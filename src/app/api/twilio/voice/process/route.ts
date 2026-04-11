@@ -553,13 +553,19 @@ export async function POST(request: Request) {
               ? "closing"
               : "discovery";
 
+    const shouldUseFastRuleMode =
+      !process.env.OPENAI_API_KEY ||
+      context.turn === 0 ||
+      heardText.length < 6 ||
+      /^ja$|^nein$|^okay$|^ok$/.test(heardText.trim());
+
     const aiResult = await generateAdaptiveReply({
       topic: context.topic,
       prospectMessage: heardText,
       transcript: context.transcript,
       script: activeScript,
       stage,
-      preferFastResponse: true,
+      preferFastResponse: shouldUseFastRuleMode,
     });
 
     const updatedTranscript = trimTranscript(

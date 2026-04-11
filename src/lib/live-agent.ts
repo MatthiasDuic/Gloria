@@ -283,14 +283,19 @@ export async function generateAdaptiveReply(input: {
         input: [
           {
             role: "system",
-            content: [{ type: "input_text", text: config.systemPrompt }],
+            content: [
+              {
+                type: "input_text",
+                text: `${config.systemPrompt}\n\nTELEFON-REGELN: Klinge menschlich, freundlich und natürlich. Antworte nur in 1 bis 2 kurzen Sätzen. Bleibe strikt in der aktuellen Gesprächsphase und springe nicht vor. Keine Listen, keine langen Erklärungen, kein Smalltalk.` ,
+              },
+            ],
           },
           {
             role: "user",
             content: [
               {
                 type: "input_text",
-                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAktuelle Gesprächsphase: ${stage}.\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in 1 bis 3 kurzen, natürlichen Sätzen. Halte dich an die aktuelle Gesprächsphase: zuerst Bedarf verstehen und Einwände aufgreifen, erst danach sauber in Richtung Termin oder Wiedervorlage führen.`,
+                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAktuelle Gesprächsphase: ${stage}.\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in 1 bis 2 kurzen, natürlichen Sätzen. Wenn die Phase discovery ist, stelle eine passende Bedarf- oder Problemfrage. Wenn die Phase problem ist, vertiefe den Bedarf. Wenn die Phase benefit ist, erkläre kurz den Nutzen. Wenn die Phase closing ist, sichere sauber den Termin.`,
               },
             ],
           },
