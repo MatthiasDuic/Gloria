@@ -63,6 +63,17 @@ curl -X POST http://localhost:3000/api/calls/webhook \
   }'
 ```
 
+## Admin-Zugang schützen
+
+Die Gloria-Oberfläche ist jetzt per **HTTP Basic Auth** absicherbar. Lege dafür in deiner Umgebung diese Variablen an:
+
+```env
+BASIC_AUTH_USERNAME=MDUIC
+BASIC_AUTH_PASSWORD=dein_starkes_passwort
+```
+
+Wichtig: Die Admin-Seite und internen APIs sind dann geschützt. Die Twilio-Webhooks für Telefonie bleiben bewusst erreichbar.
+
 ## SMTP / E-Mail konfigurieren
 
 Kopiere `.env.example` nach `.env` und trage deine echten SMTP-Daten ein.
