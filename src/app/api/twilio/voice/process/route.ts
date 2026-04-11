@@ -57,25 +57,64 @@ function buildTopicIntro(topic: Topic) {
   return "Es geht um die betriebliche Krankenversicherung als attraktiven Benefit für Mitarbeitende.";
 }
 
-function buildDecisionMakerPrompt(topic: Topic) {
+function normalizeName(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mentionsTargetName(text: string, contactName?: string) {
+  if (!contactName?.trim()) {
+    return false;
+  }
+
+  const normalizedText = normalizeName(text);
+  const nameParts = normalizeName(contactName)
+    .split(" ")
+    .filter((part) => part.length > 2 && part !== "herr" && part !== "frau");
+
+  return nameParts.some((part) => normalizedText.includes(part));
+}
+
+function buildDecisionMakerPrompt(topic: Topic, contactName?: string) {
+  if (contactName?.trim()) {
+    return `Es geht um ${buildTopicIntro(topic).replace(/^Es geht um /, "") } Spreche ich mit ${contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`;
+  }
+
   return `${buildTopicIntro(topic)} Sind Sie dafür die richtige Ansprechperson, oder wen darf ich dazu am besten kurz sprechen?`;
 }
 
+function buildDecisionMakerGreeting(topic: Topic, contactName?: string) {
+  if (contactName?.trim()) {
+    return `Guten Tag ${contactName}, hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. ${buildTopicIntro(topic)}`;
+  }
+
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. ${buildTopicIntro(topic)}`;
+}
+
+function soundsLikeTransfer(text: string) {
+  return /ich verbinde|verbinde sie|stelle.*durch|einen moment|augenblick|ich hole|bleiben sie dran|ich leite.*weiter/.test(text);
+}
+
 function soundsLikeNotDecisionMaker(text: string) {
-  return /nicht zuständig|bin ich nicht|dafür ist .* zuständig|sekretariat|empfang|zentrale|assistenz|büro|nicht da|außer haus|ich verbinde|ich leite.*weiter|weiterleiten/.test(text);
+  return /nicht zuständig|bin ich nicht|dafür ist .* zuständig|sekretariat|empfang|zentrale|assistenz|büro|nicht da|außer haus|weiterleiten/.test(text);
 }
 
 function soundsLikeDecisionMaker(text: string) {
-  return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig/.test(text);
+  return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig|am apparat|spreche selbst/.test(text);
 }
 
 function isLikelyGreeting(text: string) {
-  if (soundsLikeDecisionMaker(text) || soundsLikeNotDecisionMaker(text)) {
+  if (soundsLikeDecisionMaker(text) || soundsLikeNotDecisionMaker(text) || soundsLikeTransfer(text)) {
     return false;
   }
 
   const words = text.trim().split(/\s+/).filter(Boolean);
-  return words.length <= 3 || /hallo|guten tag|ja bitte|wer ist da|moment|einen moment|moin/.test(text);
+  return words.length <= 3 || /hallo|guten tag|ja bitte|wer ist da|moin/.test(text);
 }
 
 function detectConsent(speech: string, digits: string) {
@@ -98,16 +137,45 @@ function detectConsent(speech: string, digits: string) {
   return null;
 }
 
-function classifyOutcome(speech: string): ReportOutcome {
+function isCallbackRequest(speech: string) {
+  return /(später|andermal|nächste woche|rückruf|rufen sie wieder an|kein[e]? zeit|im moment schlecht|gerade schlecht|heute nicht|morgen|bitte später|nochmal anrufen)/.test(
+    speech,
+  );
+}
+
+function isAppointmentAcceptance(
+  speech: string,
+  stage: "discovery" | "objection" | "closing" = "discovery",
+) {
+  if (/termin|machen wir|passt .*vormittag|passt .*nachmittag|einverstanden mit termin|gerne termin/.test(speech)) {
+    return true;
+  }
+
+  if (
+    stage === "closing" &&
+    /(^|\b)(ja|ja gern|ja gerne|gern|gerne|okay|ok|einverstanden|passt|passt gut|ja passt|machen wir)(\b|$)/.test(
+      speech.trim(),
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function classifyOutcome(
+  speech: string,
+  stage: "discovery" | "objection" | "closing" = "discovery",
+): ReportOutcome {
   if (/(kein interesse|nicht interessant|bitte nicht|nein danke|keinen bedarf|kein bedarf)/.test(speech)) {
     return "Absage";
   }
 
-  if (/(später|andermal|nächste woche|rückruf|rufen sie wieder an|kein[e]? zeit|im moment schlecht)/.test(speech)) {
+  if (isCallbackRequest(speech)) {
     return "Wiedervorlage";
   }
 
-  if (/termin|machen wir|passt .*vormittag|passt .*nachmittag|einverstanden mit termin|gerne termin/.test(speech)) {
+  if (isAppointmentAcceptance(speech, stage)) {
     return "Termin";
   }
 
@@ -245,7 +313,7 @@ export async function POST(request: Request) {
     const heardText = speech || digits;
 
     if (!heardText) {
-      const prompt = `Guten Tag. ${buildDecisionMakerPrompt(context.topic)}`;
+      const prompt = buildDecisionMakerPrompt(context.topic, context.contactName);
       return respondWithGather({
         response,
         baseUrl,
@@ -259,8 +327,39 @@ export async function POST(request: Request) {
       });
     }
 
-    if (soundsLikeNotDecisionMaker(heardText) || isLikelyGreeting(heardText) || /worum geht|was genau|wer sind sie|ja bitte/.test(heardText)) {
-      const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic)}`;
+    if (/(nicht da|außer haus|im termin|gerade nicht erreichbar|später erreichbar|morgen wieder da|heute nachmittag|heute vormittag|rufen sie.*wieder an|nochmal anrufen)/.test(heardText)) {
+      const nextCallAt = buildFollowUpDate(heardText, "Wiedervorlage");
+
+      await safelyStoreReport({
+        leadId: context.leadId,
+        company: context.company,
+        contactName: context.contactName,
+        topic: context.topic,
+        summary: trimTranscript(`${context.transcript}\nInteressent: ${heardText}`),
+        outcome: "Wiedervorlage",
+        nextCallAt,
+        recordingConsent: false,
+        attempts: 1,
+      });
+
+      if (isElevenLabsConfigured()) {
+        response.play(buildAudioUrl(baseUrl, { step: "final", variant: "callback" }));
+      } else {
+        response.say(
+          { voice: "alice", language: "de-DE" },
+          "Vielen Dank für die Info. Ich notiere die Wiedervorlage und melde mich dann passend noch einmal.",
+        );
+      }
+
+      response.hangup();
+
+      return new NextResponse(response.toString(), {
+        headers: { "Content-Type": "text/xml; charset=utf-8" },
+      });
+    }
+
+    if (soundsLikeTransfer(heardText)) {
+      const prompt = `${buildDecisionMakerGreeting(context.topic, context.contactName)} Spreche ich damit direkt mit der richtigen Ansprechperson?`;
       return respondWithGather({
         response,
         baseUrl,
@@ -274,9 +373,14 @@ export async function POST(request: Request) {
       });
     }
 
-    if (soundsLikeDecisionMaker(heardText) || context.turn >= 1) {
+    const targetConfirmed =
+      mentionsTargetName(heardText, context.contactName) ||
+      soundsLikeDecisionMaker(heardText) ||
+      (!context.contactName && !soundsLikeNotDecisionMaker(heardText) && !isLikelyGreeting(heardText));
+
+    if (targetConfirmed) {
       const consentPrompt =
-        "Perfekt, danke Ihnen. Bevor wir weitergehen: Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
+        "Perfekt, danke Ihnen. Ich bin Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
 
       return respondWithGather({
         response,
@@ -291,7 +395,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic)}`;
+    const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic, context.contactName)}`;
     return respondWithGather({
       response,
       baseUrl,
@@ -340,7 +444,7 @@ export async function POST(request: Request) {
 
     const consentValue = consent ? "yes" : "no";
     const discoveryPrompt = activeScript?.discovery || "Darf ich kurz fragen, wie Sie dieses Thema aktuell bei sich handhaben?";
-    const appointmentText = `${consent ? "Vielen Dank, ich notiere die Zustimmung." : "Natürlich, dann ohne Aufzeichnung."} ${buildTopicIntro(context.topic)} ${discoveryPrompt}`;
+    const appointmentText = `${consent ? "Vielen Dank." : "Natürlich, dann ohne Aufzeichnung."} ${buildDecisionMakerGreeting(context.topic, context.contactName)} ${discoveryPrompt}`;
 
     if (getTwilioConversationMode() === "media-stream") {
       const mediaStreamUrl = getTwilioMediaStreamUrl();
@@ -417,7 +521,7 @@ export async function POST(request: Request) {
       }
 
       const retryText =
-        "Ich habe Sie akustisch gerade nicht ganz verstanden. Möchten Sie lieber einen kurzen Termin, eine Wiedervorlage oder soll ich es noch einmal kurz einordnen?";
+        "Ich habe Sie akustisch gerade nicht ganz verstanden. Was ist Ihnen bei dem Thema aktuell wichtiger: eher Mitarbeiterbindung, Kosten oder erstmal nur ein kurzer Überblick?";
 
       return respondWithGather({
         response,
@@ -433,7 +537,7 @@ export async function POST(request: Request) {
     }
 
     const isObjection =
-      /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie/.test(
+      /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie|wir haben schon|haben bereits|zu teuer|zu klein|kein bedarf/.test(
         heardText,
       );
     const isPositiveSignal = /interessant|passt|gerne|gern|okay|einverstanden|ja/.test(heardText);
@@ -460,7 +564,7 @@ export async function POST(request: Request) {
         .join("\n"),
     );
 
-    const detectedOutcome = classifyOutcome(heardText);
+    const detectedOutcome = classifyOutcome(heardText, stage);
     const reachedTurnLimit = context.turn >= MAX_LIVE_TURNS;
     const shouldFinish = detectedOutcome !== "Kein Kontakt" || reachedTurnLimit;
 
@@ -477,8 +581,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const finalOutcome =
-      detectedOutcome === "Kein Kontakt" && reachedTurnLimit ? "Wiedervorlage" : detectedOutcome;
+    const finalOutcome = detectedOutcome;
     const followUpDate = buildFollowUpDate(heardText, finalOutcome);
     await safelyStoreReport({
       leadId: context.leadId,
@@ -536,7 +639,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const outcome = classifyOutcome(speech);
+  const outcome = classifyOutcome(speech, "closing");
   const followUpDate = buildFollowUpDate(speech, outcome);
   await safelyStoreReport({
     leadId: context.leadId,

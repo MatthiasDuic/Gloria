@@ -138,6 +138,10 @@ export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveA
   };
 }
 
+function cleanScriptText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function buildShortTopicExplanation(topic: Topic) {
   if (topic === "betriebliche Altersvorsorge") {
     return "Ganz konkret geht es darum, wie die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiv aufgestellt werden kann.";
@@ -168,9 +172,26 @@ function generateRuleBasedReply(
   const text = prospectMessage.toLowerCase();
   const activeScript = script || DEFAULT_SCRIPTS[topic];
   const detailScript = DETAIL_SCRIPTS[topic];
-  const discoveryQuestions = detailScript.needs.questions.filter(Boolean);
-  const primaryDiscovery = discoveryQuestions[0] || activeScript.discovery;
-  const secondaryDiscovery = discoveryQuestions[1] || activeScript.discovery;
+  const discoveryQuestions = detailScript.needs.questions.filter(Boolean).map(cleanScriptText);
+  const primaryDiscovery = cleanScriptText(discoveryQuestions[0] || activeScript.discovery);
+  const secondaryDiscovery = cleanScriptText(discoveryQuestions[1] || activeScript.discovery);
+  const problemPrompt = cleanScriptText(detailScript.problem.text);
+  const objectionWeHaveIt = cleanScriptText(
+    detailScript.objections["wir haben schon etwas"] ||
+      "Das ist völlig in Ordnung. Oft lohnt sich trotzdem ein kurzer Vergleich, weil sich Leistung und Arbeitgeberattraktivität noch sauberer aufstellen lassen.",
+  );
+  const objectionNoInterest = cleanScriptText(
+    detailScript.objections["kein interesse"] ||
+      `${activeScript.objectionHandling} Wenn es für Sie angenehmer ist, halte ich das Ganze ganz kurz.`,
+  );
+  const objectionNoTime = cleanScriptText(
+    detailScript.objections["keine zeit"] ||
+      `Das kann ich gut nachvollziehen. ${activeScript.close}`,
+  );
+  const objectionSendDocs = cleanScriptText(
+    detailScript.objections["schicken sie unterlagen"] ||
+      `Sehr gern. Damit ich Ihnen nichts Beliebiges schicke, würde ich nur kurz verstehen: ${secondaryDiscovery}`,
+  );
 
   if (/nicht zuständig|falsche person/.test(text)) {
     return "Alles klar, danke Ihnen. Wer wäre denn bei Ihnen der richtige Ansprechpartner, damit ich das Thema direkt an die passende Stelle geben kann?";
@@ -180,16 +201,20 @@ function generateRuleBasedReply(
     return "Das ist vollkommen in Ordnung. Wir müssen das jetzt nicht im Detail besprechen. Für die weitere Einordnung reicht mir zunächst nur die kurze Einschätzung: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?";
   }
 
-  if (/unterlagen|email|e-mail|schicken/.test(text)) {
-    return `Sehr gern. Damit ich Ihnen nichts Beliebiges schicke, würde ich nur kurz verstehen: ${secondaryDiscovery}`;
+  if (/wir haben schon|haben bereits|bereits abgedeckt|schon vorhanden/.test(text)) {
+    return objectionWeHaveIt;
   }
 
-  if (/kein interesse|nicht interessiert|brauchen wir nicht/.test(text)) {
-    return `Verstehe ich total. ${activeScript.objectionHandling} Wenn es Ihnen lieber ist, halte ich das Ganze wirklich kurz und wir schauen nur, ob überhaupt Bedarf besteht.`;
+  if (/unterlagen|email|e-mail|schicken/.test(text)) {
+    return objectionSendDocs;
+  }
+
+  if (/kein interesse|nicht interessiert|brauchen wir nicht|kein bedarf/.test(text)) {
+    return objectionNoInterest;
   }
 
   if (/keine zeit|später|gerade ungünstig|im stress/.test(text)) {
-    return `Alles gut, ich halte es kurz. ${activeScript.objectionHandling} ${activeScript.close}`;
+    return objectionNoTime;
   }
 
   if (/was genau|worum geht|erklären sie/.test(text)) {
@@ -198,21 +223,21 @@ function generateRuleBasedReply(
 
   if (stage === "discovery") {
     if (/(ja|grundsätzlich|wir haben|aktuell|derzeit|mitarbeiter|versicherung|vertrag|nutzen|bieten|thema)/.test(text)) {
-      return `Danke Ihnen, das hilft mir schon weiter. ${secondaryDiscovery}`;
+      return `Danke Ihnen, das hilft mir schon weiter. ${problemPrompt}`;
     }
 
     return primaryDiscovery;
   }
 
   if (stage === "objection") {
-    return `${activeScript.objectionHandling} ${activeScript.close}`;
+    return `${cleanScriptText(activeScript.objectionHandling)} ${cleanScriptText(activeScript.close)}`;
   }
 
   if (/interessant|passt|gerne|machen wir|einverstanden|ja/.test(text)) {
-    return activeScript.close;
+    return cleanScriptText(activeScript.close);
   }
 
-  return `Verstehe. ${config.objective} ${activeScript.close}`;
+  return `Verstehe. ${problemPrompt} ${cleanScriptText(activeScript.close)}`;
 }
 
 export async function generateAdaptiveReply(input: {

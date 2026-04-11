@@ -19,16 +19,11 @@ export async function generateElevenLabsPreview(text: string): Promise<ElevenLab
 
   const speechText = text
     .replaceAll("im Auftrag von Herrn Matthias Duic", "im Auftrag von Matthias Duic")
-    .replaceAll("von Herrn Matthias Duic", "im Auftrag von Matthias Duic")
-    .replaceAll(
-      "die betriebliche Krankenversicherung aktuell nutzen",
-      "die betriebliche Krankenversicherung inzwischen gezielt nutzen",
-    )
+    .replaceAll("von Herrn Matthias Duic", "von Matthias Duic")
     .replaceAll(" – ", ", ")
-    .replaceAll(": ", ", ")
-    .replaceAll(". Ich ", ", ich ")
-    .replaceAll(". Viele ", ", viele ")
+    .replace(/[–—]/g, ", ")
     .replace(/\s+/g, " ")
+    .replace(/([.!?])\1+/g, "$1")
     .trim();
 
   try {
@@ -37,7 +32,7 @@ export async function generateElevenLabsPreview(text: string): Promise<ElevenLab
     );
     elevenLabsUrl.searchParams.set(
       "optimize_streaming_latency",
-      process.env.ELEVENLABS_LATENCY_MODE || "3",
+      process.env.ELEVENLABS_LATENCY_MODE || "2",
     );
 
     const response = await fetch(elevenLabsUrl, {

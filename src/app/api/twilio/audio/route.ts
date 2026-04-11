@@ -39,7 +39,9 @@ function buildAudioText(params: URLSearchParams) {
   const variant = params.get("variant") || "neutral";
 
   if (step === "intro") {
-    return `Guten Tag${contactName ? ` ${contactName}` : ""}, hier ist Gloria im Auftrag von Matthias Duic. ${buildTopicPitch(topic)} Bin ich dafür direkt bei der richtigen Ansprechperson, oder wer wäre bei Ihnen dafür zuständig?`;
+    return contactName
+      ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Spreche ich mit ${contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`
+      : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildTopicPitch(topic)} Bin ich damit direkt bei der richtigen Ansprechperson?`;
   }
 
   if (step === "consent-retry") {

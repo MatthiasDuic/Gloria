@@ -65,8 +65,9 @@ async function renderVoiceResponse(request: Request) {
     hints: "zuständig, richtige Ansprechperson, worum geht es, ja bitte, einen Moment",
   });
 
-  const openingText =
-    `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}, hier ist Gloria im Auftrag von Matthias Duic. ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson, oder wer wäre bei Ihnen dafür zuständig?`;
+  const openingText = context.contactName
+    ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Spreche ich mit ${context.contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`
+    : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson?`;
 
   if (isElevenLabsConfigured()) {
     gather.play(
