@@ -362,7 +362,7 @@ function respondWithGather(options: {
   });
 
   if (options.promptText.trim()) {
-    if (!options.lowLatency && isElevenLabsConfigured()) {
+    if (isElevenLabsConfigured()) {
       gather.play(
         buildAudioUrl(options.baseUrl, {
           text: options.promptText,
