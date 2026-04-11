@@ -40,7 +40,7 @@ function buildAudioText(params: URLSearchParams) {
 
   if (step === "intro") {
     return contactName
-      ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Spreche ich mit ${contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`
+      ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Ich habe eine kurze fachliche Rückfrage für ${contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
       : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildTopicPitch(topic)} Bin ich damit direkt bei der richtigen Ansprechperson?`;
   }
 

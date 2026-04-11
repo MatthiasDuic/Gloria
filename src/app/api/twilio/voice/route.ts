@@ -66,7 +66,7 @@ async function renderVoiceResponse(request: Request) {
   });
 
   const openingText = context.contactName
-    ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Spreche ich mit ${context.contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`
+    ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Ich habe eine kurze fachliche Rückfrage für ${context.contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
     : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson?`;
 
   if (isElevenLabsConfigured()) {

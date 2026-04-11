@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
+import {
+  BAV_TERMINIERUNG_SCRIPT,
+  BKV_TERMINIERUNG_SCRIPT,
+  ENERGIE_TERMINIERUNG_SCRIPT,
+  GEWERBE_TERMINIERUNG_SCRIPT,
+  PKV_TERMINIERUNG_SCRIPT,
+} from "@/lib/call-scripts";
+import type { CallScript } from "@/lib/call-scripts";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { generateAdaptiveReply } from "@/lib/live-agent";
 import { sendReportEmail } from "@/lib/mailer";
@@ -13,6 +21,16 @@ import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+type ContactRole = "gatekeeper" | "decision-maker";
+
+const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
+  "betriebliche Krankenversicherung": BKV_TERMINIERUNG_SCRIPT,
+  "betriebliche Altersvorsorge": BAV_TERMINIERUNG_SCRIPT,
+  "gewerbliche Versicherungen": GEWERBE_TERMINIERUNG_SCRIPT,
+  "private Krankenversicherung": PKV_TERMINIERUNG_SCRIPT,
+  Energie: ENERGIE_TERMINIERUNG_SCRIPT,
+};
+
 const MAX_LIVE_TURNS = 5;
 const MAX_SILENT_RETRIES = 2;
 
@@ -24,17 +42,25 @@ function normalizeText(value: FormDataEntryValue | null) {
 
 function readContext(request: Request) {
   const url = new URL(request.url);
+  const contactName = url.searchParams.get("contactName") || undefined;
+  const contactRoleParam = url.searchParams.get("contactRole");
 
   return {
     step: url.searchParams.get("step") || "intro",
     leadId: url.searchParams.get("leadId") || undefined,
     company: url.searchParams.get("company") || "Unbekanntes Unternehmen",
-    contactName: url.searchParams.get("contactName") || undefined,
+    contactName,
     topic: (url.searchParams.get("topic") || "betriebliche Krankenversicherung") as Topic,
     consent: url.searchParams.get("consent") || "no",
     turn: Number(url.searchParams.get("turn") || "0"),
     transcript: url.searchParams.get("transcript") || "",
-  };
+    contactRole:
+      contactRoleParam === "decision-maker"
+        ? "decision-maker"
+        : contactName
+          ? "gatekeeper"
+          : "decision-maker",
+  } as const;
 }
 
 function buildTopicIntro(topic: Topic) {
@@ -57,6 +83,10 @@ function buildTopicIntro(topic: Topic) {
   return "Es geht um die betriebliche Krankenversicherung als attraktiven Benefit für Mitarbeitende.";
 }
 
+function cleanScriptText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function normalizeName(value: string) {
   return value
     .toLowerCase()
@@ -65,6 +95,16 @@ function normalizeName(value: string) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function fillNameTemplate(value: string, contactName?: string) {
+  const fallbackName = contactName?.trim() || "der zuständigen Person";
+
+  return cleanScriptText(value)
+    .replaceAll("Frau/Herrn [NAME]", fallbackName)
+    .replaceAll("Frau/Herr [NAME]", fallbackName)
+    .replaceAll("Herr/Frau [NAME]", fallbackName)
+    .replaceAll("[NAME]", fallbackName);
 }
 
 function mentionsTargetName(text: string, contactName?: string) {
@@ -80,20 +120,67 @@ function mentionsTargetName(text: string, contactName?: string) {
   return nameParts.some((part) => normalizedText.includes(part));
 }
 
-function buildDecisionMakerPrompt(topic: Topic, contactName?: string) {
-  if (contactName?.trim()) {
-    return `Es geht um ${buildTopicIntro(topic).replace(/^Es geht um /, "") } Spreche ich mit ${contactName}, oder könnten Sie mich bitte kurz dorthin verbinden?`;
+function mentionsDifferentNamedPerson(text: string, contactName?: string) {
+  if (!contactName?.trim() || mentionsTargetName(text, contactName)) {
+    return false;
   }
 
-  return `${buildTopicIntro(topic)} Sind Sie dafür die richtige Ansprechperson, oder wen darf ich dazu am besten kurz sprechen?`;
+  const normalizedText = normalizeName(text);
+  return /(^|\s)(herr|frau)\s+[a-z0-9]+|[a-z0-9]+\s+am apparat|[a-z0-9]+\s+guten tag/.test(
+    normalizedText,
+  );
+}
+
+function buildReceptionPrompt(
+  topic: Topic,
+  contactName?: string,
+  variant: "intro" | "what" | "email" | "email-insist" = "intro",
+) {
+  const script = DETAIL_SCRIPTS[topic];
+
+  if (variant === "what") {
+    return fillNameTemplate(
+      script.reception.ifAskedWhatTopic || script.reception.alternativeShort || script.reception.intro,
+      contactName,
+    );
+  }
+
+  if (variant === "email") {
+    return fillNameTemplate(
+      script.reception.ifEmailSuggested || script.reception.alternativeShort || script.reception.intro,
+      contactName,
+    );
+  }
+
+  if (variant === "email-insist") {
+    return fillNameTemplate(
+      script.reception.ifEmailInsisted || script.reception.ifEmailSuggested || script.reception.intro,
+      contactName,
+    );
+  }
+
+  return fillNameTemplate(script.reception.intro, contactName);
+}
+
+function buildDecisionMakerHello(contactName?: string) {
+  if (contactName?.trim()) {
+    return `Guten Tag ${contactName}, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel im Auftrag von Matthias Duic.`;
+  }
+
+  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel im Auftrag von Matthias Duic.";
+}
+
+function buildDecisionMakerPrompt(topic: Topic, contactName?: string) {
+  if (contactName?.trim()) {
+    return `${buildDecisionMakerHello(contactName)} Spreche ich direkt mit Ihnen persönlich?`;
+  }
+
+  return `${buildDecisionMakerHello(contactName)} ${buildTopicIntro(topic)} Sind Sie dafür die richtige Ansprechperson?`;
 }
 
 function buildDecisionMakerGreeting(topic: Topic, contactName?: string) {
-  if (contactName?.trim()) {
-    return `Guten Tag ${contactName}, hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. ${buildTopicIntro(topic)}`;
-  }
-
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. ${buildTopicIntro(topic)}`;
+  const script = DETAIL_SCRIPTS[topic];
+  return fillNameTemplate(script.intro.text, contactName);
 }
 
 function soundsLikeTransfer(text: string) {
@@ -241,6 +328,7 @@ function respondWithGather(options: {
   transcript: string;
   lowLatency?: boolean;
   step?: "intro" | "consent" | "conversation";
+  contactRole?: ContactRole;
 }) {
   const nextStep = options.step || "conversation";
   const actionUrl = buildProcessUrl(options.baseUrl, {
@@ -252,6 +340,7 @@ function respondWithGather(options: {
     topic: options.context.topic,
     turn: String(options.turn),
     transcript: trimTranscript(options.transcript),
+    contactRole: options.contactRole || options.context.contactRole,
   });
 
   const hints =
@@ -272,15 +361,17 @@ function respondWithGather(options: {
     hints,
   });
 
-  if (!options.lowLatency && isElevenLabsConfigured()) {
-    gather.play(
-      buildAudioUrl(options.baseUrl, {
-        text: options.promptText,
-        ...options.audioParams,
-      }),
-    );
-  } else {
-    gather.say({ voice: "alice", language: "de-DE" }, options.promptText);
+  if (options.promptText.trim()) {
+    if (!options.lowLatency && isElevenLabsConfigured()) {
+      gather.play(
+        buildAudioUrl(options.baseUrl, {
+          text: options.promptText,
+          ...options.audioParams,
+        }),
+      );
+    } else {
+      gather.say({ voice: "alice", language: "de-DE" }, options.promptText);
+    }
   }
 
   return new NextResponse(options.response.toString(), {
@@ -311,9 +402,13 @@ export async function POST(request: Request) {
 
   if (context.step === "intro") {
     const heardText = speech || digits;
+    const atGatekeeper = context.contactRole === "gatekeeper";
 
     if (!heardText) {
-      const prompt = buildDecisionMakerPrompt(context.topic, context.contactName);
+      const prompt = atGatekeeper
+        ? buildReceptionPrompt(context.topic, context.contactName, "intro")
+        : buildDecisionMakerPrompt(context.topic, context.contactName);
+
       return respondWithGather({
         response,
         baseUrl,
@@ -324,6 +419,7 @@ export async function POST(request: Request) {
         turn: context.turn + 1,
         transcript: trimTranscript(`${context.transcript}\nGloria: ${prompt}`),
         step: "intro",
+        contactRole: atGatekeeper ? "gatekeeper" : "decision-maker",
       });
     }
 
@@ -358,8 +454,85 @@ export async function POST(request: Request) {
       });
     }
 
-    if (soundsLikeTransfer(heardText)) {
-      const prompt = `${buildDecisionMakerGreeting(context.topic, context.contactName)} Spreche ich damit direkt mit der richtigen Ansprechperson?`;
+    if (atGatekeeper) {
+      if (/worum geht|was genau|um was geht/.test(heardText)) {
+        const prompt = buildReceptionPrompt(context.topic, context.contactName, "what");
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: context.turn + 1,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
+          contactRole: "gatekeeper",
+        });
+      }
+
+      if (/email|e-mail|mailen|schicken sie/.test(heardText)) {
+        const prompt = buildReceptionPrompt(
+          context.topic,
+          context.contactName,
+          /nur per mail|bitte per e-?mail|allgemeine mail/.test(heardText) ? "email-insist" : "email",
+        );
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: context.turn + 1,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
+          contactRole: "gatekeeper",
+        });
+      }
+
+      if (soundsLikeTransfer(heardText)) {
+        const prompt = "Danke Ihnen.";
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
+          contactRole: "decision-maker",
+          lowLatency: true,
+        });
+      }
+
+      if (mentionsTargetName(heardText, context.contactName) || soundsLikeDecisionMaker(heardText)) {
+        const consentPrompt =
+          "Perfekt, danke Ihnen. Ich bin Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel im Auftrag von Matthias Duic. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
+
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: consentPrompt,
+          audioParams: { text: consentPrompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
+          step: "consent",
+          contactRole: "decision-maker",
+        });
+      }
+
+      const prompt =
+        mentionsDifferentNamedPerson(heardText, context.contactName) ||
+        soundsLikeNotDecisionMaker(heardText) ||
+        isLikelyGreeting(heardText)
+          ? buildReceptionPrompt(context.topic, context.contactName, "intro")
+          : buildReceptionPrompt(context.topic, context.contactName, "what");
+
       return respondWithGather({
         response,
         baseUrl,
@@ -370,42 +543,40 @@ export async function POST(request: Request) {
         turn: context.turn + 1,
         transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
         step: "intro",
+        contactRole: "gatekeeper",
       });
     }
 
-    const targetConfirmed =
-      mentionsTargetName(heardText, context.contactName) ||
-      soundsLikeDecisionMaker(heardText) ||
-      (!context.contactName && !soundsLikeNotDecisionMaker(heardText) && !isLikelyGreeting(heardText));
-
-    if (targetConfirmed) {
-      const consentPrompt =
-        "Perfekt, danke Ihnen. Ich bin Gloria, die digitale Vertriebsassistentin im Auftrag von Matthias Duic. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
-
+    if (soundsLikeNotDecisionMaker(heardText)) {
+      const prompt = buildReceptionPrompt(context.topic, context.contactName, "intro");
       return respondWithGather({
         response,
         baseUrl,
-        promptText: consentPrompt,
-        audioParams: { text: consentPrompt },
+        promptText: prompt,
+        audioParams: { text: prompt },
         context,
         consent: "no",
-        turn: 0,
-        transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
-        step: "consent",
+        turn: context.turn + 1,
+        transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+        step: "intro",
+        contactRole: "gatekeeper",
       });
     }
 
-    const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic, context.contactName)}`;
+    const consentPrompt =
+      "Perfekt, danke Ihnen. Ich bin Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel im Auftrag von Matthias Duic. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
+
     return respondWithGather({
       response,
       baseUrl,
-      promptText: prompt,
-      audioParams: { text: prompt },
+      promptText: consentPrompt,
+      audioParams: { text: consentPrompt },
       context,
       consent: "no",
-      turn: context.turn + 1,
-      transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
-      step: "intro",
+      turn: 0,
+      transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
+      step: "consent",
+      contactRole: "decision-maker",
     });
   }
 
@@ -443,8 +614,7 @@ export async function POST(request: Request) {
     }
 
     const consentValue = consent ? "yes" : "no";
-    const discoveryPrompt = activeScript?.discovery || "Darf ich kurz fragen, wie Sie dieses Thema aktuell bei sich handhaben?";
-    const appointmentText = `${consent ? "Vielen Dank." : "Natürlich, dann ohne Aufzeichnung."} ${buildDecisionMakerGreeting(context.topic, context.contactName)} ${discoveryPrompt}`;
+    const appointmentText = `${consent ? "Vielen Dank." : "Natürlich, dann ohne Aufzeichnung."} ${buildDecisionMakerGreeting(context.topic, context.contactName)}`;
 
     if (getTwilioConversationMode() === "media-stream") {
       const mediaStreamUrl = getTwilioMediaStreamUrl();
