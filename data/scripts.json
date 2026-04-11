@@ -1,0 +1,42 @@
+[
+  {
+    "id": "skript-bkv",
+    "topic": "betriebliche Krankenversicherung",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich hoffe, ich störe Sie gerade nicht. Viele Unternehmen nutzen die betriebliche Krankenversicherung inzwischen gezielt, um Fachkräfte leichter zu gewinnen und zu binden. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "discovery": "Mich würde kurz interessieren: Welche Benefits bieten Sie Ihren Mitarbeitenden heute schon an, und ist Mitarbeiterbindung bei Ihnen gerade ein wichtiges Thema?",
+    "objectionHandling": "Das kann ich gut nachvollziehen. Genau deshalb schauen viele Unternehmen zuerst ganz unverbindlich in 15 Minuten darauf, welche Modelle wirklich sinnvoll sind und was budgetseitig gut darstellbar wäre.",
+    "close": "Wenn Sie mögen, reserviere ich Ihnen direkt einen kurzen Termin mit Herrn Duic – passt Ihnen eher ein Vormittag oder ein Nachmittag besser?"
+  },
+  {
+    "id": "skript-bav",
+    "topic": "betriebliche Altersvorsorge",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Altersvorsorge, weil viele Arbeitgeber hier nach verständlichen und attraktiven Lösungen suchen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "discovery": "Wie handhaben Sie die bAV aktuell bei neuen und bestehenden Mitarbeitenden, und gibt es dabei Punkte, die Sie gern einfacher oder attraktiver aufstellen würden?",
+    "objectionHandling": "Verstehe. Häufig reicht schon ein kurzer Blick von außen, um Fördermöglichkeiten, Arbeitgeberaufwand und die Verständlichkeit für Mitarbeitende deutlich besser einzuordnen.",
+    "close": "Gern würde ich Ihnen dafür einen kompakten Termin mit Herrn Duic reservieren – was passt bei Ihnen meist besser, eher Anfang oder eher Ende der Woche?"
+  },
+  {
+    "id": "skript-gewerbe",
+    "topic": "gewerbliche Versicherungen",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an, weil viele Unternehmen ihre gewerblichen Versicherungen momentan neu vergleichen, um Preis und Leistung sauber abzugleichen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "discovery": "Wann haben Sie Ihre gewerblichen Policen zuletzt in Ruhe verglichen – vor allem bei Betriebshaftpflicht, Inhalts- oder Cyberabsicherung?",
+    "objectionHandling": "Das ist absolut verständlich. Ein kurzer Vergleich zeigt oft schon, ob Deckungslücken bestehen oder ob Beiträge günstiger und Leistungen gleichzeitig besser darstellbar wären – ganz ohne direkten Wechselzwang.",
+    "close": "Wenn es für Sie passt, sichere ich Ihnen gern einen unverbindlichen Termin mit Herrn Duic – welcher Tag wäre dafür grundsätzlich angenehm?"
+  },
+  {
+    "id": "skript-pkv",
+    "topic": "private Krankenversicherung",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Wir haben ein Konzept entwickelt, mit dem sich Krankenversicherungsbeiträge im Alter planbarer und stabiler aufstellen lassen. Denn egal ob gesetzlich oder privat versichert: Die Beiträge steigen meist Jahr für Jahr. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "discovery": "Darf ich kurz fragen: Sind Sie derzeit gesetzlich oder privat versichert, und ist das Thema Beitragsstabilität im Alter für Sie grundsätzlich interessant?",
+    "objectionHandling": "Das kann ich gut verstehen. Genau deshalb geht es im Termin nicht um einen schnellen Abschluss, sondern um eine kurze Einordnung, wie sich Beiträge langfristig besser planen lassen. Wenn Sie die Details gerade nicht parat haben, reicht zunächst auch die kurze Info, ob Sie sich derzeit grundsätzlich als gesund bezeichnen würden.",
+    "close": "Wenn es für Sie passt, reserviere ich Ihnen gern einen kurzen Termin mit Herrn Duic. Für die Vorbereitung klären wir dann nur noch ein paar Rahmendaten."
+  },
+  {
+    "id": "skript-energie",
+    "topic": "Energie",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an und melde mich kurz zum Thema gewerbliche Strom- und Gasoptimierung, weil sich dort häufig schnell Einsparpotenziale zeigen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Es geht wirklich nur um eine kurze Einordnung von etwa 15 Minuten. Es geht wirklich nur um eine kurze Einordnung von etwa 15 Minuten.",
+    "discovery": "Wie zufrieden sind Sie aktuell mit Ihren gewerblichen Strom- und Gaskonditionen, und steht bei Ihnen in nächster Zeit eine Verlängerung oder Neuverhandlung an? Was wäre für Sie dabei aktuell am interessantesten – Mitarbeitervorteile, Kosten oder Absicherung?",
+    "objectionHandling": "Verstehe gut. Genau deshalb nutzen viele Unternehmen einen kurzen Vergleich, um ohne großen Aufwand Transparenz über mögliche Einsparungen und bessere Konditionen zu bekommen.",
+    "close": "Wenn Sie möchten, organisiere ich Ihnen direkt einen kurzen Vergleichstermin mit Herrn Duic – wann würde es Ihnen zeitlich am besten passen? Wenn Sie möchten, schlage ich Ihnen direkt zwei kurze Zeitfenster vor. Wenn Sie möchten, schlage ich Ihnen direkt zwei kurze Zeitfenster vor."
+  }
+]

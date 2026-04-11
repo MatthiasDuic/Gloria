@@ -1,0 +1,93 @@
+import type { Topic } from "./types";
+
+export interface TwilioCallRequest {
+  to: string;
+  company: string;
+  contactName?: string;
+  topic: Topic;
+  leadId?: string;
+}
+
+function readEnv(name: string): string {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`Um Twilio zu nutzen, fehlt die Umgebungsvariable ${name}.`);
+  }
+
+  return value;
+}
+
+export function isTwilioConfigured() {
+  return Boolean(
+    process.env.TWILIO_ACCOUNT_SID?.trim() &&
+      process.env.TWILIO_AUTH_TOKEN?.trim() &&
+      process.env.TWILIO_PHONE_NUMBER?.trim(),
+  );
+}
+
+export function getAppBaseUrl(request?: Request) {
+  const configured = process.env.APP_BASE_URL?.trim();
+
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  if (request) {
+    const url = new URL(request.url);
+    const host =
+      request.headers.get("x-forwarded-host") ||
+      request.headers.get("host") ||
+      url.host;
+    const proto =
+      request.headers.get("x-forwarded-proto") ||
+      url.protocol.replace(":", "");
+
+    return `${proto}://${host}`.replace(/\/$/, "");
+  }
+
+  throw new Error(
+    "APP_BASE_URL fehlt. Für Twilio braucht Gloria eine öffentliche URL, z. B. über Cloudflare Tunnel oder ngrok.",
+  );
+}
+
+function buildUrl(pathname: string, params: Record<string, string | undefined>) {
+  const url = new URL(pathname, `${readEnv("APP_BASE_URL").replace(/\/$/, "")}/`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+}
+
+export async function createTwilioCall(payload: TwilioCallRequest) {
+  const accountSid = readEnv("TWILIO_ACCOUNT_SID");
+  const authToken = readEnv("TWILIO_AUTH_TOKEN");
+  const from = readEnv("TWILIO_PHONE_NUMBER");
+  const { default: twilio } = await import("twilio");
+
+  const client = twilio(accountSid, authToken);
+
+  return client.calls.create({
+    to: payload.to,
+    from,
+    method: "POST",
+    url: buildUrl("/api/twilio/voice", {
+      leadId: payload.leadId,
+      company: payload.company,
+      contactName: payload.contactName,
+      topic: payload.topic,
+    }),
+    statusCallback: buildUrl("/api/twilio/status", {
+      leadId: payload.leadId,
+      company: payload.company,
+      contactName: payload.contactName,
+      topic: payload.topic,
+    }),
+    statusCallbackMethod: "POST",
+    statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+  });
+}

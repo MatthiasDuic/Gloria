@@ -1,0 +1,95 @@
+import { NextResponse } from "next/server";
+import twilio from "twilio";
+import { isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { getAppBaseUrl } from "@/lib/twilio";
+
+export const runtime = "nodejs";
+
+function getContext(request: Request) {
+  const url = new URL(request.url);
+
+  return {
+    leadId: url.searchParams.get("leadId") || undefined,
+    company: url.searchParams.get("company") || "Ihr Unternehmen",
+    contactName: url.searchParams.get("contactName") || "",
+    topic: url.searchParams.get("topic") || "betriebliche Krankenversicherung",
+  };
+}
+
+function buildPitch(topic: string) {
+  if (topic === "betriebliche Altersvorsorge") {
+    return "Es geht um eine kurze Einordnung, wie die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiv aufgestellt werden kann.";
+  }
+
+  if (topic === "gewerbliche Versicherungen") {
+    return "Es geht um einen kompakten Abgleich, ob Preis und Leistung Ihrer gewerblichen Absicherung noch sauber zusammenpassen.";
+  }
+
+  if (topic === "private Krankenversicherung") {
+    return "Es geht um die Frage, wie sich Krankenversicherungsbeiträge im Alter planbarer und stabiler aufstellen lassen.";
+  }
+
+  if (topic === "Energie") {
+    return "Es geht um einen kurzen gewerblichen Strom- und Gasvergleich mit möglichem Einsparpotenzial.";
+  }
+
+  return "Es geht um einen kurzen Überblick, wie Unternehmen mit der betrieblichen Krankenversicherung Fachkräfte besser binden können.";
+}
+
+function buildAudioUrl(baseUrl: string, params: Record<string, string | undefined>) {
+  const url = new URL("/api/twilio/audio", `${baseUrl}/`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+}
+
+function renderVoiceResponse(request: Request) {
+  const baseUrl = getAppBaseUrl(request);
+  const context = getContext(request);
+  const response = new twilio.twiml.VoiceResponse();
+  const gather = response.gather({
+    input: ["speech", "dtmf"],
+    numDigits: 1,
+    action: `${baseUrl}/api/twilio/voice/process?step=consent&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
+    method: "POST",
+    language: "de-DE",
+    speechTimeout: "auto",
+    hints: "ja, nein, Termin, Rückruf, kein Interesse",
+  });
+
+  const openingText = `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}. Hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Herrn Matthias Duic. ${buildPitch(context.topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
+
+  if (isElevenLabsConfigured()) {
+    gather.play(
+      buildAudioUrl(baseUrl, {
+        step: "intro",
+        topic: context.topic,
+        contactName: context.contactName,
+      }),
+    );
+  } else {
+    gather.say({ voice: "alice", language: "de-DE" }, openingText);
+  }
+
+  response.redirect(
+    { method: "POST" },
+    `${baseUrl}/api/twilio/voice/process?step=consent&fallback=1&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
+  );
+
+  return new NextResponse(response.toString(), {
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+  });
+}
+
+export async function GET(request: Request) {
+  return renderVoiceResponse(request);
+}
+
+export async function POST(request: Request) {
+  return renderVoiceResponse(request);
+}

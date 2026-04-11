@@ -1,0 +1,36 @@
+[
+  {
+    "id": "lead-1001",
+    "company": "Bergische Metallbau GmbH",
+    "contactName": "Frau Klein",
+    "phone": "+49 2339 123450",
+    "email": "klein@bergische-metallbau.de",
+    "topic": "betriebliche Krankenversicherung",
+    "note": "50 Mitarbeitende, stark im Recruiting aktiv.",
+    "status": "wiedervorlage",
+    "nextCallAt": "2026-04-11T09:30:00.000Z",
+    "attempts": 2
+  },
+  {
+    "id": "lead-1002",
+    "company": "Ruhr IT Services",
+    "contactName": "Herr Kramer",
+    "phone": "+49 201 555990",
+    "email": "kramer@ruhr-it.de",
+    "topic": "gewerbliche Versicherungen",
+    "note": "Cyber-Risiko ansprechen.",
+    "status": "termin",
+    "attempts": 1
+  },
+  {
+    "id": "lead-1003",
+    "company": "Nordstern Logistik",
+    "contactName": "Frau Yildiz",
+    "phone": "+49 2302 777100",
+    "email": "yildiz@nordstern-logistik.de",
+    "topic": "Energie",
+    "note": "Stromvertrag endet in 4 Monaten.",
+    "status": "neu",
+    "attempts": 0
+  }
+]
