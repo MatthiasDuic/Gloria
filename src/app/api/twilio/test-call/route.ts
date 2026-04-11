@@ -31,13 +31,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const call = await createTwilioCall({
-      to: payload.to,
-      company: payload.company,
-      contactName: payload.contactName,
-      topic: payload.topic,
-      leadId: payload.leadId,
-    });
+    const call = await createTwilioCall(
+      {
+        to: payload.to,
+        company: payload.company,
+        contactName: payload.contactName,
+        topic: payload.topic,
+        leadId: payload.leadId,
+      },
+      request,
+    );
 
     return NextResponse.json({
       ok: true,

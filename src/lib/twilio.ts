@@ -30,7 +30,15 @@ export function getAppBaseUrl(request?: Request) {
   const configured = process.env.APP_BASE_URL?.trim();
 
   if (configured) {
-    return configured.replace(/\/$/, "");
+    try {
+      return new URL(configured).toString().replace(/\/$/, "");
+    } catch {
+      if (!request) {
+        throw new Error(
+          "APP_BASE_URL ist ungültig. Bitte den vollständigen Wert inklusive https:// setzen, z. B. https://gloria.agentur-duic-sprockhoevel.de",
+        );
+      }
+    }
   }
 
   if (request) {
@@ -51,8 +59,12 @@ export function getAppBaseUrl(request?: Request) {
   );
 }
 
-function buildUrl(pathname: string, params: Record<string, string | undefined>) {
-  const url = new URL(pathname, `${readEnv("APP_BASE_URL").replace(/\/$/, "")}/`);
+function buildUrl(
+  baseUrl: string,
+  pathname: string,
+  params: Record<string, string | undefined>,
+) {
+  const url = new URL(pathname, `${baseUrl.replace(/\/$/, "")}/`);
 
   for (const [key, value] of Object.entries(params)) {
     if (value) {
@@ -63,10 +75,11 @@ function buildUrl(pathname: string, params: Record<string, string | undefined>) 
   return url.toString();
 }
 
-export async function createTwilioCall(payload: TwilioCallRequest) {
+export async function createTwilioCall(payload: TwilioCallRequest, request?: Request) {
   const accountSid = readEnv("TWILIO_ACCOUNT_SID");
   const authToken = readEnv("TWILIO_AUTH_TOKEN");
   const from = readEnv("TWILIO_PHONE_NUMBER");
+  const baseUrl = getAppBaseUrl(request);
   const { default: twilio } = await import("twilio");
 
   const client = twilio(accountSid, authToken);
@@ -75,13 +88,13 @@ export async function createTwilioCall(payload: TwilioCallRequest) {
     to: payload.to,
     from,
     method: "POST",
-    url: buildUrl("/api/twilio/voice", {
+    url: buildUrl(baseUrl, "/api/twilio/voice", {
       leadId: payload.leadId,
       company: payload.company,
       contactName: payload.contactName,
       topic: payload.topic,
     }),
-    statusCallback: buildUrl("/api/twilio/status", {
+    statusCallback: buildUrl(baseUrl, "/api/twilio/status", {
       leadId: payload.leadId,
       company: payload.company,
       contactName: payload.contactName,
