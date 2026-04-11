@@ -145,7 +145,7 @@ function isCallbackRequest(speech: string) {
 
 function isAppointmentAcceptance(
   speech: string,
-  stage: "discovery" | "objection" | "closing" = "discovery",
+  stage: "discovery" | "problem" | "benefit" | "objection" | "closing" = "discovery",
 ) {
   if (/termin|machen wir|passt .*vormittag|passt .*nachmittag|einverstanden mit termin|gerne termin/.test(speech)) {
     return true;
@@ -165,7 +165,7 @@ function isAppointmentAcceptance(
 
 function classifyOutcome(
   speech: string,
-  stage: "discovery" | "objection" | "closing" = "discovery",
+  stage: "discovery" | "problem" | "benefit" | "objection" | "closing" = "discovery",
 ): ReportOutcome {
   if (/(kein interesse|nicht interessant|bitte nicht|nein danke|keinen bedarf|kein bedarf)/.test(speech)) {
     return "Absage";
@@ -543,11 +543,15 @@ export async function POST(request: Request) {
     const isPositiveSignal = /interessant|passt|gerne|gern|okay|einverstanden|ja/.test(heardText);
     const stage = isObjection
       ? "objection"
-      : context.turn <= 1
+      : context.turn <= 0
         ? "discovery"
-        : context.turn >= MAX_LIVE_TURNS - 1 || isPositiveSignal
-          ? "closing"
-          : "discovery";
+        : context.turn === 1
+          ? "problem"
+          : context.turn === 2
+            ? "benefit"
+            : context.turn >= 3 || isPositiveSignal
+              ? "closing"
+              : "discovery";
 
     const aiResult = await generateAdaptiveReply({
       topic: context.topic,

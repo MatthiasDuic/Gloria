@@ -82,7 +82,7 @@ export interface LiveAgentConfig {
   systemPrompt: string;
 }
 
-export type LiveConversationStage = "discovery" | "objection" | "closing";
+export type LiveConversationStage = "discovery" | "problem" | "benefit" | "objection" | "closing";
 
 export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveAgentConfig {
   const detailScript = DETAIL_SCRIPTS[topic];
@@ -176,6 +176,9 @@ function generateRuleBasedReply(
   const primaryDiscovery = cleanScriptText(discoveryQuestions[0] || activeScript.discovery);
   const secondaryDiscovery = cleanScriptText(discoveryQuestions[1] || activeScript.discovery);
   const problemPrompt = cleanScriptText(detailScript.problem.text);
+  const conceptPrompt = cleanScriptText(detailScript.concept.text);
+  const pressurePrompt = cleanScriptText(detailScript.pressure.text);
+  const closePrompt = cleanScriptText(activeScript.close);
   const objectionWeHaveIt = cleanScriptText(
     detailScript.objections["wir haben schon etwas"] ||
       "Das ist völlig in Ordnung. Oft lohnt sich trotzdem ein kurzer Vergleich, weil sich Leistung und Arbeitgeberattraktivität noch sauberer aufstellen lassen.",
@@ -202,7 +205,7 @@ function generateRuleBasedReply(
   }
 
   if (/wir haben schon|haben bereits|bereits abgedeckt|schon vorhanden/.test(text)) {
-    return objectionWeHaveIt;
+    return `${objectionWeHaveIt} ${closePrompt}`;
   }
 
   if (/unterlagen|email|e-mail|schicken/.test(text)) {
@@ -229,15 +232,23 @@ function generateRuleBasedReply(
     return primaryDiscovery;
   }
 
+  if (stage === "problem") {
+    return `${problemPrompt} ${secondaryDiscovery}`;
+  }
+
+  if (stage === "benefit") {
+    return `${conceptPrompt} ${pressurePrompt}`;
+  }
+
   if (stage === "objection") {
-    return `${cleanScriptText(activeScript.objectionHandling)} ${cleanScriptText(activeScript.close)}`;
+    return `${cleanScriptText(activeScript.objectionHandling)} ${closePrompt}`;
   }
 
   if (/interessant|passt|gerne|machen wir|einverstanden|ja/.test(text)) {
-    return cleanScriptText(activeScript.close);
+    return closePrompt;
   }
 
-  return `Verstehe. ${problemPrompt} ${cleanScriptText(activeScript.close)}`;
+  return `Verstehe. ${conceptPrompt} ${closePrompt}`;
 }
 
 export async function generateAdaptiveReply(input: {
