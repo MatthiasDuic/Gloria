@@ -13,6 +13,9 @@ import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+const MAX_LIVE_TURNS = 5;
+const MAX_SILENT_RETRIES = 2;
+
 function normalizeText(value: FormDataEntryValue | null) {
   return String(value || "")
     .trim()
@@ -147,6 +150,7 @@ function respondWithGather(options: {
   consent: "yes" | "no";
   turn: number;
   transcript: string;
+  lowLatency?: boolean;
 }) {
   const actionUrl = buildProcessUrl(options.baseUrl, {
     step: "conversation",
@@ -165,10 +169,12 @@ function respondWithGather(options: {
     method: "POST",
     language: "de-DE",
     speechTimeout: "auto",
+    timeout: 4,
+    actionOnEmptyResult: true,
     hints: "ja, nein, Termin, Rückruf, kein Interesse, später, nächste Woche",
   });
 
-  if (isElevenLabsConfigured()) {
+  if (!options.lowLatency && isElevenLabsConfigured()) {
     gather.play(
       buildAudioUrl(options.baseUrl, {
         text: options.promptText,
@@ -178,8 +184,6 @@ function respondWithGather(options: {
   } else {
     gather.say({ voice: "alice", language: "de-DE" }, options.promptText);
   }
-
-  options.response.redirect({ method: "POST" }, actionUrl);
 
   return new NextResponse(options.response.toString(), {
     headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -272,6 +276,7 @@ export async function POST(request: Request) {
       consent: consentValue,
       turn: 0,
       transcript: `Gloria: ${appointmentText}`,
+      lowLatency: true,
     });
   }
 
@@ -279,7 +284,7 @@ export async function POST(request: Request) {
     const heardText = speech || digits;
 
     if (!heardText) {
-      if (context.turn >= 2) {
+      if (context.turn >= MAX_SILENT_RETRIES) {
         const report = await storeCallReport({
           leadId: context.leadId,
           company: context.company,
@@ -323,15 +328,22 @@ export async function POST(request: Request) {
         consent: context.consent === "yes" ? "yes" : "no",
         turn: context.turn + 1,
         transcript: trimTranscript(`${context.transcript}\nGloria: ${retryText}`),
+        lowLatency: true,
       });
     }
 
-    const stage =
-      /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie/.test(heardText)
-        ? "objection"
-        : context.turn === 0
-          ? "discovery"
-          : "closing";
+    const isObjection =
+      /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie/.test(
+        heardText,
+      );
+    const isPositiveSignal = /interessant|passt|gerne|gern|okay|einverstanden|ja/.test(heardText);
+    const stage = isObjection
+      ? "objection"
+      : context.turn <= 1
+        ? "discovery"
+        : context.turn >= MAX_LIVE_TURNS - 1 || isPositiveSignal
+          ? "closing"
+          : "discovery";
 
     const aiResult = await generateAdaptiveReply({
       topic: context.topic,
@@ -339,6 +351,7 @@ export async function POST(request: Request) {
       transcript: context.transcript,
       script: activeScript,
       stage,
+      preferFastResponse: true,
     });
 
     const updatedTranscript = trimTranscript(
@@ -348,7 +361,8 @@ export async function POST(request: Request) {
     );
 
     const detectedOutcome = classifyOutcome(heardText);
-    const shouldFinish = detectedOutcome !== "Kein Kontakt" || context.turn >= 2;
+    const reachedTurnLimit = context.turn >= MAX_LIVE_TURNS;
+    const shouldFinish = detectedOutcome !== "Kein Kontakt" || reachedTurnLimit;
 
     if (!shouldFinish) {
       return respondWithGather({
@@ -360,11 +374,12 @@ export async function POST(request: Request) {
         consent: context.consent === "yes" ? "yes" : "no",
         turn: context.turn + 1,
         transcript: updatedTranscript,
+        lowLatency: true,
       });
     }
 
     const finalOutcome =
-      detectedOutcome === "Kein Kontakt" && context.turn >= 2 ? "Wiedervorlage" : detectedOutcome;
+      detectedOutcome === "Kein Kontakt" && reachedTurnLimit ? "Wiedervorlage" : detectedOutcome;
     const followUpDate = buildFollowUpDate(heardText, finalOutcome);
     const report = await storeCallReport({
       leadId: context.leadId,

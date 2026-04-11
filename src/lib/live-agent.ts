@@ -221,11 +221,12 @@ export async function generateAdaptiveReply(input: {
   transcript?: string;
   script?: ScriptConfig;
   stage?: LiveConversationStage;
+  preferFastResponse?: boolean;
 }) {
   const config = buildLiveAgentConfig(input.topic, input.script);
   const stage = input.stage || "discovery";
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (input.preferFastResponse || !process.env.OPENAI_API_KEY) {
     return {
       mode: "rule-based",
       reply: generateRuleBasedReply(input.topic, input.prospectMessage, config, input.script, stage),
