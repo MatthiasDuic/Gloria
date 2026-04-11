@@ -132,8 +132,25 @@ Twilio ruft dann diese Endpunkte auf:
 
 - `/api/twilio/voice` – Gloria eröffnet das Gespräch
 - `/api/twilio/audio` – liefert bei aktiver ElevenLabs-Konfiguration die echte Gloria-Stimme als Audio
-- `/api/twilio/voice/process` – verarbeitet Zustimmung, Interesse, Termin oder Wiedervorlage
+- `/api/twilio/voice/process` – verarbeitet jetzt auch mehrstufige, freie Live-Gespräche auf Vercel
 - `/api/twilio/status` – nimmt Statusupdates von Twilio entgegen
+
+## Live-Gespräche auf Vercel
+
+Gloria kann jetzt in einem **Vercel-tauglichen Live-Modus** mehrstufig auf freie Antworten reagieren. Dafür setze optional:
+
+```env
+TWILIO_CONVERSATION_MODE=live
+```
+
+Wenn du später mit einem echten WebSocket-Stream arbeiten willst, kannst du vorbereitend zusätzlich setzen:
+
+```env
+TWILIO_CONVERSATION_MODE=media-stream
+TWILIO_MEDIA_STREAM_URL=wss://dein-stream-endpunkt
+```
+
+Ohne `TWILIO_MEDIA_STREAM_URL` bleibt Gloria automatisch im funktionierenden Live-Gesprächsmodus auf Basis von Twilio Speech Gather.
 
 ## So wird daraus echte automatische Telefonie
 

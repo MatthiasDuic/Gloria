@@ -26,6 +26,44 @@ export function isTwilioConfigured() {
   );
 }
 
+export type TwilioConversationMode = "guided" | "live" | "media-stream";
+
+export function getTwilioConversationMode(): TwilioConversationMode {
+  const value = process.env.TWILIO_CONVERSATION_MODE?.trim().toLowerCase();
+
+  if (value === "guided") {
+    return "guided";
+  }
+
+  if (value === "media-stream") {
+    return "media-stream";
+  }
+
+  return "live";
+}
+
+export function getTwilioMediaStreamUrl() {
+  const value = process.env.TWILIO_MEDIA_STREAM_URL?.trim();
+
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (url.protocol !== "wss:" && url.protocol !== "ws:") {
+      throw new Error("Twilio Media Streams erwarten eine ws:// oder wss:// URL.");
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(
+      "TWILIO_MEDIA_STREAM_URL ist ungültig. Bitte als vollständige ws:// oder wss:// URL setzen.",
+    );
+  }
+}
+
 export function getAppBaseUrl(request?: Request) {
   const configured = process.env.APP_BASE_URL?.trim();
 

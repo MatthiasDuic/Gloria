@@ -82,6 +82,8 @@ export interface LiveAgentConfig {
   systemPrompt: string;
 }
 
+export type LiveConversationStage = "discovery" | "objection" | "closing";
+
 export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveAgentConfig {
   const detailScript = DETAIL_SCRIPTS[topic];
   const activeScript = script || DEFAULT_SCRIPTS[topic];
@@ -136,34 +138,81 @@ export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveA
   };
 }
 
-function generateRuleBasedReply(topic: Topic, prospectMessage: string, config: LiveAgentConfig) {
+function buildShortTopicExplanation(topic: Topic) {
+  if (topic === "betriebliche Altersvorsorge") {
+    return "Ganz konkret geht es darum, wie die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiv aufgestellt werden kann.";
+  }
+
+  if (topic === "gewerbliche Versicherungen") {
+    return "Ganz konkret geht es um einen neutralen Blick darauf, ob Preis und Leistung Ihrer gewerblichen Absicherung noch sauber zusammenpassen.";
+  }
+
+  if (topic === "private Krankenversicherung") {
+    return "Ganz konkret geht es um Beitragsstabilität und Planbarkeit im Alter – also um eine ruhige Einordnung, nicht um einen Schnellabschluss.";
+  }
+
+  if (topic === "Energie") {
+    return "Ganz konkret geht es um einen kurzen gewerblichen Strom- und Gasvergleich mit möglichem Einsparpotenzial.";
+  }
+
+  return "Ganz konkret geht es darum, wie Unternehmen mit der betrieblichen Krankenversicherung Fachkräfte besser gewinnen und binden können.";
+}
+
+function generateRuleBasedReply(
+  topic: Topic,
+  prospectMessage: string,
+  config: LiveAgentConfig,
+  script?: ScriptConfig,
+  stage: LiveConversationStage = "discovery",
+) {
   const text = prospectMessage.toLowerCase();
-
-  if (/kein interesse|nicht interessiert|brauchen wir nicht/.test(text)) {
-    return "Verstehe ich gut. Gerade deshalb halte ich es ganz kurz: Es geht nur um eine kompakte Einordnung, ob das Thema für Sie überhaupt sinnvoll ist. Wäre dafür eher nächste Woche ein kurzer Termin passend?";
-  }
-
-  if (/keine zeit|später|gerade ungünstig|im stress/.test(text)) {
-    return "Das kann ich gut nachvollziehen. Dann machen wir es Ihnen leicht und planen einfach einen kurzen Termin zu einem ruhigen Zeitpunkt – wäre kommende oder übernächste Woche angenehmer?";
-  }
-
-  if (/unterlagen|email|e-mail|schicken/.test(text)) {
-    return "Gern schicke ich Ihnen Informationen zu. Erfahrungsgemäß ist eine kurze Einordnung aber deutlich hilfreicher als allgemeine Unterlagen. Wann hätten Sie 10 bis 15 Minuten Zeit, damit Herr Duic das passend für Ihre Situation einordnen kann?";
-  }
+  const activeScript = script || DEFAULT_SCRIPTS[topic];
+  const detailScript = DETAIL_SCRIPTS[topic];
+  const discoveryQuestions = detailScript.needs.questions.filter(Boolean);
+  const primaryDiscovery = discoveryQuestions[0] || activeScript.discovery;
+  const secondaryDiscovery = discoveryQuestions[1] || activeScript.discovery;
 
   if (/nicht zuständig|falsche person/.test(text)) {
     return "Alles klar, danke Ihnen. Wer wäre denn bei Ihnen der richtige Ansprechpartner, damit ich das Thema direkt an die passende Stelle geben kann?";
   }
 
   if (topic === "private Krankenversicherung" && /daten|gesundheit|möchte ich nicht sagen|zu privat/.test(text)) {
-    return "Das ist vollkommen in Ordnung. Wir müssen das jetzt nicht im Detail besprechen. Für die Terminvereinbarung reicht mir zunächst nur die kurze Einschätzung: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?";
+    return "Das ist vollkommen in Ordnung. Wir müssen das jetzt nicht im Detail besprechen. Für die weitere Einordnung reicht mir zunächst nur die kurze Einschätzung: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?";
+  }
+
+  if (/unterlagen|email|e-mail|schicken/.test(text)) {
+    return `Gern schicke ich Ihnen Informationen zu. Damit das wirklich passend ist, würde ich gern noch kurz verstehen: ${secondaryDiscovery}`;
+  }
+
+  if (/kein interesse|nicht interessiert|brauchen wir nicht/.test(text)) {
+    return `Verstehe ich gut. ${activeScript.objectionHandling} Wenn es für Sie angenehmer ist, können wir dafür auch einfach einen kurzen Termin oder eine Wiedervorlage zu einem ruhigen Zeitpunkt festhalten.`;
+  }
+
+  if (/keine zeit|später|gerade ungünstig|im stress/.test(text)) {
+    return `Das kann ich gut nachvollziehen. ${activeScript.objectionHandling} ${activeScript.close}`;
   }
 
   if (/was genau|worum geht|erklären sie/.test(text)) {
-    return `${config.objective} Ganz konkret geht es also um eine kurze, verständliche Einordnung. Darf ich Ihnen dafür direkt einen kurzen Termin mit Herrn Duic reservieren?`;
+    return `${buildShortTopicExplanation(topic)} ${primaryDiscovery}`;
   }
 
-  return `Verstehe. ${config.objective} Wenn es für Sie passt, gehen wir am besten den nächsten kleinen Schritt: Soll ich Ihnen dafür direkt einen kurzen Termin oder alternativ eine Wiedervorlage eintragen?`;
+  if (stage === "discovery") {
+    if (/(ja|grundsätzlich|wir haben|aktuell|derzeit|mitarbeiter|versicherung|vertrag|nutzen|bieten|thema)/.test(text)) {
+      return `Danke Ihnen, das hilft mir schon weiter. ${secondaryDiscovery}`;
+    }
+
+    return primaryDiscovery;
+  }
+
+  if (stage === "objection") {
+    return `${activeScript.objectionHandling} ${activeScript.close}`;
+  }
+
+  if (/interessant|passt|gerne|machen wir|einverstanden|ja/.test(text)) {
+    return activeScript.close;
+  }
+
+  return `Verstehe. ${config.objective} ${activeScript.close}`;
 }
 
 export async function generateAdaptiveReply(input: {
@@ -171,13 +220,15 @@ export async function generateAdaptiveReply(input: {
   prospectMessage: string;
   transcript?: string;
   script?: ScriptConfig;
+  stage?: LiveConversationStage;
 }) {
   const config = buildLiveAgentConfig(input.topic, input.script);
+  const stage = input.stage || "discovery";
 
   if (!process.env.OPENAI_API_KEY) {
     return {
       mode: "rule-based",
-      reply: generateRuleBasedReply(input.topic, input.prospectMessage, config),
+      reply: generateRuleBasedReply(input.topic, input.prospectMessage, config, input.script, stage),
       objective: config.objective,
     };
   }
@@ -202,7 +253,7 @@ export async function generateAdaptiveReply(input: {
             content: [
               {
                 type: "input_text",
-                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in 1 bis 3 kurzen, natürlichen Sätzen und führe klar zum nächsten Schritt Richtung Termin oder Wiedervorlage.`,
+                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAktuelle Gesprächsphase: ${stage}.\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in 1 bis 3 kurzen, natürlichen Sätzen. Halte dich an die aktuelle Gesprächsphase: zuerst Bedarf verstehen und Einwände aufgreifen, erst danach sauber in Richtung Termin oder Wiedervorlage führen.`,
               },
             ],
           },
@@ -242,7 +293,13 @@ export async function generateAdaptiveReply(input: {
   } catch {
     return {
       mode: "fallback",
-      reply: generateRuleBasedReply(input.topic, input.prospectMessage, config),
+      reply: generateRuleBasedReply(
+        input.topic,
+        input.prospectMessage,
+        config,
+        input.script,
+        stage,
+      ),
       objective: config.objective,
     };
   }

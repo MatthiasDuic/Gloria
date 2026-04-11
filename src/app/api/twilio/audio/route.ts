@@ -26,6 +26,12 @@ function buildTopicPitch(topic: Topic) {
 }
 
 function buildAudioText(params: URLSearchParams) {
+  const directText = params.get("text");
+
+  if (directText?.trim()) {
+    return directText.trim();
+  }
+
   const step = params.get("step") || "intro";
   const topic = (params.get("topic") || "betriebliche Krankenversicherung") as Topic;
   const contactName = params.get("contactName") || "";

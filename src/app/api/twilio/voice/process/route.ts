@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { generateAdaptiveReply } from "@/lib/live-agent";
 import { sendReportEmail } from "@/lib/mailer";
-import { storeCallReport } from "@/lib/storage";
-import { getAppBaseUrl } from "@/lib/twilio";
+import { getDashboardData, storeCallReport } from "@/lib/storage";
+import {
+  getAppBaseUrl,
+  getTwilioConversationMode,
+  getTwilioMediaStreamUrl,
+} from "@/lib/twilio";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,6 +28,9 @@ function readContext(request: Request) {
     company: url.searchParams.get("company") || "Unbekanntes Unternehmen",
     contactName: url.searchParams.get("contactName") || undefined,
     topic: (url.searchParams.get("topic") || "betriebliche Krankenversicherung") as Topic,
+    consent: url.searchParams.get("consent") || "no",
+    turn: Number(url.searchParams.get("turn") || "0"),
+    transcript: url.searchParams.get("transcript") || "",
   };
 }
 
@@ -75,7 +83,7 @@ function classifyOutcome(speech: string): ReportOutcome {
     return "Wiedervorlage";
   }
 
-  if (/(ja|gern|gerne|interessant|passt|termin|machen wir|einverstanden|okay)/.test(speech)) {
+  if (/termin|machen wir|passt .*vormittag|passt .*nachmittag|einverstanden mit termin|gerne termin/.test(speech)) {
     return "Termin";
   }
 
@@ -87,7 +95,12 @@ function buildFollowUpDate(speech: string, outcome: ReportOutcome) {
   const result = new Date(now);
   const wantsNextWeek = /nächste woche/.test(speech);
   result.setDate(now.getDate() + (wantsNextWeek ? 7 : 2));
-  result.setHours(outcome === "Termin" ? (/nachmittag|14|15|16/.test(speech) ? 14 : 10) : 11, 0, 0, 0);
+  result.setHours(
+    outcome === "Termin" ? (/nachmittag|14|15|16/.test(speech) ? 14 : 10) : 11,
+    0,
+    0,
+    0,
+  );
   return result.toISOString();
 }
 
@@ -103,6 +116,76 @@ function buildAudioUrl(baseUrl: string, params: Record<string, string | undefine
   return url.toString();
 }
 
+function buildProcessUrl(baseUrl: string, params: Record<string, string | undefined>) {
+  const url = new URL("/api/twilio/voice/process", `${baseUrl}/`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+}
+
+function trimTranscript(value: string, maxLength = 1200) {
+  const normalized = value.trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return normalized.slice(normalized.length - maxLength);
+}
+
+function respondWithGather(options: {
+  response: twilio.twiml.VoiceResponse;
+  baseUrl: string;
+  promptText: string;
+  audioParams?: Record<string, string | undefined>;
+  context: ReturnType<typeof readContext>;
+  consent: "yes" | "no";
+  turn: number;
+  transcript: string;
+}) {
+  const actionUrl = buildProcessUrl(options.baseUrl, {
+    step: "conversation",
+    consent: options.consent,
+    leadId: options.context.leadId,
+    company: options.context.company,
+    contactName: options.context.contactName,
+    topic: options.context.topic,
+    turn: String(options.turn),
+    transcript: trimTranscript(options.transcript),
+  });
+
+  const gather = options.response.gather({
+    input: ["speech", "dtmf"],
+    action: actionUrl,
+    method: "POST",
+    language: "de-DE",
+    speechTimeout: "auto",
+    hints: "ja, nein, Termin, Rückruf, kein Interesse, später, nächste Woche",
+  });
+
+  if (isElevenLabsConfigured()) {
+    gather.play(
+      buildAudioUrl(options.baseUrl, {
+        text: options.promptText,
+        ...options.audioParams,
+      }),
+    );
+  } else {
+    gather.say({ voice: "alice", language: "de-DE" }, options.promptText);
+  }
+
+  options.response.redirect({ method: "POST" }, actionUrl);
+
+  return new NextResponse(options.response.toString(), {
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+  });
+}
+
 export async function POST(request: Request) {
   const baseUrl = getAppBaseUrl(request);
   const context = readContext(request);
@@ -110,6 +193,8 @@ export async function POST(request: Request) {
   const speech = normalizeText(form.get("SpeechResult"));
   const digits = normalizeText(form.get("Digits"));
   const response = new twilio.twiml.VoiceResponse();
+  const dashboardData = await getDashboardData();
+  const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
 
   if (context.step === "consent") {
     const consent = detectConsent(speech, digits);
@@ -118,7 +203,13 @@ export async function POST(request: Request) {
       const retry = response.gather({
         input: ["speech", "dtmf"],
         numDigits: 1,
-        action: `${baseUrl}/api/twilio/voice/process?step=consent&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName || "")}&topic=${encodeURIComponent(context.topic)}`,
+        action: buildProcessUrl(baseUrl, {
+          step: "consent",
+          leadId: context.leadId,
+          company: context.company,
+          contactName: context.contactName,
+          topic: context.topic,
+        }),
         method: "POST",
         language: "de-DE",
         speechTimeout: "auto",
@@ -140,33 +231,193 @@ export async function POST(request: Request) {
       });
     }
 
-    const gather = response.gather({
-      input: ["speech", "dtmf"],
-      action: `${baseUrl}/api/twilio/voice/process?step=appointment&consent=${consent ? "yes" : "no"}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName || "")}&topic=${encodeURIComponent(context.topic)}`,
-      method: "POST",
-      language: "de-DE",
-      speechTimeout: "auto",
-      hints: "ja, nein, nächste Woche, später, Rückruf, kein Interesse",
-    });
+    const consentValue = consent ? "yes" : "no";
+    const discoveryPrompt = activeScript?.discovery || "Darf ich kurz fragen, wie Sie dieses Thema aktuell bei sich handhaben?";
+    const appointmentText = `${consent ? "Vielen Dank, ich notiere die Zustimmung." : "Natürlich, dann ohne Aufzeichnung."} ${buildTopicIntro(context.topic)} ${discoveryPrompt}`;
 
-    const appointmentText = `${consent ? "Vielen Dank, ich notiere die Zustimmung." : "Natürlich, dann ohne Aufzeichnung."} ${buildTopicIntro(context.topic)} Passt dafür eher ein kurzer Termin mit Herrn Duic, oder soll ich eine Wiedervorlage notieren?`;
+    if (getTwilioConversationMode() === "media-stream") {
+      const mediaStreamUrl = getTwilioMediaStreamUrl();
 
-    if (isElevenLabsConfigured()) {
-      gather.play(
-        buildAudioUrl(baseUrl, {
-          step: "appointment",
-          topic: context.topic,
-          consent: consent ? "yes" : "no",
-        }),
-      );
-    } else {
-      gather.say({ voice: "alice", language: "de-DE" }, appointmentText);
+      if (mediaStreamUrl) {
+        if (isElevenLabsConfigured()) {
+          response.play(buildAudioUrl(baseUrl, { text: appointmentText }));
+        } else {
+          response.say({ voice: "alice", language: "de-DE" }, appointmentText);
+        }
+
+        const connect = response.connect();
+        const stream = connect.stream({ url: mediaStreamUrl });
+        stream.parameter({ name: "leadId", value: context.leadId || "" });
+        stream.parameter({ name: "company", value: context.company });
+        stream.parameter({ name: "contactName", value: context.contactName || "" });
+        stream.parameter({ name: "topic", value: context.topic });
+        stream.parameter({ name: "recordingConsent", value: consentValue });
+
+        return new NextResponse(response.toString(), {
+          headers: { "Content-Type": "text/xml; charset=utf-8" },
+        });
+      }
     }
 
-    response.redirect(
-      { method: "POST" },
-      `${baseUrl}/api/twilio/voice/process?step=appointment&consent=${consent ? "yes" : "no"}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName || "")}&topic=${encodeURIComponent(context.topic)}`,
+    return respondWithGather({
+      response,
+      baseUrl,
+      promptText: appointmentText,
+      audioParams: {
+        step: "appointment",
+        topic: context.topic,
+        consent: consentValue,
+      },
+      context,
+      consent: consentValue,
+      turn: 0,
+      transcript: `Gloria: ${appointmentText}`,
+    });
+  }
+
+  if (context.step === "conversation") {
+    const heardText = speech || digits;
+
+    if (!heardText) {
+      if (context.turn >= 2) {
+        const report = await storeCallReport({
+          leadId: context.leadId,
+          company: context.company,
+          contactName: context.contactName,
+          topic: context.topic,
+          summary: trimTranscript(
+            `${context.transcript}\nInteressent: keine verwertbare Rückmeldung im Live-Gespräch.`,
+          ),
+          outcome: "Kein Kontakt",
+          recordingConsent: context.consent === "yes",
+          attempts: 1,
+        });
+
+        await sendReportEmail(report).catch(() => undefined);
+
+        if (isElevenLabsConfigured()) {
+          response.play(buildAudioUrl(baseUrl, { step: "final", variant: "neutral" }));
+        } else {
+          response.say(
+            { voice: "alice", language: "de-DE" },
+            "Vielen Dank für Ihre Zeit. Herr Duic meldet sich bei Bedarf noch einmal kurz bei Ihnen.",
+          );
+        }
+
+        response.hangup();
+
+        return new NextResponse(response.toString(), {
+          headers: { "Content-Type": "text/xml; charset=utf-8" },
+        });
+      }
+
+      const retryText =
+        "Ich habe Sie akustisch gerade nicht ganz verstanden. Möchten Sie lieber einen kurzen Termin, eine Wiedervorlage oder soll ich es noch einmal kurz einordnen?";
+
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: retryText,
+        audioParams: { step: "dynamic", text: retryText },
+        context,
+        consent: context.consent === "yes" ? "yes" : "no",
+        turn: context.turn + 1,
+        transcript: trimTranscript(`${context.transcript}\nGloria: ${retryText}`),
+      });
+    }
+
+    const stage =
+      /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie/.test(heardText)
+        ? "objection"
+        : context.turn === 0
+          ? "discovery"
+          : "closing";
+
+    const aiResult = await generateAdaptiveReply({
+      topic: context.topic,
+      prospectMessage: heardText,
+      transcript: context.transcript,
+      script: activeScript,
+      stage,
+    });
+
+    const updatedTranscript = trimTranscript(
+      [context.transcript, `Interessent: ${heardText}`, `Gloria: ${aiResult.reply}`]
+        .filter(Boolean)
+        .join("\n"),
     );
+
+    const detectedOutcome = classifyOutcome(heardText);
+    const shouldFinish = detectedOutcome !== "Kein Kontakt" || context.turn >= 2;
+
+    if (!shouldFinish) {
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: aiResult.reply,
+        audioParams: { step: "dynamic", text: aiResult.reply },
+        context,
+        consent: context.consent === "yes" ? "yes" : "no",
+        turn: context.turn + 1,
+        transcript: updatedTranscript,
+      });
+    }
+
+    const finalOutcome =
+      detectedOutcome === "Kein Kontakt" && context.turn >= 2 ? "Wiedervorlage" : detectedOutcome;
+    const followUpDate = buildFollowUpDate(heardText, finalOutcome);
+    const report = await storeCallReport({
+      leadId: context.leadId,
+      company: context.company,
+      contactName: context.contactName,
+      topic: context.topic,
+      summary: updatedTranscript,
+      outcome: finalOutcome,
+      appointmentAt: finalOutcome === "Termin" ? followUpDate : undefined,
+      nextCallAt: finalOutcome === "Wiedervorlage" ? followUpDate : undefined,
+      recordingConsent: context.consent === "yes",
+      attempts: 1,
+    });
+
+    await sendReportEmail(report).catch(() => undefined);
+
+    if (isElevenLabsConfigured()) {
+      response.play(
+        buildAudioUrl(baseUrl, {
+          step: "final",
+          variant:
+            finalOutcome === "Termin"
+              ? "success"
+              : finalOutcome === "Wiedervorlage"
+                ? "callback"
+                : finalOutcome === "Absage"
+                  ? "rejection"
+                  : "neutral",
+        }),
+      );
+    } else if (finalOutcome === "Termin") {
+      response.say(
+        { voice: "alice", language: "de-DE" },
+        "Perfekt, dann ist ein kurzer Termin vorgemerkt. Herr Duic meldet sich mit der Bestätigung. Vielen Dank für Ihre Zeit.",
+      );
+    } else if (finalOutcome === "Wiedervorlage") {
+      response.say(
+        { voice: "alice", language: "de-DE" },
+        "Sehr gern. Ich habe die Wiedervorlage notiert. Vielen Dank und bis bald.",
+      );
+    } else if (finalOutcome === "Absage") {
+      response.say(
+        { voice: "alice", language: "de-DE" },
+        "Danke für die offene Rückmeldung. Dann wünsche ich Ihnen einen angenehmen Tag.",
+      );
+    } else {
+      response.say(
+        { voice: "alice", language: "de-DE" },
+        "Vielen Dank für Ihre Zeit. Herr Duic meldet sich bei Bedarf noch einmal kurz bei Ihnen.",
+      );
+    }
+
+    response.hangup();
 
     return new NextResponse(response.toString(), {
       headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -187,7 +438,7 @@ export async function POST(request: Request) {
     outcome,
     appointmentAt: outcome === "Termin" ? followUpDate : undefined,
     nextCallAt: outcome === "Wiedervorlage" ? followUpDate : undefined,
-    recordingConsent: new URL(request.url).searchParams.get("consent") === "yes",
+    recordingConsent: context.consent === "yes",
     attempts: 1,
   });
 

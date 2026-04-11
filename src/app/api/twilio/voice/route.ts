@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { getDashboardData } from "@/lib/storage";
 import { getAppBaseUrl } from "@/lib/twilio";
 
 export const runtime = "nodejs";
@@ -48,10 +49,12 @@ function buildAudioUrl(baseUrl: string, params: Record<string, string | undefine
   return url.toString();
 }
 
-function renderVoiceResponse(request: Request) {
+async function renderVoiceResponse(request: Request) {
   const baseUrl = getAppBaseUrl(request);
   const context = getContext(request);
   const response = new twilio.twiml.VoiceResponse();
+  const dashboardData = await getDashboardData();
+  const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
   const gather = response.gather({
     input: ["speech", "dtmf"],
     numDigits: 1,
@@ -62,7 +65,9 @@ function renderVoiceResponse(request: Request) {
     hints: "ja, nein, Termin, Rückruf, kein Interesse",
   });
 
-  const openingText = `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}. Hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Herrn Matthias Duic. ${buildPitch(context.topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
+  const openingText =
+    activeScript?.opener ||
+    `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}. Hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Herrn Matthias Duic. ${buildPitch(context.topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
 
   if (isElevenLabsConfigured()) {
     gather.play(
@@ -87,9 +92,9 @@ function renderVoiceResponse(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return renderVoiceResponse(request);
+  return await renderVoiceResponse(request);
 }
 
 export async function POST(request: Request) {
-  return renderVoiceResponse(request);
+  return await renderVoiceResponse(request);
 }
