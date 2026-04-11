@@ -26,7 +26,7 @@ function readContext(request: Request) {
   const url = new URL(request.url);
 
   return {
-    step: url.searchParams.get("step") || "consent",
+    step: url.searchParams.get("step") || "intro",
     leadId: url.searchParams.get("leadId") || undefined,
     company: url.searchParams.get("company") || "Unbekanntes Unternehmen",
     contactName: url.searchParams.get("contactName") || undefined,
@@ -39,22 +39,39 @@ function readContext(request: Request) {
 
 function buildTopicIntro(topic: Topic) {
   if (topic === "betriebliche Altersvorsorge") {
-    return "Es geht um einen kurzen Abgleich, wie sich die betriebliche Altersvorsorge einfacher und attraktiver kommunizieren lässt.";
+    return "Es geht um einen kurzen Abgleich, wie sich die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiv aufstellen lässt.";
   }
 
   if (topic === "gewerbliche Versicherungen") {
-    return "Es geht um einen kompakten Vergleich Ihrer gewerblichen Absicherung auf Preis, Leistung und eventuelle Lücken.";
+    return "Es geht um einen kurzen Vergleich Ihrer gewerblichen Absicherung auf Preis, Leistung und mögliche Lücken.";
   }
 
   if (topic === "private Krankenversicherung") {
-    return "Es geht um eine kurze Einordnung, wie sich Krankenversicherungsbeiträge im Alter besser planen lassen.";
+    return "Es geht um eine ruhige Einordnung, wie sich Krankenversicherungsbeiträge im Alter besser planen lassen.";
   }
 
   if (topic === "Energie") {
     return "Es geht um einen kurzen gewerblichen Strom- und Gasvergleich mit möglichem Einsparpotenzial.";
   }
 
-  return "Es geht um die betriebliche Krankenversicherung als attraktiven Mitarbeitenden-Benefit.";
+  return "Es geht um die betriebliche Krankenversicherung als attraktiven Benefit für Mitarbeitende.";
+}
+
+function buildDecisionMakerPrompt(topic: Topic) {
+  return `${buildTopicIntro(topic)} Sind Sie dafür die richtige Ansprechperson, oder wen darf ich dazu am besten kurz sprechen?`;
+}
+
+function soundsLikeNotDecisionMaker(text: string) {
+  return /nicht zuständig|bin ich nicht|dafür ist .* zuständig|sekretariat|empfang|zentrale|assistenz|büro|nicht da|außer haus|ich verbinde|ich leite.*weiter|weiterleiten/.test(text);
+}
+
+function soundsLikeDecisionMaker(text: string) {
+  return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig/.test(text);
+}
+
+function isLikelyGreeting(text: string) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  return words.length <= 4 || /hallo|guten tag|ja bitte|wer ist da|moment|einen moment|moin/.test(text);
 }
 
 function detectConsent(speech: string, digits: string) {
@@ -151,9 +168,11 @@ function respondWithGather(options: {
   turn: number;
   transcript: string;
   lowLatency?: boolean;
+  step?: "intro" | "consent" | "conversation";
 }) {
+  const nextStep = options.step || "conversation";
   const actionUrl = buildProcessUrl(options.baseUrl, {
-    step: "conversation",
+    step: nextStep,
     consent: options.consent,
     leadId: options.context.leadId,
     company: options.context.company,
@@ -163,6 +182,13 @@ function respondWithGather(options: {
     transcript: trimTranscript(options.transcript),
   });
 
+  const hints =
+    nextStep === "intro"
+      ? "zuständig, richtige Ansprechperson, durchstellen, worum geht es, einen Moment"
+      : nextStep === "consent"
+        ? "ja, nein, aufzeichnung erlaubt, ohne aufzeichnung"
+        : "ja, nein, Termin, Rückruf, kein Interesse, später, nächste Woche";
+
   const gather = options.response.gather({
     input: ["speech", "dtmf"],
     action: actionUrl,
@@ -171,7 +197,7 @@ function respondWithGather(options: {
     speechTimeout: "auto",
     timeout: 4,
     actionOnEmptyResult: true,
-    hints: "ja, nein, Termin, Rückruf, kein Interesse, später, nächste Woche",
+    hints,
   });
 
   if (!options.lowLatency && isElevenLabsConfigured()) {
@@ -190,6 +216,17 @@ function respondWithGather(options: {
   });
 }
 
+async function safelyStoreReport(payload: Parameters<typeof storeCallReport>[0]) {
+  try {
+    const report = await storeCallReport(payload);
+    await sendReportEmail(report).catch(() => undefined);
+    return report;
+  } catch (error) {
+    console.error("Twilio report could not be saved", error);
+    return undefined;
+  }
+}
+
 export async function POST(request: Request) {
   const baseUrl = getAppBaseUrl(request);
   const context = readContext(request);
@@ -199,6 +236,70 @@ export async function POST(request: Request) {
   const response = new twilio.twiml.VoiceResponse();
   const dashboardData = await getDashboardData();
   const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
+
+  if (context.step === "intro") {
+    const heardText = speech || digits;
+
+    if (!heardText) {
+      const prompt = `Guten Tag. ${buildDecisionMakerPrompt(context.topic)}`;
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: prompt,
+        audioParams: { text: prompt },
+        context,
+        consent: "no",
+        turn: context.turn + 1,
+        transcript: trimTranscript(`${context.transcript}\nGloria: ${prompt}`),
+        step: "intro",
+      });
+    }
+
+    if (soundsLikeNotDecisionMaker(heardText) || isLikelyGreeting(heardText) || /worum geht|was genau|wer sind sie|ja bitte/.test(heardText)) {
+      const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic)}`;
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: prompt,
+        audioParams: { text: prompt },
+        context,
+        consent: "no",
+        turn: context.turn + 1,
+        transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+        step: "intro",
+      });
+    }
+
+    if (soundsLikeDecisionMaker(heardText) || context.turn >= 1) {
+      const consentPrompt =
+        "Perfekt, danke Ihnen. Bevor wir weitergehen: Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?";
+
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: consentPrompt,
+        audioParams: { text: consentPrompt },
+        context,
+        consent: "no",
+        turn: 0,
+        transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
+        step: "consent",
+      });
+    }
+
+    const prompt = `Danke Ihnen. ${buildDecisionMakerPrompt(context.topic)}`;
+    return respondWithGather({
+      response,
+      baseUrl,
+      promptText: prompt,
+      audioParams: { text: prompt },
+      context,
+      consent: "no",
+      turn: context.turn + 1,
+      transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+      step: "intro",
+    });
+  }
 
   if (context.step === "consent") {
     const consent = detectConsent(speech, digits);
@@ -227,8 +328,6 @@ export async function POST(request: Request) {
           "Danke. Ich habe Sie akustisch nicht sicher verstanden. Wenn die Aufzeichnung in Ordnung ist, sagen Sie bitte ja oder drücken Sie die eins. Wenn nicht, sagen Sie bitte nein oder drücken Sie die zwei.",
         );
       }
-
-      response.hangup();
 
       return new NextResponse(response.toString(), {
         headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -276,7 +375,6 @@ export async function POST(request: Request) {
       consent: consentValue,
       turn: 0,
       transcript: `Gloria: ${appointmentText}`,
-      lowLatency: true,
     });
   }
 
@@ -285,7 +383,7 @@ export async function POST(request: Request) {
 
     if (!heardText) {
       if (context.turn >= MAX_SILENT_RETRIES) {
-        const report = await storeCallReport({
+        await safelyStoreReport({
           leadId: context.leadId,
           company: context.company,
           contactName: context.contactName,
@@ -297,8 +395,6 @@ export async function POST(request: Request) {
           recordingConsent: context.consent === "yes",
           attempts: 1,
         });
-
-        await sendReportEmail(report).catch(() => undefined);
 
         if (isElevenLabsConfigured()) {
           response.play(buildAudioUrl(baseUrl, { step: "final", variant: "neutral" }));
@@ -374,14 +470,13 @@ export async function POST(request: Request) {
         consent: context.consent === "yes" ? "yes" : "no",
         turn: context.turn + 1,
         transcript: updatedTranscript,
-        lowLatency: true,
       });
     }
 
     const finalOutcome =
       detectedOutcome === "Kein Kontakt" && reachedTurnLimit ? "Wiedervorlage" : detectedOutcome;
     const followUpDate = buildFollowUpDate(heardText, finalOutcome);
-    const report = await storeCallReport({
+    await safelyStoreReport({
       leadId: context.leadId,
       company: context.company,
       contactName: context.contactName,
@@ -393,8 +488,6 @@ export async function POST(request: Request) {
       recordingConsent: context.consent === "yes",
       attempts: 1,
     });
-
-    await sendReportEmail(report).catch(() => undefined);
 
     if (isElevenLabsConfigured()) {
       response.play(
@@ -441,7 +534,7 @@ export async function POST(request: Request) {
 
   const outcome = classifyOutcome(speech);
   const followUpDate = buildFollowUpDate(speech, outcome);
-  const report = await storeCallReport({
+  await safelyStoreReport({
     leadId: context.leadId,
     company: context.company,
     contactName: context.contactName,
@@ -456,8 +549,6 @@ export async function POST(request: Request) {
     recordingConsent: context.consent === "yes",
     attempts: 1,
   });
-
-  await sendReportEmail(report).catch(() => undefined);
 
   if (isElevenLabsConfigured()) {
     response.play(

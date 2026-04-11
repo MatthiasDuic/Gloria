@@ -32,30 +32,35 @@ export async function generateElevenLabsPreview(text: string): Promise<ElevenLab
     .trim();
 
   try {
-    const response = await fetch(
+    const elevenLabsUrl = new URL(
       `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-          "xi-api-key": process.env.ELEVENLABS_API_KEY as string,
-        },
-        body: JSON.stringify({
-          text: speechText,
-          model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2",
-          voice_settings: {
-            stability: Number(process.env.ELEVENLABS_STABILITY || 0.44),
-            similarity_boost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.92),
-            style: Number(process.env.ELEVENLABS_STYLE || 0.2),
-            speed: Number(process.env.ELEVENLABS_SPEED || 1.08),
-            use_speaker_boost:
-              (process.env.ELEVENLABS_USE_SPEAKER_BOOST || "true") === "true",
-          },
-        }),
-        cache: "no-store",
-      },
     );
+    elevenLabsUrl.searchParams.set(
+      "optimize_streaming_latency",
+      process.env.ELEVENLABS_LATENCY_MODE || "3",
+    );
+
+    const response = await fetch(elevenLabsUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+        "xi-api-key": process.env.ELEVENLABS_API_KEY as string,
+      },
+      body: JSON.stringify({
+        text: speechText,
+        model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2",
+        voice_settings: {
+          stability: Number(process.env.ELEVENLABS_STABILITY || 0.38),
+          similarity_boost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.88),
+          style: Number(process.env.ELEVENLABS_STYLE || 0.3),
+          speed: Number(process.env.ELEVENLABS_SPEED || 0.97),
+          use_speaker_boost:
+            (process.env.ELEVENLABS_USE_SPEAKER_BOOST || "true") === "true",
+        },
+      }),
+      cache: "no-store",
+    });
 
     if (!response.ok) {
       const details = await response.text();

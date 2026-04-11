@@ -38,8 +38,12 @@ function buildAudioText(params: URLSearchParams) {
   const consent = params.get("consent") === "yes";
   const variant = params.get("variant") || "neutral";
 
+  if (step === "intro") {
+    return `Guten Tag${contactName ? ` ${contactName}` : ""}, hier ist Gloria im Auftrag von Matthias Duic. ${buildTopicPitch(topic)} Bin ich dafür direkt bei der richtigen Ansprechperson, oder wer wäre bei Ihnen dafür zuständig?`;
+  }
+
   if (step === "consent-retry") {
-    return "Danke. Ich habe Sie akustisch nicht ganz sicher verstanden. Wenn die Aufzeichnung in Ordnung ist, sagen Sie bitte ja oder drücken Sie die Eins. Wenn nicht, sagen Sie bitte nein oder drücken Sie die Zwei.";
+    return "Danke. Ich habe Sie akustisch gerade nicht ganz verstanden. Ist eine kurze Aufzeichnung für Schulung und Qualität in Ordnung? Sie können einfach ja oder nein sagen.";
   }
 
   if (step === "appointment") {

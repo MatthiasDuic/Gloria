@@ -181,15 +181,15 @@ function generateRuleBasedReply(
   }
 
   if (/unterlagen|email|e-mail|schicken/.test(text)) {
-    return `Gern schicke ich Ihnen Informationen zu. Damit das wirklich passend ist, würde ich gern noch kurz verstehen: ${secondaryDiscovery}`;
+    return `Sehr gern. Damit ich Ihnen nichts Beliebiges schicke, würde ich nur kurz verstehen: ${secondaryDiscovery}`;
   }
 
   if (/kein interesse|nicht interessiert|brauchen wir nicht/.test(text)) {
-    return `Verstehe ich gut. ${activeScript.objectionHandling} Wenn es für Sie angenehmer ist, können wir dafür auch einfach einen kurzen Termin oder eine Wiedervorlage zu einem ruhigen Zeitpunkt festhalten.`;
+    return `Verstehe ich total. ${activeScript.objectionHandling} Wenn es Ihnen lieber ist, halte ich das Ganze wirklich kurz und wir schauen nur, ob überhaupt Bedarf besteht.`;
   }
 
   if (/keine zeit|später|gerade ungünstig|im stress/.test(text)) {
-    return `Das kann ich gut nachvollziehen. ${activeScript.objectionHandling} ${activeScript.close}`;
+    return `Alles gut, ich halte es kurz. ${activeScript.objectionHandling} ${activeScript.close}`;
   }
 
   if (/was genau|worum geht|erklären sie/.test(text)) {

@@ -58,16 +58,15 @@ async function renderVoiceResponse(request: Request) {
   const gather = response.gather({
     input: ["speech", "dtmf"],
     numDigits: 1,
-    action: `${baseUrl}/api/twilio/voice/process?step=consent&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
+    action: `${baseUrl}/api/twilio/voice/process?step=intro&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
     method: "POST",
     language: "de-DE",
     speechTimeout: "auto",
-    hints: "ja, nein, Termin, Rückruf, kein Interesse",
+    hints: "zuständig, richtige Ansprechperson, worum geht es, ja bitte, einen Moment",
   });
 
   const openingText =
-    activeScript?.opener ||
-    `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}. Hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Herrn Matthias Duic. ${buildPitch(context.topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
+    `Guten Tag${context.contactName ? ` ${context.contactName}` : ""}, hier ist Gloria im Auftrag von Matthias Duic. ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson, oder wer wäre bei Ihnen dafür zuständig?`;
 
   if (isElevenLabsConfigured()) {
     gather.play(
@@ -83,7 +82,7 @@ async function renderVoiceResponse(request: Request) {
 
   response.redirect(
     { method: "POST" },
-    `${baseUrl}/api/twilio/voice/process?step=consent&fallback=1&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
+    `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
   );
 
   return new NextResponse(response.toString(), {
