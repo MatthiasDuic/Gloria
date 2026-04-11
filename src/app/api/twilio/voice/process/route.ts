@@ -70,8 +70,12 @@ function soundsLikeDecisionMaker(text: string) {
 }
 
 function isLikelyGreeting(text: string) {
+  if (soundsLikeDecisionMaker(text) || soundsLikeNotDecisionMaker(text)) {
+    return false;
+  }
+
   const words = text.trim().split(/\s+/).filter(Boolean);
-  return words.length <= 4 || /hallo|guten tag|ja bitte|wer ist da|moment|einen moment|moin/.test(text);
+  return words.length <= 3 || /hallo|guten tag|ja bitte|wer ist da|moment|einen moment|moin/.test(text);
 }
 
 function detectConsent(speech: string, digits: string) {
