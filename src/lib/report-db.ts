@@ -568,3 +568,29 @@ export async function appendConversationEventToPostgres(
     return false;
   }
 }
+
+export async function writeScriptToPostgres(script: ScriptConfig): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `
+      INSERT INTO gloria_scripts (topic, data, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (topic)
+      DO UPDATE SET
+        data = EXCLUDED.data,
+        updated_at = NOW();
+      `,
+      [script.topic, JSON.stringify(script)],
+    );
+    return true;
+  } catch (error) {
+    console.error("Postgres single script write failed, fallback to file storage", error);
+    return false;
+  }
+}

@@ -8,6 +8,7 @@ import {
   readConversationEventsFromPostgres,
   readReportDatabaseFromPostgres,
   readScriptsFromPostgres,
+  writeScriptToPostgres,
   writeReportDatabaseToPostgres,
   writeScriptsToPostgres,
 } from "./report-db";
@@ -339,15 +340,33 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
       : script,
   );
 
-  const wroteToPostgres = await writeScriptsToPostgres(updated);
+  const updatedScript = updated.find((script) => script.topic === topic);
 
-  if (!wroteToPostgres) {
-    await writeJsonStrict(SCRIPTS_FILE, updated);
+  if (!updatedScript) {
+    throw new Error(`Skript für Thema ${topic} konnte nicht gefunden werden.`);
   }
 
+  const wroteToPostgres = await writeScriptToPostgres(updatedScript);
+
+  if (wroteToPostgres) {
+    const persistedScripts = await readScriptsFromPostgres();
+    const persistedScript = persistedScripts?.find((script) => script.topic === topic);
+
+    if (!persistedScript) {
+      throw new Error("Skript wurde nicht persistent in der Datenbank gefunden.");
+    }
+
+    return {
+      script: persistedScript,
+      storageMode: "postgres" as const,
+    };
+  }
+
+  await writeJsonStrict(SCRIPTS_FILE, updated);
+
   return {
-    script: updated.find((script) => script.topic === topic),
-    storageMode: wroteToPostgres ? ("postgres" as const) : ("file" as const),
+    script: updatedScript,
+    storageMode: "file" as const,
   };
 }
 
