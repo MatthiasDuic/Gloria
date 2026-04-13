@@ -73,46 +73,59 @@ async function writeFileState(data: Record<string, CallState>) {
 }
 
 export async function getCallState(callSid: string) {
-  const key = `${REDIS_PREFIX}${callSid}`;
-  const redis = await getRedisClient();
+  try {
+    const key = `${REDIS_PREFIX}${callSid}`;
+    const redis = await getRedisClient();
 
-  if (redis) {
-    const raw = await redis.get(key);
-    if (!raw) {
-      return undefined;
+    if (redis) {
+      const raw = await redis.get(key);
+      if (!raw) {
+        return undefined;
+      }
+
+      return JSON.parse(raw) as CallState;
     }
 
-    return JSON.parse(raw) as CallState;
+    const fileState = await readFileState();
+    return fileState[callSid];
+  } catch (error) {
+    console.error("Call state read failed", error);
+    return undefined;
   }
-
-  const fileState = await readFileState();
-  return fileState[callSid];
 }
 
 export async function saveCallState(callSid: string, state: CallState, ttlSeconds = DEFAULT_TTL_SECONDS) {
-  const key = `${REDIS_PREFIX}${callSid}`;
-  const redis = await getRedisClient();
+  try {
+    const key = `${REDIS_PREFIX}${callSid}`;
+    const redis = await getRedisClient();
 
-  if (redis) {
-    await redis.set(key, JSON.stringify(state), { EX: ttlSeconds });
-    return;
+    if (redis) {
+      await redis.set(key, JSON.stringify(state), { EX: ttlSeconds });
+      return;
+    }
+
+    const fileState = await readFileState();
+    fileState[callSid] = state;
+    await writeFileState(fileState);
+  } catch (error) {
+    console.error("Call state write failed", error);
   }
-
-  const fileState = await readFileState();
-  fileState[callSid] = state;
-  await writeFileState(fileState);
 }
 
 export async function deleteCallState(callSid: string) {
-  const key = `${REDIS_PREFIX}${callSid}`;
-  const redis = await getRedisClient();
+  try {
+    const key = `${REDIS_PREFIX}${callSid}`;
+    const redis = await getRedisClient();
 
-  if (redis) {
-    await redis.del(key);
-    return;
+    if (redis) {
+      await redis.del(key);
+      return;
+    }
+
+    const fileState = await readFileState();
+    delete fileState[callSid];
+    await writeFileState(fileState);
+  } catch (error) {
+    console.error("Call state delete failed", error);
   }
-
-  const fileState = await readFileState();
-  delete fileState[callSid];
-  await writeFileState(fileState);
 }
