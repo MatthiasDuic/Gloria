@@ -290,7 +290,7 @@ function resolveAppointmentSelection(speech: string) {
 }
 
 function buildAppointmentConfirmation(appointmentAt: Date) {
-  return `Vielen Dank. Dann habe ich den Termin für ${formatAppointmentLabel(appointmentAt)} mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss.`;
+  return `Vielen Dank. Dann habe ich den Termin für ${formatAppointmentLabel(appointmentAt)} mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.`;
 }
 
 const PKV_HEALTH_QUESTIONS = [
@@ -362,11 +362,11 @@ function readTranscriptMarker(transcript: string, key: string) {
 }
 
 function buildDecisionMakerGreeting(topic: Topic, contactName?: string) {
-  const salutation = contactName?.trim()
-    ? `Guten Tag ${contactName}, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.`
-    : "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+  const warmIntro = contactName?.trim()
+    ? `Vielen Dank, ${contactName}.`
+    : "Vielen Dank.";
 
-  return `${salutation} Vielen Dank, dass Sie sich kurz Zeit nehmen. Ich rufe im Auftrag von Herrn Duic an. Soll ich Ihnen in zwei kurzen Sätzen sagen, worum es geht?`;
+  return `${warmIntro} Dann steigen wir direkt ein. Soll ich Ihnen kurz sagen, worum es geht?`;
 }
 
 function buildTopicExplanationPrompt(topic: Topic) {
@@ -415,6 +415,38 @@ function buildPreparationQuestions(topic: Topic) {
   }
 
   return fields.map((field) => `Kurze Frage zur Vorbereitung: ${field}?`);
+}
+
+function soundsLikeYes(text: string) {
+  return /(^|\b)(ja|ja gern|ja gerne|gern|gerne|interessant|klingt gut|passt|einverstanden|okay|ok|machen wir)(\b|$)/.test(
+    normalizeName(text),
+  );
+}
+
+function soundsLikeNo(text: string) {
+  return /(^|\b)(nein|nicht interessant|kein interesse|eher nicht|lieber nicht|kein bedarf)(\b|$)/.test(
+    normalizeName(text),
+  );
+}
+
+function buildProblemBenefitConfirmation(topic: Topic) {
+  if (topic === "private Krankenversicherung") {
+    return "Verstehe, das geht vielen Unternehmern so. Jetzt stellen Sie sich einmal vor: Sie und Herr Duic sitzen zusammen und Herr Duic zeigt Ihnen schwarz auf weiß, wie sich die Beiträge nach heutigem Stand entwickeln und wie Sie von unserem Konzept profitieren. Wäre das für Sie interessant?";
+  }
+
+  if (topic === "betriebliche Krankenversicherung") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich kurz vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie Sie Mitarbeiterbindung und Gesundheitsleistungen mit einem klaren, kalkulierbaren Modell verbessern können. Wäre das für Sie interessant?";
+  }
+
+  if (topic === "betriebliche Altersvorsorge") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie sich Ihre bAV für Mitarbeitende verständlicher und attraktiver aufstellen lässt. Wäre das für Sie interessant?";
+  }
+
+  if (topic === "gewerbliche Versicherungen") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wo bei Ihren Policen Leistung, Preis und mögliche Lücken wirklich stehen. Wäre das für Sie interessant?";
+  }
+
+  return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, welche Einsparungen und Konditionen aktuell für Ihr Unternehmen realistisch sind. Wäre das für Sie interessant?";
 }
 
 function soundsLikeTransfer(text: string) {
@@ -1154,8 +1186,8 @@ export async function POST(request: Request) {
       });
 
       const closingText = wantsMail
-        ? `Perfekt, dann ist der Termin für ${slotLabel} fest eingetragen und wir bereiten die Bestätigungsmail für Sie vor.`
-        : `Perfekt, dann ist der Termin für ${slotLabel} fest eingetragen.`;
+        ? `Perfekt, dann ist der Termin für ${slotLabel} fest eingetragen und wir bereiten die Bestätigungsmail für Sie vor. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.`
+        : `Perfekt, dann ist der Termin für ${slotLabel} fest eingetragen. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.`;
 
       if (isElevenLabsConfigured()) {
         response.play(buildAudioUrl(baseUrl, { text: closingText }));
@@ -1282,6 +1314,7 @@ export async function POST(request: Request) {
 
   if (context.step === "conversation") {
     const heardText = speech || digits;
+    const problemConfirmPending = readTranscriptMarker(context.transcript, "PROBLEM_CONFIRM_PENDING") === "yes";
 
     if (!heardText) {
       if (context.turn >= MAX_SILENT_RETRIES) {
@@ -1349,6 +1382,63 @@ export async function POST(request: Request) {
       });
     }
 
+    if (problemConfirmPending) {
+      if (soundsLikeYes(heardText)) {
+        const appointmentPrompt = buildPreparationConsentPrompt(context.topic);
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: appointmentPrompt,
+          audioParams: { text: appointmentPrompt },
+          context,
+          consent: context.consent === "yes" ? "yes" : "no",
+          turn: 0,
+          transcript: trimTranscript(
+            `${context.transcript}\nInteressent: ${heardText}\nPROBLEM_CONFIRM_PENDING: no\nGloria: ${appointmentPrompt}`,
+          ),
+          step: "appointment",
+          contactRole: "decision-maker",
+        });
+      }
+
+      if (soundsLikeNo(heardText)) {
+        const objectionPrompt = cleanScriptText(
+          activeScript?.objectionHandling ||
+            DETAIL_SCRIPTS[context.topic].objections["kein interesse"] ||
+            "Verstehe. Lassen Sie uns gern einen ruhigen Zeitpunkt für eine Wiedervorlage festhalten.",
+        );
+
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: objectionPrompt,
+          audioParams: { text: objectionPrompt },
+          context,
+          consent: context.consent === "yes" ? "yes" : "no",
+          turn: context.turn + 1,
+          transcript: trimTranscript(
+            `${context.transcript}\nInteressent: ${heardText}\nPROBLEM_CONFIRM_PENDING: no\nGloria: ${objectionPrompt}`,
+          ),
+          step: "conversation",
+          contactRole: "decision-maker",
+        });
+      }
+
+      const clarifyPrompt = "Danke. Nur kurz zur Einordnung: Wäre das für Sie grundsätzlich interessant, ja oder nein?";
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: clarifyPrompt,
+        audioParams: { text: clarifyPrompt },
+        context,
+        consent: context.consent === "yes" ? "yes" : "no",
+        turn: context.turn + 1,
+        transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${clarifyPrompt}`),
+        step: "conversation",
+        contactRole: "decision-maker",
+      });
+    }
+
     const isObjection =
       /kein interesse|keine zeit|später|unterlagen|email|e-mail|nicht zuständig|falsche person|was genau|worum geht|erklären sie|wir haben schon|haben bereits|zu teuer|zu klein|kein bedarf/.test(
         heardText,
@@ -1365,6 +1455,25 @@ export async function POST(request: Request) {
             : context.turn >= 3 || isPositiveSignal
               ? "closing"
               : "discovery";
+
+    if (stage === "problem") {
+      const confirmationPrompt = buildProblemBenefitConfirmation(context.topic);
+
+      return respondWithGather({
+        response,
+        baseUrl,
+        promptText: confirmationPrompt,
+        audioParams: { text: confirmationPrompt },
+        context,
+        consent: context.consent === "yes" ? "yes" : "no",
+        turn: context.turn + 1,
+        transcript: trimTranscript(
+          `${context.transcript}\nInteressent: ${heardText}\nPROBLEM_CONFIRM_PENDING: yes\nGloria: ${confirmationPrompt}`,
+        ),
+        step: "conversation",
+        contactRole: "decision-maker",
+      });
+    }
 
     const shouldUseFastRuleMode = !process.env.OPENAI_API_KEY;
 
