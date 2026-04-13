@@ -335,6 +335,38 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
   }
 }
 
+export async function clearReportRecordingInPostgres(reportId: string): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+
+    // Get callSid before clearing, so we can delete from recordings table too
+    const result = await db.query(
+      `SELECT call_sid FROM gloria_reports WHERE id = $1`,
+      [reportId],
+    );
+    const callSid = result.rows[0]?.call_sid as string | undefined;
+
+    await db.query(
+      `UPDATE gloria_reports SET recording_url = NULL, updated_at = NOW() WHERE id = $1`,
+      [reportId],
+    );
+
+    if (callSid) {
+      await db.query(`DELETE FROM gloria_recordings WHERE call_sid = $1`, [callSid]);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Postgres clear recording failed", error);
+    return false;
+  }
+}
+
 export async function readConversationEventsFromPostgres(): Promise<ConversationEvent[] | null> {
   if (!shouldUsePostgres()) {
     return null;

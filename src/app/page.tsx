@@ -101,6 +101,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
+  const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
 
   const liveAgentConfig = buildLiveAgentConfig(detailTopic, draftScripts[detailTopic]);
   const activeDraft = draftScripts[detailTopic];
@@ -350,6 +351,35 @@ export default function HomePage() {
     }
   }
 
+  async function deleteRecording(reportId: string) {
+    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch(
+        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error("Aufnahme konnte nicht gelöscht werden.");
+      }
+
+      setNotice("Aufnahme erfolgreich gelöscht.");
+      setSelectedReport((current) =>
+        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
+      );
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="dashboard-page">
       <header className="duic-hero">
@@ -581,7 +611,7 @@ export default function HomePage() {
           <h2>Gesprächsreports & Aufnahmen</h2>
           <table>
             <thead>
-              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th></tr>
+              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
             </thead>
             <tbody>
               {reportRows.map((report) => (
@@ -596,10 +626,28 @@ export default function HomePage() {
                   <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
                   <td>
                     {report.recordingConsent ? (
-                      report.recordingUrl ? <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Audio öffnen</a> : "Zugestimmt"
+                      report.recordingUrl ? (
+                        <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Audio öffnen</a>
+                          <button
+                            className="btn danger"
+                            style={{ fontSize: "0.78rem", padding: "3px 9px" }}
+                            onClick={() => void deleteRecording(report.id)}
+                            disabled={busy}
+                            title="Aufnahme löschen"
+                          >✕</button>
+                        </div>
+                      ) : "Zugestimmt"
                     ) : (
                       "Keine Freigabe"
                     )}
+                  </td>
+                  <td>
+                    <button
+                      className="btn ghost"
+                      style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => setSelectedReport(report)}
+                    >Details</button>
                   </td>
                 </tr>
               ))}
@@ -627,6 +675,88 @@ export default function HomePage() {
           </table>
         </article>
       </section>
+
+      {selectedReport && (
+        <div className="modal-overlay" onClick={() => setSelectedReport(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSelectedReport(null)}>✕</button>
+            <h2>{selectedReport.company}</h2>
+            <div className="row" style={{ marginTop: 8 }}>
+              <span className={`status ${selectedReport.outcome === "Absage" ? "absage" : selectedReport.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
+                {selectedReport.outcome}
+              </span>
+              <span className="subtle" style={{ fontSize: "0.85rem" }}>{formatDate(selectedReport.conversationDate)}</span>
+            </div>
+
+            <div className="report-detail-grid">
+              <div className="report-detail-field">
+                <label>Ansprechpartner</label>
+                <p>{selectedReport.contactName || "–"}</p>
+              </div>
+              <div className="report-detail-field">
+                <label>Thema</label>
+                <p>{selectedReport.topic}</p>
+              </div>
+              <div className="report-detail-field">
+                <label>Gesprächsversuche</label>
+                <p>{selectedReport.attempts}</p>
+              </div>
+              <div className="report-detail-field">
+                <label>Aufnahme-Einwilligung</label>
+                <p>{selectedReport.recordingConsent ? "Ja" : "Nein"}</p>
+              </div>
+              {selectedReport.appointmentAt && (
+                <div className="report-detail-field">
+                  <label>Termin vereinbart</label>
+                  <p>{formatDate(selectedReport.appointmentAt)}</p>
+                </div>
+              )}
+              {selectedReport.nextCallAt && (
+                <div className="report-detail-field">
+                  <label>Wiedervorlage</label>
+                  <p>{formatDate(selectedReport.nextCallAt)}</p>
+                </div>
+              )}
+              <div className="report-detail-field">
+                <label>E-Mail-Report an</label>
+                <p>{selectedReport.emailedTo || "–"}</p>
+              </div>
+              {selectedReport.callSid && (
+                <div className="report-detail-field">
+                  <label>Call-SID</label>
+                  <p style={{ fontFamily: "monospace", fontSize: "0.82rem", color: "#4f6588" }}>{selectedReport.callSid}</p>
+                </div>
+              )}
+              <div className="report-detail-field report-detail-full">
+                <label>Gesprächszusammenfassung</label>
+                <p className="summary-box">{selectedReport.summary || "Keine Zusammenfassung vorhanden."}</p>
+              </div>
+              {selectedReport.recordingConsent && (
+                <div className="report-detail-field report-detail-full">
+                  <label>Aufnahme</label>
+                  {selectedReport.recordingUrl ? (
+                    <div className="row top-gap">
+                      <a
+                        href={`/api/reports/recording?url=${encodeURIComponent(selectedReport.recordingUrl)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn ghost"
+                      >Audio öffnen</a>
+                      <button
+                        className="btn danger"
+                        onClick={() => void deleteRecording(selectedReport.id)}
+                        disabled={busy}
+                      >Aufnahme löschen</button>
+                    </div>
+                  ) : (
+                    <p className="subtle" style={{ marginTop: 6 }}>Keine Aufnahme vorhanden.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

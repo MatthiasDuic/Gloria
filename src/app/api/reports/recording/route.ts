@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { deleteReportRecording } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,4 +59,15 @@ export async function GET(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Aufnahme konnte nicht abgerufen werden." }, { status: 502 });
   }
+}
+
+export async function DELETE(request: NextRequest) {
+  const reportId = request.nextUrl.searchParams.get("reportId");
+
+  if (!reportId) {
+    return NextResponse.json({ error: "reportId fehlt." }, { status: 400 });
+  }
+
+  await deleteReportRecording(reportId);
+  return NextResponse.json({ ok: true });
 }

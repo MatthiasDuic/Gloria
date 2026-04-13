@@ -3,6 +3,7 @@ import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import {
   appendConversationEventToPostgres,
+  clearReportRecordingInPostgres,
   readConversationEventsFromPostgres,
   readReportDatabaseFromPostgres,
   writeReportDatabaseToPostgres,
@@ -404,4 +405,22 @@ export async function storeCallReport(payload: {
   ]);
 
   return report;
+}
+
+export async function deleteReportRecording(reportId: string): Promise<void> {
+  const postgresCleared = await clearReportRecordingInPostgres(reportId);
+
+  if (!postgresCleared) {
+    const reportDb = await readReportDatabase();
+    const targetReport = reportDb.reports.find((r) => r.id === reportId);
+    const updatedReports = reportDb.reports.map((r) =>
+      r.id === reportId ? { ...r, recordingUrl: undefined } : r,
+    );
+    const updatedRecordings = targetReport
+      ? reportDb.recordings.filter(
+          (rec) => rec.callSid !== (targetReport.callSid || targetReport.id),
+        )
+      : reportDb.recordings;
+    await writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings });
+  }
 }
