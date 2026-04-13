@@ -269,13 +269,18 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draft),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        storageMode?: "postgres" | "file";
+      };
 
       if (!response.ok) {
         throw new Error(payload.error || "Skript konnte nicht gespeichert werden.");
       }
 
-      setNotice(`Skript für ${topic} gespeichert und für Gloria übernommen.`);
+      setNotice(
+        `Skript für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
+      );
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.");

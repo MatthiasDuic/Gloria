@@ -10,8 +10,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const updated = await saveScript(payload.topic, payload);
-    return NextResponse.json({ ok: true, script: updated });
+    const result = await saveScript(payload.topic, payload);
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json(
       {

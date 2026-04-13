@@ -90,7 +90,7 @@ Standardmäßig speichert Gloria Reports lokal als JSON-Dateien. Für produktive
 DATABASE_URL=postgres://user:pass@host:5432/dbname
 ```
 
-Sobald `DATABASE_URL` gesetzt ist, werden Gesprächsreports, Aufnahmen und die bearbeiteten Skripte in PostgreSQL persistiert (inkl. automatischer Tabellenanlage). Ohne `DATABASE_URL` nutzt Gloria weiterhin den bestehenden JSON-Fallback.
+Sobald `DATABASE_URL` gesetzt ist, werden Gesprächsreports, Aufnahmen und die bearbeiteten Skripte in PostgreSQL persistiert (inkl. automatischer Tabellenanlage). Bereits vorhandene Skripte aus dem JSON-Fallback werden beim Laden automatisch in PostgreSQL übernommen. Ohne `DATABASE_URL` nutzt Gloria weiterhin den bestehenden JSON-Fallback.
 
 ## Live-KI für freie Gesprächsführung aktivieren
 

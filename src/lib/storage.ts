@@ -194,16 +194,6 @@ async function readConversationEvents(): Promise<ConversationEvent[]> {
   return await readJson<ConversationEvent[]>(EVENTS_FILE, []);
 }
 
-async function readScripts(): Promise<ScriptConfig[]> {
-  const postgresData = await readScriptsFromPostgres();
-
-  if (postgresData) {
-    return postgresData;
-  }
-
-  return await readJson(SCRIPTS_FILE, defaultScripts);
-}
-
 async function readScriptsWithMode(): Promise<{
   data: ScriptConfig[];
   mode: "postgres" | "file";
@@ -214,10 +204,22 @@ async function readScriptsWithMode(): Promise<{
     return { data: postgresData, mode: "postgres" };
   }
 
+  const fallbackScripts = await readJson(SCRIPTS_FILE, defaultScripts);
+  const bootstrappedToPostgres = await writeScriptsToPostgres(fallbackScripts);
+
+  if (bootstrappedToPostgres) {
+    return { data: fallbackScripts, mode: "postgres" };
+  }
+
   return {
-    data: await readJson(SCRIPTS_FILE, defaultScripts),
+    data: fallbackScripts,
     mode: "file",
   };
+}
+
+async function readScripts(): Promise<ScriptConfig[]> {
+  const scriptsState = await readScriptsWithMode();
+  return scriptsState.data;
 }
 
 export async function appendConversationEvent(
@@ -343,7 +345,10 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
     await writeJsonStrict(SCRIPTS_FILE, updated);
   }
 
-  return updated.find((script) => script.topic === topic);
+  return {
+    script: updated.find((script) => script.topic === topic),
+    storageMode: wroteToPostgres ? ("postgres" as const) : ("file" as const),
+  };
 }
 
 export async function storeCallReport(payload: {
