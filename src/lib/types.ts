@@ -80,4 +80,5 @@ export interface DashboardData {
   reports: CallReport[];
   scripts: ScriptConfig[];
   metrics: MetricSummary;
+  reportStorageMode: "postgres" | "file";
 }

@@ -82,6 +82,16 @@ Dann sendet Gloria nach jedem gespeicherten Gespräch einen Report an:
 
 - `Matthias.duic@agentur-duic-sprockhoevel.de`
 
+## Persistente Datenbank für Reports & Aufnahmen
+
+Standardmäßig speichert Gloria Reports lokal als JSON-Dateien. Für produktive, dauerhafte Speicherung kannst du jetzt eine PostgreSQL-Datenbank anbinden:
+
+```env
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+```
+
+Sobald `DATABASE_URL` gesetzt ist, werden Gesprächsreports und Aufnahmen in PostgreSQL persistiert (inkl. automatischer Tabellenanlage). Ohne `DATABASE_URL` nutzt Gloria weiterhin den bestehenden JSON-Fallback.
+
 ## Live-KI für freie Gesprächsführung aktivieren
 
 Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotzdem konsequent auf den Termin hinarbeiten soll, trage zusätzlich einen OpenAI-Key ein:

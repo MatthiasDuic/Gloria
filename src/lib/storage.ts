@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
+import {
+  readReportDatabaseFromPostgres,
+  writeReportDatabaseToPostgres,
+} from "./report-db";
+import type { RecordingEntry, ReportDatabase } from "./report-db";
 import type {
   CallReport,
   DashboardData,
@@ -16,21 +21,6 @@ const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
 const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
-
-interface RecordingEntry {
-  id: string;
-  callSid: string;
-  company: string;
-  contactName?: string;
-  topic: Topic;
-  recordingUrl: string;
-  createdAt: string;
-}
-
-interface ReportDatabase {
-  reports: CallReport[];
-  recordings: RecordingEntry[];
-}
 
 async function ensureFile<T>(filePath: string, fallback: T) {
   await mkdir(DATA_DIR, { recursive: true });
@@ -86,6 +76,12 @@ function buildRecordingEntries(reports: CallReport[]): RecordingEntry[] {
 }
 
 async function readReportDatabase(): Promise<ReportDatabase> {
+  const postgresData = await readReportDatabaseFromPostgres();
+
+  if (postgresData) {
+    return postgresData;
+  }
+
   await mkdir(DATA_DIR, { recursive: true });
 
   try {
@@ -106,7 +102,27 @@ async function readReportDatabase(): Promise<ReportDatabase> {
   }
 }
 
+async function readReportDatabaseWithMode(): Promise<{
+  data: ReportDatabase;
+  mode: "postgres" | "file";
+}> {
+  const postgresData = await readReportDatabaseFromPostgres();
+
+  if (postgresData) {
+    return { data: postgresData, mode: "postgres" };
+  }
+
+  const fileData = await readReportDatabase();
+  return { data: fileData, mode: "file" };
+}
+
 async function writeReportDatabase(data: ReportDatabase) {
+  const wroteToPostgres = await writeReportDatabaseToPostgres(data);
+
+  if (wroteToPostgres) {
+    return;
+  }
+
   await writeJson(REPORT_DB_FILE, data);
   await writeJson(REPORTS_FILE, data.reports);
 }
@@ -166,19 +182,20 @@ function buildMetrics(leads: Lead[], reports: CallReport[]): MetricSummary {
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const [leads, reportDb, scripts] = await Promise.all([
+  const [leads, reportState, scripts] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
-    readReportDatabase(),
+    readReportDatabaseWithMode(),
     readJson(SCRIPTS_FILE, defaultScripts),
   ]);
 
-  const reports = reportDb.reports;
+  const reports = reportState.data.reports;
 
   return {
     leads,
     reports,
     scripts,
     metrics: buildMetrics(leads, reports),
+    reportStorageMode: reportState.mode,
   };
 }
 

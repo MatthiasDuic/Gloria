@@ -1,14 +1,6 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  BAV_TERMINIERUNG_SCRIPT,
-  BKV_TERMINIERUNG_SCRIPT,
-  ENERGIE_TERMINIERUNG_SCRIPT,
-  GEWERBE_TERMINIERUNG_SCRIPT,
-  PKV_TERMINIERUNG_SCRIPT,
-} from "@/lib/call-scripts";
-import type { CallScript } from "@/lib/call-scripts";
 import { buildLiveAgentConfig } from "@/lib/live-agent";
 import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
@@ -21,6 +13,7 @@ const EMPTY_DATA: DashboardData = {
   leads: [],
   reports: [],
   scripts: [],
+  reportStorageMode: "file",
   metrics: {
     dialAttempts: 0,
     conversations: 0,
@@ -33,14 +26,6 @@ const EMPTY_DATA: DashboardData = {
 const EMPTY_LEARNING: LearningResponse = {
   insights: [],
   globalSummary: [],
-};
-
-const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
-  "betriebliche Krankenversicherung": BKV_TERMINIERUNG_SCRIPT,
-  "betriebliche Altersvorsorge": BAV_TERMINIERUNG_SCRIPT,
-  "gewerbliche Versicherungen": GEWERBE_TERMINIERUNG_SCRIPT,
-  "private Krankenversicherung": PKV_TERMINIERUNG_SCRIPT,
-  Energie: ENERGIE_TERMINIERUNG_SCRIPT,
 };
 
 function formatDate(value?: string) {
@@ -115,7 +100,6 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
 
-  const detailScript = DETAIL_SCRIPTS[detailTopic];
   const liveAgentConfig = buildLiveAgentConfig(detailTopic, draftScripts[detailTopic]);
   const activeDraft = draftScripts[detailTopic];
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
@@ -377,6 +361,9 @@ export default function HomePage() {
         </div>
         <div className="hero-actions">
           <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
+          <span className="pill">
+            Datenquelle: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+          </span>
           <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
         </div>
       </header>
@@ -513,15 +500,21 @@ export default function HomePage() {
 
         <div className="live-grid">
           <div className="mini-panel">
-            <h3>{detailScript.title}</h3>
-            <p className="subtle">Empfang</p>
-            <div className="code-box">{formatScriptText(detailScript.reception.intro)}</div>
-            <p className="subtle top-gap">Entscheider-Einstieg</p>
-            <div className="code-box">{formatScriptText(detailScript.intro.text)}</div>
-            <p className="subtle top-gap">Problem/Nutzen</p>
-            <div className="code-box">{formatScriptText(detailScript.problem.text)}</div>
-            <p className="subtle top-gap">Abschluss</p>
-            <div className="code-box">{formatScriptText(detailScript.close.main)}</div>
+            <h3>Aktuelles Skript ({detailTopic})</h3>
+            {activeDraft ? (
+              <>
+                <p className="subtle">Opener</p>
+                <div className="code-box">{formatScriptText(activeDraft.opener)}</div>
+                <p className="subtle top-gap">Bedarfsermittlung</p>
+                <div className="code-box">{formatScriptText(activeDraft.discovery)}</div>
+                <p className="subtle top-gap">Einwandbehandlung</p>
+                <div className="code-box">{formatScriptText(activeDraft.objectionHandling)}</div>
+                <p className="subtle top-gap">Terminabschluss</p>
+                <div className="code-box">{formatScriptText(activeDraft.close)}</div>
+              </>
+            ) : (
+              <p className="subtle">Für dieses Thema liegt noch kein gespeichertes Skript vor.</p>
+            )}
           </div>
 
           <div className="mini-panel">
