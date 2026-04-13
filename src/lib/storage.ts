@@ -172,6 +172,7 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
 }
 
 export async function storeCallReport(payload: {
+  callSid?: string;
   leadId?: string;
   company: string;
   contactName?: string;
@@ -189,25 +190,40 @@ export async function storeCallReport(payload: {
     readJson(REPORTS_FILE, defaultReports),
   ]);
 
+  const existingIndex = payload.callSid
+    ? reports.findIndex((report) => report.callSid === payload.callSid)
+    : -1;
+  const existingReport = existingIndex >= 0 ? reports[existingIndex] : undefined;
+
   const report: CallReport = {
-    id: `report-${Date.now()}`,
-    leadId: payload.leadId,
+    id: existingReport?.id || `report-${Date.now()}`,
+    callSid: payload.callSid || existingReport?.callSid,
+    leadId: payload.leadId || existingReport?.leadId,
     company: payload.company,
-    contactName: payload.contactName,
+    contactName: payload.contactName || existingReport?.contactName,
     topic: payload.topic,
-    summary: payload.summary,
-    outcome: payload.outcome,
-    conversationDate: new Date().toISOString(),
-    appointmentAt: payload.appointmentAt,
-    nextCallAt: payload.nextCallAt,
-    attempts: payload.attempts ?? 1,
-    recordingConsent: Boolean(payload.recordingConsent),
-    recordingUrl: payload.recordingUrl,
+    summary: payload.summary || existingReport?.summary || "",
+    outcome: payload.outcome || existingReport?.outcome || "Kein Kontakt",
+    conversationDate: existingReport?.conversationDate || new Date().toISOString(),
+    appointmentAt: payload.appointmentAt || existingReport?.appointmentAt,
+    nextCallAt: payload.nextCallAt || existingReport?.nextCallAt,
+    attempts: payload.attempts ?? existingReport?.attempts ?? 1,
+    recordingConsent: Boolean(
+      payload.recordingConsent ?? existingReport?.recordingConsent,
+    ),
+    recordingUrl: payload.recordingUrl || existingReport?.recordingUrl,
     emailedTo:
       process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
   };
 
-  const updatedReports = [report, ...reports];
+  const updatedReports = [...reports];
+
+  if (existingIndex >= 0) {
+    updatedReports[existingIndex] = report;
+  } else {
+    updatedReports.unshift(report);
+  }
+
   const updatedLeads = leads.map((lead) => {
     const sameLead = payload.leadId
       ? lead.id === payload.leadId

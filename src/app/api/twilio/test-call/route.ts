@@ -38,6 +38,7 @@ export async function POST(request: Request) {
         contactName: payload.contactName,
         topic: payload.topic,
         leadId: payload.leadId,
+        isTestCall: true,
       },
       request,
     );

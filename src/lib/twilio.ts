@@ -6,6 +6,7 @@ export interface TwilioCallRequest {
   contactName?: string;
   topic: Topic;
   leadId?: string;
+  isTestCall?: boolean;
 }
 
 function readEnv(name: string): string {
@@ -137,8 +138,19 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
       company: payload.company,
       contactName: payload.contactName,
       topic: payload.topic,
+      testCall: payload.isTestCall ? "1" : undefined,
     }),
     statusCallbackMethod: "POST",
     statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+    record: true,
+    recordingChannels: "mono",
+    recordingStatusCallback: buildUrl(baseUrl, "/api/twilio/status", {
+      leadId: payload.leadId,
+      company: payload.company,
+      contactName: payload.contactName,
+      topic: payload.topic,
+      testCall: payload.isTestCall ? "1" : undefined,
+    }),
+    recordingStatusCallbackMethod: "POST",
   });
 }

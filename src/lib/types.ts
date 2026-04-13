@@ -34,6 +34,7 @@ export interface ScriptConfig {
 
 export interface CallReport {
   id: string;
+  callSid?: string;
   leadId?: string;
   company: string;
   contactName?: string;
