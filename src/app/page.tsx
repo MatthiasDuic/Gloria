@@ -596,7 +596,7 @@ export default function HomePage() {
                   <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
                   <td>
                     {report.recordingConsent ? (
-                      report.recordingUrl ? <a href={report.recordingUrl} target="_blank" rel="noreferrer">Audio öffnen</a> : "Zugestimmt"
+                      report.recordingUrl ? <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Audio öffnen</a> : "Zugestimmt"
                     ) : (
                       "Keine Freigabe"
                     )}
