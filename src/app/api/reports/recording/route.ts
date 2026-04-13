@@ -48,12 +48,17 @@ export async function GET(request: NextRequest) {
 
     const contentType = twilioResponse.headers.get("content-type") ?? "audio/mpeg";
     const audioBuffer = await twilioResponse.arrayBuffer();
+    const download = request.nextUrl.searchParams.get("download") === "1";
+    const ext = contentType.includes("wav") ? "wav" : "mp3";
 
     return new NextResponse(audioBuffer, {
       status: 200,
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "private, max-age=3600",
+        ...(download
+          ? { "Content-Disposition": `attachment; filename="aufnahme.${ext}"` }
+          : {}),
       },
     });
   } catch {

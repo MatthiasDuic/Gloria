@@ -4,6 +4,7 @@ import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import {
   appendConversationEventToPostgres,
   clearReportRecordingInPostgres,
+  deleteReportFromPostgres,
   readConversationEventsFromPostgres,
   readReportDatabaseFromPostgres,
   writeReportDatabaseToPostgres,
@@ -405,6 +406,22 @@ export async function storeCallReport(payload: {
   ]);
 
   return report;
+}
+
+export async function deleteReport(reportId: string): Promise<void> {
+  const postgresDeleted = await deleteReportFromPostgres(reportId);
+
+  if (!postgresDeleted) {
+    const reportDb = await readReportDatabase();
+    const target = reportDb.reports.find((r) => r.id === reportId);
+    const updatedReports = reportDb.reports.filter((r) => r.id !== reportId);
+    const updatedRecordings = target
+      ? reportDb.recordings.filter(
+          (rec) => rec.callSid !== (target.callSid || target.id),
+        )
+      : reportDb.recordings;
+    await writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings });
+  }
 }
 
 export async function deleteReportRecording(reportId: string): Promise<void> {

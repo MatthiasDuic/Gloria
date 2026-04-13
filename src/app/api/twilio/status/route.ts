@@ -39,13 +39,9 @@ export async function POST(request: Request) {
         company,
         contactName,
         topic,
-        summary: isTestCall
-          ? recordingUrl
-            ? "Twilio-Testanruf abgeschlossen. Aufnahme wurde gespeichert."
-            : "Twilio-Testanruf abgeschlossen."
-          : recordingUrl
-            ? "Twilio-Gespräch abgeschlossen. Aufnahme wurde gespeichert."
-            : undefined,
+        // Don't overwrite the conversation summary set by the voice processor.
+        // Only set a minimal note if recordingUrl arrived without a prior voice summary.
+        summary: undefined,
         recordingConsent: recordingUrl ? true : undefined,
         recordingUrl: recordingUrl || undefined,
         attempts: 1,
@@ -65,9 +61,7 @@ export async function POST(request: Request) {
           company,
           contactName,
           topic,
-          summary: isTestCall
-            ? "Twilio-Testanruf abgeschlossen. Aufnahme wurde gespeichert."
-            : "Twilio-Gespräch abgeschlossen. Aufnahme wurde gespeichert.",
+          summary: "Aufnahme gespeichert.",
           outcome: "Kein Kontakt",
           conversationDate: new Date().toISOString(),
           attempts: 1,
