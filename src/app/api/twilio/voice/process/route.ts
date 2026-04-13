@@ -18,12 +18,11 @@ import {
   getTwilioMediaStreamUrl,
 } from "@/lib/twilio";
 import {
-  deleteCallState,
-  getCallState,
-  saveCallState,
-  type CallState,
+  decodeCallStateToken,
+  encodeCallStateToken,
   type ContactRole,
-} from "@/lib/call-state";
+  type TokenizedCallState,
+} from "@/lib/call-state-token";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -69,26 +68,26 @@ function readContext(request: Request) {
   } as const;
 }
 
-function mergeContextWithState(
+function mergeContextWithToken(
   baseContext: ReturnType<typeof readContext>,
-  state?: CallState,
+  tokenState?: TokenizedCallState,
 ) {
-  if (!state) {
+  if (!tokenState) {
     return baseContext;
   }
 
   return {
     ...baseContext,
-    callSid: baseContext.callSid,
-    leadId: state.leadId || baseContext.leadId,
-    company: state.company || baseContext.company,
-    contactName: state.contactName || baseContext.contactName,
-    topic: state.topic || baseContext.topic,
-    step: state.step || baseContext.step,
-    consent: state.consent || baseContext.consent,
-    turn: Number.isFinite(state.turn) ? state.turn : baseContext.turn,
-    transcript: state.transcript || baseContext.transcript,
-    contactRole: state.contactRole || baseContext.contactRole,
+    callSid: tokenState.callSid || baseContext.callSid,
+    leadId: tokenState.leadId || baseContext.leadId,
+    company: tokenState.company || baseContext.company,
+    contactName: tokenState.contactName || baseContext.contactName,
+    topic: tokenState.topic || baseContext.topic,
+    step: tokenState.step || baseContext.step,
+    consent: tokenState.consent || baseContext.consent,
+    turn: Number.isFinite(tokenState.turn) ? tokenState.turn : baseContext.turn,
+    transcript: tokenState.transcript || baseContext.transcript,
+    contactRole: tokenState.contactRole || baseContext.contactRole,
   } as const;
 }
 
@@ -363,17 +362,26 @@ function respondWithGather(options: {
   const nextStep = options.step || "conversation";
   const nextRole = options.contactRole || options.context.contactRole;
   const nextTranscript = trimTranscript(options.transcript);
-  const actionUrl = buildProcessUrl(options.baseUrl, {
-    callSid: options.callSid || options.context.callSid,
-    step: nextStep,
-    consent: options.consent,
+  const nextCallSid = options.callSid || options.context.callSid;
+  const stateToken = encodeCallStateToken({
+    callSid: nextCallSid,
     leadId: options.context.leadId,
     company: options.context.company,
     contactName: options.context.contactName,
     topic: options.context.topic,
-    turn: String(options.turn),
+    step: nextStep,
+    consent: options.consent,
+    turn: options.turn,
     transcript: nextTranscript,
     contactRole: nextRole,
+  });
+  const actionUrl = buildProcessUrl(options.baseUrl, {
+    callSid: nextCallSid,
+    step: nextStep,
+    company: options.context.company,
+    contactName: options.context.contactName,
+    topic: options.context.topic,
+    state: stateToken,
   });
 
   const hints =
@@ -407,24 +415,6 @@ function respondWithGather(options: {
     }
   }
 
-  const stateCallSid = options.callSid || options.context.callSid;
-
-  if (stateCallSid) {
-    void saveCallState(stateCallSid, {
-      callSid: stateCallSid,
-      leadId: options.context.leadId,
-      company: options.context.company,
-      contactName: options.context.contactName,
-      topic: options.context.topic,
-      step: nextStep,
-      consent: options.consent,
-      turn: options.turn,
-      transcript: nextTranscript,
-      contactRole: nextRole,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
   return new NextResponse(options.response.toString(), {
     headers: { "Content-Type": "text/xml; charset=utf-8" },
   });
@@ -443,33 +433,20 @@ async function safelyStoreReport(payload: Parameters<typeof storeCallReport>[0])
 
 export async function POST(request: Request) {
   const baseUrl = getAppBaseUrl(request);
+  const url = new URL(request.url);
+  const tokenFromQuery = url.searchParams.get("state");
   const baseContext = readContext(request);
   const form = await request.formData();
+  const tokenFromForm = String(form.get("state") || "").trim();
   const callSidRaw = String(form.get("CallSid") || "").trim();
   const callSid = callSidRaw || baseContext.callSid;
-  const persistedState = callSid ? await getCallState(callSid) : undefined;
-  const context = mergeContextWithState(baseContext, persistedState);
+  const tokenState = decodeCallStateToken(tokenFromForm || tokenFromQuery, callSid);
+  const context = mergeContextWithToken(baseContext, tokenState);
   const speech = normalizeText(form.get("SpeechResult"));
   const digits = normalizeText(form.get("Digits"));
   const response = new twilio.twiml.VoiceResponse();
   const dashboardData = await getDashboardData();
   const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
-
-  if (callSid && !persistedState) {
-    await saveCallState(callSid, {
-      callSid,
-      leadId: context.leadId,
-      company: context.company,
-      contactName: context.contactName,
-      topic: context.topic,
-      step: context.step as CallState["step"],
-      consent: context.consent === "yes" ? "yes" : "no",
-      turn: context.turn,
-      transcript: context.transcript,
-      contactRole: context.contactRole,
-      updatedAt: new Date().toISOString(),
-    });
-  }
 
   if (context.step === "intro") {
     const heardText = speech || digits;
@@ -519,10 +496,6 @@ export async function POST(request: Request) {
       }
 
       response.hangup();
-
-      if (callSid) {
-        await deleteCallState(callSid);
-      }
 
       return new NextResponse(response.toString(), {
         headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -659,15 +632,28 @@ export async function POST(request: Request) {
     const consent = detectConsent(speech, digits);
 
     if (consent === null) {
+      const retryStateToken = encodeCallStateToken({
+        callSid,
+        leadId: context.leadId,
+        company: context.company,
+        contactName: context.contactName,
+        topic: context.topic,
+        step: "consent",
+        consent: context.consent === "yes" ? "yes" : "no",
+        turn: context.turn,
+        transcript: context.transcript,
+        contactRole: "decision-maker",
+      });
       const retry = response.gather({
         input: ["speech", "dtmf"],
         numDigits: 1,
         action: buildProcessUrl(baseUrl, {
+          callSid,
           step: "consent",
-          leadId: context.leadId,
           company: context.company,
           contactName: context.contactName,
           topic: context.topic,
+          state: retryStateToken,
         }),
         method: "POST",
         language: "de-DE",
@@ -759,10 +745,6 @@ export async function POST(request: Request) {
         }
 
         response.hangup();
-
-        if (callSid) {
-          await deleteCallState(callSid);
-        }
 
         return new NextResponse(response.toString(), {
           headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -893,10 +875,6 @@ export async function POST(request: Request) {
 
     response.hangup();
 
-    if (callSid) {
-      await deleteCallState(callSid);
-    }
-
     return new NextResponse(response.toString(), {
       headers: { "Content-Type": "text/xml; charset=utf-8" },
     });
@@ -957,10 +935,6 @@ export async function POST(request: Request) {
   }
 
   response.hangup();
-
-  if (callSid) {
-    await deleteCallState(callSid);
-  }
 
   return new NextResponse(response.toString(), {
     headers: { "Content-Type": "text/xml; charset=utf-8" },
