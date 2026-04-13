@@ -272,7 +272,7 @@ export async function generateAdaptiveReply(input: {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2200);
+    const timeout = setTimeout(() => controller.abort(), 1200);
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
