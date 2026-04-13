@@ -134,7 +134,6 @@ export default function HomePage() {
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
 
   const activeDraft = draftScripts[detailTopic];
-  const activeDetailScript = DETAIL_SCRIPTS[detailTopic];
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
 
   async function loadDashboard() {
@@ -150,7 +149,29 @@ export default function HomePage() {
     setLearning(learningPayload);
     setDraftScripts(
       payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
-        acc[script.topic] = script;
+        const detail = DETAIL_SCRIPTS[script.topic as Topic];
+        acc[script.topic] = {
+          ...script,
+          receptionIntro: script.receptionIntro ?? formatBlock(detail?.reception.intro),
+          receptionIfAskedWhatTopic: script.receptionIfAskedWhatTopic ?? formatBlock(detail?.reception.ifAskedWhatTopic),
+          receptionIfEmailSuggested: script.receptionIfEmailSuggested ?? formatBlock(detail?.reception.ifEmailSuggested),
+          receptionIfEmailInsisted: script.receptionIfEmailInsisted ?? formatBlock(detail?.reception.ifEmailInsisted),
+          decisionMakerIntro: script.decisionMakerIntro ?? formatBlock(detail?.intro.text),
+          needsQuestions: script.needsQuestions ?? (detail?.needs.questions.map((q) => formatBlock(q)).join("\n") ?? ""),
+          needsReinforcement: script.needsReinforcement ?? formatBlock(detail?.needs.reinforcement),
+          problemText: script.problemText ?? formatBlock(detail?.problem.text),
+          conceptText: script.conceptText ?? formatBlock(detail?.concept.text),
+          pressureText: script.pressureText ?? formatBlock(detail?.pressure.text),
+          closeMain: script.closeMain ?? formatBlock(detail?.close.main),
+          closeIfNoTime: script.closeIfNoTime ?? formatBlock(detail?.close.ifNoTime),
+          closeIfAskWhatExactly: script.closeIfAskWhatExactly ?? formatBlock(detail?.close.ifAskWhatExactly),
+          objectionsText: script.objectionsText ?? Object.entries(detail?.objections ?? {}).map(([k, v]) => `${k}: ${formatBlock(v)}`).join("\n"),
+          dataCollectionIntro: script.dataCollectionIntro ?? formatBlock(detail?.dataCollection.intro),
+          dataCollectionFields: script.dataCollectionFields ?? (detail?.dataCollection.fields.join("\n") ?? ""),
+          dataCollectionIfDetailsDeclined: script.dataCollectionIfDetailsDeclined ?? formatBlock(detail?.dataCollection.ifDetailsDeclined),
+          dataCollectionClosing: script.dataCollectionClosing ?? formatBlock(detail?.dataCollection.closing),
+          finalText: script.finalText ?? formatBlock(detail?.final.text),
+        };
         return acc;
       }, {}),
     );
@@ -534,115 +555,73 @@ export default function HomePage() {
 
         {activeDraft ? (
           <>
-            <label>Gesprächseinstieg</label>
-            <textarea
-              value={activeDraft.opener}
-              onChange={(event) =>
-                setDraftScripts((current) => ({
-                  ...current,
-                  [detailTopic]: { ...current[detailTopic], opener: event.target.value },
-                }))
-              }
-            />
+            <p className="subtle">Alle Felder entsprechen exakt dem Telefonleitfaden. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.</p>
 
-            <label>Interesse / Bedarf</label>
-            <textarea
-              value={activeDraft.discovery}
-              onChange={(event) =>
-                setDraftScripts((current) => ({
-                  ...current,
-                  [detailTopic]: { ...current[detailTopic], discovery: event.target.value },
-                }))
-              }
-            />
+            <p className="subtle top-gap"><strong>1) Empfang</strong> – Gloria wartet zuerst, dann spricht sie nach der Meldung der Gegenstelle</p>
+            <label>Empfangs-Intro (Gloria nach erster Meldung)</label>
+            <textarea value={activeDraft.receptionIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIntro: event.target.value } }))} />
+            <label>Wenn Empfang fragt "Worum geht es?"</label>
+            <textarea value={activeDraft.receptionIfAskedWhatTopic ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfAskedWhatTopic: event.target.value } }))} />
+            <label>Wenn Empfang E-Mail vorschlägt</label>
+            <textarea value={activeDraft.receptionIfEmailSuggested ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfEmailSuggested: event.target.value } }))} />
+            <label>Wenn Empfang auf E-Mail besteht</label>
+            <textarea value={activeDraft.receptionIfEmailInsisted ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfEmailInsisted: event.target.value } }))} />
 
-            <label>Lösung / Einwandbehandlung</label>
-            <textarea
-              value={activeDraft.objectionHandling}
-              onChange={(event) =>
-                setDraftScripts((current) => ({
-                  ...current,
-                  [detailTopic]: { ...current[detailTopic], objectionHandling: event.target.value },
-                }))
-              }
-            />
+            <p className="subtle top-gap"><strong>2) Einstieg Entscheider</strong> – Gloria wartet zuerst, stellt sich dann nach erster Meldung vor</p>
+            <label>Einstieg Entscheider (Gloria nach erster Meldung)</label>
+            <textarea value={activeDraft.decisionMakerIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerIntro: event.target.value } }))} />
 
-            <label>Terminabschluss</label>
-            <textarea
-              value={activeDraft.close}
-              onChange={(event) =>
-                setDraftScripts((current) => ({
-                  ...current,
-                  [detailTopic]: { ...current[detailTopic], close: event.target.value },
-                }))
-              }
-            />
+            <p className="subtle top-gap"><strong>3) Bedarfsermittlung</strong> – Gloria fragt, Interessent antwortet</p>
+            <label>Bedarfsfragen (eine Frage pro Zeile)</label>
+            <textarea value={activeDraft.needsQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], needsQuestions: event.target.value } }))} />
+            <label>Verstärkung nach Antwort</label>
+            <textarea value={activeDraft.needsReinforcement ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], needsReinforcement: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>4) Problem und Lösung</strong> – Gloria spricht, wartet auf Reaktion</p>
+            <label>Problemfrage</label>
+            <textarea value={activeDraft.problemText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemText: event.target.value } }))} />
+            <label>Lösungs-Pitch</label>
+            <textarea value={activeDraft.conceptText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptText: event.target.value } }))} />
+            <label>Druck rausnehmen</label>
+            <textarea value={activeDraft.pressureText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pressureText: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> – Format: "Einwand: Antwort" (eine Zeile pro Einwand)</p>
+            <label>Einwände und Antworten</label>
+            <textarea value={activeDraft.objectionsText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionsText: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>6) Terminierung</strong> – Gloria fragt, Interessent bestätigt oder schlägt Alternative vor</p>
+            <label>Standard-Terminfrage</label>
+            <textarea value={activeDraft.closeMain ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeMain: event.target.value } }))} />
+            <label>Wenn keine Zeit</label>
+            <textarea value={activeDraft.closeIfNoTime ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeIfNoTime: event.target.value } }))} />
+            <label>Wenn "Worum genau?"</label>
+            <textarea value={activeDraft.closeIfAskWhatExactly ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeIfAskWhatExactly: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>7) Vorqualifikation und Abschluss</strong> – Gloria fragt, Interessent antwortet</p>
+            <label>Datenerfassungs-Einleitung</label>
+            <textarea value={activeDraft.dataCollectionIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionIntro: event.target.value } }))} />
+            <label>Abzufragende Felder (ein Feld pro Zeile)</label>
+            <textarea value={activeDraft.dataCollectionFields ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionFields: event.target.value } }))} />
+            <label>Wenn Datenabgabe abgelehnt wird</label>
+            <textarea value={activeDraft.dataCollectionIfDetailsDeclined ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionIfDetailsDeclined: event.target.value } }))} />
+            <label>Abschluss-Text</label>
+            <textarea value={activeDraft.dataCollectionClosing ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionClosing: event.target.value } }))} />
+            <label>Finale Verabschiedung</label>
+            <textarea value={activeDraft.finalText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], finalText: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>KI-System-Felder</strong> – werden für den live-adaptiven OpenAI-Prompt verwendet</p>
+            <label>Gesprächseinstieg (KI-Prompt)</label>
+            <textarea value={activeDraft.opener} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
+            <label>Bedarfsermittlung (KI-Prompt)</label>
+            <textarea value={activeDraft.discovery} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
+            <label>Einwandbehandlung (KI-Prompt)</label>
+            <textarea value={activeDraft.objectionHandling} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
+            <label>Terminabschluss (KI-Prompt)</label>
+            <textarea value={activeDraft.close} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
 
             <div className="row top-gap">
               <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
-              <span className="subtle">Gespeicherte Änderungen werden von Gloria für neue Gespräche verwendet.</span>
-            </div>
-
-            <div className="top-gap">
-              <h3>Vollständiger Telefonleitfaden (inkl. Wartepunkte und Reaktionen)</h3>
-              <p className="subtle">Hier sehen Sie, was Gloria spricht, wann sie auf Antworten wartet und wie sie reagiert.</p>
-
-              <p className="subtle top-gap"><strong>1) Empfang</strong> - Gloria spricht, dann wartet sie auf Antwort</p>
-              <div className="code-box">{formatBlock(activeDetailScript.reception.intro)}</div>
-              <p className="subtle top-gap">Wenn Empfang fragt: "Worum geht es?"</p>
-              <div className="code-box">{formatBlock(activeDetailScript.reception.ifAskedWhatTopic)}</div>
-              <p className="subtle top-gap">Wenn Empfang E-Mail fordert</p>
-              <div className="code-box">{formatBlock(activeDetailScript.reception.ifEmailSuggested)}</div>
-              <p className="subtle top-gap">Wenn Empfang hart blockt</p>
-              <div className="code-box">{formatBlock(activeDetailScript.reception.ifEmailInsisted)}</div>
-
-              <p className="subtle top-gap"><strong>2) Einstieg Entscheider</strong> - Gloria spricht, dann wartet sie auf Antwort</p>
-              <div className="code-box">{formatBlock(activeDetailScript.intro.text)}</div>
-
-              <p className="subtle top-gap"><strong>3) Bedarfsermittlung</strong> - Gloria fragt, Interessent antwortet</p>
-              <div className="code-box">
-                {activeDetailScript.needs.questions.map((q, index) => `${index + 1}. ${formatBlock(q)}`).join("\n")}
-              </div>
-              {activeDetailScript.needs.reinforcement ? (
-                <>
-                  <p className="subtle top-gap">Verstärkung nach Antwort</p>
-                  <div className="code-box">{formatBlock(activeDetailScript.needs.reinforcement)}</div>
-                </>
-              ) : null}
-
-              <p className="subtle top-gap"><strong>4) Problem und Lösung</strong> - Gloria spricht, dann wartet sie auf Reaktion</p>
-              <p className="subtle">Problemfrage</p>
-              <div className="code-box">{formatBlock(activeDetailScript.problem.text)}</div>
-              <p className="subtle top-gap">Lösungs-Pitch</p>
-              <div className="code-box">{formatBlock(activeDetailScript.concept.text)}</div>
-              <p className="subtle top-gap">Druck rausnehmen</p>
-              <div className="code-box">{formatBlock(activeDetailScript.pressure.text)}</div>
-
-              <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> - Reaktion je nach Antwort des Interessenten</p>
-              <div className="code-box">
-                {Object.entries(activeDetailScript.objections)
-                  .map(([key, value]) => `${key}: ${formatBlock(value)}`)
-                  .join("\n\n")}
-              </div>
-
-              <p className="subtle top-gap"><strong>6) Terminierung</strong> - Gloria fragt, Interessent bestätigt oder schlägt Alternativtermin vor</p>
-              <p className="subtle">Standard-Terminfrage</p>
-              <div className="code-box">{formatBlock(activeDetailScript.close.main)}</div>
-              <p className="subtle top-gap">Wenn keine Zeit</p>
-              <div className="code-box">{formatBlock(activeDetailScript.close.ifNoTime)}</div>
-              <p className="subtle top-gap">Wenn "Worum genau?"</p>
-              <div className="code-box">{formatBlock(activeDetailScript.close.ifAskWhatExactly)}</div>
-
-              <p className="subtle top-gap"><strong>7) Vorqualifikation und Abschluss</strong></p>
-              <p className="subtle">Datenerfassung - Gloria fragt, Interessent antwortet</p>
-              <div className="code-box">{formatBlock(activeDetailScript.dataCollection.intro)}</div>
-              <div className="code-box top-gap">
-                {activeDetailScript.dataCollection.fields.map((field, index) => `${index + 1}. ${field}`).join("\n")}
-              </div>
-              <p className="subtle top-gap">Wenn Details abgelehnt werden</p>
-              <div className="code-box">{formatBlock(activeDetailScript.dataCollection.ifDetailsDeclined)}</div>
-              <p className="subtle top-gap">Finale Verabschiedung</p>
-              <div className="code-box">{formatBlock(activeDetailScript.final.text)}</div>
+              <span className="subtle">Alle Felder werden gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
             </div>
           </>
         ) : (

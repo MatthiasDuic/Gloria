@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
-import { isElevenLabsConfigured } from "@/lib/elevenlabs";
-import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
-import { getDashboardData } from "@/lib/storage";
 import { getAppBaseUrl } from "@/lib/twilio";
 
 export const runtime = "nodejs";
@@ -18,72 +15,25 @@ function getContext(request: Request) {
   };
 }
 
-function buildPitch(topic: string) {
-  if (topic === "betriebliche Altersvorsorge") {
-    return "Es geht um eine kurze Einordnung, wie die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiv aufgestellt werden kann.";
-  }
-
-  if (topic === "gewerbliche Versicherungen") {
-    return "Es geht um einen kompakten Abgleich, ob Preis und Leistung Ihrer gewerblichen Absicherung noch sauber zusammenpassen.";
-  }
-
-  if (topic === "private Krankenversicherung") {
-    return "Es geht um die Frage, wie sich Krankenversicherungsbeiträge im Alter planbarer und stabiler aufstellen lassen.";
-  }
-
-  if (topic === "Energie") {
-    return "Es geht um einen kurzen gewerblichen Strom- und Gasvergleich mit möglichem Einsparpotenzial.";
-  }
-
-  return "Es geht um einen kurzen Überblick, wie Unternehmen mit der betrieblichen Krankenversicherung Fachkräfte besser binden können.";
-}
-
-function buildAgentIntroduction() {
-  return REQUIRED_GLORIA_INTRO;
-}
-
-function buildAudioUrl(baseUrl: string, params: Record<string, string | undefined>) {
-  const url = new URL("/api/twilio/audio", `${baseUrl}/`);
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value) {
-      url.searchParams.set(key, value);
-    }
-  }
-
-  return url.toString();
-}
-
 async function renderVoiceResponse(request: Request) {
   const baseUrl = getAppBaseUrl(request);
   const context = getContext(request);
   const response = new twilio.twiml.VoiceResponse();
-  const dashboardData = await getDashboardData();
-  const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
-  const gather = response.gather({
+  // Gather silently first – let the person on the other end speak before Gloria introduces herself.
+  // Gloria will respond only after hearing the first utterance from the receptionist or decision-maker.
+  response.gather({
     input: ["speech", "dtmf"],
     numDigits: 1,
     action: `${baseUrl}/api/twilio/voice/process?step=intro&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
     method: "POST",
     language: "de-DE",
     speechTimeout: "auto",
+    timeout: 8,
+    actionOnEmptyResult: true,
     hints: "zuständig, richtige Ansprechperson, worum geht es, ja bitte, einen Moment",
   });
 
-  const openingText = context.contactName
-    ? `${buildAgentIntroduction()} Ich habe eine kurze fachliche Rückfrage für ${context.contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
-    : `${buildAgentIntroduction()} ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson?`;
-
-  if (isElevenLabsConfigured()) {
-    gather.play(
-      buildAudioUrl(baseUrl, {
-        text: openingText,
-      }),
-    );
-  } else {
-    gather.say({ voice: "alice", language: "de-DE" }, openingText);
-  }
-
+  // Fallback if nobody speaks at all within the timeout.
   response.redirect(
     { method: "POST" },
     `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,

@@ -24,7 +24,7 @@ import {
   type ContactRole,
   type TokenizedCallState,
 } from "@/lib/call-state-token";
-import type { ReportOutcome, Topic } from "@/lib/types";
+import type { ReportOutcome, ScriptConfig, Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -35,6 +35,77 @@ const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
   "private Krankenversicherung": PKV_TERMINIERUNG_SCRIPT,
   Energie: ENERGIE_TERMINIERUNG_SCRIPT,
 };
+
+function resolveCallScript(topic: Topic, saved?: ScriptConfig): CallScript {
+  const base = DETAIL_SCRIPTS[topic];
+  if (!saved) return base;
+
+  const needsQuestions = saved.needsQuestions
+    ? saved.needsQuestions.split("\n").map((q) => q.trim()).filter(Boolean)
+    : base.needs.questions;
+
+  const objections = saved.objectionsText
+    ? Object.fromEntries(
+        saved.objectionsText
+          .split("\n")
+          .filter((l) => l.includes(":"))
+          .map((l) => [l.slice(0, l.indexOf(":")).trim(), l.slice(l.indexOf(":") + 1).trim()])
+      )
+    : base.objections;
+
+  const dataCollectionFields = saved.dataCollectionFields
+    ? saved.dataCollectionFields.split("\n").map((f) => f.trim()).filter(Boolean)
+    : base.dataCollection.fields;
+
+  return {
+    ...base,
+    reception: {
+      ...base.reception,
+      ...(saved.receptionIntro ? { intro: saved.receptionIntro } : {}),
+      ...(saved.receptionIfAskedWhatTopic ? { ifAskedWhatTopic: saved.receptionIfAskedWhatTopic } : {}),
+      ...(saved.receptionIfEmailSuggested ? { ifEmailSuggested: saved.receptionIfEmailSuggested } : {}),
+      ...(saved.receptionIfEmailInsisted ? { ifEmailInsisted: saved.receptionIfEmailInsisted } : {}),
+    },
+    intro: {
+      ...base.intro,
+      ...(saved.decisionMakerIntro ? { text: saved.decisionMakerIntro } : {}),
+    },
+    needs: {
+      ...base.needs,
+      questions: needsQuestions,
+      ...(saved.needsReinforcement ? { reinforcement: saved.needsReinforcement } : {}),
+    },
+    problem: {
+      ...base.problem,
+      ...(saved.problemText ? { text: saved.problemText } : {}),
+    },
+    concept: {
+      ...base.concept,
+      ...(saved.conceptText ? { text: saved.conceptText } : {}),
+    },
+    pressure: {
+      ...base.pressure,
+      ...(saved.pressureText ? { text: saved.pressureText } : {}),
+    },
+    close: {
+      ...base.close,
+      ...(saved.closeMain ? { main: saved.closeMain } : {}),
+      ...(saved.closeIfNoTime ? { ifNoTime: saved.closeIfNoTime } : {}),
+      ...(saved.closeIfAskWhatExactly ? { ifAskWhatExactly: saved.closeIfAskWhatExactly } : {}),
+    },
+    objections,
+    dataCollection: {
+      ...base.dataCollection,
+      ...(saved.dataCollectionIntro ? { intro: saved.dataCollectionIntro } : {}),
+      fields: dataCollectionFields,
+      ...(saved.dataCollectionIfDetailsDeclined ? { ifDetailsDeclined: saved.dataCollectionIfDetailsDeclined } : {}),
+      ...(saved.dataCollectionClosing ? { closing: saved.dataCollectionClosing } : {}),
+    },
+    final: {
+      text: saved.finalText || base.final.text,
+    },
+  };
+}
 
 const MAX_LIVE_TURNS = 5;
 const MAX_SILENT_RETRIES = 2;
@@ -197,11 +268,11 @@ function mentionsDifferentNamedPerson(text: string, contactName?: string) {
 }
 
 function buildReceptionPrompt(
-  topic: Topic,
+  callScript: CallScript,
   contactName?: string,
   variant: "intro" | "what" | "email" | "email-insist" = "intro",
 ) {
-  const script = DETAIL_SCRIPTS[topic];
+  const script = callScript;
 
   if (variant === "what") {
     return fillNameTemplate(
@@ -416,9 +487,8 @@ function buildTopicExplanationPrompt(topic: Topic) {
   return "Es geht darum, wie Unternehmen mit der betrieblichen Krankenversicherung Mitarbeiterbindung und Arbeitgeberattraktivität spürbar stärken können.";
 }
 
-function buildTopicDiscoveryPrompt(topic: Topic) {
-  const script = DETAIL_SCRIPTS[topic];
-  return cleanScriptText(script.needs.questions[0] || script.problem.text);
+function buildTopicDiscoveryPrompt(callScript: CallScript) {
+  return cleanScriptText(callScript.needs.questions[0] || callScript.problem.text);
 }
 
 function buildPreparationConsentPrompt(topic: Topic) {
@@ -429,13 +499,12 @@ function buildPreparationConsentPrompt(topic: Topic) {
   return "Um den Termin perfekt vorzubereiten, benötige ich noch zwei kurze Angaben. Ist das für Sie in Ordnung?";
 }
 
-function buildPreparationQuestions(topic: Topic) {
-  if (topic === "private Krankenversicherung") {
+function buildPreparationQuestions(callScript: CallScript) {
+  if (callScript.id.startsWith("pkv")) {
     return PKV_HEALTH_QUESTIONS;
   }
 
-  const script = DETAIL_SCRIPTS[topic];
-  const fields = script.dataCollection.fields.slice(0, 2);
+  const fields = callScript.dataCollection.fields.slice(0, 2);
 
   if (!fields.length) {
     return ["Worauf sollen wir im Termin besonders achten?"];
@@ -757,6 +826,7 @@ export async function POST(request: Request) {
   const response = new twilio.twiml.VoiceResponse();
   const dashboardData = await getDashboardData();
   const activeScript = dashboardData.scripts.find((entry) => entry.topic === context.topic);
+  const callScript = resolveCallScript(context.topic, activeScript);
 
   if (context.step === "intro") {
     const heardText = speech || digits;
@@ -764,7 +834,7 @@ export async function POST(request: Request) {
 
     if (!heardText) {
       const prompt = atGatekeeper
-        ? buildReceptionPrompt(context.topic, context.contactName, "intro")
+        ? buildReceptionPrompt(callScript, context.contactName, "intro")
         : buildDecisionMakerPrompt(context.topic, context.contactName);
 
       return respondWithGather({
@@ -855,7 +925,7 @@ export async function POST(request: Request) {
       }
 
       if (/worum geht|was genau|um was geht/.test(heardText)) {
-        const prompt = buildReceptionPrompt(context.topic, context.contactName, "what");
+        const prompt = buildReceptionPrompt(callScript, context.contactName, "what");
         return respondWithGather({
           response,
           baseUrl,
@@ -872,7 +942,7 @@ export async function POST(request: Request) {
 
       if (/email|e-mail|mailen|schicken sie/.test(heardText)) {
         const prompt = buildReceptionPrompt(
-          context.topic,
+          callScript,
           context.contactName,
           /nur per mail|bitte per e-?mail|allgemeine mail/.test(heardText) ? "email-insist" : "email",
         );
@@ -921,7 +991,7 @@ export async function POST(request: Request) {
       // Phrases like "Mueller am Apparat" are often still spoken by reception.
       // Keep gatekeeper mode unless the known target contact is explicitly recognized.
       if (soundsLikeSwitchboardHandOff(heardText) && !mentionsTargetName(heardText, context.contactName)) {
-        const prompt = buildReceptionPrompt(context.topic, context.contactName, "intro");
+        const prompt = buildReceptionPrompt(callScript, context.contactName, "intro");
         return respondWithGather({
           response,
           baseUrl,
@@ -1026,8 +1096,8 @@ export async function POST(request: Request) {
         mentionsDifferentNamedPerson(heardText, context.contactName) ||
         soundsLikeNotDecisionMaker(heardText) ||
         isLikelyGreeting(heardText)
-          ? buildReceptionPrompt(context.topic, context.contactName, "intro")
-          : buildReceptionPrompt(context.topic, context.contactName, "what");
+          ? buildReceptionPrompt(callScript, context.contactName, "intro")
+          : buildReceptionPrompt(callScript, context.contactName, "what");
 
       return respondWithGather({
         response,
@@ -1044,7 +1114,7 @@ export async function POST(request: Request) {
     }
 
     if (soundsLikeNotDecisionMaker(heardText)) {
-      const prompt = buildReceptionPrompt(context.topic, context.contactName, "intro");
+      const prompt = buildReceptionPrompt(callScript, context.contactName, "intro");
       return respondWithGather({
         response,
         baseUrl,
@@ -1166,7 +1236,7 @@ export async function POST(request: Request) {
 
   if (context.step === "appointment") {
     const heardText = speech || digits;
-    const prepQuestions = buildPreparationQuestions(context.topic);
+    const prepQuestions = buildPreparationQuestions(callScript);
     const prepMode = readTranscriptMarker(context.transcript, "PREP_MODE");
 
     if (context.turn === 0) {
@@ -1210,7 +1280,7 @@ export async function POST(request: Request) {
       const fallbackPrompt =
         context.topic === "private Krankenversicherung"
           ? "Das ist kein Problem. Dann nur kurz die Frage: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?"
-          : `Das ist kein Problem. Dann nur kurz vorab: ${buildTopicDiscoveryPrompt(context.topic)}`;
+          : `Das ist kein Problem. Dann nur kurz vorab: ${buildTopicDiscoveryPrompt(callScript)}`;
 
       return respondWithGather({
         response,
@@ -1556,7 +1626,7 @@ export async function POST(request: Request) {
       context.turn === 0 &&
       /worum geht|was genau|gern|gerne|ja|ja bitte|okay|ok|ich hore|ich höre|sagen sie|erzählen sie|um was geht/.test(heardText)
     ) {
-      const explanationPrompt = `${buildTopicExplanationPrompt(context.topic)} ${buildTopicDiscoveryPrompt(context.topic)}`;
+      const explanationPrompt = `${buildTopicExplanationPrompt(context.topic)} ${buildTopicDiscoveryPrompt(callScript)}`;
 
       return respondWithGather({
         response,
@@ -1592,7 +1662,7 @@ export async function POST(request: Request) {
       if (soundsLikeNo(heardText)) {
         const objectionPrompt = cleanScriptText(
           activeScript?.objectionHandling ||
-            DETAIL_SCRIPTS[context.topic].objections["kein interesse"] ||
+            callScript.objections["kein interesse"] ||
             "Verstehe. Lassen Sie uns gern einen ruhigen Zeitpunkt für eine Wiedervorlage festhalten.",
         );
 

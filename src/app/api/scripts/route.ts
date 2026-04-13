@@ -9,12 +9,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Thema fehlt." }, { status: 400 });
   }
 
-  const updated = await saveScript(payload.topic, {
-    opener: payload.opener,
-    discovery: payload.discovery,
-    objectionHandling: payload.objectionHandling,
-    close: payload.close,
-  });
+  const updated = await saveScript(payload.topic, payload);
 
   return NextResponse.json({ ok: true, script: updated });
 }

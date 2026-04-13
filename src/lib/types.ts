@@ -30,6 +30,26 @@ export interface ScriptConfig {
   discovery: string;
   objectionHandling: string;
   close: string;
+  // Full Leitfaden fields – editable and saved to JSON, override the .ts defaults
+  receptionIntro?: string;
+  receptionIfAskedWhatTopic?: string;
+  receptionIfEmailSuggested?: string;
+  receptionIfEmailInsisted?: string;
+  decisionMakerIntro?: string;
+  needsQuestions?: string;        // newline-separated list
+  needsReinforcement?: string;
+  problemText?: string;
+  conceptText?: string;
+  pressureText?: string;
+  closeMain?: string;
+  closeIfNoTime?: string;
+  closeIfAskWhatExactly?: string;
+  objectionsText?: string;        // "Einwand: Antwort" per line
+  dataCollectionIntro?: string;
+  dataCollectionFields?: string;  // newline-separated list
+  dataCollectionIfDetailsDeclined?: string;
+  dataCollectionClosing?: string;
+  finalText?: string;
 }
 
 export interface CallReport {
