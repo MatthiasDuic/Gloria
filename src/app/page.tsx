@@ -1,7 +1,15 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { DashboardData, LearningResponse, Topic } from "@/lib/types";
+import {
+  BAV_TERMINIERUNG_SCRIPT,
+  BKV_TERMINIERUNG_SCRIPT,
+  ENERGIE_TERMINIERUNG_SCRIPT,
+  GEWERBE_TERMINIERUNG_SCRIPT,
+  PKV_TERMINIERUNG_SCRIPT,
+} from "@/lib/call-scripts";
+import type { CallScript } from "@/lib/call-scripts";
+import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -27,6 +35,14 @@ const EMPTY_DATA: DashboardData = {
 const EMPTY_LEARNING: LearningResponse = {
   insights: [],
   globalSummary: [],
+};
+
+const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
+  "betriebliche Krankenversicherung": BKV_TERMINIERUNG_SCRIPT,
+  "betriebliche Altersvorsorge": BAV_TERMINIERUNG_SCRIPT,
+  "gewerbliche Versicherungen": GEWERBE_TERMINIERUNG_SCRIPT,
+  "private Krankenversicherung": PKV_TERMINIERUNG_SCRIPT,
+  Energie: ENERGIE_TERMINIERUNG_SCRIPT,
 };
 
 function formatDate(value?: string) {
@@ -91,9 +107,18 @@ function detectLostStage(summary: string): string {
   return "Gesprächseinstieg – Entscheider nicht oder kaum erreicht";
 }
 
+function formatBlock(text?: string) {
+  if (!text) {
+    return "-";
+  }
+
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export default function HomePage() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
+  const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
   const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
@@ -105,8 +130,11 @@ export default function HomePage() {
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
 
+  const activeDraft = draftScripts[detailTopic];
+  const activeDetailScript = DETAIL_SCRIPTS[detailTopic];
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
 
   async function loadDashboard() {
@@ -120,6 +148,12 @@ export default function HomePage() {
 
     setData(payload);
     setLearning(learningPayload);
+    setDraftScripts(
+      payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
+        acc[script.topic] = script;
+        return acc;
+      }, {}),
+    );
     setNotice(
       `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
     );
@@ -193,6 +227,36 @@ export default function HomePage() {
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveScript(topic: Topic) {
+    const draft = draftScripts[topic];
+
+    if (!draft) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch("/api/scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Skript konnte nicht gespeichert werden.");
+      }
+
+      setNotice(`Skript für ${topic} gespeichert und für Gloria übernommen.`);
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.");
     } finally {
       setBusy(false);
     }
@@ -458,6 +522,132 @@ export default function HomePage() {
             </div>
           </article>
         </div>
+      </section>
+
+      <section className="panel top-section">
+        <div className="row spread">
+          <h2>Skripte für Gloria bearbeiten</h2>
+          <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
+            {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+          </select>
+        </div>
+
+        {activeDraft ? (
+          <>
+            <label>Gesprächseinstieg</label>
+            <textarea
+              value={activeDraft.opener}
+              onChange={(event) =>
+                setDraftScripts((current) => ({
+                  ...current,
+                  [detailTopic]: { ...current[detailTopic], opener: event.target.value },
+                }))
+              }
+            />
+
+            <label>Interesse / Bedarf</label>
+            <textarea
+              value={activeDraft.discovery}
+              onChange={(event) =>
+                setDraftScripts((current) => ({
+                  ...current,
+                  [detailTopic]: { ...current[detailTopic], discovery: event.target.value },
+                }))
+              }
+            />
+
+            <label>Lösung / Einwandbehandlung</label>
+            <textarea
+              value={activeDraft.objectionHandling}
+              onChange={(event) =>
+                setDraftScripts((current) => ({
+                  ...current,
+                  [detailTopic]: { ...current[detailTopic], objectionHandling: event.target.value },
+                }))
+              }
+            />
+
+            <label>Terminabschluss</label>
+            <textarea
+              value={activeDraft.close}
+              onChange={(event) =>
+                setDraftScripts((current) => ({
+                  ...current,
+                  [detailTopic]: { ...current[detailTopic], close: event.target.value },
+                }))
+              }
+            />
+
+            <div className="row top-gap">
+              <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
+              <span className="subtle">Gespeicherte Änderungen werden von Gloria für neue Gespräche verwendet.</span>
+            </div>
+
+            <div className="top-gap">
+              <h3>Vollständiger Telefonleitfaden (inkl. Wartepunkte und Reaktionen)</h3>
+              <p className="subtle">Hier sehen Sie, was Gloria spricht, wann sie auf Antworten wartet und wie sie reagiert.</p>
+
+              <p className="subtle top-gap"><strong>1) Empfang</strong> - Gloria spricht, dann wartet sie auf Antwort</p>
+              <div className="code-box">{formatBlock(activeDetailScript.reception.intro)}</div>
+              <p className="subtle top-gap">Wenn Empfang fragt: "Worum geht es?"</p>
+              <div className="code-box">{formatBlock(activeDetailScript.reception.ifAskedWhatTopic)}</div>
+              <p className="subtle top-gap">Wenn Empfang E-Mail fordert</p>
+              <div className="code-box">{formatBlock(activeDetailScript.reception.ifEmailSuggested)}</div>
+              <p className="subtle top-gap">Wenn Empfang hart blockt</p>
+              <div className="code-box">{formatBlock(activeDetailScript.reception.ifEmailInsisted)}</div>
+
+              <p className="subtle top-gap"><strong>2) Einstieg Entscheider</strong> - Gloria spricht, dann wartet sie auf Antwort</p>
+              <div className="code-box">{formatBlock(activeDetailScript.intro.text)}</div>
+
+              <p className="subtle top-gap"><strong>3) Bedarfsermittlung</strong> - Gloria fragt, Interessent antwortet</p>
+              <div className="code-box">
+                {activeDetailScript.needs.questions.map((q, index) => `${index + 1}. ${formatBlock(q)}`).join("\n")}
+              </div>
+              {activeDetailScript.needs.reinforcement ? (
+                <>
+                  <p className="subtle top-gap">Verstärkung nach Antwort</p>
+                  <div className="code-box">{formatBlock(activeDetailScript.needs.reinforcement)}</div>
+                </>
+              ) : null}
+
+              <p className="subtle top-gap"><strong>4) Problem und Lösung</strong> - Gloria spricht, dann wartet sie auf Reaktion</p>
+              <p className="subtle">Problemfrage</p>
+              <div className="code-box">{formatBlock(activeDetailScript.problem.text)}</div>
+              <p className="subtle top-gap">Lösungs-Pitch</p>
+              <div className="code-box">{formatBlock(activeDetailScript.concept.text)}</div>
+              <p className="subtle top-gap">Druck rausnehmen</p>
+              <div className="code-box">{formatBlock(activeDetailScript.pressure.text)}</div>
+
+              <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> - Reaktion je nach Antwort des Interessenten</p>
+              <div className="code-box">
+                {Object.entries(activeDetailScript.objections)
+                  .map(([key, value]) => `${key}: ${formatBlock(value)}`)
+                  .join("\n\n")}
+              </div>
+
+              <p className="subtle top-gap"><strong>6) Terminierung</strong> - Gloria fragt, Interessent bestätigt oder schlägt Alternativtermin vor</p>
+              <p className="subtle">Standard-Terminfrage</p>
+              <div className="code-box">{formatBlock(activeDetailScript.close.main)}</div>
+              <p className="subtle top-gap">Wenn keine Zeit</p>
+              <div className="code-box">{formatBlock(activeDetailScript.close.ifNoTime)}</div>
+              <p className="subtle top-gap">Wenn "Worum genau?"</p>
+              <div className="code-box">{formatBlock(activeDetailScript.close.ifAskWhatExactly)}</div>
+
+              <p className="subtle top-gap"><strong>7) Vorqualifikation und Abschluss</strong></p>
+              <p className="subtle">Datenerfassung - Gloria fragt, Interessent antwortet</p>
+              <div className="code-box">{formatBlock(activeDetailScript.dataCollection.intro)}</div>
+              <div className="code-box top-gap">
+                {activeDetailScript.dataCollection.fields.map((field, index) => `${index + 1}. ${field}`).join("\n")}
+              </div>
+              <p className="subtle top-gap">Wenn Details abgelehnt werden</p>
+              <div className="code-box">{formatBlock(activeDetailScript.dataCollection.ifDetailsDeclined)}</div>
+              <p className="subtle top-gap">Finale Verabschiedung</p>
+              <div className="code-box">{formatBlock(activeDetailScript.final.text)}</div>
+            </div>
+          </>
+        ) : (
+          <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>
+        )}
       </section>
 
       <section className="report-grid top-section">
