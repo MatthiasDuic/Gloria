@@ -42,6 +42,9 @@ export function buildSystemPrompt(script: ScriptConfig): string {
     script.receptionIfAskedWhatTopic
       ? `Empfang - bei Rückfrage zum Thema: ${script.receptionIfAskedWhatTopic}`
       : undefined,
+    script.receptionIfBlocked
+      ? `Empfang - wenn abgeblockt und nicht durchgestellt wird: ${script.receptionIfBlocked}`
+      : undefined,
     script.receptionIfEmailSuggested
       ? `Empfang - bei E-Mail Vorschlag: ${script.receptionIfEmailSuggested}`
       : undefined,

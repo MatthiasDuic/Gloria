@@ -116,6 +116,48 @@ function formatBlock(text?: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function pickText(value: string | undefined, fallback?: string) {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+
+  return fallback ?? "";
+}
+
+type ObjectionEntry = {
+  objection: string;
+  reply: string;
+};
+
+function parseObjections(text?: string): ObjectionEntry[] {
+  if (!text || text.trim().length === 0) {
+    return [];
+  }
+
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const idx = line.indexOf(":");
+      if (idx === -1) {
+        return { objection: line, reply: "" };
+      }
+
+      return {
+        objection: line.slice(0, idx).trim(),
+        reply: line.slice(idx + 1).trim(),
+      };
+    });
+}
+
+function serializeObjections(entries: ObjectionEntry[]) {
+  return entries
+    .map((entry) => `${entry.objection.trim()}: ${entry.reply.trim()}`)
+    .filter((line) => line !== ":")
+    .join("\n");
+}
+
 export default function HomePage() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
@@ -133,8 +175,13 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const activeDraft = draftScripts[detailTopic];
+  const objectionEntries = useMemo(
+    () => parseObjections(activeDraft?.objectionsText),
+    [activeDraft?.objectionsText],
+  );
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
 
   async function loadDashboard() {
@@ -153,25 +200,61 @@ export default function HomePage() {
         const detail = DETAIL_SCRIPTS[script.topic as Topic];
         acc[script.topic] = {
           ...script,
-          receptionIntro: script.receptionIntro ?? formatBlock(detail?.reception.intro),
-          receptionIfAskedWhatTopic: script.receptionIfAskedWhatTopic ?? formatBlock(detail?.reception.ifAskedWhatTopic),
-          receptionIfEmailSuggested: script.receptionIfEmailSuggested ?? formatBlock(detail?.reception.ifEmailSuggested),
-          receptionIfEmailInsisted: script.receptionIfEmailInsisted ?? formatBlock(detail?.reception.ifEmailInsisted),
-          decisionMakerIntro: script.decisionMakerIntro ?? formatBlock(detail?.intro.text),
-          needsQuestions: script.needsQuestions ?? (detail?.needs.questions.map((q) => formatBlock(q)).join("\n") ?? ""),
-          needsReinforcement: script.needsReinforcement ?? formatBlock(detail?.needs.reinforcement),
-          problemText: script.problemText ?? formatBlock(detail?.problem.text),
-          conceptText: script.conceptText ?? formatBlock(detail?.concept.text),
-          pressureText: script.pressureText ?? formatBlock(detail?.pressure.text),
-          closeMain: script.closeMain ?? formatBlock(detail?.close.main),
-          closeIfNoTime: script.closeIfNoTime ?? formatBlock(detail?.close.ifNoTime),
-          closeIfAskWhatExactly: script.closeIfAskWhatExactly ?? formatBlock(detail?.close.ifAskWhatExactly),
-          objectionsText: script.objectionsText ?? Object.entries(detail?.objections ?? {}).map(([k, v]) => `${k}: ${formatBlock(v)}`).join("\n"),
-          dataCollectionIntro: script.dataCollectionIntro ?? formatBlock(detail?.dataCollection.intro),
-          dataCollectionFields: script.dataCollectionFields ?? (detail?.dataCollection.fields.join("\n") ?? ""),
-          dataCollectionIfDetailsDeclined: script.dataCollectionIfDetailsDeclined ?? formatBlock(detail?.dataCollection.ifDetailsDeclined),
-          dataCollectionClosing: script.dataCollectionClosing ?? formatBlock(detail?.dataCollection.closing),
-          finalText: script.finalText ?? formatBlock(detail?.final.text),
+          receptionIntro: pickText(script.receptionIntro, formatBlock(detail?.reception.intro)),
+          receptionIfAskedWhatTopic: pickText(
+            script.receptionIfAskedWhatTopic,
+            formatBlock(detail?.reception.ifAskedWhatTopic),
+          ),
+          receptionIfBlocked: pickText(
+            script.receptionIfBlocked,
+            formatBlock(detail?.reception.alternativeShort),
+          ),
+          receptionIfEmailSuggested: pickText(
+            script.receptionIfEmailSuggested,
+            formatBlock(detail?.reception.ifEmailSuggested),
+          ),
+          receptionIfEmailInsisted: pickText(
+            script.receptionIfEmailInsisted,
+            formatBlock(detail?.reception.ifEmailInsisted),
+          ),
+          decisionMakerIntro: pickText(script.decisionMakerIntro, formatBlock(detail?.intro.text)),
+          needsQuestions: pickText(
+            script.needsQuestions,
+            detail?.needs.questions.map((q) => formatBlock(q)).join("\n") ?? "",
+          ),
+          needsReinforcement: pickText(script.needsReinforcement, formatBlock(detail?.needs.reinforcement)),
+          problemText: pickText(script.problemText, formatBlock(detail?.problem.text)),
+          conceptText: pickText(script.conceptText, formatBlock(detail?.concept.text)),
+          pressureText: pickText(script.pressureText, formatBlock(detail?.pressure.text)),
+          closeMain: pickText(script.closeMain, formatBlock(detail?.close.main)),
+          closeIfNoTime: pickText(script.closeIfNoTime, formatBlock(detail?.close.ifNoTime)),
+          closeIfAskWhatExactly: pickText(
+            script.closeIfAskWhatExactly,
+            formatBlock(detail?.close.ifAskWhatExactly),
+          ),
+          objectionsText: pickText(
+            script.objectionsText,
+            Object.entries(detail?.objections ?? {})
+              .map(([k, v]) => `${k}: ${formatBlock(v)}`)
+              .join("\n"),
+          ),
+          dataCollectionIntro: pickText(
+            script.dataCollectionIntro,
+            formatBlock(detail?.dataCollection.intro),
+          ),
+          dataCollectionFields: pickText(
+            script.dataCollectionFields,
+            detail?.dataCollection.fields.join("\n") ?? "",
+          ),
+          dataCollectionIfDetailsDeclined: pickText(
+            script.dataCollectionIfDetailsDeclined,
+            formatBlock(detail?.dataCollection.ifDetailsDeclined),
+          ),
+          dataCollectionClosing: pickText(
+            script.dataCollectionClosing,
+            formatBlock(detail?.dataCollection.closing),
+          ),
+          finalText: pickText(script.finalText, formatBlock(detail?.final.text)),
         };
         return acc;
       }, {}),
@@ -185,6 +268,65 @@ export default function HomePage() {
   useEffect(() => {
     void loadDashboard();
   }, []);
+
+  function updateObjectionEntry(index: number, patch: Partial<ObjectionEntry>) {
+    setDraftScripts((current) => {
+      const topicDraft = current[detailTopic];
+      if (!topicDraft) {
+        return current;
+      }
+
+      const nextEntries = parseObjections(topicDraft.objectionsText);
+      const existing = nextEntries[index] ?? { objection: "", reply: "" };
+      nextEntries[index] = { ...existing, ...patch };
+
+      return {
+        ...current,
+        [detailTopic]: {
+          ...topicDraft,
+          objectionsText: serializeObjections(nextEntries),
+        },
+      };
+    });
+  }
+
+  function addObjectionEntry() {
+    setDraftScripts((current) => {
+      const topicDraft = current[detailTopic];
+      if (!topicDraft) {
+        return current;
+      }
+
+      const nextEntries = [...parseObjections(topicDraft.objectionsText), { objection: "", reply: "" }];
+
+      return {
+        ...current,
+        [detailTopic]: {
+          ...topicDraft,
+          objectionsText: serializeObjections(nextEntries),
+        },
+      };
+    });
+  }
+
+  function removeObjectionEntry(index: number) {
+    setDraftScripts((current) => {
+      const topicDraft = current[detailTopic];
+      if (!topicDraft) {
+        return current;
+      }
+
+      const nextEntries = parseObjections(topicDraft.objectionsText).filter((_, i) => i !== index);
+
+      return {
+        ...current,
+        [detailTopic]: {
+          ...topicDraft,
+          objectionsText: serializeObjections(nextEntries),
+        },
+      };
+    });
+  }
 
   function downloadSampleCsv() {
     const blob = new Blob([SAMPLE_CSV], { type: "text/csv;charset=utf-8;" });
@@ -262,6 +404,7 @@ export default function HomePage() {
     }
 
     setBusy(true);
+    setSaveStatus(null);
 
     try {
       const response = await fetch("/api/scripts", {
@@ -281,9 +424,15 @@ export default function HomePage() {
       setNotice(
         `Skript für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
       );
+      setSaveStatus({
+        type: "success",
+        message: `Erfolgreich gespeichert (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
+      });
       await loadDashboard();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.");
+      const errorMessage = error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.";
+      setNotice(errorMessage);
+      setSaveStatus({ type: "error", message: errorMessage });
     } finally {
       setBusy(false);
     }
@@ -574,6 +723,8 @@ export default function HomePage() {
             <textarea value={activeDraft.receptionIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIntro: event.target.value } }))} />
             <label>Wenn Empfang fragt "Worum geht es?"</label>
             <textarea value={activeDraft.receptionIfAskedWhatTopic ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfAskedWhatTopic: event.target.value } }))} />
+            <label>Wenn Empfang abblockt und nicht durchstellen will</label>
+            <textarea value={activeDraft.receptionIfBlocked ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfBlocked: event.target.value } }))} />
             <label>Wenn Empfang E-Mail vorschlägt</label>
             <textarea value={activeDraft.receptionIfEmailSuggested ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfEmailSuggested: event.target.value } }))} />
             <label>Wenn Empfang auf E-Mail besteht</label>
@@ -597,9 +748,35 @@ export default function HomePage() {
             <label>Druck rausnehmen</label>
             <textarea value={activeDraft.pressureText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pressureText: event.target.value } }))} />
 
-            <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> – Format: "Einwand: Antwort" (eine Zeile pro Einwand)</p>
-            <label>Einwände und Antworten</label>
-            <textarea value={activeDraft.objectionsText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionsText: event.target.value } }))} />
+            <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> – jeder Einwand bekommt ein eigenes Feld</p>
+            {objectionEntries.map((entry, index) => (
+              <div key={`${detailTopic}-objection-${index}`} className="field-grid" style={{ marginBottom: 10 }}>
+                <div>
+                  <label>Einwand {index + 1}</label>
+                  <input
+                    value={entry.objection}
+                    onChange={(event) => updateObjectionEntry(index, { objection: event.target.value })}
+                    placeholder="z. B. kein Interesse"
+                  />
+                </div>
+                <div>
+                  <label>Antwort von Gloria</label>
+                  <textarea
+                    value={entry.reply}
+                    onChange={(event) => updateObjectionEntry(index, { reply: event.target.value })}
+                    placeholder="Antwort auf diesen Einwand"
+                  />
+                </div>
+                <div className="row" style={{ alignItems: "end" }}>
+                  <button className="btn danger" type="button" onClick={() => removeObjectionEntry(index)}>
+                    Einwand entfernen
+                  </button>
+                </div>
+              </div>
+            ))}
+            <div className="row">
+              <button className="btn ghost" type="button" onClick={addObjectionEntry}>Einwand hinzufügen</button>
+            </div>
 
             <p className="subtle top-gap"><strong>6) Terminierung</strong> – Gloria fragt, Interessent bestätigt oder schlägt Alternative vor</p>
             <label>Standard-Terminfrage</label>
@@ -635,6 +812,19 @@ export default function HomePage() {
               <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
               <span className="subtle">Alle Felder werden gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
             </div>
+            {saveStatus ? (
+              <p
+                className="subtle"
+                role="status"
+                style={{
+                  marginTop: 8,
+                  color: saveStatus.type === "success" ? "#1f7a42" : "#b42318",
+                  fontWeight: 700,
+                }}
+              >
+                {saveStatus.message}
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>

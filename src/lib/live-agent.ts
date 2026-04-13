@@ -50,6 +50,7 @@ function resolveDetailScript(topic: Topic, script?: ScriptConfig): CallScript {
       ...base.reception,
       intro: script.receptionIntro || base.reception.intro,
       ifAskedWhatTopic: script.receptionIfAskedWhatTopic || base.reception.ifAskedWhatTopic,
+      alternativeShort: script.receptionIfBlocked || base.reception.alternativeShort,
       ifEmailSuggested: script.receptionIfEmailSuggested || base.reception.ifEmailSuggested,
       ifEmailInsisted: script.receptionIfEmailInsisted || base.reception.ifEmailInsisted,
     },

@@ -33,6 +33,7 @@ export interface ScriptConfig {
   // Full Leitfaden fields – editable and saved to JSON, override the .ts defaults
   receptionIntro?: string;
   receptionIfAskedWhatTopic?: string;
+  receptionIfBlocked?: string;
   receptionIfEmailSuggested?: string;
   receptionIfEmailInsisted?: string;
   decisionMakerIntro?: string;
