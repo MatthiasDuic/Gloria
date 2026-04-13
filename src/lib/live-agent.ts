@@ -271,12 +271,15 @@ export async function generateAdaptiveReply(input: {
   }
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2200);
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         temperature: 0.6,
@@ -303,6 +306,7 @@ export async function generateAdaptiveReply(input: {
       }),
       cache: "no-store",
     });
+    clearTimeout(timeout);
 
     const data = (await response.json()) as {
       output_text?: string;

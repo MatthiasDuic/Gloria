@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sendReportEmail } from "@/lib/mailer";
 import { storeCallReport } from "@/lib/storage";
 import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
@@ -30,22 +31,53 @@ export async function POST(request: Request) {
   const leadId = url.searchParams.get("leadId") || undefined;
   const topic = normalizeTopic(url.searchParams.get("topic"));
 
-  // Persist call metadata for test calls so reports and recordings are visible in the dashboard.
-  if (isTestCall && callSid && (callStatus === "completed" || Boolean(recordingUrl))) {
-    await storeCallReport({
-      callSid,
-      leadId,
-      company,
-      contactName,
-      topic,
-      summary: recordingUrl
-        ? "Twilio-Testanruf abgeschlossen. Aufnahme wurde gespeichert."
-        : "Twilio-Testanruf abgeschlossen.",
-      outcome: "Kein Kontakt",
-      recordingConsent: Boolean(recordingUrl),
-      recordingUrl: recordingUrl || undefined,
-      attempts: 1,
-    });
+  if (callSid && (callStatus === "completed" || Boolean(recordingUrl))) {
+    try {
+      const report = await storeCallReport({
+        callSid,
+        leadId,
+        company,
+        contactName,
+        topic,
+        summary: isTestCall
+          ? recordingUrl
+            ? "Twilio-Testanruf abgeschlossen. Aufnahme wurde gespeichert."
+            : "Twilio-Testanruf abgeschlossen."
+          : recordingUrl
+            ? "Twilio-Gespräch abgeschlossen. Aufnahme wurde gespeichert."
+            : undefined,
+        recordingConsent: recordingUrl ? true : undefined,
+        recordingUrl: recordingUrl || undefined,
+        attempts: 1,
+      });
+
+      if (recordingUrl) {
+        await sendReportEmail(report).catch(() => undefined);
+      }
+    } catch (error) {
+      console.error("Twilio status report could not be saved", error);
+
+      if (recordingUrl) {
+        await sendReportEmail({
+          id: `status-${Date.now()}`,
+          callSid,
+          leadId,
+          company,
+          contactName,
+          topic,
+          summary: isTestCall
+            ? "Twilio-Testanruf abgeschlossen. Aufnahme wurde gespeichert."
+            : "Twilio-Gespräch abgeschlossen. Aufnahme wurde gespeichert.",
+          outcome: "Kein Kontakt",
+          conversationDate: new Date().toISOString(),
+          attempts: 1,
+          recordingConsent: true,
+          recordingUrl,
+          emailedTo:
+            process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
+        }).catch(() => undefined);
+      }
+    }
   }
 
   return NextResponse.json({

@@ -29,13 +29,10 @@ Alles klar, dann notiere ich mir gern die direkte E-Mail-Adresse.
     goal: "Über Einsparpotenzial und Aktualität Interesse erzeugen.",
     text: `
 Guten Tag, Herr/Frau [NAME], hier ist Gloria – die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel.
-Vielen Dank, dass Sie kurz drangehen.
+Vielen Dank, dass Sie kurz Zeit haben.
 
-Ich rufe im Auftrag von Herrn Duic an. Er unterstützt Unternehmen dabei,
-ihre gewerblichen Strom- und Gaskonditionen strukturiert zu vergleichen und Einsparpotenziale sichtbar zu machen.
-Gerade bei auslaufenden Verträgen oder veränderten Verbräuchen lohnt sich oft ein kurzer Blick.
-
-Darf ich kurz fragen: Wie zufrieden sind Sie aktuell mit Ihren Energieverträgen?
+Ich rufe im Auftrag von Herrn Duic an.
+Soll ich Ihnen kurz sagen, worum es geht?
 `,
   },
 

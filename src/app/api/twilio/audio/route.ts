@@ -25,6 +25,10 @@ function buildTopicPitch(topic: Topic) {
   return "Es geht um einen kurzen Überblick, wie Unternehmen mit der betrieblichen Krankenversicherung Fachkräfte besser binden können.";
 }
 
+function buildAgentIntroduction() {
+  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+}
+
 function buildAudioText(params: URLSearchParams) {
   const directText = params.get("text");
 
@@ -40,8 +44,8 @@ function buildAudioText(params: URLSearchParams) {
 
   if (step === "intro") {
     return contactName
-      ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Ich habe eine kurze fachliche Rückfrage für ${contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
-      : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildTopicPitch(topic)} Bin ich damit direkt bei der richtigen Ansprechperson?`;
+      ? `${buildAgentIntroduction()} Ich habe eine kurze fachliche Rückfrage für ${contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
+      : `${buildAgentIntroduction()} ${buildTopicPitch(topic)} Bin ich damit direkt bei der richtigen Ansprechperson?`;
   }
 
   if (step === "consent-retry") {
@@ -54,7 +58,7 @@ function buildAudioText(params: URLSearchParams) {
 
   if (step === "final") {
     if (variant === "success") {
-      return "Perfekt, dann ist ein kurzer Termin vorgemerkt. Herr Duic meldet sich mit der Bestätigung. Vielen Dank für Ihre Zeit.";
+      return "Vielen Dank. Ich habe den Termin verbindlich notiert und Herr Duic meldet sich mit der Bestätigung bei Ihnen.";
     }
 
     if (variant === "callback") {
@@ -68,7 +72,7 @@ function buildAudioText(params: URLSearchParams) {
     return "Vielen Dank für Ihre Zeit. Herr Duic meldet sich bei Bedarf noch einmal kurz bei Ihnen.";
   }
 
-  return `Guten Tag${contactName ? ` ${contactName}` : ""}. Hier ist Gloria, die digitale Vertriebsassistentin im Auftrag von Herrn Matthias Duic. ${buildTopicPitch(topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
+  return `${buildAgentIntroduction()} Ich rufe im Auftrag von Matthias Duic an. ${buildTopicPitch(topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
 }
 
 export async function GET(request: Request) {

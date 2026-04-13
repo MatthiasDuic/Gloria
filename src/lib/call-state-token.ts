@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Topic } from "./types";
 
-export type CallStep = "intro" | "consent" | "conversation" | "finished";
+export type CallStep = "intro" | "consent" | "conversation" | "appointment" | "finished";
 export type ContactRole = "gatekeeper" | "decision-maker";
 
 export interface TokenizedCallState {

@@ -14,7 +14,23 @@ import type {
 const DATA_DIR = path.join(process.cwd(), "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
+const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
+
+interface RecordingEntry {
+  id: string;
+  callSid: string;
+  company: string;
+  contactName?: string;
+  topic: Topic;
+  recordingUrl: string;
+  createdAt: string;
+}
+
+interface ReportDatabase {
+  reports: CallReport[];
+  recordings: RecordingEntry[];
+}
 
 async function ensureFile<T>(filePath: string, fallback: T) {
   await mkdir(DATA_DIR, { recursive: true });
@@ -41,6 +57,46 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
 async function writeJson<T>(filePath: string, data: T) {
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+}
+
+function buildRecordingEntries(reports: CallReport[]): RecordingEntry[] {
+  return reports
+    .filter((report) => report.callSid && report.recordingUrl)
+    .map((report) => ({
+      id: `rec-${report.callSid}`,
+      callSid: report.callSid as string,
+      company: report.company,
+      contactName: report.contactName,
+      topic: report.topic,
+      recordingUrl: report.recordingUrl as string,
+      createdAt: report.conversationDate,
+    }));
+}
+
+async function readReportDatabase(): Promise<ReportDatabase> {
+  await mkdir(DATA_DIR, { recursive: true });
+
+  try {
+    const raw = await readFile(REPORT_DB_FILE, "utf8");
+    const parsed = JSON.parse(raw) as Partial<ReportDatabase>;
+    return {
+      reports: parsed.reports || [],
+      recordings: parsed.recordings || [],
+    };
+  } catch {
+    const legacyReports = await readJson(REPORTS_FILE, defaultReports);
+    const migrated: ReportDatabase = {
+      reports: legacyReports,
+      recordings: buildRecordingEntries(legacyReports),
+    };
+    await writeJson(REPORT_DB_FILE, migrated);
+    return migrated;
+  }
+}
+
+async function writeReportDatabase(data: ReportDatabase) {
+  await writeJson(REPORT_DB_FILE, data);
+  await writeJson(REPORTS_FILE, data.reports);
 }
 
 function normalizeTopic(input: string): Topic {
@@ -98,11 +154,13 @@ function buildMetrics(leads: Lead[], reports: CallReport[]): MetricSummary {
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const [leads, reports, scripts] = await Promise.all([
+  const [leads, reportDb, scripts] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
-    readJson(REPORTS_FILE, defaultReports),
+    readReportDatabase(),
     readJson(SCRIPTS_FILE, defaultScripts),
   ]);
+
+  const reports = reportDb.reports;
 
   return {
     leads,
@@ -177,18 +235,19 @@ export async function storeCallReport(payload: {
   company: string;
   contactName?: string;
   topic: Topic;
-  summary: string;
-  outcome: ReportOutcome;
+  summary?: string;
+  outcome?: ReportOutcome;
   appointmentAt?: string;
   nextCallAt?: string;
   attempts?: number;
   recordingConsent?: boolean;
   recordingUrl?: string;
 }) {
-  const [leads, reports] = await Promise.all([
+  const [leads, reportDb] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
-    readJson(REPORTS_FILE, defaultReports),
+    readReportDatabase(),
   ]);
+  const reports = reportDb.reports;
 
   const existingIndex = payload.callSid
     ? reports.findIndex((report) => report.callSid === payload.callSid)
@@ -224,6 +283,21 @@ export async function storeCallReport(payload: {
     updatedReports.unshift(report);
   }
 
+  const updatedRecordings = report.recordingUrl
+    ? [
+        {
+          id: `rec-${report.callSid || report.id}`,
+          callSid: report.callSid || report.id,
+          company: report.company,
+          contactName: report.contactName,
+          topic: report.topic,
+          recordingUrl: report.recordingUrl,
+          createdAt: report.conversationDate,
+        },
+        ...reportDb.recordings.filter((entry) => entry.callSid !== (report.callSid || report.id)),
+      ]
+    : reportDb.recordings;
+
   const updatedLeads = leads.map((lead) => {
     const sameLead = payload.leadId
       ? lead.id === payload.leadId
@@ -249,7 +323,7 @@ export async function storeCallReport(payload: {
   });
 
   await Promise.all([
-    writeJson(REPORTS_FILE, updatedReports),
+    writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
     writeJson(LEADS_FILE, updatedLeads),
   ]);
 

@@ -34,14 +34,10 @@ damit die Anfrage gezielt ankommt.
     goal: "Relevanz aufbauen und Interesse für einen kurzen Termin erzeugen.",
     text: `
 Guten Tag, Herr/Frau [NAME], hier ist Gloria – die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel.
-Vielen Dank, dass Sie kurz drangehen.
+Vielen Dank, dass Sie kurz Zeit haben.
 
-Ich rufe im Auftrag von Herrn Duic an. Er begleitet Unternehmen dabei,
-Benefits und Vorsorgelösungen für Mitarbeitende verständlich und attraktiv aufzustellen.
-Gerade bei der betrieblichen Altersvorsorge geht es oft darum,
-Mitarbeitende stärker zu binden und gleichzeitig vorhandene Modelle sinnvoller zu strukturieren.
-
-Wie ist das Thema bAV aktuell bei Ihnen aufgestellt?
+Ich rufe im Auftrag von Herrn Duic an.
+Soll ich Ihnen kurz sagen, worum es geht?
 `,
   },
 

@@ -35,14 +35,10 @@ damit es nicht im allgemeinen Postfach untergeht.
     goal: "Relevanz und Sympathie aufbauen, ohne sofort zu pitchen.",
     text: `
 Guten Tag, Herr/Frau [NAME], hier ist Gloria – die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel.
-Vielen Dank, dass Sie kurz drangehen.
+Vielen Dank, dass Sie kurz Zeit haben.
 
-Ich rufe im Auftrag von Herrn Duic an. Er begleitet viele Unternehmen in der Region,
-insbesondere bei Themen rund um Mitarbeiterbindung, Gesundheitsleistungen und moderne Benefits.
-Gerade die betriebliche Krankenversicherung wird für viele Firmen immer relevanter,
-weil sie hilft, Fachkräfte zu gewinnen und gute Mitarbeitende langfristig zu halten.
-
-Darf ich kurz fragen: Wie gehen Sie aktuell mit dem Thema Mitarbeitergesundheit und Benefits um?
+Ich rufe im Auftrag von Herrn Duic an.
+Soll ich Ihnen kurz sagen, worum es geht?
 `,
   },
 

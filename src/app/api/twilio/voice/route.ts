@@ -37,6 +37,10 @@ function buildPitch(topic: string) {
   return "Es geht um einen kurzen Überblick, wie Unternehmen mit der betrieblichen Krankenversicherung Fachkräfte besser binden können.";
 }
 
+function buildAgentIntroduction() {
+  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+}
+
 function buildAudioUrl(baseUrl: string, params: Record<string, string | undefined>) {
   const url = new URL("/api/twilio/audio", `${baseUrl}/`);
 
@@ -66,15 +70,13 @@ async function renderVoiceResponse(request: Request) {
   });
 
   const openingText = context.contactName
-    ? `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. Ich habe eine kurze fachliche Rückfrage für ${context.contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
-    : `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel. ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson?`;
+    ? `${buildAgentIntroduction()} Ich habe eine kurze fachliche Rückfrage für ${context.contactName}. Würden Sie mich bitte kurz dorthin verbinden?`
+    : `${buildAgentIntroduction()} ${buildPitch(context.topic)} Bin ich dafür direkt bei der richtigen Ansprechperson?`;
 
   if (isElevenLabsConfigured()) {
     gather.play(
       buildAudioUrl(baseUrl, {
-        step: "intro",
-        topic: context.topic,
-        contactName: context.contactName,
+        text: openingText,
       }),
     );
   } else {

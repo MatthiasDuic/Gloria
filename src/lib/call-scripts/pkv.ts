@@ -32,14 +32,8 @@ Alles klar, dann notiere ich gern die direkte E-Mail-Adresse.
 Guten Tag, Herr/Frau [NAME], hier ist Gloria – die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel.
 Vielen Dank, dass Sie kurz Zeit haben.
 
-Ich rufe im Auftrag von Herrn Duic an. Wir haben ein Konzept entwickelt,
-mit dem sich Krankenversicherungsbeiträge im Alter deutlich planbarer und stabiler aufstellen lassen.
-Denn ganz unabhängig davon, ob jemand gesetzlich oder privat versichert ist,
-haben im Grunde alle dasselbe Problem: Die Beiträge steigen von Jahr zu Jahr.
-Solange man im Berufsleben steht, lässt sich das oft noch gut tragen –
-im wohlverdienten Ruhestand sieht das für viele Menschen jedoch ganz anders aus.
-
-Darf ich kurz fragen: Ist das Thema Beitragsstabilität und Planbarkeit im Alter für Sie grundsätzlich interessant?
+Ich rufe im Auftrag von Herrn Duic an.
+Soll ich Ihnen kurz sagen, worum es geht?
 `,
   },
 

@@ -614,12 +614,14 @@ export default function HomePage() {
           <h2>Offene Firmenliste</h2>
           <table>
             <thead>
-              <tr><th>Firma</th><th>Status</th><th>Nächster Anruf</th></tr>
+              <tr><th>Firma</th><th>Ansprechpartner</th><th>Thema</th><th>Status</th><th>Nächster Anruf</th></tr>
             </thead>
             <tbody>
               {data.leads.map((lead) => (
                 <tr key={lead.id}>
-                  <td><strong>{lead.company}</strong><div className="subtle">{lead.topic}</div></td>
+                  <td><strong>{lead.company}</strong></td>
+                  <td>{lead.contactName || "-"}</td>
+                  <td>{lead.topic}</td>
                   <td>{lead.status}</td>
                   <td>{formatDate(lead.nextCallAt)}</td>
                 </tr>

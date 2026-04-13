@@ -33,11 +33,8 @@ Kein Problem. Dann notiere ich mir gern die direkte E-Mail-Adresse.
 Guten Tag, Herr/Frau [NAME], hier ist Gloria – die digitale Vertriebsassistentin der Agentur Duic in Sprockhövel.
 Vielen Dank, dass Sie kurz Zeit haben.
 
-Ich rufe im Auftrag von Herrn Duic an. Er begleitet Unternehmen dabei,
-ihre gewerblichen Versicherungen strukturiert zu vergleichen – insbesondere in den Bereichen
-Betriebshaftpflicht, Inhaltsabsicherung, Cyber und angrenzende Risiken.
-
-Darf ich kurz fragen: Wann haben Sie Ihre gewerblichen Policen zuletzt in Ruhe überprüft?
+Ich rufe im Auftrag von Herrn Duic an.
+Soll ich Ihnen kurz sagen, worum es geht?
 `,
   },
 
