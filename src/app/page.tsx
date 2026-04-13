@@ -1,8 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { buildLiveAgentConfig } from "@/lib/live-agent";
-import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
+import type { DashboardData, LearningResponse, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -61,24 +60,6 @@ function speakText(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
-function buildLocalVoicePreview(script?: ScriptConfig) {
-  if (!script) {
-    return "";
-  }
-
-  return [script.opener, script.discovery, script.objectionHandling, script.close]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function formatScriptText(text?: string) {
-  if (!text) {
-    return "-";
-  }
-
-  return text.trim().replace(/\n\s+/g, "\n");
-}
-
 function buildConversationLines(summary: string) {
   return summary
     .split("\n")
@@ -114,16 +95,9 @@ export default function HomePage() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
-  const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
   const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
-  const [voiceProvider, setVoiceProvider] = useState("browser");
   const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
-  const [prospectMessage, setProspectMessage] = useState(
-    "Wir haben aktuell eigentlich kein Interesse und außerdem wenig Zeit.",
-  );
-  const [liveReply, setLiveReply] = useState("");
-  const [liveMode, setLiveMode] = useState("openai");
   const [twilioTarget, setTwilioTarget] = useState("");
   const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
   const [twilioContactName, setTwilioContactName] = useState("Herr Neumann");
@@ -131,11 +105,8 @@ export default function HomePage() {
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
 
-  const liveAgentConfig = buildLiveAgentConfig(detailTopic, draftScripts[detailTopic]);
-  const activeDraft = draftScripts[detailTopic];
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
 
   async function loadDashboard() {
@@ -149,12 +120,6 @@ export default function HomePage() {
 
     setData(payload);
     setLearning(learningPayload);
-    setDraftScripts(
-      payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
-        acc[script.topic] = script;
-        return acc;
-      }, {}),
-    );
     setNotice(
       `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
     );
@@ -201,36 +166,15 @@ export default function HomePage() {
     }
   }
 
-  async function saveScript(topic: Topic) {
-    const draft = draftScripts[topic];
+  async function applyLearning(topic: Topic) {
+    const confirmed = confirm(
+      `Möchten Sie die vorgeschlagenen Optimierungen für "${topic}" übernehmen?`,
+    );
 
-    if (!draft) {
+    if (!confirmed) {
       return;
     }
 
-    setBusy(true);
-
-    try {
-      const response = await fetch("/api/scripts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-
-      if (!response.ok) {
-        throw new Error("Skript konnte nicht gespeichert werden.");
-      }
-
-      setNotice(`Skript für ${topic} gespeichert.`);
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Speichern fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function applyLearning(topic: Topic) {
     setBusy(true);
 
     try {
@@ -257,10 +201,8 @@ export default function HomePage() {
   async function testVoice() {
     setBusy(true);
 
-    const localPreview = buildLocalVoicePreview(draftScripts[voiceTopic]);
-    setVoicePreview(localPreview || "Vorschau wird geladen ...");
+    setVoicePreview("Vorschau wird geladen ...");
     setVoiceAudioUrl("");
-    setVoiceProvider("browser");
 
     try {
       const response = await fetch("/api/voice-preview", {
@@ -282,8 +224,7 @@ export default function HomePage() {
         throw new Error(payload.error || payload.message || "Stimmtest konnte nicht geladen werden.");
       }
 
-      setVoicePreview(payload.preview || localPreview || "Keine Vorschau verfügbar.");
-      setVoiceProvider(payload.provider || "browser");
+      setVoicePreview(payload.preview || "Keine Vorschau verfügbar.");
 
       if (payload.audioBase64 && payload.audioMimeType) {
         const url = `data:${payload.audioMimeType};base64,${payload.audioBase64}`;
@@ -291,54 +232,16 @@ export default function HomePage() {
         void new Audio(url).play().catch(() => undefined);
       } else {
         setVoiceAudioUrl("");
-        speakText(payload.preview || localPreview);
+        speakText(payload.preview || "");
       }
 
       setNotice(payload.message || `Stimmtest für ${voiceTopic} gestartet.`);
     } catch (error) {
-      if (localPreview) {
-        setVoicePreview(localPreview);
-      }
-
       setNotice(
         error instanceof Error
-          ? `${error.message} - die Textvorschau wurde lokal geladen.`
-          : "Stimmtest konnte nicht geladen werden - die Textvorschau wurde lokal geladen.",
+          ? `${error.message} - die Textvorschau konnte nicht geladen werden.`
+          : "Stimmtest konnte nicht geladen werden.",
       );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function simulateLiveReplyResponse() {
-    setBusy(true);
-
-    try {
-      const response = await fetch("/api/live-agent/respond", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: detailTopic,
-          prospectMessage,
-          transcript: `Gloria hat bereits Kontakt aufgenommen und möchte einen Termin für ${detailTopic} vereinbaren.`,
-        }),
-      });
-
-      const payload = (await response.json()) as {
-        error?: string;
-        reply?: string;
-        mode?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Live-Antwort konnte nicht erzeugt werden.");
-      }
-
-      setLiveReply(payload.reply || "Keine Antwort erzeugt.");
-      setLiveMode(payload.mode || "openai");
-      setNotice("OpenAI-Liveantwort erzeugt und auf Terminziel ausgerichtet.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Live-Antwort fehlgeschlagen.");
     } finally {
       setBusy(false);
     }
@@ -491,7 +394,6 @@ export default function HomePage() {
               </button>
             </div>
             <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
-            <p className="subtle top-gap">Aktive Quelle: <strong>{voiceProvider === "elevenlabs" ? "ElevenLabs" : "Browser"}</strong></p>
             {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
           </article>
 
@@ -550,117 +452,11 @@ export default function HomePage() {
                   <ul>
                     {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
                   </ul>
-                  <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung anwenden</button>
+                  <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
                 </div>
               ))}
             </div>
           </article>
-        </div>
-      </section>
-
-      <section className="panel top-section">
-        <h2>Live-KI (OpenAI): frei reagieren und trotzdem zum Ziel kommen</h2>
-        <div className="live-grid">
-          <div className="mini-panel">
-            <h3>Zielsteuerung für {detailTopic}</h3>
-            <p className="subtle">Primäres Ziel</p>
-            <div className="code-box">{liveAgentConfig.objective}</div>
-            <p className="subtle top-gap">Erster Gesprächseinstieg</p>
-            <div className="code-box">{formatScriptText(liveAgentConfig.firstMessage)}</div>
-          </div>
-          <div className="mini-panel">
-            <h3>Freie Antwort simulieren</h3>
-            <textarea value={prospectMessage} onChange={(event) => setProspectMessage(event.target.value)} />
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void simulateLiveReplyResponse()} disabled={busy}>
-                {busy ? "OpenAI antwortet ..." : "Freie Antwort testen"}
-              </button>
-            </div>
-            <p className="subtle top-gap">Aktiver Modus: <strong>{liveMode}</strong></p>
-            <div className="code-box">{liveReply || "Noch keine Live-Antwort simuliert."}</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="panel top-section">
-        <div className="row spread">
-          <h2>Detail-Skripte und Bearbeitung</h2>
-          <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
-            {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-          </select>
-        </div>
-
-        <div className="live-grid">
-          <div className="mini-panel">
-            <h3>Aktuelles Skript ({detailTopic})</h3>
-            {activeDraft ? (
-              <>
-                <p className="subtle">Opener</p>
-                <div className="code-box">{formatScriptText(activeDraft.opener)}</div>
-                <p className="subtle top-gap">Bedarfsermittlung</p>
-                <div className="code-box">{formatScriptText(activeDraft.discovery)}</div>
-                <p className="subtle top-gap">Einwandbehandlung</p>
-                <div className="code-box">{formatScriptText(activeDraft.objectionHandling)}</div>
-                <p className="subtle top-gap">Terminabschluss</p>
-                <div className="code-box">{formatScriptText(activeDraft.close)}</div>
-              </>
-            ) : (
-              <p className="subtle">Für dieses Thema liegt noch kein gespeichertes Skript vor.</p>
-            )}
-          </div>
-
-          <div className="mini-panel">
-            <h3>Skript-Editor ({detailTopic})</h3>
-            {activeDraft ? (
-              <>
-                <label>Opener</label>
-                <textarea
-                  value={activeDraft.opener}
-                  onChange={(event) =>
-                    setDraftScripts((current) => ({
-                      ...current,
-                      [detailTopic]: { ...current[detailTopic], opener: event.target.value },
-                    }))
-                  }
-                />
-                <label>Bedarfsermittlung</label>
-                <textarea
-                  value={activeDraft.discovery}
-                  onChange={(event) =>
-                    setDraftScripts((current) => ({
-                      ...current,
-                      [detailTopic]: { ...current[detailTopic], discovery: event.target.value },
-                    }))
-                  }
-                />
-                <label>Einwandbehandlung</label>
-                <textarea
-                  value={activeDraft.objectionHandling}
-                  onChange={(event) =>
-                    setDraftScripts((current) => ({
-                      ...current,
-                      [detailTopic]: { ...current[detailTopic], objectionHandling: event.target.value },
-                    }))
-                  }
-                />
-                <label>Terminabschluss</label>
-                <textarea
-                  value={activeDraft.close}
-                  onChange={(event) =>
-                    setDraftScripts((current) => ({
-                      ...current,
-                      [detailTopic]: { ...current[detailTopic], close: event.target.value },
-                    }))
-                  }
-                />
-                <div className="row top-gap">
-                  <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
-                </div>
-              </>
-            ) : (
-              <p className="subtle">Für dieses Thema liegt noch kein editierbares Skript vor.</p>
-            )}
-          </div>
         </div>
       </section>
 
