@@ -2,12 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import {
+  appendConversationEventToPostgres,
+  readConversationEventsFromPostgres,
   readReportDatabaseFromPostgres,
   writeReportDatabaseToPostgres,
 } from "./report-db";
 import type { RecordingEntry, ReportDatabase } from "./report-db";
 import type {
   CallReport,
+  ConversationEvent,
   DashboardData,
   Lead,
   MetricSummary,
@@ -20,6 +23,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
 const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
+const EVENTS_FILE = path.join(DATA_DIR, "conversation-events.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 
 async function ensureFile<T>(filePath: string, fallback: T) {
@@ -171,21 +175,64 @@ function parseCsvLine(line: string): string[] {
   return values;
 }
 
-function buildMetrics(leads: Lead[], reports: CallReport[]): MetricSummary {
+async function readConversationEvents(): Promise<ConversationEvent[]> {
+  const postgresData = await readConversationEventsFromPostgres();
+
+  if (postgresData) {
+    return postgresData;
+  }
+
+  return await readJson<ConversationEvent[]>(EVENTS_FILE, []);
+}
+
+export async function appendConversationEvent(
+  event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
+) {
+  const normalized: ConversationEvent = {
+    ...event,
+    id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    createdAt: event.createdAt || new Date().toISOString(),
+  };
+
+  const wroteToPostgres = await appendConversationEventToPostgres(normalized);
+
+  if (wroteToPostgres) {
+    return normalized;
+  }
+
+  const existing = await readJson<ConversationEvent[]>(EVENTS_FILE, []);
+  const next = [normalized, ...existing].slice(0, 5000);
+  await writeJson(EVENTS_FILE, next);
+  return normalized;
+}
+
+function buildMetrics(
+  leads: Lead[],
+  reports: CallReport[],
+  events: ConversationEvent[],
+): MetricSummary {
+  const transferRequested = events.filter((event) => event.eventType === "transfer_requested").length;
+  const transferConnected = events.filter((event) => event.eventType === "transfer_connected").length;
+  const transferSuccessRate =
+    transferRequested > 0 ? Math.round((transferConnected / transferRequested) * 100) : 0;
+
   return {
     dialAttempts: leads.reduce((sum, lead) => sum + lead.attempts, 0),
     conversations: reports.length,
     appointments: reports.filter((report) => report.outcome === "Termin").length,
     rejections: reports.filter((report) => report.outcome === "Absage").length,
     callbacksOpen: leads.filter((lead) => lead.status === "wiedervorlage").length,
+    gatekeeperLoops: events.filter((event) => event.eventType === "gatekeeper_loop_break").length,
+    transferSuccessRate,
   };
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const [leads, reportState, scripts] = await Promise.all([
+  const [leads, reportState, scripts, events] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
     readReportDatabaseWithMode(),
     readJson(SCRIPTS_FILE, defaultScripts),
+    readConversationEvents(),
   ]);
 
   const reports = reportState.data.reports;
@@ -194,7 +241,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     leads,
     reports,
     scripts,
-    metrics: buildMetrics(leads, reports),
+    metrics: buildMetrics(leads, reports, events),
     reportStorageMode: reportState.mode,
   };
 }

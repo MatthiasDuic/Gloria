@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ReportOutcome, Topic } from "./types";
+import type { CallReport, ConversationEvent, ReportOutcome, Topic } from "./types";
 
 export interface RecordingEntry {
   id: string;
@@ -117,6 +117,26 @@ async function ensureSchema() {
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_recordings_call_sid_idx
     ON gloria_recordings (call_sid);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_conversation_events (
+      id TEXT PRIMARY KEY,
+      call_sid TEXT,
+      topic TEXT NOT NULL,
+      company TEXT NOT NULL,
+      step TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      contact_role TEXT,
+      turn INTEGER,
+      text_value TEXT,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS gloria_conversation_events_call_sid_idx
+    ON gloria_conversation_events (call_sid);
   `);
 
   schemaReady = true;
@@ -311,6 +331,89 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
     return true;
   } catch (error) {
     console.error("Postgres write failed, fallback to file storage", error);
+    return false;
+  }
+}
+
+export async function readConversationEventsFromPostgres(): Promise<ConversationEvent[] | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(`
+      SELECT id, call_sid, topic, company, step, event_type, contact_role, turn, text_value, created_at
+      FROM gloria_conversation_events
+      ORDER BY created_at DESC
+      LIMIT 5000;
+    `);
+
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      callSid: row.call_sid ? String(row.call_sid) : undefined,
+      topic: normalizeTopic(String(row.topic)),
+      company: String(row.company),
+      step: String(row.step),
+      eventType: String(row.event_type),
+      contactRole:
+        row.contact_role === "gatekeeper" || row.contact_role === "decision-maker"
+          ? row.contact_role
+          : undefined,
+      turn: typeof row.turn === "number" ? row.turn : undefined,
+      text: row.text_value ? String(row.text_value) : undefined,
+      createdAt: toIso(row.created_at) || new Date().toISOString(),
+    }));
+  } catch (error) {
+    console.error("Postgres event read failed, fallback to file storage", error);
+    return null;
+  }
+}
+
+export async function appendConversationEventToPostgres(
+  event: ConversationEvent,
+): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `
+      INSERT INTO gloria_conversation_events (
+        id,
+        call_sid,
+        topic,
+        company,
+        step,
+        event_type,
+        contact_role,
+        turn,
+        text_value,
+        created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT (id) DO NOTHING;
+      `,
+      [
+        event.id,
+        event.callSid || null,
+        event.topic,
+        event.company,
+        event.step,
+        event.eventType,
+        event.contactRole || null,
+        event.turn ?? null,
+        event.text || null,
+        event.createdAt,
+      ],
+    );
+
+    return true;
+  } catch (error) {
+    console.error("Postgres event write failed, fallback to file storage", error);
     return false;
   }
 }

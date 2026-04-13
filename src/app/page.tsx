@@ -20,6 +20,8 @@ const EMPTY_DATA: DashboardData = {
     appointments: 0,
     rejections: 0,
     callbacksOpen: 0,
+    gatekeeperLoops: 0,
+    transferSuccessRate: 0,
   },
 };
 
@@ -374,6 +376,8 @@ export default function HomePage() {
         <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
         <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
         <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
+        <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
+        <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
       </section>
 
       <section className="workbench">

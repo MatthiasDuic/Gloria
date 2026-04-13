@@ -56,6 +56,21 @@ export interface MetricSummary {
   appointments: number;
   rejections: number;
   callbacksOpen: number;
+  gatekeeperLoops: number;
+  transferSuccessRate: number;
+}
+
+export interface ConversationEvent {
+  id: string;
+  callSid?: string;
+  topic: Topic;
+  company: string;
+  step: string;
+  eventType: string;
+  contactRole?: "gatekeeper" | "decision-maker";
+  turn?: number;
+  text?: string;
+  createdAt: string;
 }
 
 export interface LearningInsight {

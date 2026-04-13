@@ -11,7 +11,7 @@ import type { CallScript } from "@/lib/call-scripts";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { generateAdaptiveReply } from "@/lib/live-agent";
 import { sendReportEmail } from "@/lib/mailer";
-import { getDashboardData, storeCallReport } from "@/lib/storage";
+import { appendConversationEvent, getDashboardData, storeCallReport } from "@/lib/storage";
 import {
   getAppBaseUrl,
   getTwilioConversationMode,
@@ -691,6 +691,23 @@ async function safelyStoreReport(payload: Parameters<typeof storeCallReport>[0])
   }
 }
 
+async function safelyLogConversationEvent(payload: {
+  callSid?: string;
+  topic: Topic;
+  company: string;
+  step: string;
+  eventType: string;
+  contactRole?: ContactRole;
+  turn?: number;
+  text?: string;
+}) {
+  try {
+    await appendConversationEvent(payload);
+  } catch (error) {
+    console.error("Twilio conversation event could not be saved", error);
+  }
+}
+
 export async function POST(request: Request) {
   const baseUrl = getAppBaseUrl(request);
   const url = new URL(request.url);
@@ -764,6 +781,17 @@ export async function POST(request: Request) {
     }
 
     if (atGatekeeper) {
+      await safelyLogConversationEvent({
+        callSid,
+        topic: context.topic,
+        company: context.company,
+        step: "intro",
+        eventType: "gatekeeper_turn",
+        contactRole: "gatekeeper",
+        turn: context.turn,
+        text: heardText,
+      });
+
       if (/worum geht|was genau|um was geht/.test(heardText)) {
         const prompt = buildReceptionPrompt(context.topic, context.contactName, "what");
         return respondWithGather({
@@ -801,6 +829,17 @@ export async function POST(request: Request) {
       }
 
       if (soundsLikeTransfer(heardText)) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "transfer_requested",
+          contactRole: "gatekeeper",
+          turn: context.turn,
+          text: heardText,
+        });
+
         const prompt = "Danke Ihnen.";
         return respondWithGather({
           response,
@@ -817,7 +856,47 @@ export async function POST(request: Request) {
         });
       }
 
+      // After one or more gatekeeper turns, a short greeting often means
+      // the decision-maker picked up after transfer. Switch mode proactively.
+      if (context.turn >= 1 && isLikelyGreeting(heardText)) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "transfer_connected",
+          contactRole: "decision-maker",
+          turn: context.turn,
+          text: heardText,
+        });
+
+        const prompt = buildDecisionMakerHello(context.contactName);
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
+          contactRole: "decision-maker",
+        });
+      }
+
       if (mentionsTargetName(heardText, context.contactName) || soundsLikeDecisionMaker(heardText)) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "transfer_connected",
+          contactRole: "decision-maker",
+          turn: context.turn,
+          text: heardText,
+        });
+
         const consentPrompt = buildConsentPrompt(context.contactName);
 
         return respondWithGather({
@@ -830,6 +909,35 @@ export async function POST(request: Request) {
           turn: 0,
           transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
           step: "consent",
+          contactRole: "decision-maker",
+        });
+      }
+
+      if (context.turn >= 3 && (soundsLikeNotDecisionMaker(heardText) || isLikelyGreeting(heardText))) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "gatekeeper_loop_break",
+          contactRole: "gatekeeper",
+          turn: context.turn,
+          text: heardText,
+        });
+
+        const prompt =
+          "Danke Ihnen. Dann klären wir es kurz direkt: Sind Sie selbst die zuständige Person für dieses Thema?";
+
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
           contactRole: "decision-maker",
         });
       }
