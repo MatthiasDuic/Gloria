@@ -38,7 +38,11 @@ async function ensureFile<T>(filePath: string, fallback: T) {
   try {
     await readFile(filePath, "utf8");
   } catch {
-    await writeFile(filePath, JSON.stringify(fallback, null, 2), "utf8");
+    try {
+      await writeFile(filePath, JSON.stringify(fallback, null, 2), "utf8");
+    } catch {
+      // Ignore write errors on read-only runtimes; caller will use fallback in-memory.
+    }
   }
 }
 
@@ -49,14 +53,22 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
     const raw = await readFile(filePath, "utf8");
     return JSON.parse(raw) as T;
   } catch {
-    await writeFile(filePath, JSON.stringify(fallback, null, 2), "utf8");
+    try {
+      await writeFile(filePath, JSON.stringify(fallback, null, 2), "utf8");
+    } catch {
+      // Ignore write errors on read-only runtimes.
+    }
     return fallback;
   }
 }
 
 async function writeJson<T>(filePath: string, data: T) {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+  try {
+    await writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+  } catch {
+    // Allow callers to continue in runtimes without writable filesystem.
+  }
 }
 
 function buildRecordingEntries(reports: CallReport[]): RecordingEntry[] {
