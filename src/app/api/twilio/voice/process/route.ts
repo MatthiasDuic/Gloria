@@ -792,6 +792,35 @@ export async function POST(request: Request) {
         text: heardText,
       });
 
+      // If the known contact name is heard, switch immediately to decision-maker flow.
+      if (mentionsTargetName(heardText, context.contactName)) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "transfer_connected",
+          contactRole: "decision-maker",
+          turn: context.turn,
+          text: heardText,
+        });
+
+        const consentPrompt = buildConsentPrompt(context.contactName);
+
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: consentPrompt,
+          audioParams: { text: consentPrompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
+          step: "consent",
+          contactRole: "decision-maker",
+        });
+      }
+
       if (/worum geht|was genau|um was geht/.test(heardText)) {
         const prompt = buildReceptionPrompt(context.topic, context.contactName, "what");
         return respondWithGather({
