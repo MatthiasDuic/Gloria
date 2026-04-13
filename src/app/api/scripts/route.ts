@@ -9,7 +9,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Thema fehlt." }, { status: 400 });
   }
 
-  const updated = await saveScript(payload.topic, payload);
-
-  return NextResponse.json({ ok: true, script: updated });
+  try {
+    const updated = await saveScript(payload.topic, payload);
+    return NextResponse.json({ ok: true, script: updated });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Skript konnte nicht gespeichert werden.",
+      },
+      { status: 500 },
+    );
+  }
 }

@@ -7,7 +7,9 @@ import {
   deleteReportFromPostgres,
   readConversationEventsFromPostgres,
   readReportDatabaseFromPostgres,
+  readScriptsFromPostgres,
   writeReportDatabaseToPostgres,
+  writeScriptsToPostgres,
 } from "./report-db";
 import type { RecordingEntry, ReportDatabase } from "./report-db";
 import type {
@@ -65,6 +67,11 @@ async function writeJson<T>(filePath: string, data: T) {
   } catch {
     // Allow callers to continue in runtimes without writable filesystem.
   }
+}
+
+async function writeJsonStrict<T>(filePath: string, data: T) {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
 function buildRecordingEntries(reports: CallReport[]): RecordingEntry[] {
@@ -187,6 +194,16 @@ async function readConversationEvents(): Promise<ConversationEvent[]> {
   return await readJson<ConversationEvent[]>(EVENTS_FILE, []);
 }
 
+async function readScripts(): Promise<ScriptConfig[]> {
+  const postgresData = await readScriptsFromPostgres();
+
+  if (postgresData) {
+    return postgresData;
+  }
+
+  return await readJson(SCRIPTS_FILE, defaultScripts);
+}
+
 export async function appendConversationEvent(
   event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
 ) {
@@ -233,7 +250,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   const [leads, reportState, scripts, events] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
     readReportDatabaseWithMode(),
-    readJson(SCRIPTS_FILE, defaultScripts),
+    readScripts(),
     readConversationEvents(),
   ]);
 
@@ -293,7 +310,7 @@ export async function importLeadsFromCsv(csvText: string) {
 }
 
 export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
-  const scripts = await readJson(SCRIPTS_FILE, defaultScripts);
+  const scripts = await readScripts();
   const updated = scripts.map((script) =>
     script.topic === topic
       ? {
@@ -303,7 +320,12 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
       : script,
   );
 
-  await writeJson(SCRIPTS_FILE, updated);
+  const wroteToPostgres = await writeScriptsToPostgres(updated);
+
+  if (!wroteToPostgres) {
+    await writeJsonStrict(SCRIPTS_FILE, updated);
+  }
+
   return updated.find((script) => script.topic === topic);
 }
 

@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, ReportOutcome, Topic } from "./types";
+import type { CallReport, ConversationEvent, ReportOutcome, ScriptConfig, Topic } from "./types";
 
 export interface RecordingEntry {
   id: string;
@@ -139,7 +139,98 @@ async function ensureSchema() {
     ON gloria_conversation_events (call_sid);
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_scripts (
+      topic TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   schemaReady = true;
+}
+
+export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(`
+      SELECT topic, data
+      FROM gloria_scripts
+      ORDER BY topic ASC;
+    `);
+
+    if (!result.rows.length) {
+      return null;
+    }
+
+    return result.rows.map((row) => {
+      const data = (row.data || {}) as Partial<ScriptConfig>;
+
+      return {
+        ...data,
+        id: String(data.id || `skript-${String(row.topic)}`),
+        topic: normalizeTopic(String(row.topic)),
+        opener: String(data.opener || ""),
+        discovery: String(data.discovery || ""),
+        objectionHandling: String(data.objectionHandling || ""),
+        close: String(data.close || ""),
+      } as ScriptConfig;
+    });
+  } catch (error) {
+    console.error("Postgres script read failed, fallback to file storage", error);
+    return null;
+  }
+}
+
+export async function writeScriptsToPostgres(scripts: ScriptConfig[]): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const client = await db.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      for (const script of scripts) {
+        await client.query(
+          `
+          INSERT INTO gloria_scripts (topic, data, updated_at)
+          VALUES ($1, $2::jsonb, NOW())
+          ON CONFLICT (topic)
+          DO UPDATE SET
+            data = EXCLUDED.data,
+            updated_at = NOW();
+          `,
+          [script.topic, JSON.stringify(script)],
+        );
+      }
+
+      await client.query(
+        `DELETE FROM gloria_scripts WHERE topic <> ALL($1::text[])`,
+        [scripts.map((script) => script.topic)],
+      );
+
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Postgres script write failed, fallback to file storage", error);
+    return false;
+  }
 }
 
 export async function readReportDatabaseFromPostgres(): Promise<ReportDatabase | null> {
