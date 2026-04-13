@@ -84,6 +84,51 @@ export interface LiveAgentConfig {
 
 export type LiveConversationStage = "discovery" | "problem" | "benefit" | "objection" | "closing";
 
+function compactSentences(text: string, maxSentences = 2) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "";
+  }
+
+  const sentences = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return sentences.slice(0, maxSentences).join(" ");
+}
+
+function ensureTurnTakingQuestion(
+  text: string,
+  stage: LiveConversationStage,
+  fallbackQuestion: string,
+) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return fallbackQuestion;
+  }
+
+  // In closing we still want a question to secure commitment/next step.
+  const shouldForceQuestion =
+    stage === "discovery" || stage === "problem" || stage === "objection" || stage === "closing";
+
+  if (!shouldForceQuestion || trimmed.includes("?")) {
+    return trimmed;
+  }
+
+  const normalized = trimmed.replace(/[.!]+$/, "");
+  return `${normalized}. ${fallbackQuestion}`;
+}
+
+function normalizeReplyForCall(
+  raw: string,
+  stage: LiveConversationStage,
+  fallbackQuestion: string,
+) {
+  const compact = compactSentences(raw, 2);
+  return ensureTurnTakingQuestion(compact, stage, fallbackQuestion);
+}
+
 export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveAgentConfig {
   const detailScript = DETAIL_SCRIPTS[topic];
   const activeScript = script || DEFAULT_SCRIPTS[topic];
@@ -197,58 +242,82 @@ function generateRuleBasedReply(
   );
 
   if (/nicht zuständig|falsche person/.test(text)) {
-    return "Alles klar, danke Ihnen. Wer wäre denn bei Ihnen der richtige Ansprechpartner, damit ich das Thema direkt an die passende Stelle geben kann?";
+    return normalizeReplyForCall(
+      "Alles klar, danke Ihnen. Wer wäre denn bei Ihnen der richtige Ansprechpartner, damit ich das Thema direkt an die passende Stelle geben kann?",
+      stage,
+      primaryDiscovery,
+    );
   }
 
   if (topic === "private Krankenversicherung" && /daten|gesundheit|möchte ich nicht sagen|zu privat/.test(text)) {
-    return "Das ist vollkommen in Ordnung. Wir müssen das jetzt nicht im Detail besprechen. Für die weitere Einordnung reicht mir zunächst nur die kurze Einschätzung: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?";
+    return normalizeReplyForCall(
+      "Das ist vollkommen in Ordnung. Für die weitere Einordnung reicht mir nur eine kurze Einschätzung: Würden Sie sagen, dass Sie derzeit grundsätzlich gesund sind?",
+      stage,
+      primaryDiscovery,
+    );
   }
 
   if (/wir haben schon|haben bereits|bereits abgedeckt|schon vorhanden/.test(text)) {
-    return `${objectionWeHaveIt} ${closePrompt}`;
+    return normalizeReplyForCall(`${objectionWeHaveIt} ${closePrompt}`, stage, closePrompt);
   }
 
   if (/unterlagen|email|e-mail|schicken/.test(text)) {
-    return objectionSendDocs;
+    return normalizeReplyForCall(objectionSendDocs, stage, secondaryDiscovery);
   }
 
   if (/kein interesse|nicht interessiert|brauchen wir nicht|kein bedarf/.test(text)) {
-    return objectionNoInterest;
+    return normalizeReplyForCall(objectionNoInterest, stage, closePrompt);
   }
 
   if (/keine zeit|später|gerade ungünstig|im stress/.test(text)) {
-    return objectionNoTime;
+    return normalizeReplyForCall(objectionNoTime, stage, closePrompt);
   }
 
   if (/was genau|worum geht|erklären sie/.test(text)) {
-    return `${buildShortTopicExplanation(topic)} ${primaryDiscovery}`;
+    return normalizeReplyForCall(
+      `${buildShortTopicExplanation(topic)} ${primaryDiscovery}`,
+      stage,
+      primaryDiscovery,
+    );
   }
 
   if (stage === "discovery") {
     if (/(ja|grundsätzlich|wir haben|aktuell|derzeit|mitarbeiter|versicherung|vertrag|nutzen|bieten|thema)/.test(text)) {
-      return `Danke Ihnen, das hilft mir schon weiter. ${problemPrompt}`;
+      return normalizeReplyForCall(
+        `Danke Ihnen, das hilft mir schon weiter. ${problemPrompt}`,
+        stage,
+        secondaryDiscovery,
+      );
     }
 
-    return primaryDiscovery;
+    return normalizeReplyForCall(primaryDiscovery, stage, primaryDiscovery);
   }
 
   if (stage === "problem") {
-    return `${problemPrompt} ${secondaryDiscovery}`;
+    return normalizeReplyForCall(
+      `${problemPrompt} ${secondaryDiscovery}`,
+      stage,
+      secondaryDiscovery,
+    );
   }
 
   if (stage === "benefit") {
-    return `${conceptPrompt} ${pressurePrompt}`;
+    return normalizeReplyForCall(`${conceptPrompt} ${pressurePrompt}`, stage, closePrompt);
   }
 
   if (stage === "objection") {
-    return `${cleanScriptText(activeScript.objectionHandling)} ${closePrompt}`;
+    return normalizeReplyForCall(
+      `${cleanScriptText(activeScript.objectionHandling)} ${closePrompt}`,
+      stage,
+      closePrompt,
+    );
   }
 
   if (/interessant|passt|gerne|machen wir|einverstanden|ja/.test(text)) {
-    return closePrompt;
+    return normalizeReplyForCall(closePrompt, stage, closePrompt);
   }
 
-  return `Verstehe. ${conceptPrompt} ${closePrompt}`;
+  return normalizeReplyForCall(`Verstehe. ${conceptPrompt} ${closePrompt}`, stage, closePrompt);
 }
 
 export async function generateAdaptiveReply(input: {
@@ -298,7 +367,7 @@ export async function generateAdaptiveReply(input: {
             content: [
               {
                 type: "input_text",
-                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAktuelle Gesprächsphase: ${stage}.\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in 1 bis 2 kurzen, natürlichen Sätzen. Wenn die Phase discovery ist, stelle eine passende Bedarf- oder Problemfrage. Wenn die Phase problem ist, vertiefe den Bedarf. Wenn die Phase benefit ist, erkläre kurz den Nutzen. Wenn die Phase closing ist, sichere sauber den Termin.`,
+                text: `Bisheriger Gesprächsverlauf:\n${input.transcript || "Noch kein weiterer Verlauf."}\n\nAktuelle Gesprächsphase: ${stage}.\n\nAussage des Interessenten:\n${input.prospectMessage}\n\nAntworte als Gloria in genau 1 bis 2 kurzen, natürlichen Sätzen. Maximal eine Kernaussage und dann eine klare Frage zurück, damit der Interessent mehr spricht. Kein Monolog. Wenn die Phase discovery ist, stelle eine passende Bedarf- oder Problemfrage. Wenn die Phase problem ist, vertiefe den Bedarf mit einer Rückfrage. Wenn die Phase benefit ist, erkläre kurz den Nutzen. Wenn die Phase closing ist, frage konkret nach Terminzusage oder passendem Zeitfenster.`,
               },
             ],
           },
@@ -331,9 +400,12 @@ export async function generateAdaptiveReply(input: {
       throw new Error("Leere KI-Antwort erhalten.");
     }
 
+    const activeScript = input.script || DEFAULT_SCRIPTS[input.topic];
+    const fallbackQuestion = cleanScriptText(activeScript.discovery || activeScript.close);
+
     return {
       mode: "openai",
-      reply: outputText,
+      reply: normalizeReplyForCall(outputText, stage, fallbackQuestion),
       objective: config.objective,
     };
   } catch {
