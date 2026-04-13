@@ -204,6 +204,22 @@ async function readScripts(): Promise<ScriptConfig[]> {
   return await readJson(SCRIPTS_FILE, defaultScripts);
 }
 
+async function readScriptsWithMode(): Promise<{
+  data: ScriptConfig[];
+  mode: "postgres" | "file";
+}> {
+  const postgresData = await readScriptsFromPostgres();
+
+  if (postgresData) {
+    return { data: postgresData, mode: "postgres" };
+  }
+
+  return {
+    data: await readJson(SCRIPTS_FILE, defaultScripts),
+    mode: "file",
+  };
+}
+
 export async function appendConversationEvent(
   event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
 ) {
@@ -247,10 +263,10 @@ function buildMetrics(
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const [leads, reportState, scripts, events] = await Promise.all([
+  const [leads, reportState, scriptsState, events] = await Promise.all([
     readJson(LEADS_FILE, defaultLeads),
     readReportDatabaseWithMode(),
-    readScripts(),
+    readScriptsWithMode(),
     readConversationEvents(),
   ]);
 
@@ -259,9 +275,10 @@ export async function getDashboardData(): Promise<DashboardData> {
   return {
     leads,
     reports,
-    scripts,
+    scripts: scriptsState.data,
     metrics: buildMetrics(leads, reports, events),
     reportStorageMode: reportState.mode,
+    scriptsStorageMode: scriptsState.mode,
   };
 }
 

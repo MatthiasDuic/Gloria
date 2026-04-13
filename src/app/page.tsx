@@ -21,6 +21,7 @@ const EMPTY_DATA: DashboardData = {
   reports: [],
   scripts: [],
   reportStorageMode: "file",
+  scriptsStorageMode: "file",
   metrics: {
     dialAttempts: 0,
     conversations: 0,
@@ -440,7 +441,10 @@ export default function HomePage() {
         <div className="hero-actions">
           <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
           <span className="pill">
-            Datenquelle: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+            Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+          </span>
+          <span className="pill">
+            Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
           </span>
           <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
         </div>
@@ -555,7 +559,10 @@ export default function HomePage() {
 
         {activeDraft ? (
           <>
-            <p className="subtle">Alle Felder entsprechen exakt dem Telefonleitfaden. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.</p>
+            <p className="subtle">
+              Alle Felder entsprechen exakt dem Telefonleitfaden. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
+              Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
+            </p>
 
             <p className="subtle top-gap"><strong>1) Empfang</strong> – Gloria wartet zuerst, dann spricht sie nach der Meldung der Gegenstelle</p>
             <label>Empfangs-Intro (Gloria nach erster Meldung)</label>

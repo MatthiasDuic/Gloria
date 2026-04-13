@@ -116,4 +116,5 @@ export interface DashboardData {
   scripts: ScriptConfig[];
   metrics: MetricSummary;
   reportStorageMode: "postgres" | "file";
+  scriptsStorageMode: "postgres" | "file";
 }
