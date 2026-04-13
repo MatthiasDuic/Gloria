@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
 import { getDashboardData } from "@/lib/storage";
 import { getAppBaseUrl } from "@/lib/twilio";
 
@@ -38,7 +39,7 @@ function buildPitch(topic: string) {
 }
 
 function buildAgentIntroduction() {
-  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+  return REQUIRED_GLORIA_INTRO;
 }
 
 function buildAudioUrl(baseUrl: string, params: Record<string, string | undefined>) {

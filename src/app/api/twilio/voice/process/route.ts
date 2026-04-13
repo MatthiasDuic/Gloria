@@ -11,6 +11,7 @@ import type { CallScript } from "@/lib/call-scripts";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { generateAdaptiveReply } from "@/lib/live-agent";
 import { sendReportEmail } from "@/lib/mailer";
+import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
 import { appendConversationEvent, getDashboardData, storeCallReport } from "@/lib/storage";
 import {
   getAppBaseUrl,
@@ -39,7 +40,7 @@ const MAX_LIVE_TURNS = 5;
 const MAX_SILENT_RETRIES = 2;
 
 function buildAgentIntroduction() {
-  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+  return REQUIRED_GLORIA_INTRO;
 }
 
 function normalizeText(value: FormDataEntryValue | null) {
@@ -121,8 +122,9 @@ function cleanScriptText(value: string) {
 
 function normalizeGloriaBranding(value: string) {
   return value
-    .replaceAll("digitale Assistentin der Agentur Duic in Sprockhövel", "digitale Vertriebsassistentin der Agentur Duic")
-    .replaceAll("digitale Vertriebsassistentin der Agentur Duic in Sprockhövel", "digitale Vertriebsassistentin der Agentur Duic")
+    .replaceAll("digitale Assistentin der Agentur Duic in Sprockhövel", "digitale Vertriebsassistentin der Agentur Duic Sprockhövel")
+    .replaceAll("digitale Vertriebsassistentin der Agentur Duic in Sprockhövel", "digitale Vertriebsassistentin der Agentur Duic Sprockhövel")
+    .replaceAll("digitale Vertriebsassistentin der Agentur Duic", "digitale Vertriebsassistentin der Agentur Duic Sprockhövel")
     .replaceAll("Gloria – die digitale", "Gloria, die digitale");
 }
 
@@ -242,8 +244,9 @@ function buildDecisionMakerPrompt(topic: Topic, contactName?: string) {
 }
 
 function buildConsentPrompt(contactName?: string) {
+  const intro = buildAgentIntroduction();
   const directAddress = contactName?.trim() ? ` ${contactName},` : "";
-  return `Guten Tag${directAddress} hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Matthias Duic an. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?`;
+  return `${intro}${directAddress} Ich rufe im Auftrag von Herrn Matthias Duic an. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?`;
 }
 
 function nextBusinessDay(date: Date, offsetDays = 0) {

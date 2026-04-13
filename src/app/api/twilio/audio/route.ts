@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
 import type { Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -26,7 +27,7 @@ function buildTopicPitch(topic: Topic) {
 }
 
 function buildAgentIntroduction() {
-  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic.";
+  return REQUIRED_GLORIA_INTRO;
 }
 
 function buildAudioText(params: URLSearchParams) {
@@ -72,7 +73,7 @@ function buildAudioText(params: URLSearchParams) {
     return "Vielen Dank für Ihre Zeit. Herr Duic meldet sich bei Bedarf noch einmal kurz bei Ihnen.";
   }
 
-  return `${buildAgentIntroduction()} Ich rufe im Auftrag von Matthias Duic an. ${buildTopicPitch(topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
+  return `${buildAgentIntroduction()} Ich rufe im Auftrag von Herrn Matthias Duic an. ${buildTopicPitch(topic)} Bevor wir starten: Darf ich dieses Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Sagen Sie bitte ja oder nein.`;
 }
 
 export async function GET(request: Request) {
