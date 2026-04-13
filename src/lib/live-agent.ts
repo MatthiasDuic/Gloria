@@ -17,6 +17,84 @@ const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
   Energie: ENERGIE_TERMINIERUNG_SCRIPT,
 };
 
+function resolveDetailScript(topic: Topic, script?: ScriptConfig): CallScript {
+  const base = DETAIL_SCRIPTS[topic];
+  if (!script) {
+    return base;
+  }
+
+  const needsQuestions = script.needsQuestions
+    ? script.needsQuestions.split("\n").map((q) => q.trim()).filter(Boolean)
+    : base.needs.questions;
+
+  const objections = script.objectionsText
+    ? Object.fromEntries(
+        script.objectionsText
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.includes(":"))
+          .map((line) => {
+            const idx = line.indexOf(":");
+            return [line.slice(0, idx).trim(), line.slice(idx + 1).trim()];
+          }),
+      )
+    : base.objections;
+
+  const dataCollectionFields = script.dataCollectionFields
+    ? script.dataCollectionFields.split("\n").map((field) => field.trim()).filter(Boolean)
+    : base.dataCollection.fields;
+
+  return {
+    ...base,
+    reception: {
+      ...base.reception,
+      intro: script.receptionIntro || base.reception.intro,
+      ifAskedWhatTopic: script.receptionIfAskedWhatTopic || base.reception.ifAskedWhatTopic,
+      ifEmailSuggested: script.receptionIfEmailSuggested || base.reception.ifEmailSuggested,
+      ifEmailInsisted: script.receptionIfEmailInsisted || base.reception.ifEmailInsisted,
+    },
+    intro: {
+      ...base.intro,
+      text: script.decisionMakerIntro || base.intro.text,
+    },
+    needs: {
+      ...base.needs,
+      questions: needsQuestions,
+      reinforcement: script.needsReinforcement || base.needs.reinforcement,
+    },
+    problem: {
+      ...base.problem,
+      text: script.problemText || base.problem.text,
+    },
+    concept: {
+      ...base.concept,
+      text: script.conceptText || base.concept.text,
+    },
+    pressure: {
+      ...base.pressure,
+      text: script.pressureText || base.pressure.text,
+    },
+    close: {
+      ...base.close,
+      main: script.closeMain || base.close.main,
+      ifNoTime: script.closeIfNoTime || base.close.ifNoTime,
+      ifAskWhatExactly: script.closeIfAskWhatExactly || base.close.ifAskWhatExactly,
+    },
+    objections,
+    dataCollection: {
+      ...base.dataCollection,
+      intro: script.dataCollectionIntro || base.dataCollection.intro,
+      fields: dataCollectionFields,
+      ifDetailsDeclined:
+        script.dataCollectionIfDetailsDeclined || base.dataCollection.ifDetailsDeclined,
+      closing: script.dataCollectionClosing || base.dataCollection.closing,
+    },
+    final: {
+      text: script.finalText || base.final.text,
+    },
+  };
+}
+
 const DEFAULT_SCRIPTS: Record<Topic, ScriptConfig> = {
   "betriebliche Krankenversicherung": {
     id: "skript-bkv-default",
@@ -84,6 +162,16 @@ export interface LiveAgentConfig {
 
 export type LiveConversationStage = "discovery" | "problem" | "benefit" | "objection" | "closing";
 
+function getAdaptiveTimeoutMs() {
+  const raw = Number(process.env.LIVE_AI_TIMEOUT_MS || 700);
+
+  if (!Number.isFinite(raw)) {
+    return 700;
+  }
+
+  return Math.min(Math.max(raw, 300), 2000);
+}
+
 function compactSentences(text: string, maxSentences = 2) {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (!cleaned) {
@@ -130,8 +218,8 @@ function normalizeReplyForCall(
 }
 
 export function buildLiveAgentConfig(topic: Topic, script?: ScriptConfig): LiveAgentConfig {
-  const detailScript = DETAIL_SCRIPTS[topic];
   const activeScript = script || DEFAULT_SCRIPTS[topic];
+  const detailScript = resolveDetailScript(topic, activeScript);
 
   const objectiveByTopic: Record<Topic, string> = {
     "betriebliche Krankenversicherung":
@@ -216,7 +304,7 @@ function generateRuleBasedReply(
 ) {
   const text = prospectMessage.toLowerCase();
   const activeScript = script || DEFAULT_SCRIPTS[topic];
-  const detailScript = DETAIL_SCRIPTS[topic];
+  const detailScript = resolveDetailScript(topic, activeScript);
   const discoveryQuestions = detailScript.needs.questions.filter(Boolean).map(cleanScriptText);
   const primaryDiscovery = cleanScriptText(discoveryQuestions[0] || activeScript.discovery);
   const secondaryDiscovery = cleanScriptText(discoveryQuestions[1] || activeScript.discovery);
@@ -341,7 +429,7 @@ export async function generateAdaptiveReply(input: {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1200);
+    const timeout = setTimeout(() => controller.abort(), getAdaptiveTimeoutMs());
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
