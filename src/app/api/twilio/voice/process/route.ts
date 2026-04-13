@@ -146,8 +146,32 @@ function fillNameTemplate(value: string, contactName?: string) {
     .replaceAll("[NAME]", fallbackName);
 }
 
-function mentionsTargetName(text: string, contactName?: string) {
+function looksLikePersonName(contactName?: string) {
   if (!contactName?.trim()) {
+    return false;
+  }
+
+  const normalized = normalizeName(contactName);
+
+  // Company-style names should not trigger direct decision-maker matching.
+  if (/(gmbh|mbh|ag|kg|ug|gbr|ohg|ek|e k|ltd|inc|llc|holding|group|gruppe|service|solutions)/.test(normalized)) {
+    return false;
+  }
+
+  const parts = normalized.split(" ").filter(Boolean);
+  if (parts.length < 2) {
+    return false;
+  }
+
+  // Typical person pattern: title + surname or first + last name.
+  const hasTitle = /(^|\s)(herr|frau)(\s|$)/.test(normalized);
+  const filtered = parts.filter((part) => !["herr", "frau"].includes(part));
+
+  return hasTitle ? filtered.length >= 1 : filtered.length >= 2;
+}
+
+function mentionsTargetName(text: string, contactName?: string) {
+  if (!contactName?.trim() || !looksLikePersonName(contactName)) {
     return false;
   }
 
@@ -458,7 +482,13 @@ function soundsLikeNotDecisionMaker(text: string) {
 }
 
 function soundsLikeDecisionMaker(text: string) {
-  return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig|am apparat|spreche selbst/.test(text);
+  return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig|spreche selbst/.test(text);
+}
+
+function soundsLikeSwitchboardHandOff(text: string) {
+  return /am apparat|ist dran|habe .* dran|einen moment .* herr|einen moment .* frau|ich stelle .* durch/.test(
+    text,
+  );
 }
 
 function isLikelyGreeting(text: string) {
@@ -882,6 +912,24 @@ export async function POST(request: Request) {
           step: "intro",
           contactRole: "decision-maker",
           lowLatency: true,
+        });
+      }
+
+      // Phrases like "Mueller am Apparat" are often still spoken by reception.
+      // Keep gatekeeper mode unless the known target contact is explicitly recognized.
+      if (soundsLikeSwitchboardHandOff(heardText) && !mentionsTargetName(heardText, context.contactName)) {
+        const prompt = buildReceptionPrompt(context.topic, context.contactName, "intro");
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: prompt,
+          audioParams: { text: prompt },
+          context,
+          consent: "no",
+          turn: context.turn + 1,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${prompt}`),
+          step: "intro",
+          contactRole: "gatekeeper",
         });
       }
 
