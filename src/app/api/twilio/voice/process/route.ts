@@ -557,6 +557,14 @@ function soundsLikeDecisionMaker(text: string) {
   return /ich bin zuständig|das bin ich|ja,? ich bin|da sprechen sie richtig|das passt|ich kümmere mich|dafür bin ich zuständig|spreche selbst/.test(text);
 }
 
+function soundsLikeSelfIdentification(text: string) {
+  return /hier spricht|mein name ist|sie sprechen mit|am apparat ist|am telefon ist/.test(text);
+}
+
+function soundsLikeCompanyReception(text: string) {
+  return /(gmbh|ag|kg|ug|holding|gruppe|zentrale|empfang|sekretariat|büro|firma)\b/.test(text);
+}
+
 function soundsLikeSwitchboardHandOff(text: string) {
   return /am apparat|ist dran|habe .* dran|einen moment .* herr|einen moment .* frau|ich stelle .* durch/.test(
     text,
@@ -565,6 +573,10 @@ function soundsLikeSwitchboardHandOff(text: string) {
 
 function isLikelyGreeting(text: string) {
   if (soundsLikeDecisionMaker(text) || soundsLikeNotDecisionMaker(text) || soundsLikeTransfer(text)) {
+    return false;
+  }
+
+  if (soundsLikeCompanyReception(text)) {
     return false;
   }
 
@@ -985,6 +997,36 @@ export async function POST(request: Request) {
           step: "intro",
           contactRole: "decision-maker",
           lowLatency: true,
+        });
+      }
+
+      // A personal self-identification without clear reception cues is a strong signal
+      // that we are already speaking to the decision-maker.
+      if (soundsLikeSelfIdentification(heardText) && !soundsLikeCompanyReception(heardText)) {
+        await safelyLogConversationEvent({
+          callSid,
+          topic: context.topic,
+          company: context.company,
+          step: "intro",
+          eventType: "transfer_connected",
+          contactRole: "decision-maker",
+          turn: context.turn,
+          text: heardText,
+        });
+
+        const consentPrompt = buildConsentPrompt(context.contactName);
+
+        return respondWithGather({
+          response,
+          baseUrl,
+          promptText: consentPrompt,
+          audioParams: { text: consentPrompt },
+          context,
+          consent: "no",
+          turn: 0,
+          transcript: trimTranscript(`${context.transcript}\nInteressent: ${heardText}\nGloria: ${consentPrompt}`),
+          step: "consent",
+          contactRole: "decision-maker",
         });
       }
 
