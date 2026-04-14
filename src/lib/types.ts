@@ -59,6 +59,13 @@ export interface ScriptConfig {
   problemBenefitConfirmation?: string;
   appointmentOffer?: string;
   appointmentConfirmation?: string;
+  // OpenAI-driven call configuration (replaces hard-coded prompts)
+  aiKeyInfo?: string;              // Basisinformationen für den Anruf
+  gatekeeperTask?: string;         // Aufgabe beim Empfang
+  gatekeeperBehavior?: string;     // Verhalten beim Empfang
+  decisionMakerTask?: string;      // Aufgabe beim Entscheider
+  decisionMakerBehavior?: string;  // Verhalten beim Entscheider
+  appointmentGoal?: string;        // Zielbeschreibung für erfolgreichen Abschluss
 }
 
 export interface CallReport {

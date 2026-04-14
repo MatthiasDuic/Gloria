@@ -316,6 +316,28 @@ export default function HomePage() {
             script.appointmentConfirmation,
             "Vielen Dank. Dann habe ich den Termin mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.",
           ),
+          // KI-Konfiguration (OpenAI-driven fields)
+          aiKeyInfo: pickText(script.aiKeyInfo, ""),
+          gatekeeperTask: pickText(
+            script.gatekeeperTask,
+            "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft.",
+          ),
+          gatekeeperBehavior: pickText(
+            script.gatekeeperBehavior,
+            "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
+          ),
+          decisionMakerTask: pickText(
+            script.decisionMakerTask,
+            "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
+          ),
+          decisionMakerBehavior: pickText(
+            script.decisionMakerBehavior,
+            "Erkläre den Mehrwert klar und präzise. Gehe auf Einwände ein. Schlage konkrete Terminoptionen vor.",
+          ),
+          appointmentGoal: pickText(
+            script.appointmentGoal,
+            "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart, inklusive Datum und Uhrzeit.",
+          ),
         };
         return acc;
       }, {}),
@@ -778,6 +800,20 @@ export default function HomePage() {
               Alle Felder entsprechen exakt dem Telefonleitfaden. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
               Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
             </p>
+
+            <p className="subtle top-gap"><strong>0) KI-Konfiguration</strong> – Diese Felder steuern das OpenAI-Gespräch. Gloria nutzt sie auf jeder Gesprächsrunde für Rollenerkennung und Antwortgenerierung.</p>
+            <label>Basisinformationen (was bieten wir an – Kontext für OpenAI)</label>
+            <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
+            <label>Aufgabe beim Empfang (was soll Gloria beim Gatekeeper erreichen)</label>
+            <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
+            <label>Verhalten beim Empfang (wie soll Gloria sich verhalten)</label>
+            <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
+            <label>Aufgabe beim Entscheider (was soll Gloria beim Entscheider erreichen)</label>
+            <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
+            <label>Verhalten beim Entscheider (Argumentationsstil, Einwandbehandlung)</label>
+            <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
+            <label>Abschlussziel / Erfolgsdefinition (wann ist der Anruf erfolgreich)</label>
+            <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
 
             <p className="subtle top-gap"><strong>1) Empfang</strong> – Gloria wartet zuerst, dann spricht sie nach der Meldung der Gegenstelle</p>
             <label>Empfangs-Intro (Gloria nach erster Meldung)</label>
