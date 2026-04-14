@@ -99,7 +99,7 @@ Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotz
 ```env
 LIVE_AI_PROVIDER=openai
 OPENAI_API_KEY=dein_openai_key
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-4o
 ```
 
 Dann kann der Endpoint `/api/live-agent/respond` spontane Aussagen des Interessenten in eine passende nächste Gloria-Antwort übersetzen. Ohne Key greift automatisch eine zielorientierte Fallback-Logik.
