@@ -51,6 +51,14 @@ export interface ScriptConfig {
   dataCollectionIfDetailsDeclined?: string;
   dataCollectionClosing?: string;
   finalText?: string;
+  // Twilio voice process hardcoded prompts → extracted to Dashboard
+  consentPrompt?: string;
+  decisionMakerGreeting?: string;
+  topicExplanation?: string;
+  preparationConsent?: string;
+  problemBenefitConfirmation?: string;
+  appointmentOffer?: string;
+  appointmentConfirmation?: string;
 }
 
 export interface CallReport {

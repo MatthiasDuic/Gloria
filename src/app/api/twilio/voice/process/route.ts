@@ -314,7 +314,12 @@ function buildDecisionMakerPrompt(topic: Topic, contactName?: string) {
   return `${buildAgentIntroduction()} ${buildTopicIntro(topic)} Sind Sie dafür die richtige Ansprechperson?`;
 }
 
-function buildConsentPrompt(contactName?: string) {
+function buildConsentPrompt(contactName?: string, script?: ScriptConfig) {
+  const customPrompt = script?.consentPrompt?.trim();
+  if (customPrompt) {
+    return fillNameTemplate(customPrompt, contactName);
+  }
+
   const intro = buildAgentIntroduction();
   const directAddress = contactName?.trim() ? ` ${contactName},` : "";
   return `${intro}${directAddress} Ich rufe im Auftrag von Herrn Matthias Duic an. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?`;
@@ -355,7 +360,12 @@ function formatAppointmentLabel(value: Date) {
   return `${datePart} um ${timePart} Uhr`;
 }
 
-function buildAppointmentOffer() {
+function buildAppointmentOffer(script?: ScriptConfig) {
+  const customOffer = script?.appointmentOffer?.trim();
+  if (customOffer) {
+    return customOffer;
+  }
+
   const [first, second] = buildAppointmentOptions();
   return `Sehr gut. Für den kurzen Austausch mit Herrn Duic kann ich Ihnen ${formatAppointmentLabel(first)} oder ${formatAppointmentLabel(second)} anbieten. Welcher Termin passt Ihnen besser?`;
 }
@@ -387,7 +397,16 @@ function resolveAppointmentSelection(speech: string) {
   return undefined;
 }
 
-function buildAppointmentConfirmation(appointmentAt: Date) {
+function buildAppointmentConfirmation(appointmentAt: Date, script?: ScriptConfig) {
+  const customConfirm = script?.appointmentConfirmation?.trim();
+  if (customConfirm) {
+    const slotLabel = formatAppointmentLabel(appointmentAt);
+    if (customConfirm.includes("{{termin}}")) {
+      return customConfirm.replace("{{termin}}", slotLabel);
+    }
+    return `${customConfirm} (${slotLabel})`;
+  }
+
   return `Vielen Dank. Dann habe ich den Termin für ${formatAppointmentLabel(appointmentAt)} mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.`;
 }
 
@@ -459,7 +478,12 @@ function readTranscriptMarker(transcript: string, key: string) {
   return match?.[1]?.trim();
 }
 
-function buildDecisionMakerGreeting(topic: Topic, contactName?: string) {
+function buildDecisionMakerGreeting(topic: Topic, contactName?: string, script?: ScriptConfig) {
+  const customGreeting = script?.decisionMakerGreeting?.trim();
+  if (customGreeting) {
+    return customGreeting;
+  }
+
   const warmIntro = contactName?.trim()
     ? `Vielen Dank, ${contactName}.`
     : "Vielen Dank.";
@@ -467,7 +491,12 @@ function buildDecisionMakerGreeting(topic: Topic, contactName?: string) {
   return `${warmIntro} Dann steigen wir direkt ein. Soll ich Ihnen kurz sagen, worum es geht?`;
 }
 
-function buildTopicExplanationPrompt(topic: Topic) {
+function buildTopicExplanationPrompt(topic: Topic, script?: ScriptConfig) {
+  const customExplanation = script?.topicExplanation?.trim();
+  if (customExplanation) {
+    return customExplanation;
+  }
+
   if (topic === "betriebliche Altersvorsorge") {
     return "Es geht um die Frage, wie sich die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiver aufstellen lässt.";
   }
@@ -491,7 +520,12 @@ function buildTopicDiscoveryPrompt(callScript: CallScript) {
   return cleanScriptText(callScript.needs.questions[0] || callScript.problem.text);
 }
 
-function buildPreparationConsentPrompt(topic: Topic) {
+function buildPreparationConsentPrompt(topic: Topic, script?: ScriptConfig) {
+  const customConsent = script?.preparationConsent?.trim();
+  if (customConsent) {
+    return customConsent;
+  }
+
   if (topic === "private Krankenversicherung") {
     return "Um den Termin perfekt vorzubereiten, benötige ich noch ein paar Gesundheitsangaben. Ist das für Sie in Ordnung?";
   }
@@ -525,7 +559,12 @@ function soundsLikeNo(text: string) {
   );
 }
 
-function buildProblemBenefitConfirmation(topic: Topic) {
+function buildProblemBenefitConfirmation(topic: Topic, script?: ScriptConfig) {
+  const customConfirmation = script?.problemBenefitConfirmation?.trim();
+  if (customConfirmation) {
+    return customConfirmation;
+  }
+
   if (topic === "private Krankenversicherung") {
     return "Verstehe, das geht vielen Unternehmern so. Jetzt stellen Sie sich einmal vor: Sie und Herr Duic sitzen zusammen und Herr Duic zeigt Ihnen schwarz auf weiß, wie sich die Beiträge nach heutigem Stand entwickeln und wie Sie von unserem Konzept profitieren. Wäre das für Sie interessant?";
   }
@@ -920,7 +959,7 @@ export async function POST(request: Request) {
           text: heardText,
         });
 
-        const consentPrompt = buildConsentPrompt(context.contactName);
+        const consentPrompt = buildConsentPrompt(context.contactName, activeScript);
 
         return respondWithGather({
           response,
@@ -1014,7 +1053,7 @@ export async function POST(request: Request) {
           text: heardText,
         });
 
-        const consentPrompt = buildConsentPrompt(context.contactName);
+        const consentPrompt = buildConsentPrompt(context.contactName, activeScript);
 
         return respondWithGather({
           response,
@@ -1089,7 +1128,7 @@ export async function POST(request: Request) {
           text: heardText,
         });
 
-        const consentPrompt = buildConsentPrompt(context.contactName);
+        const consentPrompt = buildConsentPrompt(context.contactName, activeScript);
 
         return respondWithGather({
           response,
@@ -1171,7 +1210,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const consentPrompt = buildConsentPrompt(context.contactName);
+    const consentPrompt = buildConsentPrompt(context.contactName, activeScript);
 
     return respondWithGather({
       response,
@@ -1234,7 +1273,7 @@ export async function POST(request: Request) {
     }
 
     const consentValue = consent ? "yes" : "no";
-    const appointmentText = `${consent ? "Vielen Dank." : "Natürlich, dann ohne Aufzeichnung."} ${buildDecisionMakerGreeting(context.topic, context.contactName)}`;
+    const appointmentText = `${consent ? "Vielen Dank." : "Natürlich, dann ohne Aufzeichnung."} ${buildDecisionMakerGreeting(context.topic, context.contactName, activeScript)}`;
 
     if (getTwilioConversationMode() === "media-stream") {
       const mediaStreamUrl = getTwilioMediaStreamUrl();
@@ -1282,7 +1321,7 @@ export async function POST(request: Request) {
     const prepMode = readTranscriptMarker(context.transcript, "PREP_MODE");
 
     if (context.turn === 0) {
-      const prompt = buildPreparationConsentPrompt(context.topic);
+      const prompt = buildPreparationConsentPrompt(context.topic, activeScript);
 
       if (!heardText) {
         return respondWithGather({
@@ -1502,7 +1541,7 @@ export async function POST(request: Request) {
     }
 
     if (!heardText) {
-      const prompt = buildAppointmentOffer();
+      const prompt = buildAppointmentOffer(activeScript);
       return respondWithGather({
         response,
         baseUrl,
@@ -1570,7 +1609,7 @@ export async function POST(request: Request) {
     const selectedAppointment = resolveAppointmentSelection(heardText);
 
     if (!selectedAppointment) {
-      const prompt = `Danke. Damit ich den Termin konkret eintragen kann: ${buildAppointmentOffer()}`;
+      const prompt = `Danke. Damit ich den Termin konkret eintragen kann: ${buildAppointmentOffer(activeScript)}`;
       return respondWithGather({
         response,
         baseUrl,
@@ -1585,7 +1624,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const confirmationText = buildAppointmentConfirmation(selectedAppointment);
+    const confirmationText = buildAppointmentConfirmation(selectedAppointment, activeScript);
     await safelyStoreReport({
       callSid,
       leadId: context.leadId,
@@ -1668,7 +1707,7 @@ export async function POST(request: Request) {
       context.turn === 0 &&
       /worum geht|was genau|gern|gerne|ja|ja bitte|okay|ok|ich hore|ich höre|sagen sie|erzählen sie|um was geht/.test(heardText)
     ) {
-      const explanationPrompt = `${buildTopicExplanationPrompt(context.topic)} ${buildTopicDiscoveryPrompt(callScript)}`;
+      const explanationPrompt = `${buildTopicExplanationPrompt(context.topic, activeScript)} ${buildTopicDiscoveryPrompt(callScript)}`;
 
       return respondWithGather({
         response,
@@ -1684,7 +1723,7 @@ export async function POST(request: Request) {
 
     if (problemConfirmPending) {
       if (soundsLikeYes(heardText)) {
-        const appointmentPrompt = buildPreparationConsentPrompt(context.topic);
+        const appointmentPrompt = buildPreparationConsentPrompt(context.topic, activeScript);
         return respondWithGather({
           response,
           baseUrl,
@@ -1757,7 +1796,7 @@ export async function POST(request: Request) {
               : "discovery";
 
     if (stage === "problem") {
-      const confirmationPrompt = buildProblemBenefitConfirmation(context.topic);
+      const confirmationPrompt = buildProblemBenefitConfirmation(context.topic, activeScript);
 
       return respondWithGather({
         response,
@@ -1794,7 +1833,7 @@ export async function POST(request: Request) {
 
     const detectedOutcome = classifyOutcome(heardText, stage);
     if (detectedOutcome === "Termin") {
-      const appointmentPrompt = buildPreparationConsentPrompt(context.topic);
+      const appointmentPrompt = buildPreparationConsentPrompt(context.topic, activeScript);
       return respondWithGather({
         response,
         baseUrl,

@@ -124,6 +124,45 @@ function pickText(value: string | undefined, fallback?: string) {
   return fallback ?? "";
 }
 
+function defaultTopicExplanation(topic: Topic) {
+  if (topic === "betriebliche Altersvorsorge") {
+    return "Es geht um die Frage, wie sich die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiver aufstellen lässt.";
+  }
+  if (topic === "gewerbliche Versicherungen") {
+    return "Es geht um einen kurzen Abgleich, ob Ihre gewerblichen Versicherungen in Preis und Leistung noch sauber zu Ihrem aktuellen Risiko passen.";
+  }
+  if (topic === "private Krankenversicherung") {
+    return "Es geht um ein Konzept, mit dem sich Krankenversicherungsbeiträge im Alter deutlich planbarer und stabiler aufstellen lassen.";
+  }
+  if (topic === "Energie") {
+    return "Es geht um einen kurzen gewerblichen Strom- und Gasvergleich, um mögliche Einsparpotenziale und bessere Konditionen sichtbar zu machen.";
+  }
+  return "Es geht darum, wie Unternehmen mit der betrieblichen Krankenversicherung Mitarbeiterbindung und Arbeitgeberattraktivität spürbar stärken können.";
+}
+
+function defaultPreparationConsent(topic: Topic) {
+  if (topic === "private Krankenversicherung") {
+    return "Um den Termin perfekt vorzubereiten, benötige ich noch ein paar Gesundheitsangaben. Ist das für Sie in Ordnung?";
+  }
+  return "Um den Termin perfekt vorzubereiten, benötige ich noch zwei kurze Angaben. Ist das für Sie in Ordnung?";
+}
+
+function defaultProblemBenefitConfirmation(topic: Topic) {
+  if (topic === "private Krankenversicherung") {
+    return "Verstehe, das geht vielen Unternehmern so. Jetzt stellen Sie sich einmal vor: Sie und Herr Duic sitzen zusammen und Herr Duic zeigt Ihnen schwarz auf weiß, wie sich die Beiträge nach heutigem Stand entwickeln und wie Sie von unserem Konzept profitieren. Wäre das für Sie interessant?";
+  }
+  if (topic === "betriebliche Krankenversicherung") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich kurz vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie Sie Mitarbeiterbindung und Gesundheitsleistungen mit einem klaren, kalkulierbaren Modell verbessern können. Wäre das für Sie interessant?";
+  }
+  if (topic === "betriebliche Altersvorsorge") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie sich Ihre bAV für Mitarbeitende verständlicher und attraktiver aufstellen lässt. Wäre das für Sie interessant?";
+  }
+  if (topic === "gewerbliche Versicherungen") {
+    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wo bei Ihren Policen Leistung, Preis und mögliche Lücken wirklich stehen. Wäre das für Sie interessant?";
+  }
+  return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, welche Einsparungen und Konditionen aktuell für Ihr Unternehmen realistisch sind. Wäre das für Sie interessant?";
+}
+
 type ObjectionEntry = {
   objection: string;
   reply: string;
@@ -255,6 +294,28 @@ export default function HomePage() {
             formatBlock(detail?.dataCollection.closing),
           ),
           finalText: pickText(script.finalText, formatBlock(detail?.final.text)),
+          consentPrompt: pickText(
+            script.consentPrompt,
+            "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?",
+          ),
+          decisionMakerGreeting: pickText(
+            script.decisionMakerGreeting,
+            "Vielen Dank. Dann steigen wir direkt ein. Soll ich Ihnen kurz sagen, worum es geht?",
+          ),
+          topicExplanation: pickText(script.topicExplanation, defaultTopicExplanation(script.topic)),
+          preparationConsent: pickText(script.preparationConsent, defaultPreparationConsent(script.topic)),
+          problemBenefitConfirmation: pickText(
+            script.problemBenefitConfirmation,
+            defaultProblemBenefitConfirmation(script.topic),
+          ),
+          appointmentOffer: pickText(
+            script.appointmentOffer,
+            "Sehr gut. Für den kurzen Austausch mit Herrn Duic kann ich Ihnen zwei Termine anbieten. Welcher passt Ihnen besser?",
+          ),
+          appointmentConfirmation: pickText(
+            script.appointmentConfirmation,
+            "Vielen Dank. Dann habe ich den Termin mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.",
+          ),
         };
         return acc;
       }, {}),
@@ -733,6 +794,22 @@ export default function HomePage() {
             <p className="subtle top-gap"><strong>2) Einstieg Entscheider</strong> – Gloria wartet zuerst, stellt sich dann nach erster Meldung vor</p>
             <label>Einstieg Entscheider (Gloria nach erster Meldung)</label>
             <textarea value={activeDraft.decisionMakerIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerIntro: event.target.value } }))} />
+
+            <p className="subtle top-gap"><strong>2b) Prozessprompts (Twilio-Flow)</strong> – diese Felder steuern die festen Übergangsfragen</p>
+            <label>Einwilligungsfrage zur Aufzeichnung</label>
+            <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
+            <label>Überleitung nach Einwilligung</label>
+            <textarea value={activeDraft.decisionMakerGreeting ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerGreeting: event.target.value } }))} />
+            <label>Thematische Erklärung ("Worum geht es?")</label>
+            <textarea value={activeDraft.topicExplanation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], topicExplanation: event.target.value } }))} />
+            <label>Einleitung Vorqualifikation vor Termin</label>
+            <textarea value={activeDraft.preparationConsent ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], preparationConsent: event.target.value } }))} />
+            <label>Nutzen-Bestätigung (Ja/Nein-Check)</label>
+            <textarea value={activeDraft.problemBenefitConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBenefitConfirmation: event.target.value } }))} />
+            <label>Terminvorschlag (feste Slots)</label>
+            <textarea value={activeDraft.appointmentOffer ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentOffer: event.target.value } }))} />
+            <label>Terminbestätigung (optional mit Platzhalter {'{{termin}}'})</label>
+            <textarea value={activeDraft.appointmentConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
 
             <p className="subtle top-gap"><strong>3) Bedarfsermittlung</strong> – Gloria fragt, Interessent antwortet</p>
             <label>Bedarfsfragen (eine Frage pro Zeile)</label>
