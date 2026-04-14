@@ -1,14 +1,6 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  BAV_TERMINIERUNG_SCRIPT,
-  BKV_TERMINIERUNG_SCRIPT,
-  ENERGIE_TERMINIERUNG_SCRIPT,
-  GEWERBE_TERMINIERUNG_SCRIPT,
-  PKV_TERMINIERUNG_SCRIPT,
-} from "@/lib/call-scripts";
-import type { CallScript } from "@/lib/call-scripts";
 import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
@@ -36,14 +28,6 @@ const EMPTY_DATA: DashboardData = {
 const EMPTY_LEARNING: LearningResponse = {
   insights: [],
   globalSummary: [],
-};
-
-const DETAIL_SCRIPTS: Record<Topic, CallScript> = {
-  "betriebliche Krankenversicherung": BKV_TERMINIERUNG_SCRIPT,
-  "betriebliche Altersvorsorge": BAV_TERMINIERUNG_SCRIPT,
-  "gewerbliche Versicherungen": GEWERBE_TERMINIERUNG_SCRIPT,
-  "private Krankenversicherung": PKV_TERMINIERUNG_SCRIPT,
-  Energie: ENERGIE_TERMINIERUNG_SCRIPT,
 };
 
 function formatDate(value?: string) {
@@ -108,93 +92,12 @@ function detectLostStage(summary: string): string {
   return "Gesprächseinstieg – Entscheider nicht oder kaum erreicht";
 }
 
-function formatBlock(text?: string) {
-  if (!text) {
-    return "-";
-  }
-
-  return text.replace(/\s+/g, " ").trim();
-}
-
 function pickText(value: string | undefined, fallback?: string) {
   if (typeof value === "string" && value.trim().length > 0) {
     return value;
   }
 
   return fallback ?? "";
-}
-
-function defaultTopicExplanation(topic: Topic) {
-  if (topic === "betriebliche Altersvorsorge") {
-    return "Es geht um die Frage, wie sich die betriebliche Altersvorsorge für Mitarbeitende verständlich und attraktiver aufstellen lässt.";
-  }
-  if (topic === "gewerbliche Versicherungen") {
-    return "Es geht um einen kurzen Abgleich, ob Ihre gewerblichen Versicherungen in Preis und Leistung noch sauber zu Ihrem aktuellen Risiko passen.";
-  }
-  if (topic === "private Krankenversicherung") {
-    return "Es geht um ein Konzept, mit dem sich Krankenversicherungsbeiträge im Alter deutlich planbarer und stabiler aufstellen lassen.";
-  }
-  if (topic === "Energie") {
-    return "Es geht um einen kurzen gewerblichen Strom- und Gasvergleich, um mögliche Einsparpotenziale und bessere Konditionen sichtbar zu machen.";
-  }
-  return "Es geht darum, wie Unternehmen mit der betrieblichen Krankenversicherung Mitarbeiterbindung und Arbeitgeberattraktivität spürbar stärken können.";
-}
-
-function defaultPreparationConsent(topic: Topic) {
-  if (topic === "private Krankenversicherung") {
-    return "Um den Termin perfekt vorzubereiten, benötige ich noch ein paar Gesundheitsangaben. Ist das für Sie in Ordnung?";
-  }
-  return "Um den Termin perfekt vorzubereiten, benötige ich noch zwei kurze Angaben. Ist das für Sie in Ordnung?";
-}
-
-function defaultProblemBenefitConfirmation(topic: Topic) {
-  if (topic === "private Krankenversicherung") {
-    return "Verstehe, das geht vielen Unternehmern so. Jetzt stellen Sie sich einmal vor: Sie und Herr Duic sitzen zusammen und Herr Duic zeigt Ihnen schwarz auf weiß, wie sich die Beiträge nach heutigem Stand entwickeln und wie Sie von unserem Konzept profitieren. Wäre das für Sie interessant?";
-  }
-  if (topic === "betriebliche Krankenversicherung") {
-    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich kurz vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie Sie Mitarbeiterbindung und Gesundheitsleistungen mit einem klaren, kalkulierbaren Modell verbessern können. Wäre das für Sie interessant?";
-  }
-  if (topic === "betriebliche Altersvorsorge") {
-    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wie sich Ihre bAV für Mitarbeitende verständlicher und attraktiver aufstellen lässt. Wäre das für Sie interessant?";
-  }
-  if (topic === "gewerbliche Versicherungen") {
-    return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, wo bei Ihren Policen Leistung, Preis und mögliche Lücken wirklich stehen. Wäre das für Sie interessant?";
-  }
-  return "Verstehe, das geht vielen Unternehmern so. Stellen Sie sich vor, Herr Duic zeigt Ihnen schwarz auf weiß, welche Einsparungen und Konditionen aktuell für Ihr Unternehmen realistisch sind. Wäre das für Sie interessant?";
-}
-
-type ObjectionEntry = {
-  objection: string;
-  reply: string;
-};
-
-function parseObjections(text?: string): ObjectionEntry[] {
-  if (!text || text.trim().length === 0) {
-    return [];
-  }
-
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const idx = line.indexOf(":");
-      if (idx === -1) {
-        return { objection: line, reply: "" };
-      }
-
-      return {
-        objection: line.slice(0, idx).trim(),
-        reply: line.slice(idx + 1).trim(),
-      };
-    });
-}
-
-function serializeObjections(entries: ObjectionEntry[]) {
-  return entries
-    .map((entry) => `${entry.objection.trim()}: ${entry.reply.trim()}`)
-    .filter((line) => line !== ":")
-    .join("\n");
 }
 
 export default function HomePage() {
@@ -217,10 +120,6 @@ export default function HomePage() {
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const activeDraft = draftScripts[detailTopic];
-  const objectionEntries = useMemo(
-    () => parseObjections(activeDraft?.objectionsText),
-    [activeDraft?.objectionsText],
-  );
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
 
   async function loadDashboard() {
@@ -236,86 +135,8 @@ export default function HomePage() {
     setLearning(learningPayload);
     setDraftScripts(
       payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
-        const detail = DETAIL_SCRIPTS[script.topic as Topic];
         acc[script.topic] = {
           ...script,
-          receptionIntro: pickText(script.receptionIntro, formatBlock(detail?.reception.intro)),
-          receptionIfAskedWhatTopic: pickText(
-            script.receptionIfAskedWhatTopic,
-            formatBlock(detail?.reception.ifAskedWhatTopic),
-          ),
-          receptionIfBlocked: pickText(
-            script.receptionIfBlocked,
-            formatBlock(detail?.reception.alternativeShort),
-          ),
-          receptionIfEmailSuggested: pickText(
-            script.receptionIfEmailSuggested,
-            formatBlock(detail?.reception.ifEmailSuggested),
-          ),
-          receptionIfEmailInsisted: pickText(
-            script.receptionIfEmailInsisted,
-            formatBlock(detail?.reception.ifEmailInsisted),
-          ),
-          decisionMakerIntro: pickText(script.decisionMakerIntro, formatBlock(detail?.intro.text)),
-          needsQuestions: pickText(
-            script.needsQuestions,
-            detail?.needs.questions.map((q) => formatBlock(q)).join("\n") ?? "",
-          ),
-          needsReinforcement: pickText(script.needsReinforcement, formatBlock(detail?.needs.reinforcement)),
-          problemText: pickText(script.problemText, formatBlock(detail?.problem.text)),
-          conceptText: pickText(script.conceptText, formatBlock(detail?.concept.text)),
-          pressureText: pickText(script.pressureText, formatBlock(detail?.pressure.text)),
-          closeMain: pickText(script.closeMain, formatBlock(detail?.close.main)),
-          closeIfNoTime: pickText(script.closeIfNoTime, formatBlock(detail?.close.ifNoTime)),
-          closeIfAskWhatExactly: pickText(
-            script.closeIfAskWhatExactly,
-            formatBlock(detail?.close.ifAskWhatExactly),
-          ),
-          objectionsText: pickText(
-            script.objectionsText,
-            Object.entries(detail?.objections ?? {})
-              .map(([k, v]) => `${k}: ${formatBlock(v)}`)
-              .join("\n"),
-          ),
-          dataCollectionIntro: pickText(
-            script.dataCollectionIntro,
-            formatBlock(detail?.dataCollection.intro),
-          ),
-          dataCollectionFields: pickText(
-            script.dataCollectionFields,
-            detail?.dataCollection.fields.join("\n") ?? "",
-          ),
-          dataCollectionIfDetailsDeclined: pickText(
-            script.dataCollectionIfDetailsDeclined,
-            formatBlock(detail?.dataCollection.ifDetailsDeclined),
-          ),
-          dataCollectionClosing: pickText(
-            script.dataCollectionClosing,
-            formatBlock(detail?.dataCollection.closing),
-          ),
-          finalText: pickText(script.finalText, formatBlock(detail?.final.text)),
-          consentPrompt: pickText(
-            script.consentPrompt,
-            "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Darf ich das Gespräch kurz zu Schulungs- und Qualitätszwecken aufzeichnen?",
-          ),
-          decisionMakerGreeting: pickText(
-            script.decisionMakerGreeting,
-            "Vielen Dank. Dann steigen wir direkt ein. Soll ich Ihnen kurz sagen, worum es geht?",
-          ),
-          topicExplanation: pickText(script.topicExplanation, defaultTopicExplanation(script.topic)),
-          preparationConsent: pickText(script.preparationConsent, defaultPreparationConsent(script.topic)),
-          problemBenefitConfirmation: pickText(
-            script.problemBenefitConfirmation,
-            defaultProblemBenefitConfirmation(script.topic),
-          ),
-          appointmentOffer: pickText(
-            script.appointmentOffer,
-            "Sehr gut. Für den kurzen Austausch mit Herrn Duic kann ich Ihnen zwei Termine anbieten. Welcher passt Ihnen besser?",
-          ),
-          appointmentConfirmation: pickText(
-            script.appointmentConfirmation,
-            "Vielen Dank. Dann habe ich den Termin mit Herrn Duic notiert. Die Bestätigung erhalten Sie im Anschluss. Vielen Dank für das nette Gespräch, ich wünsche Ihnen einen schönen Tag. Auf Wiederhören.",
-          ),
           // KI-Konfiguration (OpenAI-driven fields)
           aiKeyInfo: pickText(script.aiKeyInfo, ""),
           gatekeeperTask: pickText(
@@ -351,65 +172,6 @@ export default function HomePage() {
   useEffect(() => {
     void loadDashboard();
   }, []);
-
-  function updateObjectionEntry(index: number, patch: Partial<ObjectionEntry>) {
-    setDraftScripts((current) => {
-      const topicDraft = current[detailTopic];
-      if (!topicDraft) {
-        return current;
-      }
-
-      const nextEntries = parseObjections(topicDraft.objectionsText);
-      const existing = nextEntries[index] ?? { objection: "", reply: "" };
-      nextEntries[index] = { ...existing, ...patch };
-
-      return {
-        ...current,
-        [detailTopic]: {
-          ...topicDraft,
-          objectionsText: serializeObjections(nextEntries),
-        },
-      };
-    });
-  }
-
-  function addObjectionEntry() {
-    setDraftScripts((current) => {
-      const topicDraft = current[detailTopic];
-      if (!topicDraft) {
-        return current;
-      }
-
-      const nextEntries = [...parseObjections(topicDraft.objectionsText), { objection: "", reply: "" }];
-
-      return {
-        ...current,
-        [detailTopic]: {
-          ...topicDraft,
-          objectionsText: serializeObjections(nextEntries),
-        },
-      };
-    });
-  }
-
-  function removeObjectionEntry(index: number) {
-    setDraftScripts((current) => {
-      const topicDraft = current[detailTopic];
-      if (!topicDraft) {
-        return current;
-      }
-
-      const nextEntries = parseObjections(topicDraft.objectionsText).filter((_, i) => i !== index);
-
-      return {
-        ...current,
-        [detailTopic]: {
-          ...topicDraft,
-          objectionsText: serializeObjections(nextEntries),
-        },
-      };
-    });
-  }
 
   function downloadSampleCsv() {
     const blob = new Blob([SAMPLE_CSV], { type: "text/csv;charset=utf-8;" });
@@ -797,7 +559,7 @@ export default function HomePage() {
         {activeDraft ? (
           <>
             <p className="subtle">
-              Alle Felder entsprechen exakt dem Telefonleitfaden. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
+              Diese Konfiguration steuert den OpenAI-Call-Flow direkt. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
               Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
             </p>
 
@@ -815,111 +577,10 @@ export default function HomePage() {
             <label>Abschlussziel / Erfolgsdefinition (wann ist der Anruf erfolgreich)</label>
             <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
 
-            <p className="subtle top-gap"><strong>1) Empfang</strong> – Gloria wartet zuerst, dann spricht sie nach der Meldung der Gegenstelle</p>
-            <label>Empfangs-Intro (Gloria nach erster Meldung)</label>
-            <textarea value={activeDraft.receptionIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIntro: event.target.value } }))} />
-            <label>Wenn Empfang fragt "Worum geht es?"</label>
-            <textarea value={activeDraft.receptionIfAskedWhatTopic ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfAskedWhatTopic: event.target.value } }))} />
-            <label>Wenn Empfang abblockt und nicht durchstellen will</label>
-            <textarea value={activeDraft.receptionIfBlocked ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfBlocked: event.target.value } }))} />
-            <label>Wenn Empfang E-Mail vorschlägt</label>
-            <textarea value={activeDraft.receptionIfEmailSuggested ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfEmailSuggested: event.target.value } }))} />
-            <label>Wenn Empfang auf E-Mail besteht</label>
-            <textarea value={activeDraft.receptionIfEmailInsisted ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionIfEmailInsisted: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>2) Einstieg Entscheider</strong> – Gloria wartet zuerst, stellt sich dann nach erster Meldung vor</p>
-            <label>Einstieg Entscheider (Gloria nach erster Meldung)</label>
-            <textarea value={activeDraft.decisionMakerIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerIntro: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>2b) Prozessprompts (Twilio-Flow)</strong> – diese Felder steuern die festen Übergangsfragen</p>
-            <label>Einwilligungsfrage zur Aufzeichnung</label>
-            <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
-            <label>Überleitung nach Einwilligung</label>
-            <textarea value={activeDraft.decisionMakerGreeting ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerGreeting: event.target.value } }))} />
-            <label>Thematische Erklärung ("Worum geht es?")</label>
-            <textarea value={activeDraft.topicExplanation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], topicExplanation: event.target.value } }))} />
-            <label>Einleitung Vorqualifikation vor Termin</label>
-            <textarea value={activeDraft.preparationConsent ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], preparationConsent: event.target.value } }))} />
-            <label>Nutzen-Bestätigung (Ja/Nein-Check)</label>
-            <textarea value={activeDraft.problemBenefitConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBenefitConfirmation: event.target.value } }))} />
-            <label>Terminvorschlag (feste Slots)</label>
-            <textarea value={activeDraft.appointmentOffer ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentOffer: event.target.value } }))} />
-            <label>Terminbestätigung (optional mit Platzhalter {'{{termin}}'})</label>
-            <textarea value={activeDraft.appointmentConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>3) Bedarfsermittlung</strong> – Gloria fragt, Interessent antwortet</p>
-            <label>Bedarfsfragen (eine Frage pro Zeile)</label>
-            <textarea value={activeDraft.needsQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], needsQuestions: event.target.value } }))} />
-            <label>Verstärkung nach Antwort</label>
-            <textarea value={activeDraft.needsReinforcement ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], needsReinforcement: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>4) Problem und Lösung</strong> – Gloria spricht, wartet auf Reaktion</p>
-            <label>Problemfrage</label>
-            <textarea value={activeDraft.problemText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemText: event.target.value } }))} />
-            <label>Lösungs-Pitch</label>
-            <textarea value={activeDraft.conceptText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptText: event.target.value } }))} />
-            <label>Druck rausnehmen</label>
-            <textarea value={activeDraft.pressureText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pressureText: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>5) Einwandbehandlung</strong> – jeder Einwand bekommt ein eigenes Feld</p>
-            {objectionEntries.map((entry, index) => (
-              <div key={`${detailTopic}-objection-${index}`} className="field-grid" style={{ marginBottom: 10 }}>
-                <div>
-                  <label>Einwand {index + 1}</label>
-                  <input
-                    value={entry.objection}
-                    onChange={(event) => updateObjectionEntry(index, { objection: event.target.value })}
-                    placeholder="z. B. kein Interesse"
-                  />
-                </div>
-                <div>
-                  <label>Antwort von Gloria</label>
-                  <textarea
-                    value={entry.reply}
-                    onChange={(event) => updateObjectionEntry(index, { reply: event.target.value })}
-                    placeholder="Antwort auf diesen Einwand"
-                  />
-                </div>
-                <div className="row" style={{ alignItems: "end" }}>
-                  <button className="btn danger" type="button" onClick={() => removeObjectionEntry(index)}>
-                    Einwand entfernen
-                  </button>
-                </div>
-              </div>
-            ))}
-            <div className="row">
-              <button className="btn ghost" type="button" onClick={addObjectionEntry}>Einwand hinzufügen</button>
-            </div>
-
-            <p className="subtle top-gap"><strong>6) Terminierung</strong> – Gloria fragt, Interessent bestätigt oder schlägt Alternative vor</p>
-            <label>Standard-Terminfrage</label>
-            <textarea value={activeDraft.closeMain ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeMain: event.target.value } }))} />
-            <label>Wenn keine Zeit</label>
-            <textarea value={activeDraft.closeIfNoTime ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeIfNoTime: event.target.value } }))} />
-            <label>Wenn "Worum genau?"</label>
-            <textarea value={activeDraft.closeIfAskWhatExactly ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], closeIfAskWhatExactly: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>7) Vorqualifikation und Abschluss</strong> – Gloria fragt, Interessent antwortet</p>
-            <label>Datenerfassungs-Einleitung</label>
-            <textarea value={activeDraft.dataCollectionIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionIntro: event.target.value } }))} />
-            <label>Abzufragende Felder (ein Feld pro Zeile)</label>
-            <textarea value={activeDraft.dataCollectionFields ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionFields: event.target.value } }))} />
-            <label>Wenn Datenabgabe abgelehnt wird</label>
-            <textarea value={activeDraft.dataCollectionIfDetailsDeclined ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionIfDetailsDeclined: event.target.value } }))} />
-            <label>Abschluss-Text</label>
-            <textarea value={activeDraft.dataCollectionClosing ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], dataCollectionClosing: event.target.value } }))} />
-            <label>Finale Verabschiedung</label>
-            <textarea value={activeDraft.finalText ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], finalText: event.target.value } }))} />
-
-            <p className="subtle top-gap"><strong>KI-System-Felder</strong> – werden für den live-adaptiven OpenAI-Prompt verwendet</p>
-            <label>Gesprächseinstieg (KI-Prompt)</label>
-            <textarea value={activeDraft.opener} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
-            <label>Bedarfsermittlung (KI-Prompt)</label>
-            <textarea value={activeDraft.discovery} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
-            <label>Einwandbehandlung (KI-Prompt)</label>
-            <textarea value={activeDraft.objectionHandling} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
-            <label>Terminabschluss (KI-Prompt)</label>
-            <textarea value={activeDraft.close} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
+            <p className="subtle top-gap">
+              Hinweis: Die bisherigen Leitfaden-Felder sind in der Admin-UI ausgeblendet.
+              Für den neuen OpenAI-Twilio-Flow werden nur die KI-Konfigurationsfelder oben verwendet.
+            </p>
 
             <div className="row top-gap">
               <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
