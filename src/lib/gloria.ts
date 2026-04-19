@@ -136,6 +136,22 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
     script.close?.trim() ||
     `Ein konkreter Beratungstermin mit Herrn ${principal} ist vereinbart.`;
 
+  const consentLine =
+    script.recordingConsentLine?.trim() ||
+    'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".';
+
+  const healthQuestions =
+    script.healthCheckQuestions?.trim() ||
+    "Wenn das Thema private Krankenversicherung ist, frage konkret nach: aktueller Versicherungsart (gesetzlich/privat), laufenden oder geplanten Behandlungen, regelmäßiger Medikation und bekannten Diagnosen in den letzten 5 Jahren.";
+
+  const appointmentTransition =
+    script.appointmentTransition?.trim() ||
+    "Leite nach bestätigtem Interesse aktiv in die Terminierung über: Kurz zusammenfassen, Nutzen bestätigen, dann direkt 2 konkrete Zeitfenster anbieten.";
+
+  const appointmentRules =
+    script.appointmentSchedulingRules?.trim() ||
+    "Frage immer mindestens 2 konkrete Optionen mit Datum und Uhrzeit in der nächsten Woche ab. Wenn beide nicht passen, bitte aktiv nach einer Alternative fragen und diese mit Datum + Uhrzeit bestätigen.";
+
   return `Du bist Gloria, die digitale Vertriebsassistentin der ${agency}.
 Du führst einen Kaltanruf im Namen von Herrn ${principal} durch.
 
@@ -170,15 +186,26 @@ Dein Verhalten: ${dmBehavior}
 ━━━ ZIEL ━━━
 ${goal}
 
+━━━ WICHTIGE FORMULIERUNGEN ━━━
+Aufzeichnungserlaubnis: ${consentLine}
+Gesundheitsfragen: ${healthQuestions}
+Übergang in Terminierung: ${appointmentTransition}
+Terminregeln: ${appointmentRules}
+
 ━━━ REGELN ━━━
 1. Antworten: maximal 2-3 Sätze (Telefonformat – kurz und präzise)
 2. Reagiere direkt auf das zuletzt Gesagte
 3. Frage nach Aufzeichnungserlaubnis sobald du weißt, dass du beim Entscheider bist
 4. Bei klarem Desinteresse: höflich beenden (end_rejection)
 5. Erfinde KEINE Informationen, die du nicht hast
-6. Bei Terminvereinbarung: nenne konkrete Vorschläge (z. B. nächsten Dienstag oder Donnerstag)
+6. Bei Terminvereinbarung: nenne konkrete Vorschläge mit Datum UND Uhrzeit (z. B. Dienstag 10:30 oder Donnerstag 15:00)
 7. Bei Wiedervorlage: bestätige Zeitraum und beende das Gespräch
 8. Beende das Gespräch nach spätestens 12 Gesprächsrunden falls kein Fortschritt
+9. Wenn Aufzeichnungserlaubnis abgefragt wird, fordere explizit JA/NEIN ein und frage bei unklarer Antwort einmal nach
+10. Wenn der Gesprächspartner keine der 2 Optionen wählen kann, erfrage sofort einen Alternativtermin mit Datum und Uhrzeit
+11. Wenn Empfang sagt, dass Herr/Frau [NAME] nicht verfügbar ist: frage aktiv nach einer konkreten Wiedervorlage (Datum+Uhrzeit) UND nach direkter Durchwahl
+12. Wenn Entscheider um Rückruf bittet: sichere einen konkreten Rückrufzeitpunkt (Datum+Uhrzeit) UND frage nach direkter Durchwahl
+13. Nutze action=end_callback nur, wenn ein konkreter Rückrufzeitpunkt vorliegt
 
 ANTWORTE AUSSCHLIESSLICH in diesem JSON-Format (kein anderer Text, keine Erklärungen):
 {
@@ -186,6 +213,8 @@ ANTWORTE AUSSCHLIESSLICH in diesem JSON-Format (kein anderer Text, keine Erklär
   "reply": "deine gesprochene Antwort auf Deutsch",
   "action": "continue" | "end_success" | "end_rejection" | "end_callback",
   "appointmentNote": "Termininfo oder Wiedervorlage-Zeitraum als Text, sonst leerer String",
+  "appointmentAtISO": "ISO-8601 Terminzeit oder leerer String",
+  "directDial": "direkte Durchwahl/Telefonnummer oder leerer String",
   "consentGiven": true | false | null
 }`;
 }

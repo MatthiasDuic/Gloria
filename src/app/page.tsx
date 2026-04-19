@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
@@ -41,6 +41,22 @@ function formatDate(value?: string) {
   }).format(new Date(value));
 }
 
+function toDateKey(value: Date) {
+  const y = value.getFullYear();
+  const m = `${value.getMonth() + 1}`.padStart(2, "0");
+  const d = `${value.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toDateTimeLocalInput(date: Date) {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  const h = `${date.getHours()}`.padStart(2, "0");
+  const min = `${date.getMinutes()}`.padStart(2, "0");
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
 function speakText(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     return;
@@ -65,10 +81,23 @@ function buildConversationLines(summary: string) {
   return summary
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
+    .filter(
+      (l) =>
+        l.startsWith("Gloria:") ||
+        l.startsWith("Interessent:") ||
+        l.startsWith("Angerufener:") ||
+        l.startsWith("Phase:"),
+    )
     .map((l) => {
+      if (l.startsWith("Phase:")) {
+        return { speaker: "Phase", text: l.replace(/^Phase:/, "").trim() };
+      }
+
       const isGloria = l.startsWith("Gloria:");
-      return { speaker: isGloria ? "Gloria" : "Interessent", text: l.replace(/^Gloria:|^Interessent:/, "").trim() };
+      return {
+        speaker: isGloria ? "Gloria" : "Interessent",
+        text: l.replace(/^Gloria:|^Interessent:|^Angerufener:/, "").trim(),
+      };
     });
 }
 
@@ -103,6 +132,33 @@ function pickText(value: string | undefined, fallback?: string) {
 export default function HomePage() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  // Accordion helper
+  function Accordion({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+      <section className="accordion-section panel" style={{ marginBottom: 16 }}>
+        <button
+          className="accordion-toggle"
+          style={{
+            width: "100%",
+            textAlign: "left",
+            fontWeight: 700,
+            fontSize: "1.15rem",
+            background: "none",
+            border: "none",
+            padding: "12px 0",
+            cursor: "pointer",
+          }}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {open ? "▼ " : "► "}{title}
+        </button>
+        {open && <div style={{ paddingTop: 4 }}>{children}</div>}
+      </section>
+    );
+  }
   const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
@@ -110,7 +166,7 @@ export default function HomePage() {
   const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
   const [twilioTarget, setTwilioTarget] = useState("");
   const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
-  const [twilioContactName, setTwilioContactName] = useState("Herr Neumann");
+  const [twilioContactName, setTwilioContactName] = useState("Max Neumann");
   const [twilioTopic, setTwilioTopic] = useState<Topic>(TOPICS[0]);
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
@@ -118,9 +174,68 @@ export default function HomePage() {
   const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
+  const [manualAppointment, setManualAppointment] = useState({
+    company: "",
+    contactName: "",
+    topic: TOPICS[0] as Topic,
+    appointmentAt: toDateTimeLocalInput(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+    summary: "",
+  });
 
   const activeDraft = draftScripts[detailTopic];
   const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
+  const appointmentReports = useMemo(
+    () =>
+      data.reports
+        .filter((report) => Boolean(report.appointmentAt))
+        .slice()
+        .sort((a, b) => new Date(a.appointmentAt as string).getTime() - new Date(b.appointmentAt as string).getTime()),
+    [data.reports],
+  );
+  const appointmentsByDay = useMemo(() => {
+    const map = new Map<string, DashboardData["reports"]>();
+
+    appointmentReports.forEach((report) => {
+      if (!report.appointmentAt) {
+        return;
+      }
+
+      const key = toDateKey(new Date(report.appointmentAt));
+      const current = map.get(key) || [];
+      map.set(key, [...current, report]);
+    });
+
+    return map;
+  }, [appointmentReports]);
+
+  const calendarDays = useMemo(() => {
+    const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // Monday=0
+    const start = new Date(firstOfMonth);
+    start.setDate(firstOfMonth.getDate() - firstWeekday);
+
+    return Array.from({ length: 42 }).map((_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      const key = toDateKey(day);
+      return {
+        key,
+        date: day,
+        inMonth: day.getMonth() === calendarMonth.getMonth(),
+        items: appointmentsByDay.get(key) || [],
+      };
+    });
+  }, [appointmentsByDay, calendarMonth]);
+
+  const selectedDayAppointments = useMemo(
+    () => appointmentsByDay.get(selectedDayKey) || [],
+    [appointmentsByDay, selectedDayKey],
+  );
 
   async function loadDashboard() {
     const [dashboardResponse, learningResponse] = await Promise.all([
@@ -159,6 +274,22 @@ export default function HomePage() {
             script.appointmentGoal,
             "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart, inklusive Datum und Uhrzeit.",
           ),
+          recordingConsentLine: pickText(
+            script.recordingConsentLine,
+            'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
+          ),
+          healthCheckQuestions: pickText(
+            script.healthCheckQuestions,
+            "Bei Gesundheitsthemen bitte konkret fragen: gesetzlich/privat versichert, laufende/geplante Behandlungen, regelmäßige Medikamente und bekannte Diagnosen der letzten 5 Jahre.",
+          ),
+          appointmentTransition: pickText(
+            script.appointmentTransition,
+            "Nach bestätigtem Interesse kurz Nutzen zusammenfassen und direkt mit zwei konkreten Terminvorschlägen in die Terminierung überleiten.",
+          ),
+          appointmentSchedulingRules: pickText(
+            script.appointmentSchedulingRules,
+            "Nenne immer zwei konkrete Optionen in der nächsten Woche mit Datum und Uhrzeit. Wenn beides nicht passt, aktiv einen Alternativtermin mit Datum und Uhrzeit erfragen und bestätigen.",
+          ),
         };
         return acc;
       }, {}),
@@ -187,20 +318,28 @@ export default function HomePage() {
 
   async function handleCsvImport() {
     setBusy(true);
-
     try {
+      let csvContent = csvText;
+      // Wenn Datei hochgeladen wurde, lese sie aus
+      if (csvFile) {
+        csvContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = (e) => reject(e);
+          reader.readAsText(csvFile);
+        });
+      }
       const response = await fetch("/api/campaigns/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csvText }),
+        body: JSON.stringify({ csvText: csvContent }),
       });
       const payload = (await response.json()) as { imported?: number; error?: string };
-
       if (!response.ok) {
         throw new Error(payload.error || "CSV konnte nicht importiert werden.");
       }
-
       setNotice(`CSV importiert: ${payload.imported ?? 0} neue Firmen in Gloria geladen.`);
+      setCsvFile(null);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Import fehlgeschlagen.");
@@ -218,131 +357,155 @@ export default function HomePage() {
       return;
     }
 
-    setBusy(true);
 
-    try {
-      const response = await fetch("/api/learning", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic }),
-      });
-      const payload = (await response.json()) as { error?: string };
+      <main className="dashboard-page">
+        <header className="duic-hero">
+          <div>
+            <p className="eyebrow">Agentur Duic Sprockhövel</p>
+            <h1>Gloria Admin Dashboard</h1>
+            <p className="hero-copy">
+              Vertrieb, Telefonie und Lernlogik in einer Leitstelle: klar, schnell und auf Termine ausgerichtet.
+            </p>
+            <p className="hero-note">{loading ? "Lade Daten ..." : notice}</p>
+          </div>
+          <div className="hero-actions">
+            <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
+            <span className="pill">
+              Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+            </span>
+            <span className="pill">
+              Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+            </span>
+            <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
+          </div>
+        </header>
 
-      if (!response.ok) {
-        throw new Error(payload.error || "Optimierung konnte nicht angewendet werden.");
-      }
+        <section className="stats-grid">
+          <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
+          <article className="stat-card"><span>Gespräche</span><strong>{data.metrics.conversations}</strong></article>
+          <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
+          <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
+          <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
+          <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
+          <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
+        </section>
 
-      setNotice(`Gloria hat das Skript für ${topic} anhand der Gesprächsreports optimiert.`);
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
+        {/* Accordion-Bereiche, vertikal untereinander */}
+        <div className="accordion-stack" style={{ maxWidth: 900, margin: "0 auto", display: "flex", flexDirection: "column", gap: 0 }}>
+          <Accordion title="Compliance & Ablauf" defaultOpen>
+            <ul>
+              <li><strong>Offenlegung:</strong> Gloria stellt sich immer als digitale Vertriebsassistentin der Agentur Duic Sprockhövel vor.</li>
+              <li><strong>Aufzeichnung:</strong> Die Aufnahmefreigabe wird immer vor dem eigentlichen Gespräch klar und eindeutig abgefragt. Ohne Zustimmung keine Aufnahme.</li>
+              <li><strong>Datenschutz:</strong> Alle Gesprächsdaten und Aufnahmen werden ausschließlich für Schulungs- und Qualitätszwecke verwendet und DSGVO-konform gespeichert.</li>
+              <li><strong>Gesprächsziele:</strong> Mögliche Ausgänge sind Terminvereinbarung, Wiedervorlage (Rückruf) oder klare Absage.</li>
+              <li><strong>Transparenz:</strong> Gesprächsreports und Aufnahmen sind jederzeit im Dashboard einsehbar.</li>
+              <li><strong>Webhook für Telefonie:</strong> /api/calls/webhook</li>
+              <li><strong>Technischer Ablauf:</strong> Jeder Anruf wird in einzelne Gesprächsrunden unterteilt, KI-gestützt analysiert und dokumentiert.</li>
+              <li><strong>Protokollierung:</strong> Alle Aktionen und Gesprächsphasen werden nachvollziehbar protokolliert.</li>
+              <li><strong>Rechte:</strong> Nur berechtigte Nutzer haben Zugriff auf Reports und Aufnahmen.</li>
+            </ul>
+          </Accordion>
 
-  async function saveScript(topic: Topic) {
-    const draft = draftScripts[topic];
+          <Accordion title="Aufträge per CSV/Excel laden">
+            <p className="subtle">Lade eine CSV- oder Excel-Datei mit Firmen auftraggebern hoch. Format: company, contactName, phone, email, topic, note, nextCallAt</p>
+            <input
+              type="file"
+              accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                setCsvFile(file);
+                if (!file) return;
+                if (file.name.endsWith(".csv")) {
+                  // CSV kann direkt gelesen werden
+                  const reader = new FileReader();
+                  reader.onload = (ev) => setCsvText(ev.target?.result as string);
+                  reader.readAsText(file);
+                } else {
+                  // Excel: Hinweis
+                  setCsvText("Excel-Import wird noch nicht direkt unterstützt. Bitte als CSV speichern und erneut hochladen.");
+                }
+              }}
+              style={{ marginBottom: 8 }}
+            />
+            <textarea
+              value={csvText}
+              onChange={(event) => setCsvText(event.target.value)}
+              style={{ width: "100%", minHeight: 80, marginBottom: 8 }}
+              placeholder="CSV-Inhalt anzeigen oder bearbeiten..."
+            />
+            <div className="row top-gap">
+              <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV importieren</button>
+              <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
+            </div>
+            <p className="subtle" style={{ marginTop: 8 }}>
+              Nach dem Import werden alle Firmen automatisch in die <strong>Offene Firmenliste</strong> übernommen.
+            </p>
+          </Accordion>
 
-    if (!draft) {
-      return;
-    }
+          <Accordion title="Anruf Einzelfirma">
+            <div className="field-grid">
+              <div>
+                <label>Zielnummer</label>
+                <input value={twilioTarget} onChange={(event) => setTwilioTarget(event.target.value)} placeholder="+492339123456" />
+              </div>
+              <div>
+                <label>Firma</label>
+                <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
+              </div>
+              <div>
+                <label>Ansprechpartner (Vorname + Nachname)</label>
+                <input
+                  value={twilioContactName}
+                  onChange={(event) => setTwilioContactName(event.target.value)}
+                  placeholder="z. B. Max Neumann"
+                />
+              </div>
+              <div>
+                <label>Thema</label>
+                <select value={twilioTopic} onChange={(event) => setTwilioTopic(event.target.value as Topic)}>
+                  {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="row top-gap">
+              <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
+                {busy ? "Anruf startet ..." : "Testanruf starten"}
+              </button>
+            </div>
+          </Accordion>
 
-    setBusy(true);
-    setSaveStatus(null);
+          <Accordion title="Gloria testen">
+            <div className="row">
+              <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
+                {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+              </select>
+              <button className="btn" onClick={() => void testVoice()} disabled={busy}>
+                {busy ? "Vorschau lädt ..." : "Stimme testen"}
+              </button>
+            </div>
+            <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
+            {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
+          </Accordion>
 
-    try {
-      const response = await fetch("/api/scripts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        storageMode?: "postgres" | "file";
-      };
+          <Accordion title="Gloria lernt aus Gesprächen">
+            <ul>
+              {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            <div className="insight-grid">
+              {learning.insights.map((insight) => (
+                <div key={insight.topic} className="mini-panel">
+                  <h3>{insight.topic}</h3>
+                  <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
+                  <ul>
+                    {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+                  </ul>
+                  <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
+                </div>
+              ))}
+            </div>
+          </Accordion>
+        </div>
 
-      if (!response.ok) {
-        throw new Error(payload.error || "Skript konnte nicht gespeichert werden.");
-      }
-
-      setNotice(
-        `Skript für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
-      );
-      setSaveStatus({
-        type: "success",
-        message: `Erfolgreich gespeichert (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
-      });
-      await loadDashboard();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.";
-      setNotice(errorMessage);
-      setSaveStatus({ type: "error", message: errorMessage });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function testVoice() {
-    setBusy(true);
-
-    setVoicePreview("Vorschau wird geladen ...");
-    setVoiceAudioUrl("");
-
-    try {
-      const response = await fetch("/api/voice-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: voiceTopic }),
-      });
-
-      const payload = (await response.json()) as {
-        preview?: string;
-        provider?: "elevenlabs" | "browser";
-        audioBase64?: string;
-        audioMimeType?: string;
-        message?: string;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || payload.message || "Stimmtest konnte nicht geladen werden.");
-      }
-
-      setVoicePreview(payload.preview || "Keine Vorschau verfügbar.");
-
-      if (payload.audioBase64 && payload.audioMimeType) {
-        const url = `data:${payload.audioMimeType};base64,${payload.audioBase64}`;
-        setVoiceAudioUrl(url);
-        void new Audio(url).play().catch(() => undefined);
-      } else {
-        setVoiceAudioUrl("");
-        speakText(payload.preview || "");
-      }
-
-      setNotice(payload.message || `Stimmtest für ${voiceTopic} gestartet.`);
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? `${error.message} - die Textvorschau konnte nicht geladen werden.`
-          : "Stimmtest konnte nicht geladen werden.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startTwilioTestCall() {
-    if (!twilioTarget.trim()) {
-      setNotice("Bitte zuerst eine Zielnummer im internationalen Format eingeben, z. B. +492339123456.");
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const response = await fetch("/api/twilio/test-call", {
-        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: twilioTarget,
@@ -426,6 +589,46 @@ export default function HomePage() {
     }
   }
 
+  async function createManualAppointment() {
+    if (!manualAppointment.company.trim()) {
+      setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
+      return;
+    }
+
+    if (!manualAppointment.appointmentAt.trim()) {
+      setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(manualAppointment),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
+      }
+
+      setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
+      setManualAppointment((current) => ({
+        ...current,
+        company: "",
+        contactName: "",
+        summary: "",
+      }));
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="dashboard-page">
       <header className="duic-hero">
@@ -497,8 +700,12 @@ export default function HomePage() {
                 <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
               </div>
               <div>
-                <label>Ansprechpartner</label>
-                <input value={twilioContactName} onChange={(event) => setTwilioContactName(event.target.value)} />
+                <label>Ansprechpartner (Vorname + Nachname)</label>
+                <input
+                  value={twilioContactName}
+                  onChange={(event) => setTwilioContactName(event.target.value)}
+                  placeholder="z. B. Max Neumann"
+                />
               </div>
               <div>
                 <label>Thema</label>
@@ -576,6 +783,14 @@ export default function HomePage() {
             <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
             <label>Abschlussziel / Erfolgsdefinition (wann ist der Anruf erfolgreich)</label>
             <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
+            <label>Aufzeichnungserlaubnis (inkl. klare JA/NEIN-Antwort anfordern)</label>
+            <textarea value={activeDraft.recordingConsentLine ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], recordingConsentLine: event.target.value } }))} />
+            <label>Gesundheitsfragen (konkrete Fragen statt nur "grundsätzlich gesund")</label>
+            <textarea value={activeDraft.healthCheckQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], healthCheckQuestions: event.target.value } }))} />
+            <label>Überleitung in die Terminierung</label>
+            <textarea value={activeDraft.appointmentTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentTransition: event.target.value } }))} />
+            <label>Terminierungsregeln (Datum + Uhrzeit + Alternative erfragen)</label>
+            <textarea value={activeDraft.appointmentSchedulingRules ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentSchedulingRules: event.target.value } }))} />
 
             <p className="subtle top-gap">
               Hinweis: Die bisherigen Leitfaden-Felder sind in der Admin-UI ausgeblendet.
@@ -603,6 +818,151 @@ export default function HomePage() {
         ) : (
           <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>
         )}
+      </section>
+
+      <section className="panel top-section">
+        <div className="row spread">
+          <h2>Terminkalender</h2>
+          <div className="row">
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setCalendarMonth(
+                  (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                )
+              }
+            >
+              ← Monat zurück
+            </button>
+            <strong>
+              {new Intl.DateTimeFormat("de-DE", {
+                month: "long",
+                year: "numeric",
+              }).format(calendarMonth)}
+            </strong>
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setCalendarMonth(
+                  (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                )
+              }
+            >
+              Monat vor →
+            </button>
+          </div>
+        </div>
+
+        <div className="calendar-grid top-gap">
+          {[
+            "Mo",
+            "Di",
+            "Mi",
+            "Do",
+            "Fr",
+            "Sa",
+            "So",
+          ].map((weekday) => (
+            <div key={weekday} className="calendar-weekday">{weekday}</div>
+          ))}
+          {calendarDays.map((day) => {
+            const isSelected = day.key === selectedDayKey;
+            return (
+              <button
+                key={day.key}
+                className={`calendar-day ${day.inMonth ? "" : "outside"} ${isSelected ? "selected" : ""}`}
+                onClick={() => setSelectedDayKey(day.key)}
+              >
+                <span>{day.date.getDate()}</span>
+                <small>{day.items.length > 0 ? `${day.items.length} Termin(e)` : "-"}</small>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="calendar-detail top-gap">
+          <div className="mini-panel">
+            <h3>
+              Termine am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
+            </h3>
+            {selectedDayAppointments.length > 0 ? (
+              <div className="calendar-list top-gap">
+                {selectedDayAppointments.map((report) => (
+                  <button
+                    key={report.id}
+                    className="calendar-item"
+                    onClick={() => setSelectedReport(report)}
+                  >
+                    <strong>{formatDate(report.appointmentAt)}</strong>
+                    <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
+                    <small>{report.topic}</small>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="subtle top-gap">Für diesen Tag sind noch keine Termine eingetragen.</p>
+            )}
+          </div>
+
+          <div className="mini-panel">
+            <h3>Termin direkt eintragen</h3>
+            <div className="field-grid top-gap">
+              <div>
+                <label>Firma</label>
+                <input
+                  value={manualAppointment.company}
+                  onChange={(event) =>
+                    setManualAppointment((current) => ({ ...current, company: event.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Ansprechpartner</label>
+                <input
+                  value={manualAppointment.contactName}
+                  onChange={(event) =>
+                    setManualAppointment((current) => ({ ...current, contactName: event.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label>Thema</label>
+                <select
+                  value={manualAppointment.topic}
+                  onChange={(event) =>
+                    setManualAppointment((current) => ({ ...current, topic: event.target.value as Topic }))
+                  }
+                >
+                  {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                </select>
+              </div>
+              <div>
+                <label>Datum & Uhrzeit</label>
+                <input
+                  type="datetime-local"
+                  value={manualAppointment.appointmentAt}
+                  onChange={(event) =>
+                    setManualAppointment((current) => ({ ...current, appointmentAt: event.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <label>Notiz</label>
+            <textarea
+              value={manualAppointment.summary}
+              onChange={(event) =>
+                setManualAppointment((current) => ({ ...current, summary: event.target.value }))
+              }
+              style={{ minHeight: 80 }}
+            />
+            <div className="row top-gap">
+              <button className="btn" onClick={() => void createManualAppointment()} disabled={busy}>
+                {busy ? "Speichert ..." : "Termin speichern"}
+              </button>
+              <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="report-grid top-section">
@@ -755,11 +1115,33 @@ export default function HomePage() {
                             padding: "6px 10px",
                             borderRadius: 8,
                             fontSize: "0.88rem",
-                            background: line.speaker === "Gloria" ? "rgba(43,101,217,0.07)" : "rgba(32,57,93,0.05)",
-                            borderLeft: `3px solid ${line.speaker === "Gloria" ? "var(--blue-500)" : "var(--gold-500)"}`,
+                            background:
+                              line.speaker === "Phase"
+                                ? "rgba(183,135,34,0.14)"
+                                : line.speaker === "Gloria"
+                                  ? "rgba(43,101,217,0.07)"
+                                  : "rgba(32,57,93,0.05)",
+                            borderLeft: `3px solid ${
+                              line.speaker === "Phase"
+                                ? "var(--gold-600)"
+                                : line.speaker === "Gloria"
+                                  ? "var(--blue-500)"
+                                  : "var(--gold-500)"
+                            }`,
                           }}
                         >
-                          <span style={{ fontWeight: 700, fontSize: "0.78rem", color: line.speaker === "Gloria" ? "var(--blue-600)" : "var(--gold-600)" }}>
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "0.78rem",
+                              color:
+                                line.speaker === "Phase"
+                                  ? "#8a5e18"
+                                  : line.speaker === "Gloria"
+                                    ? "var(--blue-600)"
+                                    : "var(--gold-600)",
+                            }}
+                          >
                             {line.speaker}
                           </span>
                           <br />

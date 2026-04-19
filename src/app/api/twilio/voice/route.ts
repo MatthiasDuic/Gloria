@@ -27,8 +27,8 @@ async function renderVoiceResponse(request: Request) {
     action: `${baseUrl}/api/twilio/voice/process?step=intro&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`,
     method: "POST",
     language: "de-DE",
-    speechTimeout: "auto",
-    timeout: 8,
+    speechTimeout: "1",
+    timeout: 2,
     actionOnEmptyResult: true,
     hints: "zuständig, richtige Ansprechperson, worum geht es, ja bitte, einen Moment",
   });

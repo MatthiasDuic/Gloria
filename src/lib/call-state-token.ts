@@ -9,9 +9,11 @@ export interface TokenizedCallState {
   leadId?: string;
   company: string;
   contactName?: string;
+  directDial?: string;
   topic: Topic;
   step: CallStep;
   consent: "yes" | "no";
+  consentAsked?: boolean;
   turn: number;
   transcript: string;
   contactRole: ContactRole;

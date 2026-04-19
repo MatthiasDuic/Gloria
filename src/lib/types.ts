@@ -15,6 +15,7 @@ export interface Lead {
   company: string;
   contactName: string;
   phone: string;
+  directDial?: string;
   email?: string;
   topic: Topic;
   note?: string;
@@ -66,6 +67,10 @@ export interface ScriptConfig {
   decisionMakerTask?: string;      // Aufgabe beim Entscheider
   decisionMakerBehavior?: string;  // Verhalten beim Entscheider
   appointmentGoal?: string;        // Zielbeschreibung für erfolgreichen Abschluss
+  recordingConsentLine?: string;   // Zusätzliche Einwilligungsformulierung (JA/NEIN)
+  healthCheckQuestions?: string;   // Gesundheitsfragen als Liste/Textblock
+  appointmentTransition?: string;  // Übergang von Bedarf/Einwand in Terminierung
+  appointmentSchedulingRules?: string; // Konkrete Regeln für Datum/Uhrzeit/Alternativen
 }
 
 export interface CallReport {

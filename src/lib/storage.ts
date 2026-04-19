@@ -305,12 +305,14 @@ export async function importLeadsFromCsv(csvText: string) {
     };
 
     const nextCallAt = lookup("nextCallAt");
+    const directDial = lookup("directDial");
 
     return {
       id: `lead-${Date.now()}-${index}`,
       company: lookup("company") || `Firma ${index + 1}`,
       contactName: lookup("contactName") || "Empfang",
       phone: lookup("phone") || "",
+      directDial: directDial || undefined,
       email: lookup("email") || undefined,
       topic: normalizeTopic(lookup("topic") || "Energie"),
       note: lookup("note") || undefined,
@@ -380,6 +382,7 @@ export async function storeCallReport(payload: {
   outcome?: ReportOutcome;
   appointmentAt?: string;
   nextCallAt?: string;
+  directDial?: string;
   attempts?: number;
   recordingConsent?: boolean;
   recordingUrl?: string;
@@ -451,6 +454,7 @@ export async function storeCallReport(payload: {
     return {
       ...lead,
       attempts: payload.attempts ?? lead.attempts + 1,
+      directDial: payload.directDial || lead.directDial,
       status:
         payload.outcome === "Termin"
           ? "termin"
@@ -469,6 +473,46 @@ export async function storeCallReport(payload: {
   ]);
 
   return report;
+}
+
+export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
+  const leads = await readJson(LEADS_FILE, defaultLeads);
+  const now = Date.now();
+
+  return leads
+    .filter((lead) => {
+      if (lead.status !== "wiedervorlage" || !lead.nextCallAt) {
+        return false;
+      }
+
+      const ts = Date.parse(lead.nextCallAt);
+      if (Number.isNaN(ts) || ts > now) {
+        return false;
+      }
+
+      return Boolean(lead.directDial || lead.phone);
+    })
+    .sort((a, b) => Date.parse(a.nextCallAt || "") - Date.parse(b.nextCallAt || ""))
+    .slice(0, limit);
+}
+
+export async function markLeadCallbackScheduled(leadId: string): Promise<void> {
+  if (!leadId) {
+    return;
+  }
+
+  const leads = await readJson(LEADS_FILE, defaultLeads);
+  const updated = leads.map((lead) =>
+    lead.id === leadId
+      ? {
+          ...lead,
+          status: "angerufen" as const,
+          nextCallAt: undefined,
+        }
+      : lead,
+  );
+
+  await writeJson(LEADS_FILE, updated);
 }
 
 export async function deleteReport(reportId: string): Promise<void> {
