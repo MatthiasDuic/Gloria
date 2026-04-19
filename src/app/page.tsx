@@ -1,130 +1,147 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
-import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
-import { TOPICS } from "@/lib/types";
-
-const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
-Musterbau GmbH,Herr Neumann,+49 2339 555100,neumann@musterbau.de,betriebliche Krankenversicherung,120 Mitarbeitende; Recruiting Thema,
-Sprockhoevel Energieberatung,Frau Peters,+49 2324 555200,peters@se-beratung.de,Energie,Vertragsverlängerung in 90 Tagen,2026-04-15T10:00:00.000Z`;
-
-const EMPTY_DATA: DashboardData = {
-  leads: [],
-  reports: [],
-  scripts: [],
-  reportStorageMode: "file",
-  scriptsStorageMode: "file",
-  metrics: {
-    dialAttempts: 0,
-    conversations: 0,
-    appointments: 0,
-    rejections: 0,
-    callbacksOpen: 0,
-    gatekeeperLoops: 0,
-    transferSuccessRate: 0,
-  },
-      {/* Ende Accordion-Stack */}
+export default function HomePage() {
+  const [data, setData] = useState<DashboardData>(EMPTY_DATA);
+  const [csvText, setCsvText] = useState(SAMPLE_CSV);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  // Accordion helper
+  function Accordion({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+      <section className="accordion-section panel" style={{ marginBottom: 16 }}>
+        <button
+          className="accordion-toggle"
+          style={{
+            width: "100%",
+            textAlign: "left",
+            fontWeight: 700,
+            fontSize: "1.15rem",
+            background: "none",
+            border: "none",
+            padding: "12px 0",
+            cursor: "pointer",
+          }}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {open ? "▼ " : "► "}{title}
+        </button>
+        {open && <div style={{ paddingTop: 4 }}>{children}</div>}
+      </section>
     );
-}
-
-// Methoden außerhalb des return, aber innerhalb der Komponente
-// (direkt nach den useState-Hooks und vor dem return platzieren)
-
-// ...EXISTIERENDE useState und Hilfsfunktionen...
-
-// Methoden:
-// (1) createManualAppointment
-// (2) deleteRecording
-// (3) deleteReport
-
-// 1. createManualAppointment
-async function createManualAppointment() {
-  if (!manualAppointment.company.trim()) {
-    setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
-    return;
   }
-  if (!manualAppointment.appointmentAt.trim()) {
-    setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
-    return;
-  }
-  setBusy(true);
-  try {
-    const response = await fetch("/api/reports", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(manualAppointment),
-    });
-    const payload = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
+  const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
+  const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
+  const [voicePreview, setVoicePreview] = useState("");
+  const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
+  const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
+  const [twilioTarget, setTwilioTarget] = useState("");
+  const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
+  const [twilioContactName, setTwilioContactName] = useState("Max Neumann");
+  const [twilioTopic, setTwilioTopic] = useState<Topic>(TOPICS[0]);
+  const [notice, setNotice] = useState("Dashboard wird geladen ...");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
+  const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
+  const [manualAppointment, setManualAppointment] = useState({
+    company: "",
+    contactName: "",
+    topic: TOPICS[0] as Topic,
+    appointmentAt: toDateTimeLocalInput(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+    summary: "",
+  });
+
+  // Methoden wieder innerhalb der Komponente, aber vor dem return:
+  async function createManualAppointment() {
+    if (!manualAppointment.company.trim()) {
+      setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
+      return;
     }
-    setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
-    setManualAppointment((current) => ({
-      ...current,
-      company: "",
-      contactName: "",
-      summary: "",
-    }));
-    await loadDashboard();
-  } catch (error) {
-    setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
-  } finally {
-    setBusy(false);
-  }
-}
-
-// 2. deleteRecording
-async function deleteRecording(reportId: string) {
-  if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-    return;
-  }
-  setBusy(true);
-  try {
-    const response = await fetch(
-      `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      throw new Error("Aufnahme konnte nicht gelöscht werden.");
+    if (!manualAppointment.appointmentAt.trim()) {
+      setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
+      return;
     }
-    setNotice("Aufnahme erfolgreich gelöscht.");
-    setSelectedReport((current) =>
-      current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
-    );
-    await loadDashboard();
-  } catch (error) {
-    setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-  } finally {
-    setBusy(false);
-  }
-}
-
-// 3. deleteReport
-async function deleteReport(reportId: string) {
-  if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-    return;
-  }
-  setBusy(true);
-  try {
-    const response = await fetch(
-      `/api/reports?reportId=${encodeURIComponent(reportId)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      throw new Error("Report konnte nicht gelöscht werden.");
+    setBusy(true);
+    try {
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(manualAppointment),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
+      }
+      setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
+      setManualAppointment((current) => ({
+        ...current,
+        company: "",
+        contactName: "",
+        summary: "",
+      }));
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
+    } finally {
+      setBusy(false);
     }
-    setNotice("Report erfolgreich gelöscht.");
-    setSelectedReport(null);
-    await loadDashboard();
-  } catch (error) {
-    setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-  } finally {
-    setBusy(false);
   }
-}
 
-    return map;
-  }, [appointmentReports]);
+  async function deleteRecording(reportId: string) {
+    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        throw new Error("Aufnahme konnte nicht gelöscht werden.");
+      }
+      setNotice("Aufnahme erfolgreich gelöscht.");
+      setSelectedReport((current) =>
+        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
+      );
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteReport(reportId: string) {
+    if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/reports?reportId=${encodeURIComponent(reportId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        throw new Error("Report konnte nicht gelöscht werden.");
+      }
+      setNotice("Report erfolgreich gelöscht.");
+      setSelectedReport(null);
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
 
   const calendarDays = useMemo(() => {
     const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -420,47 +437,7 @@ async function deleteReport(reportId: string) {
         </div>
       {/* Ende Accordion-Stack */}
     );
-  // Methoden ab hier wieder innerhalb der Komponente, aber außerhalb des return-Blocks
 
-  async function createManualAppointment() {
-    if (!manualAppointment.company.trim()) {
-      setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
-      return;
-    }
-
-    if (!manualAppointment.appointmentAt.trim()) {
-      setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const response = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(manualAppointment),
-      });
-      const payload = (await response.json()) as { error?: string };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
-      }
-
-      setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
-      setManualAppointment((current) => ({
-        ...current,
-        company: "",
-        contactName: "",
-        summary: "",
-      }));
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <main className="dashboard-page">
@@ -1041,4 +1018,3 @@ async function deleteReport(reportId: string) {
       })()}
     </main>
   );
-}
