@@ -23,192 +23,105 @@ const EMPTY_DATA: DashboardData = {
     gatekeeperLoops: 0,
     transferSuccessRate: 0,
   },
-};
-
-const EMPTY_LEARNING: LearningResponse = {
-  insights: [],
-  globalSummary: [],
-};
-
-function formatDate(value?: string) {
-  if (!value) {
-    return "-";
-  }
-
-  return new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+      {/* Ende Accordion-Stack */}
+    );
 }
 
-function toDateKey(value: Date) {
-  const y = value.getFullYear();
-  const m = `${value.getMonth() + 1}`.padStart(2, "0");
-  const d = `${value.getDate()}`.padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
+// Methoden außerhalb des return, aber innerhalb der Komponente
+// (direkt nach den useState-Hooks und vor dem return platzieren)
 
-function toDateTimeLocalInput(date: Date) {
-  const y = date.getFullYear();
-  const m = `${date.getMonth() + 1}`.padStart(2, "0");
-  const d = `${date.getDate()}`.padStart(2, "0");
-  const h = `${date.getHours()}`.padStart(2, "0");
-  const min = `${date.getMinutes()}`.padStart(2, "0");
-  return `${y}-${m}-${d}T${h}:${min}`;
-}
+// ...EXISTIERENDE useState und Hilfsfunktionen...
 
-function speakText(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+// Methoden:
+// (1) createManualAppointment
+// (2) deleteRecording
+// (3) deleteReport
+
+// 1. createManualAppointment
+async function createManualAppointment() {
+  if (!manualAppointment.company.trim()) {
+    setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
     return;
   }
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "de-DE";
-
-  const germanVoice = window.speechSynthesis
-    .getVoices()
-    .find((voice) => voice.lang.toLowerCase().startsWith("de"));
-
-  if (germanVoice) {
-    utterance.voice = germanVoice;
+  if (!manualAppointment.appointmentAt.trim()) {
+    setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
+    return;
   }
-
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
-}
-
-function buildConversationLines(summary: string) {
-  return summary
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(
-      (l) =>
-        l.startsWith("Gloria:") ||
-        l.startsWith("Interessent:") ||
-        l.startsWith("Angerufener:") ||
-        l.startsWith("Phase:"),
-    )
-    .map((l) => {
-      if (l.startsWith("Phase:")) {
-        return { speaker: "Phase", text: l.replace(/^Phase:/, "").trim() };
-      }
-
-      const isGloria = l.startsWith("Gloria:");
-      return {
-        speaker: isGloria ? "Gloria" : "Interessent",
-        text: l.replace(/^Gloria:|^Interessent:|^Angerufener:/, "").trim(),
-      };
+  setBusy(true);
+  try {
+    const response = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(manualAppointment),
     });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
+    }
+    setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
+    setManualAppointment((current) => ({
+      ...current,
+      company: "",
+      contactName: "",
+      summary: "",
+    }));
+    await loadDashboard();
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
+  } finally {
+    setBusy(false);
+  }
 }
 
-function detectLostStage(summary: string): string {
-  const t = summary.toLowerCase();
-  if (t.includes("appt_slot_iso") || t.includes("appt_slot_label")) {
-    return "Terminbestätigung – Interessent hat nach Terminvorschlag abgesagt";
+// 2. deleteRecording
+async function deleteRecording(reportId: string) {
+  if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+    return;
   }
-  if (t.includes("prep_mode") || t.includes("prep_short") || t.includes("wann passt")) {
-    return "Terminvereinbarung – Abbruch beim Erfassen der Termindaten";
-  }
-  if (t.includes("problem_confirm_pending") || t.includes("stellen sie sich vor")) {
-    return "Nutzenargumentation – Interessent hat Mehrwert nicht gesehen";
-  }
-  if (t.includes("discovery") || t.includes("wie zufrieden") || t.includes("was wäre für sie")) {
-    return "Bedarfsermittlung – kein Interesse nach Bedarfsabfrage";
-  }
-  if (t.includes("aufzeichnung") || t.includes("consent")) {
-    return "Einwilligung – Gespräch nach Aufnahme-Abfrage abgebrochen";
-  }
-  return "Gesprächseinstieg – Entscheider nicht oder kaum erreicht";
-}
-
-function pickText(value: string | undefined, fallback?: string) {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value;
-  }
-
-  return fallback ?? "";
-}
-
-export default function HomePage() {
-  const [data, setData] = useState<DashboardData>(EMPTY_DATA);
-  const [csvText, setCsvText] = useState(SAMPLE_CSV);
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  // Accordion helper
-  function Accordion({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
-    const [open, setOpen] = useState(defaultOpen);
-    return (
-      <section className="accordion-section panel" style={{ marginBottom: 16 }}>
-        <button
-          className="accordion-toggle"
-          style={{
-            width: "100%",
-            textAlign: "left",
-            fontWeight: 700,
-            fontSize: "1.15rem",
-            background: "none",
-            border: "none",
-            padding: "12px 0",
-            cursor: "pointer",
-          }}
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-        >
-          {open ? "▼ " : "► "}{title}
-        </button>
-        {open && <div style={{ paddingTop: 4 }}>{children}</div>}
-      </section>
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
+      { method: "DELETE" },
     );
+    if (!response.ok) {
+      throw new Error("Aufnahme konnte nicht gelöscht werden.");
+    }
+    setNotice("Aufnahme erfolgreich gelöscht.");
+    setSelectedReport((current) =>
+      current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
+    );
+    await loadDashboard();
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+  } finally {
+    setBusy(false);
   }
-  const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
-  const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
-  const [voicePreview, setVoicePreview] = useState("");
-  const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
-  const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
-  const [twilioTarget, setTwilioTarget] = useState("");
-  const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
-  const [twilioContactName, setTwilioContactName] = useState("Max Neumann");
-  const [twilioTopic, setTwilioTopic] = useState<Topic>(TOPICS[0]);
-  const [notice, setNotice] = useState("Dashboard wird geladen ...");
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
-  const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
-  const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  });
-  const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
-  const [manualAppointment, setManualAppointment] = useState({
-    company: "",
-    contactName: "",
-    topic: TOPICS[0] as Topic,
-    appointmentAt: toDateTimeLocalInput(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-    summary: "",
-  });
+}
 
-  const activeDraft = draftScripts[detailTopic];
-  const reportRows = useMemo(() => data.reports.slice(0, 40), [data.reports]);
-  const appointmentReports = useMemo(
-    () =>
-      data.reports
-        .filter((report) => Boolean(report.appointmentAt))
-        .slice()
-        .sort((a, b) => new Date(a.appointmentAt as string).getTime() - new Date(b.appointmentAt as string).getTime()),
-    [data.reports],
-  );
-  const appointmentsByDay = useMemo(() => {
-    const map = new Map<string, DashboardData["reports"]>();
-
-    appointmentReports.forEach((report) => {
-      if (!report.appointmentAt) {
-        return;
-      }
-
-      const key = toDateKey(new Date(report.appointmentAt));
-      const current = map.get(key) || [];
-      map.set(key, [...current, report]);
-    });
+// 3. deleteReport
+async function deleteReport(reportId: string) {
+  if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/reports?reportId=${encodeURIComponent(reportId)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      throw new Error("Report konnte nicht gelöscht werden.");
+    }
+    setNotice("Report erfolgreich gelöscht.");
+    setSelectedReport(null);
+    await loadDashboard();
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+  } finally {
+    setBusy(false);
+  }
+}
 
     return map;
   }, [appointmentReports]);
@@ -505,89 +418,9 @@ export default function HomePage() {
             </div>
           </Accordion>
         </div>
-
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: twilioTarget,
-          company: twilioCompany,
-          contactName: twilioContactName,
-          topic: twilioTopic,
-        }),
-      });
-
-      const payload = (await response.json()) as {
-        error?: string;
-        sid?: string;
-        message?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Twilio-Testanruf konnte nicht gestartet werden.");
-      }
-
-      setNotice(`${payload.message || "Twilio-Testanruf gestartet."} SID: ${payload.sid || "-"}`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Twilio-Testanruf fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteRecording(reportId: string) {
-    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const response = await fetch(
-        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
-        { method: "DELETE" },
-      );
-
-      if (!response.ok) {
-        throw new Error("Aufnahme konnte nicht gelöscht werden.");
-      }
-
-      setNotice("Aufnahme erfolgreich gelöscht.");
-      setSelectedReport((current) =>
-        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
-      );
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteReport(reportId: string) {
-    if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const response = await fetch(
-        `/api/reports?reportId=${encodeURIComponent(reportId)}`,
-        { method: "DELETE" },
-      );
-
-      if (!response.ok) {
-        throw new Error("Report konnte nicht gelöscht werden.");
-      }
-
-      setNotice("Report erfolgreich gelöscht.");
-      setSelectedReport(null);
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
+      {/* Ende Accordion-Stack */}
+    );
+  // Methoden ab hier wieder innerhalb der Komponente, aber außerhalb des return-Blocks
 
   async function createManualAppointment() {
     if (!manualAppointment.company.trim()) {
@@ -639,7 +472,8 @@ export default function HomePage() {
             Vertrieb, Telefonie und Lernlogik in einer Leitstelle: klar, schnell und auf Termine ausgerichtet.
           </p>
           <p className="hero-note">{loading ? "Lade Daten ..." : notice}</p>
-        </div>
+
+      </div>
         <div className="hero-actions">
           <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
           <span className="pill">
