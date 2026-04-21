@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getTelephonyRuntimeSnapshot } from "@/lib/telephony-runtime";
 import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
 
   if (!payload.to || !payload.company || !payload.topic) {
     return NextResponse.json(
-      { error: "to, company und topic sind für den Twilio-Testanruf erforderlich." },
+      { error: "to, company und topic sind für den Anruf erforderlich." },
       { status: 400 },
     );
   }
@@ -72,19 +73,28 @@ export async function POST(request: Request) {
       request,
     );
 
+    const runtimeSnapshot = getTelephonyRuntimeSnapshot();
+
     return NextResponse.json({
       ok: true,
       sid: call.sid,
       status: call.status,
       to: call.to,
       from: call.from,
-      message: "Twilio-Testanruf wurde gestartet.",
+      message: "Anruf wurde gestartet.",
+      preinit: {
+        openAiReady: runtimeSnapshot.openAiReady,
+        openAiRealtimeReady: runtimeSnapshot.openAiRealtimeReady,
+        elevenLabsWarm: runtimeSnapshot.elevenLabsWarm,
+        scriptsReady: runtimeSnapshot.scriptsReady,
+        lastRealtimeError: runtimeSnapshot.lastRealtimeError,
+      },
     });
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
-        : "Twilio-Testanruf konnte nicht gestartet werden.";
+        : "Anruf konnte nicht gestartet werden.";
     const status = message.startsWith("RUNTIME_NOT_READY:") ? 503 : 500;
 
     return NextResponse.json(

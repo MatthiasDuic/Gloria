@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteReport, getDashboardData, storeCallReport } from "@/lib/storage";
 import { TOPICS, type Topic } from "@/lib/types";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
 
-export async function GET() {
-  const data = await getDashboardData();
+export async function GET(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
   return NextResponse.json(data);
 }
 
 export async function POST(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
   const payload = (await request.json()) as {
     company?: string;
     contactName?: string;
@@ -35,6 +48,7 @@ export async function POST(request: NextRequest) {
   }
 
   const report = await storeCallReport({
+    userId: sessionUser.id,
     callSid: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     company,
     contactName: payload.contactName?.trim() || undefined,
@@ -51,10 +65,25 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
   const reportId = request.nextUrl.searchParams.get("reportId");
 
   if (!reportId) {
     return NextResponse.json({ error: "reportId fehlt." }, { status: 400 });
+  }
+
+  if (sessionUser.role !== "master") {
+    const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
+    const owned = ownData.reports.some((report) => report.id === reportId);
+
+    if (!owned) {
+      return NextResponse.json({ error: "Keine Berechtigung." }, { status: 403 });
+    }
   }
 
   await deleteReport(reportId);

@@ -51,6 +51,7 @@ export async function GET(request: Request) {
           contactName: lead.contactName,
           topic: lead.topic,
           leadId: lead.id,
+          userId: lead.userId,
         },
         request,
       );
@@ -65,6 +66,7 @@ export async function GET(request: Request) {
         summary: `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
         outcome: "Kein Kontakt",
         attempts: (lead.attempts || 0) + 1,
+        userId: lead.userId,
       });
 
       triggered.push({ leadId: lead.id, sid: call.sid, to });

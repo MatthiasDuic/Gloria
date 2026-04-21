@@ -1,4 +1,5 @@
 import type { Topic } from "./types";
+import { prepareCall } from "./telephony-runtime";
 
 export interface TwilioCallRequest {
   to: string;
@@ -6,8 +7,28 @@ export interface TwilioCallRequest {
   contactName?: string;
   topic: Topic;
   leadId?: string;
+  userId?: string;
+  phoneNumberId?: string;
+  ownerRealName?: string;
+  ownerCompanyName?: string;
   isTestCall?: boolean;
+  from?: string;
 }
+
+export interface TwilioCallerIdOption {
+  number: string;
+  label: string;
+}
+
+const MAX_PREPARE_CALL_TIMEOUT_MS = 12_000;
+const PREPARE_CALL_TIMEOUT_MS = Math.min(
+  MAX_PREPARE_CALL_TIMEOUT_MS,
+  Math.max(3_000, Number.parseInt(process.env.PREPARE_CALL_TIMEOUT_MS || "6000", 10)),
+);
+const PREPARE_CALL_RETRY_MS = Math.max(
+  150,
+  Number.parseInt(process.env.PREPARE_CALL_RETRY_MS || "350", 10),
+);
 
 function readEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -25,6 +46,53 @@ export function isTwilioConfigured() {
       process.env.TWILIO_AUTH_TOKEN?.trim() &&
       process.env.TWILIO_PHONE_NUMBER?.trim(),
   );
+}
+
+export function getTwilioCallerIds(): string[] {
+  const primary = process.env.TWILIO_PHONE_NUMBER?.trim();
+  const rawList = process.env.TWILIO_PHONE_NUMBERS || "";
+  const extras = rawList
+    .split(/[;,\n]/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const merged = [primary, ...extras].filter((value): value is string => Boolean(value));
+  return [...new Set(merged)];
+}
+
+function getTwilioCallerIdLabelMap(): Record<string, string> {
+  const raw = process.env.TWILIO_PHONE_NUMBER_LABELS || "";
+  const map: Record<string, string> = {};
+
+  for (const entry of raw.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean)) {
+    const [number, ...labelParts] = entry.split(":");
+    const phoneNumber = number?.trim();
+    const label = labelParts.join(":").trim();
+
+    if (phoneNumber && label) {
+      map[phoneNumber] = label;
+    }
+  }
+
+  return map;
+}
+
+export function getTwilioCallerIdOptions(): TwilioCallerIdOption[] {
+  const numbers = getTwilioCallerIds();
+  const labelMap = getTwilioCallerIdLabelMap();
+
+  return numbers.map((number, index) => {
+    const configured = labelMap[number];
+    if (configured) {
+      return { number, label: configured };
+    }
+
+    if (index === 0) {
+      return { number, label: "Agentur-Duic" };
+    }
+
+    return { number, label: `Nummer ${index + 1}` };
+  });
 }
 
 export type TwilioConversationMode = "guided" | "live" | "media-stream";
@@ -117,40 +185,118 @@ function buildUrl(
 export async function createTwilioCall(payload: TwilioCallRequest, request?: Request) {
   const accountSid = readEnv("TWILIO_ACCOUNT_SID");
   const authToken = readEnv("TWILIO_AUTH_TOKEN");
-  const from = readEnv("TWILIO_PHONE_NUMBER");
+  const defaultFrom = readEnv("TWILIO_PHONE_NUMBER");
+  const allowedCallerIds = getTwilioCallerIds();
+  const from = payload.from?.trim() || defaultFrom;
+
+  if (!allowedCallerIds.includes(from)) {
+    throw new Error("Ausgangsnummer ist nicht freigegeben. Bitte wählen Sie eine konfigurierte Twilio-Nummer.");
+  }
   const baseUrl = getAppBaseUrl(request);
-  const { default: twilio } = await import("twilio");
 
-  const client = twilio(accountSid, authToken);
+  const prepareDeadline = Date.now() + PREPARE_CALL_TIMEOUT_MS;
+  let preparation: Awaited<ReturnType<typeof prepareCall>> | null = null;
+  let lastPrepareError: unknown;
 
-  return client.calls.create({
-    to: payload.to,
-    from,
-    method: "POST",
-    url: buildUrl(baseUrl, "/api/twilio/voice", {
-      leadId: payload.leadId,
-      company: payload.company,
-      contactName: payload.contactName,
-      topic: payload.topic,
-    }),
-    statusCallback: buildUrl(baseUrl, "/api/twilio/status", {
-      leadId: payload.leadId,
-      company: payload.company,
-      contactName: payload.contactName,
-      topic: payload.topic,
-      testCall: payload.isTestCall ? "1" : undefined,
-    }),
-    statusCallbackMethod: "POST",
-    statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
-    record: true,
-    recordingChannels: "mono",
-    recordingStatusCallback: buildUrl(baseUrl, "/api/twilio/status", {
-      leadId: payload.leadId,
-      company: payload.company,
-      contactName: payload.contactName,
-      topic: payload.topic,
-      testCall: payload.isTestCall ? "1" : undefined,
-    }),
-    recordingStatusCallbackMethod: "POST",
+  while (Date.now() < prepareDeadline) {
+    try {
+      preparation = await prepareCall({
+        topic: payload.topic,
+        userId: payload.userId,
+        baseUrl,
+        request,
+      });
+
+      if (preparation.ready && preparation.topicProfileLoaded) {
+        break;
+      }
+    } catch (error) {
+      lastPrepareError = error;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, PREPARE_CALL_RETRY_MS);
+    });
+  }
+
+  const topicProfileLoaded = Boolean(preparation?.topicProfileLoaded);
+  const preparedForStream = Boolean(preparation?.ready && topicProfileLoaded);
+
+  if (!preparation || !topicProfileLoaded) {
+    const reason =
+      lastPrepareError instanceof Error
+        ? lastPrepareError.message
+        : "Initialisierung ist nicht rechtzeitig fertig geworden.";
+    throw new Error(`RUNTIME_NOT_READY: ${reason}`);
+  }
+
+  const voiceUrl = buildUrl(baseUrl, "/api/twilio/voice", {
+    leadId: payload.leadId,
+    userId: payload.userId,
+    phoneNumberId: payload.phoneNumberId,
+    ownerRealName: payload.ownerRealName,
+    ownerCompanyName: payload.ownerCompanyName,
+    company: payload.company,
+    contactName: payload.contactName,
+    topic: payload.topic,
+    prepared: preparedForStream ? "1" : undefined,
+    preparedAt: preparation.preparedAt,
+    rtSessionId: preparation.realtimeSessionId,
+    rtProfileKey: preparation.topicProfileKey,
+    prepMode: preparedForStream ? "ready" : "degraded",
   });
+
+  const statusCallback = buildUrl(baseUrl, "/api/twilio/status", {
+    leadId: payload.leadId,
+    userId: payload.userId,
+    phoneNumberId: payload.phoneNumberId,
+    company: payload.company,
+    contactName: payload.contactName,
+    topic: payload.topic,
+    testCall: payload.isTestCall ? "1" : undefined,
+  });
+
+  const body = new URLSearchParams();
+  body.set("To", payload.to);
+  body.set("From", from);
+  body.set("Method", "POST");
+  body.set("Url", voiceUrl);
+  body.set("StatusCallback", statusCallback);
+  body.set("StatusCallbackMethod", "POST");
+  body.append("StatusCallbackEvent", "initiated");
+  body.append("StatusCallbackEvent", "ringing");
+  body.append("StatusCallbackEvent", "answered");
+  body.append("StatusCallbackEvent", "completed");
+  body.set("Record", "true");
+  body.set("RecordingChannels", "mono");
+  body.set("RecordingStatusCallback", statusCallback);
+  body.set("RecordingStatusCallbackMethod", "POST");
+
+  const authHeader = btoa(`${accountSid}:${authToken}`);
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      },
+      body,
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Twilio API Fehler (${response.status}): ${details}`);
+  }
+
+  const created = (await response.json()) as {
+    sid: string;
+    status: string;
+    to: string;
+    from: string;
+  };
+
+  return created;
 }

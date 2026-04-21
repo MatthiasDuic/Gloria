@@ -1,43 +1,37 @@
-﻿/**
- * Gloria – Twilio voice-process handler (OpenAI-driven).
- *
- * Each call turn is handled by OpenAI (gpt-4.1-mini recommended).
- * The model detects whether Gloria is speaking to the GATEKEEPER or the
- * DECISION-MAKER and generates the next response.  No regex-based detection,
- * no hard-coded state machine.
- *
- * ENV:
- *   OPENAI_MODEL          – defaults to "gpt-4.1-mini"
- *   LIVE_AI_TIMEOUT_MS    – OpenAI call timeout in ms (default 1000, min 800, max 1500)
- */
 import { NextResponse } from "next/server";
-import twilio from "twilio";
-import OpenAI from "openai";
-import type { ChatCompletion } from "openai/resources/chat/completions";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
-import { sendReportEmail } from "@/lib/mailer";
 import { buildCallSystemPrompt } from "@/lib/gloria";
-import { getDashboardData, storeCallReport } from "@/lib/storage";
 import { getAppBaseUrl } from "@/lib/twilio";
+import { buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
+import { AI_CONFIG } from "@/lib/ai-config";
 import {
   decodeCallStateToken,
   encodeCallStateToken,
   type ContactRole,
+  type RoleState,
   type TokenizedCallState,
 } from "@/lib/call-state-token";
 import type { ReportOutcome, ScriptConfig, Topic } from "@/lib/types";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
-// ─── Configuration ────────────────────────────────────────────────────────────
-const AI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
+const AI_MODEL = AI_CONFIG.chatModel;
 const AI_TIMEOUT_MS = Math.min(
-  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "1000", 10), 800),
-  1500,
+  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "1600", 10), 900),
+  4500,
 );
-const MAX_TURNS = 15;
+const REPLY_GATHER_TIMEOUT_SECONDS = Math.min(
+  6,
+  Math.max(1, Number.parseInt(process.env.TWILIO_REPLY_GATHER_TIMEOUT_SECONDS || "1", 10)),
+);
+const LISTEN_ONLY_TIMEOUT_SECONDS = Math.min(
+  8,
+  Math.max(2, Number.parseInt(process.env.TWILIO_LISTEN_ONLY_TIMEOUT_SECONDS || "3", 10)),
+);
+const SCRIPT_CACHE_MS = 60_000;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type StatePayload = Omit<TokenizedCallState, "issuedAt" | "expiresAt">;
+
 interface GloriaDecision {
   detectedRole: "gatekeeper" | "decision-maker" | "unknown";
   reply: string;
@@ -48,23 +42,72 @@ interface GloriaDecision {
   consentGiven: boolean | null;
 }
 
-type StatePayload = Omit<TokenizedCallState, "issuedAt" | "expiresAt">;
+const DECISION_MAKER_SCRIPT_PHASES = [
+  "discovery",
+  "objectionHandling",
+  "close",
+] as const;
 
-// ─── OpenAI client ────────────────────────────────────────────────────────────
-let openaiClient: OpenAI | null = null;
+const PRIVATE_HEALTH_QUESTIONS = [
+  "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
+  "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
+  "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+  "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
+  "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
+  "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
+  "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
+  "Gab es in den letzten zehn Jahren psychische Behandlungen?",
+  "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
+  "Bestehen bei Ihnen bekannte Allergien?",
+] as const;
 
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+const PKV_HEALTH_INTRO =
+  "Damit wir den Termin optimal vorbereiten können, müssen wir kurz ein paar Basisinformationen abklären.";
 
-  if (!apiKey) {
-    return null;
+function getConsentPrompt(script: ScriptConfig): string {
+  return (
+    script.consentPrompt?.trim() ||
+    'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".'
+  );
+}
+
+function getPkvHealthIntro(script: ScriptConfig): string {
+  return script.pkvHealthIntro?.trim() || PKV_HEALTH_INTRO;
+}
+
+function getPkvHealthQuestions(script: ScriptConfig): string[] {
+  const configured = (script.pkvHealthQuestions || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (configured.length > 0) {
+    return configured;
   }
 
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey });
+  return [...PRIVATE_HEALTH_QUESTIONS];
+}
+
+const scriptsCacheByUser: Record<string, Partial<Record<Topic, ScriptConfig>>> = {};
+const scriptsCacheAtByUser: Record<string, number> = {};
+const scriptsSyncInFlightByUser: Record<string, Promise<void> | null> = {};
+const scriptOriginByUser: Record<string, Partial<Record<Topic, "user-db" | "fallback">>> = {};
+
+function buildInternalHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const username = process.env.BASIC_AUTH_USERNAME?.trim();
+  const password = process.env.BASIC_AUTH_PASSWORD?.trim();
+  const token = process.env.CALL_STATE_SECRET?.trim() || process.env.CRON_SECRET?.trim();
+
+  if (username && password) {
+    headers.authorization = `Basic ${btoa(`${username}:${password}`)}`;
   }
 
-  return openaiClient;
+  if (token) {
+    headers["x-gloria-internal-token"] = token;
+  }
+
+  return headers;
 }
 
 function normalizeContactName(raw: string | undefined): string {
@@ -72,35 +115,10 @@ function normalizeContactName(raw: string | undefined): string {
     return "";
   }
 
-  const compact = raw
+  return raw
     .replace(/\s+/g, " ")
     .replace(/^(herr|frau)\s+/i, "")
     .trim();
-
-  return compact;
-}
-
-function buildNameGuidance(contactNameRaw: string | undefined) {
-  const contactName = normalizeContactName(contactNameRaw);
-
-  if (!contactName) {
-    return "";
-  }
-
-  const parts = contactName.split(" ").filter(Boolean);
-  const hasFullName = parts.length >= 2;
-  const guidanceName = hasFullName ? contactName : `${contactName} [NACHNAME ERFRAGEN]`;
-
-  return [
-    "",
-    "━━━ ZIELANSPRECHPARTNER ━━━",
-    `Bekannter Name aus CRM/Testanruf: ${guidanceName}`,
-    "Nutze diesen Namen konsequent und frage beim Empfang aktiv nach diesem Kontakt.",
-    "WICHTIG: Nutze nie den Platzhalter 'Herr/Frau Neumann', wenn ein anderer Name vorliegt.",
-    hasFullName
-      ? `Formuliere bei Empfang z. B.: "Ich würde gern mit ${contactName} sprechen."`
-      : `Wenn nur Vorname bekannt ist, frage nach dem vollständigen Namen von ${contactName}.`,
-  ].join("\n");
 }
 
 function normalizeDirectDial(raw: string | undefined): string | undefined {
@@ -132,18 +150,6 @@ function extractDirectDialFromText(text: string): string | undefined {
   return normalizeDirectDial(match?.[1]);
 }
 
-function signalsUnavailable(text: string): boolean {
-  return /(nicht\s+da|nicht\s+verf[üu]gbar|nicht\s+erreichbar|im\s+termin|au[ßs]er\s+haus|heute\s+nicht|gerade\s+nicht|im\s+gespr[äa]ch)/i.test(
-    text,
-  );
-}
-
-function hasGloriaAskedConsent(transcript: string): boolean {
-  return transcript
-    .split("\n")
-    .some((line) => line.startsWith("Gloria:") && /aufzeichn|aufnahme|mitschnitt/i.test(line));
-}
-
 function parseConsentAnswer(text: string): "yes" | "no" | null {
   const s = text.toLowerCase();
   if (/\bja\b|\bgerne\b|\bokay\b|\beinverstanden\b|\bnatürlich\b/.test(s)) {
@@ -155,11 +161,89 @@ function parseConsentAnswer(text: string): "yes" | "no" | null {
   return null;
 }
 
-function buildConsentPrompt(script: ScriptConfig): string {
-  return (
-    script.recordingConsentLine?.trim() ||
-    'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".'
+function hasGloriaAskedConsent(transcript: string): boolean {
+  return transcript
+    .split("\n")
+    .some((line) => line.startsWith("Gloria:") && /aufzeichn|aufnahme|mitschnitt/i.test(line));
+}
+
+function isShortAffirmative(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (t.length > 12) {
+    return false;
+  }
+
+  return /^(ja|jap|okay|ok|genau|mhm|hm|klar|gern|gerne)\.?$/.test(t);
+}
+
+function isDecisionMakerAlreadyOnLine(text: string): boolean {
+  const lower = text.toLowerCase().replace(/\s+/g, " ").trim();
+
+  return /\b(ich\s+bin\s+(schon\s+)?dran|ich\s+bin\s+am\s+apparat|ja,?\s*ich\s+bin(?:\s+es)?\b|ja,?\s*selbst\b|das\s+bin\s+ich\b|spreche\s+selbst|sprechen\s+sie\s+mit\s+mir|selbst\s+am\s+apparat|ich\s+bin\s+zustaendig|ich\s+bin\s+der\s+richtige\s+ansprechpartner|ich\s+bin\s+die\s+richtige\s+ansprechpartnerin|genau,?\s*ich\s+bin\s+zustaendig)\b/.test(
+    lower,
   );
+}
+
+function isLikelyReceptionGreeting(text: string): boolean {
+  return /\b(guten\s+tag|hallo|firma|zentrale|empfang|sekretariat|buero|büro|ja\s+bitte|was\s+kann\s+ich\s+fuer\s+sie\s+tun|was\s+kann\s+ich\s+für\s+sie\s+tun)\b/i.test(
+    text,
+  );
+}
+
+function isLikelyDecisionMakerGreeting(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  if (
+    /\b(warteschleife|bitte\s+warten|einen\s+augenblick|einen\s+moment|ich\s+verbinde|verbinde\s+sie|musik)\b/.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
+
+  return /\b(hallo|guten\s+tag|ja\s+bitte|sprech[e]?\s+ich\s+mit|am\s+apparat|ich\s+bin\s+es|worum\s+geht\s+es)\b/i.test(
+    text,
+  );
+}
+
+function isLikelyTransferAcknowledgement(text: string): boolean {
+  return /\b(einen\s+moment|einen\s+augenblick|ich\s+verbinde|ich\s+stell\s+durch|bleiben\s+sie\s+dran|bitte\s+warten|warteschleife)\b/i.test(
+    text,
+  );
+}
+
+function detectRoleState(params: {
+  currentRole: ContactRole;
+  modelDetectedRole: GloriaDecision["detectedRole"];
+  heardText: string;
+}): { contactRole: ContactRole; roleState: RoleState } {
+  const lower = params.heardText.toLowerCase();
+
+  if (
+    params.currentRole === "decision-maker" ||
+    params.modelDetectedRole === "decision-maker"
+  ) {
+    return { contactRole: "decision-maker", roleState: "decision_maker" };
+  }
+
+  if (/\b(verbinde|einen\s+moment|ich\s+stell\s+durch|ich\s+verbinde)\b/.test(lower)) {
+    return { contactRole: "gatekeeper", roleState: "transfer" };
+  }
+
+  return { contactRole: "gatekeeper", roleState: "reception" };
+}
+
+function buildFastFirstReply(
+  contactNameRaw: string | undefined,
+  identity: { ownerCompany: string; ownerName: string },
+): string {
+  const target = normalizeContactName(contactNameRaw);
+  const introBase = `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich rufe im Auftrag von ${identity.ownerName} an.`;
+  if (target) {
+    return `${introBase} Könnten Sie mich bitte kurz mit ${target} verbinden?`;
+  }
+
+  return `${introBase} Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?`;
 }
 
 function buildGatekeeperTransferLine(contactNameRaw: string | undefined): string {
@@ -170,166 +254,67 @@ function buildGatekeeperTransferLine(contactNameRaw: string | undefined): string
   return `Danke. Könnten Sie mich bitte kurz mit ${name} verbinden?`;
 }
 
-function isLikelyReceptionGreeting(text: string): boolean {
-  return /\b(guten\s+tag|hallo|firma|zentrale|empfang|sekretariat|buero|büro|ja\s+bitte|was\s+kann\s+ich\s+fuer\s+sie\s+tun|was\s+kann\s+ich\s+für\s+sie\s+tun)\b/i.test(
-    text,
-  );
+function splitByAnswerWaitMarker(text: string): string[] {
+  return text
+    .split(/\[\s*antwort\s+abwarten\s*\]/i)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter((part) => part.length > 0);
 }
 
-function buildFastFirstReply(contactNameRaw: string | undefined): string {
-  const target = normalizeContactName(contactNameRaw);
-  if (target) {
-    return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an. Könnten Sie mich bitte kurz mit ${target} verbinden?`;
+function getNextDecisionMakerScriptSegment(
+  script: ScriptConfig,
+  phaseIndex = 0,
+  segmentIndex = 0,
+): {
+  reply?: string;
+  nextPhaseIndex: number;
+  nextSegmentIndex: number;
+  done: boolean;
+} {
+  let p = Math.max(0, phaseIndex);
+  let s = Math.max(0, segmentIndex);
+
+  while (p < DECISION_MAKER_SCRIPT_PHASES.length) {
+    const phaseKey = DECISION_MAKER_SCRIPT_PHASES[p];
+    const segments = splitByAnswerWaitMarker(script[phaseKey] || "");
+
+    if (segments.length === 0) {
+      p += 1;
+      s = 0;
+      continue;
+    }
+
+    const safeSegment = Math.min(s, segments.length - 1);
+    const reply = segments[safeSegment];
+    const isLastInPhase = safeSegment >= segments.length - 1;
+
+    return {
+      reply,
+      nextPhaseIndex: isLastInPhase ? p + 1 : p,
+      nextSegmentIndex: isLastInPhase ? 0 : safeSegment + 1,
+      done: false,
+    };
   }
-
-  return "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an. Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?";
-}
-
-function hasHealthQuestionsCovered(transcript: string): boolean {
-  const text = transcript.toLowerCase();
-  const checks = [
-    /gesetzlich|privat|versichert/,
-    /medikament|behandlung|diagnose|erkrank/,
-  ];
-
-  return checks.every((pattern) => pattern.test(text));
-}
-
-function pickHealthQuestion(script: ScriptConfig): string {
-  const custom = script.healthCheckQuestions
-    ?.split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-
-  return (
-    custom ||
-    "Damit ich den Termin sauber vorbereiten kann: Sind Sie aktuell gesetzlich oder privat versichert, und gibt es laufende Behandlungen oder regelmäßige Medikamente?"
-  );
-}
-
-function detectPhase(params: {
-  role: ContactRole;
-  topic: Topic;
-  consent: "yes" | "no";
-  appointmentAt?: string;
-  action: GloriaDecision["action"];
-  transcript: string;
-  reply: string;
-}): string {
-  if (params.action !== "continue") {
-    return "Abschluss";
-  }
-
-  if (params.role !== "decision-maker") {
-    return "Empfang";
-  }
-
-  const reply = params.reply.toLowerCase();
-  if (params.consent !== "yes" || /aufzeichn|aufnahme|mitschnitt/.test(reply)) {
-    return "Aufzeichnung";
-  }
-
-  if (
-    params.topic === "private Krankenversicherung" &&
-    !hasHealthQuestionsCovered(params.transcript)
-  ) {
-    return "Gesundheitsfragen";
-  }
-
-  if (
-    params.appointmentAt ||
-    /termin|uhr|dienstag|mittwoch|donnerstag|freitag|vormittag|nachmittag/.test(reply)
-  ) {
-    return "Terminierung";
-  }
-
-  return "Bedarf";
-}
-
-async function askOpenAI(
-  systemPrompt: string,
-  contactName: string | undefined,
-  transcript: string,
-  latestSpeech: string,
-  currentRole: ContactRole,
-  currentStep: TokenizedCallState["step"],
-): Promise<GloriaDecision> {
-  const openai = getOpenAIClient();
-
-  if (!openai) {
-    throw new Error("Missing OPENAI_API_KEY");
-  }
-
-  const roleLabel =
-    currentRole === "decision-maker"
-      ? "Entscheider (bereits bestätigt)"
-      : "Empfang/Gatekeeper (oder noch unbekannt)";
-
-  const userContent = [
-    transcript
-      ? `Bisheriger Gesprächsverlauf:\n${transcript}`
-      : "(Gesprächsbeginn – erste Äußerung der anderen Seite)",
-    "",
-    `Angerufener sagt jetzt: "${latestSpeech}"`,
-    `Zuletzt erkannte Rolle: ${roleLabel}`,
-    `Erwartete Gesprächsphase: ${currentStep}`,
-  ].join("\n");
-
-  const raceResult = await Promise.race([
-    openai.chat.completions.create({
-      stream: false as const,
-      model: AI_MODEL,
-      response_format: { type: "json_object" },
-      temperature: 0.1,
-      max_tokens: 120,
-      messages: [
-        { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
-        { role: "user", content: userContent },
-      ],
-    }),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("OpenAI timeout")), AI_TIMEOUT_MS),
-    ),
-  ]);
-  const completion = raceResult as ChatCompletion;
-
-  let parsed: Partial<GloriaDecision> = {};
-  try {
-    parsed = JSON.parse(
-      completion.choices[0]?.message?.content || "{}",
-    ) as Partial<GloriaDecision>;
-  } catch {
-    /* keep defaults below */
-  }
-
-  const validActions = [
-    "continue",
-    "end_success",
-    "end_rejection",
-    "end_callback",
-  ] as const;
-  const validRoles = ["gatekeeper", "decision-maker", "unknown"] as const;
 
   return {
-    detectedRole: validRoles.includes(parsed.detectedRole as (typeof validRoles)[number])
-      ? (parsed.detectedRole as GloriaDecision["detectedRole"])
-      : "unknown",
-    reply:
-      typeof parsed.reply === "string" && parsed.reply.trim().length > 0
-        ? parsed.reply.trim()
-        : "Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da.",
-    action: validActions.includes(parsed.action as (typeof validActions)[number])
-      ? (parsed.action as GloriaDecision["action"])
-      : "continue",
-    appointmentNote:
-      typeof parsed.appointmentNote === "string" ? parsed.appointmentNote : "",
-    appointmentAtISO:
-      typeof parsed.appointmentAtISO === "string" ? parsed.appointmentAtISO.trim() : "",
-    directDial:
-      typeof parsed.directDial === "string" ? parsed.directDial.trim() : "",
-    consentGiven:
-      typeof parsed.consentGiven === "boolean" ? parsed.consentGiven : null,
+    nextPhaseIndex: DECISION_MAKER_SCRIPT_PHASES.length,
+    nextSegmentIndex: 0,
+    done: true,
   };
+}
+
+function trimTranscript(text: string, maxLen = 3500): string {
+  if (text.length <= maxLen) {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const keepTail = lines.slice(-18);
+  let compact = keepTail.join("\n");
+  if (compact.length > maxLen) {
+    compact = compact.slice(compact.length - maxLen);
+  }
+  return compact;
 }
 
 function normalizeAppointmentAt(value: string): string | undefined {
@@ -345,97 +330,182 @@ function normalizeAppointmentAt(value: string): string | undefined {
   return new Date(parsed).toISOString();
 }
 
-// ─── TwiML helpers ────────────────────────────────────────────────────────────
-function buildAudioUrl(baseUrl: string, text: string) {
-  const u = new URL(`${baseUrl}/api/twilio/audio`);
-  u.searchParams.set("text", text);
-  return u.toString();
-}
+function detectAppointmentPreference(text: string): "morning" | "afternoon" | "any" {
+  const lower = text.toLowerCase();
 
-function respondWithGather(
-  twiml: twilio.twiml.VoiceResponse,
-  baseUrl: string,
-  text: string,
-  nextState: StatePayload,
-): NextResponse {
-  const token = encodeCallStateToken(nextState);
-  const actionUrl = `${baseUrl}/api/twilio/voice/process?state=${encodeURIComponent(token)}`;
-
-  if (isElevenLabsConfigured()) {
-    twiml.play(buildAudioUrl(baseUrl, text));
-  } else {
-    twiml.say({ voice: "alice", language: "de-DE" }, text);
+  if (/\b(vormittag|morgens|frueh|früh)\b/.test(lower)) {
+    return "morning";
   }
 
-  twiml.gather({
-    input: ["speech"],
-    action: actionUrl,
-    method: "POST",
-    language: "de-DE",
-    speechTimeout: "1",
-    timeout: 3,
-    actionOnEmptyResult: true,
-    hints: "ja, nein, gerne, einen Moment, ich verbinde, kein Interesse, kein Bedarf",
-  });
-
-  // Fallback: Twilio re-sends to same URL if no speech captured
-  twiml.redirect({ method: "POST" }, actionUrl);
-
-  return new NextResponse(twiml.toString(), {
-    headers: { "Content-Type": "text/xml; charset=utf-8" },
-  });
-}
-
-function respondWithHangup(
-  twiml: twilio.twiml.VoiceResponse,
-  baseUrl: string,
-  text: string,
-): NextResponse {
-  if (isElevenLabsConfigured()) {
-    twiml.play(buildAudioUrl(baseUrl, text));
-  } else {
-    twiml.say({ voice: "alice", language: "de-DE" }, text);
+  if (/\b(nachmittag|abends|spaet|spät)\b/.test(lower)) {
+    return "afternoon";
   }
-  twiml.hangup();
-  return new NextResponse(twiml.toString(), {
-    headers: { "Content-Type": "text/xml; charset=utf-8" },
-  });
+
+  return "any";
 }
 
-// ─── State helpers ────────────────────────────────────────────────────────────
-function buildInitialState(params: {
-  callSid: string;
-  company: string;
-  contactName: string;
-  topic: Topic;
-  leadId?: string;
-}): TokenizedCallState {
-  const now = Math.floor(Date.now() / 1000);
+function detectAppointmentPreferenceFromTranscript(transcript: string):
+  | "morning"
+  | "afternoon"
+  | "any" {
+  const lines = transcript
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("Interessent:"));
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const text = lines[i].replace(/^Interessent:\s*/i, "");
+    const preference = detectAppointmentPreference(text);
+    if (preference !== "any") {
+      return preference;
+    }
+  }
+
+  return "any";
+}
+
+function toSlotIso(base: Date, hour: number, minute: number): string {
+  const d = new Date(base);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+}
+
+function getNextMonday(now = new Date()): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  const daysUntilNextMonday = ((8 - day) % 7) || 7;
+  d.setDate(d.getDate() + daysUntilNextMonday);
+  return d;
+}
+
+function buildNextWeekAppointmentOptions(
+  preference: "morning" | "afternoon" | "any",
+  now = new Date(),
+): { optionAAt: string; optionBAt: string } {
+  const monday = getNextMonday(now);
+  const tuesday = new Date(monday);
+  tuesday.setDate(monday.getDate() + 1);
+  const thursday = new Date(monday);
+  thursday.setDate(monday.getDate() + 3);
+
+  if (preference === "morning") {
+    return {
+      optionAAt: toSlotIso(tuesday, 10, 0),
+      optionBAt: toSlotIso(thursday, 11, 0),
+    };
+  }
+
+  if (preference === "afternoon") {
+    return {
+      optionAAt: toSlotIso(tuesday, 14, 30),
+      optionBAt: toSlotIso(thursday, 16, 0),
+    };
+  }
+
   return {
-    callSid: params.callSid,
-    company: params.company,
-    contactName: params.contactName,
-    topic: params.topic,
-    leadId: params.leadId,
-    step: "intro",
-    consent: "no",
-    consentAsked: false,
-    turn: 0,
-    transcript: "",
-    contactRole: "gatekeeper", // safe default; OpenAI will correct if decision-maker
-    issuedAt: now,
-    expiresAt: now + 7200,
+    optionAAt: toSlotIso(tuesday, 10, 30),
+    optionBAt: toSlotIso(thursday, 15, 30),
   };
 }
 
-function trimTranscript(text: string, maxLen = 3500): string {
-  if (text.length <= maxLen) return text;
-  const lines = text.split("\n");
-  while (text.length > maxLen && lines.length > 4) {
-    lines.splice(1, 2);
-    text = lines.join("\n");
+function formatAppointmentLabel(iso: string): string {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat("de-DE", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
+function pickSuggestedAppointmentAt(
+  heardText: string,
+  optionAAt?: string,
+  optionBAt?: string,
+): string | undefined {
+  const lower = heardText.toLowerCase();
+
+  if (!optionAAt && !optionBAt) {
+    return undefined;
   }
-  return text;
+
+  if (/\b(erste|erster|option\s*1|eins|dienstag)\b/.test(lower)) {
+    return optionAAt;
+  }
+
+  if (/\b(zweite|zweiter|option\s*2|zwei|donnerstag)\b/.test(lower)) {
+    return optionBAt;
+  }
+
+  if (isShortAffirmative(heardText)) {
+    return optionAAt;
+  }
+
+  return undefined;
+}
+
+function parseSpokenAppointmentAt(text: string, now = new Date()): string | undefined {
+  const lower = text.toLowerCase();
+
+  const weekdayMap: Record<string, number> = {
+    montag: 1,
+    dienstag: 2,
+    mittwoch: 3,
+    donnerstag: 4,
+    freitag: 5,
+    samstag: 6,
+    sonntag: 0,
+  };
+
+  const weekdayMatch = lower.match(
+    /\b(uebernaechsten|übernächsten|naechsten|nächsten)?\s*(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b/i,
+  );
+  const timeMatch = lower.match(/\bum\s*(\d{1,2})(?::|\.|\s*uhr\s*)(\d{2})?\s*(uhr)?\b/i)
+    || lower.match(/\bum\s*(\d{1,2})\s*uhr\b/i);
+
+  if (!weekdayMatch || !timeMatch) {
+    return undefined;
+  }
+
+  const modifier = (weekdayMatch[1] || "").toLowerCase();
+  const weekdayWord = weekdayMatch[2].toLowerCase();
+  const targetWeekday = weekdayMap[weekdayWord];
+
+  if (targetWeekday === undefined) {
+    return undefined;
+  }
+
+  const nextMonday = getNextMonday(now);
+  const monday = new Date(nextMonday);
+  if (/uebernaechsten|übernächsten/.test(modifier)) {
+    monday.setDate(monday.getDate() + 7);
+  }
+
+  const target = new Date(monday);
+  const offset = ((targetWeekday + 7) - monday.getDay()) % 7;
+  target.setDate(monday.getDate() + offset);
+
+  let hour = Number.parseInt(timeMatch[1], 10);
+  const minute = Number.parseInt(timeMatch[2] || "0", 10);
+
+  if (Number.isNaN(hour) || Number.isNaN(minute) || hour > 23 || minute > 59) {
+    return undefined;
+  }
+
+  if (/nachmittag|abends|spaet|spät/.test(lower) && hour < 12) {
+    hour += 12;
+  }
+
+  target.setHours(hour, minute, 0, 0);
+  return target.toISOString();
+}
+
+function wantsToRejectBothSuggestions(text: string): boolean {
+  return /\b(beide\s+nicht|beides\s+nicht|passt\s+beides\s+nicht|keiner\s+der\s+beiden|keine\s+der\s+beiden|nichts\s+davon)\b/i.test(
+    text,
+  );
 }
 
 function toStatePayload(state: TokenizedCallState): StatePayload {
@@ -444,51 +514,413 @@ function toStatePayload(state: TokenizedCallState): StatePayload {
   return rest;
 }
 
-// ─── Report storage ───────────────────────────────────────────────────────────
-async function finalizeCall(
-  state: TokenizedCallState,
-  outcome: ReportOutcome,
-  note: string,
-  appointmentAt?: string,
-  nextCallAt?: string,
-  directDial?: string,
-): Promise<void> {
-  const directDialLine = directDial ? `\nDirekte Durchwahl: ${directDial}` : "";
-  const callbackLine =
-    outcome === "Wiedervorlage" && nextCallAt
-      ? `\n\n--- Wiedervorlage ---\nGeplanter Rückruf: ${nextCallAt}`
-      : "";
-  const summary = note
-    ? `${state.transcript}\n\n--- Terminnotiz ---\n${note}${directDialLine}${callbackLine}`
-    : `${state.transcript}${directDialLine}${callbackLine}`;
-  try {
-    const report = await storeCallReport({
-      callSid: state.callSid,
-      leadId: state.leadId,
-      company: state.company,
-      contactName: state.contactName,
-      topic: state.topic as Topic,
-      summary,
-      outcome,
-      appointmentAt,
-      nextCallAt,
-      directDial,
-      recordingConsent: state.consent === "yes",
-      attempts: 1,
+function getOwnerIdentity(state: TokenizedCallState): { ownerCompany: string; ownerName: string } {
+  return {
+    ownerCompany: state.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel",
+    ownerName: state.ownerRealName?.trim() || "Herrn Matthias Duic",
+  };
+}
+
+function buildOwnerIntroLine(state: TokenizedCallState): string {
+  const identity = getOwnerIdentity(state);
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich rufe im Auftrag von ${identity.ownerName} an.`;
+}
+
+function buildInitialState(params: {
+  callSid: string;
+  company: string;
+  contactName: string;
+  topic: Topic;
+  leadId?: string;
+  ownerRealName?: string;
+  ownerCompanyName?: string;
+  userId?: string;
+  phoneNumberId?: string;
+}): TokenizedCallState {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    callSid: params.callSid,
+    userId: params.userId,
+    phoneNumberId: params.phoneNumberId,
+    ownerRealName: params.ownerRealName,
+    ownerCompanyName: params.ownerCompanyName,
+    company: params.company,
+    contactName: params.contactName,
+    topic: params.topic,
+    leadId: params.leadId,
+    decisionMakerIntroDone: false,
+    scriptPhaseIndex: 0,
+    scriptSegmentIndex: 0,
+    healthQuestionIndex: 0,
+    pkvHealthIntroDone: false,
+    appointmentAtDraft: undefined,
+    appointmentNoteDraft: undefined,
+    appointmentProposalAsked: false,
+    appointmentPreference: "any",
+    appointmentOptionAAt: undefined,
+    appointmentOptionBAt: undefined,
+    step: "intro",
+    consent: "no",
+    consentAsked: false,
+    turn: 0,
+    transcript: "",
+    contactRole: "gatekeeper",
+    roleState: "reception",
+    issuedAt: now,
+    expiresAt: now + 7200,
+  };
+}
+
+function buildAudioUrl(baseUrl: string, text: string): string {
+  const u = new URL(`${baseUrl}/api/twilio/audio`);
+  u.searchParams.set("text", text);
+  return u.toString();
+}
+
+function buildNameGuidance(contactNameRaw?: string): string {
+  const contactName = normalizeContactName(contactNameRaw);
+  if (!contactName) {
+    return "";
+  }
+
+  return [
+    "",
+    "━━━ ZIELANSPRECHPARTNER ━━━",
+    `Bekannter Name aus CRM/Testanruf: ${contactName}`,
+    "Nutze diesen Namen konsequent und frage beim Empfang aktiv nach diesem Kontakt.",
+  ].join("\n");
+}
+
+async function syncScripts(baseUrl: string, userId?: string): Promise<void> {
+  const cacheKey = userId || "global";
+  const now = Date.now();
+  const cached = scriptsCacheByUser[cacheKey] || {};
+  const cachedAt = scriptsCacheAtByUser[cacheKey] || 0;
+
+  if (now - cachedAt < SCRIPT_CACHE_MS && Object.keys(cached).length > 0) {
+    return;
+  }
+
+  if (scriptsSyncInFlightByUser[cacheKey]) {
+    await scriptsSyncInFlightByUser[cacheKey];
+    return;
+  }
+
+  scriptsSyncInFlightByUser[cacheKey] = (async () => {
+    const internalHeaders = buildInternalHeaders();
+
+    const scriptsUrl = new URL(`${baseUrl}/api/twilio/scripts`);
+    if (userId) {
+      scriptsUrl.searchParams.set("userId", userId);
+    }
+
+    let response = await fetch(scriptsUrl.toString(), {
+      method: "GET",
+      headers: internalHeaders,
+      cache: "no-store",
     });
-    if (report) {
-      await sendReportEmail(report).catch(() => {
-        /* non-critical */
+
+    if (!response.ok) {
+      // Backward-compatible fallback for older deployments.
+      response = await fetch(`${baseUrl}/api/reports`, {
+        method: "GET",
+        headers: internalHeaders,
+        cache: "no-store",
       });
     }
-  } catch {
-    /* storage failure must not crash the call */
+
+    if (!response.ok) {
+      // Continue with cached/default scripts so calls do not fail hard.
+      console.warn(`[gloria/process] Script sync failed (${response.status}). Using cache/fallback.`);
+      return;
+    }
+
+    const payload = (await response.json()) as { scripts?: ScriptConfig[] };
+    const next: Partial<Record<Topic, ScriptConfig>> = {};
+
+    for (const script of payload.scripts || []) {
+      next[script.topic] = script;
+    }
+
+    scriptsCacheByUser[cacheKey] = next;
+    scriptsCacheAtByUser[cacheKey] = Date.now();
+  })();
+
+  try {
+    await scriptsSyncInFlightByUser[cacheKey];
+  } finally {
+    scriptsSyncInFlightByUser[cacheKey] = null;
   }
 }
 
-// ─── POST handler ─────────────────────────────────────────────────────────────
+function getTopicScript(topic: Topic, userId?: string): ScriptConfig {
+  const cacheKey = userId || "global";
+  const scopedCache = scriptsCacheByUser[cacheKey] || {};
+  const script = scopedCache[topic] || {
+    id: "fallback",
+    topic,
+    opener:
+      "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel.",
+    discovery: "Darf ich kurz erklären, worum es geht?",
+    objectionHandling: "Ich verstehe Ihre Bedenken.",
+    close: "Wann würde ein kurzer Termin passen?",
+  };
+
+  // Track script origin for debugging campaign calls
+  if (!scriptOriginByUser[cacheKey]) {
+    scriptOriginByUser[cacheKey] = {};
+  }
+  scriptOriginByUser[cacheKey][topic] = scopedCache[topic] ? "user-db" : "fallback";
+
+  return script;
+}
+
+function getScriptOrigin(topic: Topic, userId?: string): string {
+  const cacheKey = userId || "global";
+  const origin = (scriptOriginByUser[cacheKey] || {})[topic] || "fallback";
+  return userId ? `user:${userId}:${origin}` : `global:${origin}`;
+}
+
+async function askOpenAI(
+  systemPrompt: string,
+  contactName: string | undefined,
+  transcript: string,
+  latestSpeech: string,
+  currentRole: ContactRole,
+  currentStep: TokenizedCallState["step"],
+): Promise<GloriaDecision> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY");
+  }
+
+  const roleLabel =
+    currentRole === "decision-maker"
+      ? "Entscheider (bereits bestätigt)"
+      : "Empfang/Gatekeeper (oder noch unbekannt)";
+
+  const userContent = [
+    transcript
+      ? `Bisheriger Gesprächsverlauf:\n${transcript}`
+      : "(Gesprächsbeginn – erste Äußerung der anderen Seite)",
+    "",
+    `Angerufener sagt jetzt: \"${latestSpeech}\"`,
+    `Zuletzt erkannte Rolle: ${roleLabel}`,
+    `Erwartete Gesprächsphase: ${currentStep}`,
+  ].join("\n");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+        max_tokens: 220,
+        messages: [
+          { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
+          { role: "user", content: userContent },
+        ],
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const details = await response.text().catch(() => "");
+      throw new Error(`OpenAI error (${response.status}): ${details}`);
+    }
+
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    let parsed: Partial<GloriaDecision> = {};
+    try {
+      parsed = JSON.parse(payload.choices?.[0]?.message?.content || "{}") as Partial<GloriaDecision>;
+    } catch {
+      parsed = {};
+    }
+
+    const validActions = [
+      "continue",
+      "end_success",
+      "end_rejection",
+      "end_callback",
+    ] as const;
+    const validRoles = ["gatekeeper", "decision-maker", "unknown"] as const;
+
+    return {
+      detectedRole: validRoles.includes(parsed.detectedRole as (typeof validRoles)[number])
+        ? (parsed.detectedRole as GloriaDecision["detectedRole"])
+        : "unknown",
+      reply:
+        typeof parsed.reply === "string" && parsed.reply.trim().length > 0
+          ? parsed.reply.trim()
+          : "Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da.",
+      action: validActions.includes(parsed.action as (typeof validActions)[number])
+        ? (parsed.action as GloriaDecision["action"])
+        : "continue",
+      appointmentNote: typeof parsed.appointmentNote === "string" ? parsed.appointmentNote : "",
+      appointmentAtISO: typeof parsed.appointmentAtISO === "string" ? parsed.appointmentAtISO.trim() : "",
+      directDial: typeof parsed.directDial === "string" ? parsed.directDial.trim() : "",
+      consentGiven: typeof parsed.consentGiven === "boolean" ? parsed.consentGiven : null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function finalizeCall(params: {
+  state: TokenizedCallState;
+  outcome: ReportOutcome;
+  note: string;
+  appointmentAt?: string;
+  nextCallAt?: string;
+  directDial?: string;
+  baseUrl: string;
+}): Promise<void> {
+  const directDialLine = params.directDial ? `\nDirekte Durchwahl: ${params.directDial}` : "";
+  const callbackLine =
+    params.outcome === "Wiedervorlage" && params.nextCallAt
+      ? `\n\n--- Wiedervorlage ---\nGeplanter Rückruf: ${params.nextCallAt}`
+      : "";
+  const summary = params.note
+    ? `${params.state.transcript}\n\n--- Terminnotiz ---\n${params.note}${directDialLine}${callbackLine}`
+    : `${params.state.transcript}${directDialLine}${callbackLine}`;
+
+  try {
+    await fetch(`${params.baseUrl}/api/calls/webhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: params.state.userId,
+        phoneNumberId: params.state.phoneNumberId,
+        callSid: params.state.callSid,
+        leadId: params.state.leadId,
+        company: params.state.company,
+        contactName: params.state.contactName,
+        topic: params.state.topic,
+        summary,
+        outcome: params.outcome,
+        appointmentAt: params.appointmentAt,
+        nextCallAt: params.nextCallAt,
+        directDial: params.directDial,
+        recordingConsent: params.state.consent === "yes",
+        attempts: 1,
+      }),
+      cache: "no-store",
+    });
+  } catch {
+    // Report storage must not break call completion.
+  }
+}
+
+async function respondWithGather(
+  baseUrl: string,
+  text: string,
+  nextState: StatePayload,
+): Promise<NextResponse> {
+  const token = await encodeCallStateToken(nextState);
+  const actionUrl = `${baseUrl}/api/twilio/voice/process?state=${encodeURIComponent(token)}`;
+
+  const twiml = buildGatherTwiml({
+    ...(isElevenLabsConfigured()
+      ? { playUrl: buildAudioUrl(baseUrl, text) }
+      : { sayText: text }),
+    gather: {
+      input: "speech",
+      action: actionUrl,
+      method: "POST",
+      language: "de-DE",
+      speechTimeout: "auto",
+      timeout: REPLY_GATHER_TIMEOUT_SECONDS,
+      actionOnEmptyResult: true,
+      hints: "ja, nein, gerne, einen Moment, ich verbinde, kein Interesse, kein Bedarf",
+    },
+    redirectUrl: actionUrl,
+    redirectMethod: "POST",
+  });
+
+  if (nextState.callSid && nextState.company && nextState.topic && text.trim()) {
+    void fetch(`${baseUrl}/api/calls/webhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: nextState.userId,
+        phoneNumberId: nextState.phoneNumberId,
+        callSid: nextState.callSid,
+        leadId: nextState.leadId,
+        company: nextState.company,
+        contactName: nextState.contactName,
+        topic: nextState.topic,
+        summaryChunk: `Gloria: ${text.trim()}`,
+        attempts: 1,
+      }),
+      cache: "no-store",
+    }).catch(() => {
+      // Transcript chunk persistence is best-effort and must not delay call flow.
+    });
+  }
+
+  return new NextResponse(twiml, {
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+  });
+}
+
+async function respondWithListenOnly(
+  baseUrl: string,
+  nextState: StatePayload,
+): Promise<NextResponse> {
+  const token = await encodeCallStateToken(nextState);
+  const actionUrl = `${baseUrl}/api/twilio/voice/process?state=${encodeURIComponent(token)}`;
+
+  const twiml = buildGatherTwiml({
+    gather: {
+      input: "speech",
+      action: actionUrl,
+      method: "POST",
+      language: "de-DE",
+      speechTimeout: "auto",
+      timeout: LISTEN_ONLY_TIMEOUT_SECONDS,
+      actionOnEmptyResult: true,
+      hints: "hallo, guten tag, ja bitte, worum geht es, ich bin am apparat",
+    },
+    redirectUrl: actionUrl,
+    redirectMethod: "POST",
+  });
+
+  return new NextResponse(twiml, {
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+  });
+}
+
+function respondWithHangup(baseUrl: string, text: string): NextResponse {
+  const normalized = text.trim();
+  const hasThanks = /danke|vielen\s+dank/i.test(normalized);
+  const hasGoodbye = /auf\s+wiederh[oö]ren|tsch[uü]ss|bis\s+bald/i.test(normalized);
+  const outro = `${hasThanks ? "" : " Vielen Dank für das Telefonat."}${hasGoodbye ? "" : " Auf Wiederhören."}`;
+  const finalText = `${normalized}${outro}`.trim();
+
+  const twiml = buildSayHangupTwiml(
+    isElevenLabsConfigured()
+      ? { playUrl: buildAudioUrl(baseUrl, finalText) }
+      : { sayText: finalText },
+  );
+
+  return new NextResponse(twiml, {
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+  });
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
-  const twiml = new twilio.twiml.VoiceResponse();
   const baseUrl = getAppBaseUrl(request);
 
   try {
@@ -501,84 +933,102 @@ export async function POST(request: Request): Promise<NextResponse> {
     const callSid = String(form.get("CallSid") || "").trim();
     const isFallback = url.searchParams.get("fallback") === "1";
 
-    // Restore persisted state or create fresh initial state for turn 0
-    const tokenState = decodeCallStateToken(tokenFromForm || tokenFromQuery, callSid);
-    const state: TokenizedCallState = tokenState ?? buildInitialState({
-      callSid,
-      company: url.searchParams.get("company") || "Ihr Unternehmen",
-      contactName: url.searchParams.get("contactName") || "",
-      topic: (url.searchParams.get("topic") || "betriebliche Krankenversicherung") as Topic,
-      leadId: url.searchParams.get("leadId") || undefined,
-    });
+    const tokenState = await decodeCallStateToken(tokenFromForm || tokenFromQuery, callSid);
+    const state: TokenizedCallState =
+      tokenState ||
+      buildInitialState({
+        callSid,
+        company: url.searchParams.get("company") || "Ihr Unternehmen",
+        contactName: url.searchParams.get("contactName") || "",
+        topic: (url.searchParams.get("topic") || "betriebliche Krankenversicherung") as Topic,
+        leadId: url.searchParams.get("leadId") || undefined,
+        ownerRealName: url.searchParams.get("ownerRealName") || undefined,
+        ownerCompanyName: url.searchParams.get("ownerCompanyName") || undefined,
+        userId: url.searchParams.get("userId") || undefined,
+        phoneNumberId: url.searchParams.get("phoneNumberId") || undefined,
+      });
+
+    await syncScripts(baseUrl, state.userId);
+    const activeScript = getTopicScript(state.topic, state.userId);
+    const scriptOrigin = getScriptOrigin(state.topic, state.userId);
+    const systemPrompt = buildCallSystemPrompt(activeScript);
 
     const heardText = speech || digits;
 
-    // ── Safety: absolute turn limit ────────────────────────────────────────────
-    if (state.turn >= MAX_TURNS) {
-      await finalizeCall(state, "Kein Kontakt", "Maximale Gesprächsrunden erreicht.");
-      return respondWithHangup(
-        twiml,
-        baseUrl,
-        "Ich bedanke mich für Ihre Zeit und melde mich zu einem anderen Zeitpunkt. Auf Wiederhören.",
-      );
+    if (state.callSid && state.company && state.topic && heardText.trim()) {
+      void fetch(`${baseUrl}/api/calls/webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: state.userId,
+          phoneNumberId: state.phoneNumberId,
+          callSid: state.callSid,
+          leadId: state.leadId,
+          company: state.company,
+          contactName: state.contactName,
+          topic: state.topic,
+          summaryChunk: `[Script: ${scriptOrigin}]\nInteressent: ${heardText.trim()}`,
+          attempts: 1,
+        }),
+        cache: "no-store",
+      }).catch(() => {
+        // Transcript chunk persistence is best-effort and must not delay call flow.
+      });
     }
 
-    // ── Load admin script for this topic ──────────────────────────────────────
-    const dashboardData = await getDashboardData();
-    const activeScript: ScriptConfig =
-      dashboardData.scripts.find((s) => s.topic === state.topic) ?? {
-        id: "fallback",
-        topic: state.topic,
-        opener:
-          "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel.",
-        discovery: "Darf ich kurz erklären, worum es geht?",
-        objectionHandling: "Ich verstehe Ihre Bedenken.",
-        close: "Wann würde ein kurzer Termin passen?",
-      };
-
-    const systemPrompt = buildCallSystemPrompt(activeScript);
-
-    // ── Fast path for call start ─────────────────────────────────────────────
-    // On the first utterance from a typical receptionist greeting, answer
-    // immediately without waiting for an OpenAI round-trip.
     if (state.turn === 0 && heardText && isLikelyReceptionGreeting(heardText)) {
-      const quickReply = buildFastFirstReply(state.contactName);
+      const quickReply = buildFastFirstReply(state.contactName, getOwnerIdentity(state));
       const updatedTranscript = trimTranscript(
-        [
-          state.transcript,
-          "Phase: Empfang",
-          `Interessent: ${heardText}`,
-          `Gloria: ${quickReply}`,
-        ]
+        [state.transcript, "Phase: Empfang", `Interessent: ${heardText}`, `Gloria: ${quickReply}`]
           .filter(Boolean)
           .join("\n"),
       );
 
-      return respondWithGather(twiml, baseUrl, quickReply, {
+      return await respondWithGather(baseUrl, quickReply, {
         ...toStatePayload(state),
         transcript: updatedTranscript,
         turn: state.turn + 1,
         step: "intro",
         contactRole: "gatekeeper",
+        roleState: "reception",
       });
     }
 
-    // ── No speech / timeout fallback ──────────────────────────────────────────
     if (!heardText || isFallback) {
+      if (state.turn > 0 || state.roleState === "transfer") {
+        return await respondWithListenOnly(baseUrl, {
+          ...toStatePayload(state),
+          turn: state.turn + 1,
+          step: state.step,
+          roleState: state.roleState,
+          contactRole: state.contactRole,
+        });
+      }
+
       const introLine =
         state.turn === 0
-          ? "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an."
-          : "Entschuldigung, ich habe Sie leider nicht verstanden. Sind Sie noch da?";
+          ? buildOwnerIntroLine(state)
+          : "Ich bin noch dran. Nehmen Sie sich ruhig einen Moment und sprechen Sie in Ruhe weiter.";
 
-      return respondWithGather(twiml, baseUrl, introLine, {
+      return await respondWithGather(baseUrl, introLine, {
         ...toStatePayload(state),
-        turn: state.turn + 1,
-        step: "intro",
+        turn: state.turn,
+        step: state.step,
         transcript: trimTranscript(`${state.transcript}\nGloria: ${introLine}`),
       });
     }
 
-    // ── Consent tracking ──────────────────────────────────────────────────────
+    if (state.contactRole !== "decision-maker" && isLikelyTransferAcknowledgement(heardText)) {
+      return await respondWithListenOnly(baseUrl, {
+        ...toStatePayload(state),
+        transcript: trimTranscript(`${state.transcript}\nInteressent: ${heardText}`),
+        turn: state.turn + 1,
+        step: "intro",
+        contactRole: "gatekeeper",
+        roleState: "transfer",
+      });
+    }
+
     let updatedConsent = state.consent;
     let consentAsked = state.consentAsked || hasGloriaAskedConsent(state.transcript);
     const consentAnswer = parseConsentAnswer(heardText);
@@ -587,6 +1037,42 @@ export async function POST(request: Request): Promise<NextResponse> {
       .split("\n")
       .reverse()
       .find((l) => l.startsWith("Gloria:"));
+
+    const askedForContactBefore = Boolean(
+      lastGloria &&
+        /\b(verbinden|zust[aä]ndigen\s+person|sprech[e]?\s+ich\s+mit|mit\s+\w+)\b/i.test(lastGloria),
+    );
+
+    if (
+      state.contactRole !== "decision-maker" &&
+      askedForContactBefore &&
+      isDecisionMakerAlreadyOnLine(heardText)
+    ) {
+      const openerSegments = splitByAnswerWaitMarker(activeScript.opener || "");
+      const openerReply =
+        openerSegments[0] ||
+        "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an.";
+      const updatedTranscript = trimTranscript(
+        [
+          state.transcript,
+          "Phase: decision_maker",
+          `Interessent: ${heardText}`,
+          `Gloria: ${openerReply}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+
+      return await respondWithGather(baseUrl, openerReply, {
+        ...toStatePayload(state),
+        decisionMakerIntroDone: true,
+        contactRole: "decision-maker",
+        roleState: "decision_maker",
+        transcript: updatedTranscript,
+        turn: state.turn + 1,
+        step: "conversation",
+      });
+    }
 
     if (lastGloria && /aufzeichn|aufnahme|mitschnitt/i.test(lastGloria)) {
       consentAsked = true;
@@ -597,26 +1083,277 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    // ── Ask OpenAI ────────────────────────────────────────────────────────────
-    const decision = await askOpenAI(
-      systemPrompt,
-      state.contactName,
-      state.transcript,
-      heardText,
-      state.contactRole as ContactRole,
-      state.step,
-    ).catch(
-      (): GloriaDecision => ({
+    const inPkvPostAppointmentFlow =
+      state.topic === "private Krankenversicherung" &&
+      state.contactRole === "decision-maker" &&
+      Boolean(state.appointmentAtDraft);
+
+    if (inPkvPostAppointmentFlow) {
+      const nextHealthQuestionIndex = state.healthQuestionIndex ?? 0;
+      const healthIntroDone = Boolean(state.pkvHealthIntroDone);
+      const pkvQuestions = getPkvHealthQuestions(activeScript);
+      const pkvIntro = getPkvHealthIntro(activeScript);
+
+      if (nextHealthQuestionIndex < pkvQuestions.length) {
+        const question = pkvQuestions[nextHealthQuestionIndex];
+        const prompt = healthIntroDone ? question : `${pkvIntro} ${question}`;
+        const updatedTranscript = trimTranscript(
+          [
+            state.transcript,
+            `Phase: ${state.roleState || "decision_maker"}`,
+            `Interessent: ${heardText}`,
+            `Gloria: ${prompt}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        return await respondWithGather(baseUrl, prompt, {
+          ...toStatePayload(state),
+          transcript: updatedTranscript,
+          pkvHealthIntroDone: true,
+          healthQuestionIndex: nextHealthQuestionIndex + 1,
+          turn: state.turn + 1,
+          step: "conversation",
+        });
+      }
+
+      await finalizeCall({
+        state: {
+          ...state,
+          transcript: trimTranscript(`${state.transcript}\nInteressent: ${heardText}`),
+          turn: state.turn + 1,
+          step: "finished",
+        },
+        outcome: "Termin",
+        note: state.appointmentNoteDraft || "",
+        appointmentAt: state.appointmentAtDraft,
+        baseUrl,
+      });
+
+      return respondWithHangup(
+        baseUrl,
+        "Vielen Dank für die Angaben. Der Termin ist fest eingeplant. Ich freue mich auf das Gespräch. Auf Wiederhören.",
+      );
+    }
+
+    // Fast path: once the decision-maker is identified and consent is given,
+    // continue the configured script deterministically without waiting for an OpenAI round-trip.
+    if (state.contactRole === "decision-maker" && updatedConsent === "yes") {
+      const scripted = getNextDecisionMakerScriptSegment(
+        activeScript,
+        state.scriptPhaseIndex ?? 0,
+        state.scriptSegmentIndex ?? 0,
+      );
+
+      if (!scripted.done && scripted.reply) {
+        const updatedTranscript = trimTranscript(
+          [
+            state.transcript,
+            "Phase: decision_maker",
+            `Interessent: ${heardText}`,
+            `Gloria: ${scripted.reply}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        return await respondWithGather(baseUrl, scripted.reply, {
+          ...toStatePayload(state),
+          decisionMakerIntroDone: true,
+          scriptPhaseIndex: scripted.nextPhaseIndex,
+          scriptSegmentIndex: scripted.nextSegmentIndex,
+          consent: updatedConsent,
+          consentAsked,
+          contactRole: "decision-maker",
+          roleState: "decision_maker",
+          transcript: updatedTranscript,
+          turn: state.turn + 1,
+          step: "conversation",
+        });
+      }
+
+      const spokenAppointmentAt = parseSpokenAppointmentAt(heardText);
+      const pickedSuggestedAt = pickSuggestedAppointmentAt(
+        heardText,
+        state.appointmentOptionAAt,
+        state.appointmentOptionBAt,
+      );
+      const resolvedAppointmentAt = spokenAppointmentAt || pickedSuggestedAt;
+
+      if (resolvedAppointmentAt) {
+        const appointmentNote = `Termin bestätigt: ${formatAppointmentLabel(resolvedAppointmentAt)}`;
+
+        if (state.topic === "private Krankenversicherung") {
+          const pkvQuestions = getPkvHealthQuestions(activeScript);
+          const firstQuestion = pkvQuestions[0];
+          const firstPrompt = firstQuestion
+            ? `${getPkvHealthIntro(activeScript)} ${firstQuestion}`
+            : getPkvHealthIntro(activeScript);
+          const updatedTranscriptForHealth = trimTranscript(
+            [
+              state.transcript,
+              "Phase: decision_maker",
+              `Interessent: ${heardText}`,
+              `Gloria: ${firstPrompt}`,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          );
+
+          return await respondWithGather(baseUrl, firstPrompt, {
+            ...toStatePayload(state),
+            contactRole: "decision-maker",
+            roleState: "decision_maker",
+            consent: updatedConsent,
+            consentAsked,
+            appointmentAtDraft: resolvedAppointmentAt,
+            appointmentNoteDraft: appointmentNote,
+            pkvHealthIntroDone: true,
+            healthQuestionIndex: firstQuestion ? 1 : 0,
+            transcript: updatedTranscriptForHealth,
+            turn: state.turn + 1,
+            step: "conversation",
+          });
+        }
+
+        const updatedTranscriptForSuccess = trimTranscript(
+          [
+            state.transcript,
+            "Phase: decision_maker",
+            `Interessent: ${heardText}`,
+            `Gloria: Vielen Dank. Dann habe ich den Termin verbindlich eingetragen: ${formatAppointmentLabel(
+              resolvedAppointmentAt,
+            )}.`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        await finalizeCall({
+          state: {
+            ...state,
+            consent: updatedConsent,
+            consentAsked,
+            contactRole: "decision-maker",
+            roleState: "decision_maker",
+            transcript: updatedTranscriptForSuccess,
+            turn: state.turn + 1,
+            step: "finished",
+          },
+          outcome: "Termin",
+          note: appointmentNote,
+          appointmentAt: resolvedAppointmentAt,
+          baseUrl,
+        });
+
+        return respondWithHangup(
+          baseUrl,
+          `Perfekt, vielen Dank. Dann steht unser Termin am ${formatAppointmentLabel(resolvedAppointmentAt)}. Auf Wiederhören.`,
+        );
+      }
+
+      if (!state.appointmentProposalAsked) {
+        const explicitPreference = detectAppointmentPreference(heardText);
+        const rememberedPreference =
+          state.appointmentPreference && state.appointmentPreference !== "any"
+            ? state.appointmentPreference
+            : detectAppointmentPreferenceFromTranscript(state.transcript);
+        const preference = explicitPreference !== "any" ? explicitPreference : rememberedPreference;
+        const options = buildNextWeekAppointmentOptions(preference);
+        const prompt = `Sehr gerne. Ich kann Ihnen direkt zwei Termine in der nächsten Woche anbieten: erstens ${formatAppointmentLabel(
+          options.optionAAt,
+        )} oder zweitens ${formatAppointmentLabel(
+          options.optionBAt,
+        )}. Welcher passt Ihnen besser?`;
+
+        const updatedTranscript = trimTranscript(
+          [
+            state.transcript,
+            "Phase: decision_maker",
+            `Interessent: ${heardText}`,
+            `Gloria: ${prompt}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        return await respondWithGather(baseUrl, prompt, {
+          ...toStatePayload(state),
+          appointmentProposalAsked: true,
+          appointmentPreference: preference,
+          appointmentOptionAAt: options.optionAAt,
+          appointmentOptionBAt: options.optionBAt,
+          consent: updatedConsent,
+          consentAsked,
+          contactRole: "decision-maker",
+          roleState: "decision_maker",
+          transcript: updatedTranscript,
+          turn: state.turn + 1,
+          step: "appointment",
+        });
+      }
+
+      const rejectedBothSuggestions = wantsToRejectBothSuggestions(heardText);
+      const optionALabel = state.appointmentOptionAAt
+        ? formatAppointmentLabel(state.appointmentOptionAAt)
+        : "Option 1";
+      const optionBLabel = state.appointmentOptionBAt
+        ? formatAppointmentLabel(state.appointmentOptionBAt)
+        : "Option 2";
+      const followUpPrompt = rejectedBothSuggestions
+        ? "Kein Problem. Dann nennen Sie mir bitte einfach Ihren Wunschtermin, zum Beispiel nächsten Mittwoch oder übernächsten Donnerstag jeweils mit Uhrzeit."
+        : `Danke. Welcher der beiden Vorschläge passt besser: ${optionALabel} oder ${optionBLabel}?`;
+
+      const updatedTranscript = trimTranscript(
+        [
+          state.transcript,
+          "Phase: decision_maker",
+          `Interessent: ${heardText}`,
+          `Gloria: ${followUpPrompt}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+
+      return await respondWithGather(baseUrl, followUpPrompt, {
+        ...toStatePayload(state),
+        consent: updatedConsent,
+        consentAsked,
+        contactRole: "decision-maker",
+        roleState: "decision_maker",
+        transcript: updatedTranscript,
+        turn: state.turn + 1,
+        step: "appointment",
+      });
+    }
+
+    let decision: GloriaDecision;
+    try {
+      decision = await askOpenAI(
+        systemPrompt,
+        state.contactName,
+        state.transcript,
+        heardText,
+        state.contactRole,
+        state.step,
+      );
+    } catch {
+      const contextualFallbackReply =
+        state.contactRole !== "decision-maker"
+          ? buildGatekeeperTransferLine(state.contactName)
+          : `Danke. ${activeScript.discovery}`;
+
+      decision = {
         detectedRole: "unknown",
-        reply:
-          "Entschuldigung, ich hatte kurz eine technische Unterbrechung. Ich bin gleich wieder für Sie da.",
+        reply: contextualFallbackReply,
         action: "continue",
         appointmentNote: "",
         appointmentAtISO: "",
         directDial: "",
         consentGiven: null,
-      }),
-    );
+      };
+    }
 
     let appointmentAt = normalizeAppointmentAt(decision.appointmentAtISO);
     let directDial =
@@ -624,7 +1361,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       extractDirectDialFromText(heardText) ||
       normalizeDirectDial(state.directDial);
 
-    // Override consent if OpenAI confirmed it explicitly
     if (decision.consentGiven === true) {
       updatedConsent = "yes";
       consentAsked = true;
@@ -634,66 +1370,180 @@ export async function POST(request: Request): Promise<NextResponse> {
       consentAsked = true;
     }
 
-    // Once identified as decision-maker, never downgrade back to gatekeeper
-    const newRole: ContactRole =
-      state.contactRole === "decision-maker"
-        ? "decision-maker"
-        : decision.detectedRole === "decision-maker"
-          ? "decision-maker"
-          : "gatekeeper";
+    const roleResolution = detectRoleState({
+      currentRole: state.contactRole,
+      modelDetectedRole: decision.detectedRole,
+      heardText,
+    });
+    const newRole = roleResolution.contactRole;
+    const newRoleState = roleResolution.roleState;
+    let nextDecisionMakerIntroDone = state.decisionMakerIntroDone ?? false;
+    let nextScriptPhaseIndex = state.scriptPhaseIndex ?? 0;
+    let nextScriptSegmentIndex = state.scriptSegmentIndex ?? 0;
+    let nextHealthQuestionIndex = state.healthQuestionIndex ?? 0;
+    let forceReply = false;
 
-    // Order guardrail 1: At reception, only transfer / callback handling - no final appointment.
+    if (
+      state.roleState === "transfer" &&
+      !nextDecisionMakerIntroDone &&
+      !isLikelyDecisionMakerGreeting(heardText)
+    ) {
+      return await respondWithListenOnly(baseUrl, {
+        ...toStatePayload(state),
+        contactRole: "gatekeeper",
+        roleState: "transfer",
+        turn: state.turn + 1,
+        step: "intro",
+      });
+    }
+
+    if (newRole === "decision-maker" && !nextDecisionMakerIntroDone) {
+      const openerSegments = splitByAnswerWaitMarker(activeScript.opener || "");
+      const openerReply =
+        openerSegments[0] ||
+        "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an.";
+      const updatedTranscript = trimTranscript(
+        [
+          state.transcript,
+          `Phase: ${newRoleState}`,
+          `Interessent: ${heardText}`,
+          `Gloria: ${openerReply}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+
+      return await respondWithGather(baseUrl, openerReply, {
+        ...toStatePayload(state),
+        decisionMakerIntroDone: true,
+        contactRole: newRole,
+        roleState: newRoleState,
+        transcript: updatedTranscript,
+        turn: state.turn + 1,
+        step: "conversation",
+      });
+    }
+
+    if (newRole === "decision-maker" && !consentAsked) {
+      const consentPrompt = getConsentPrompt(activeScript);
+      const updatedTranscript = trimTranscript(
+        [
+          state.transcript,
+          `Phase: ${newRoleState}`,
+          `Interessent: ${heardText}`,
+          `Gloria: ${consentPrompt}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+
+      return await respondWithGather(baseUrl, consentPrompt, {
+        ...toStatePayload(state),
+        decisionMakerIntroDone: true,
+        consentAsked: true,
+        contactRole: newRole,
+        roleState: newRoleState,
+        transcript: updatedTranscript,
+        turn: state.turn + 1,
+        step: "consent",
+      });
+    }
+
+    if (newRole === "decision-maker" && updatedConsent === "yes") {
+      const scripted = getNextDecisionMakerScriptSegment(
+        activeScript,
+        nextScriptPhaseIndex,
+        nextScriptSegmentIndex,
+      );
+
+      if (!scripted.done && scripted.reply) {
+        const updatedTranscript = trimTranscript(
+          [
+            state.transcript,
+            `Phase: ${newRoleState}`,
+            `Interessent: ${heardText}`,
+            `Gloria: ${scripted.reply}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        return await respondWithGather(baseUrl, scripted.reply, {
+          ...toStatePayload(state),
+          decisionMakerIntroDone: true,
+          scriptPhaseIndex: scripted.nextPhaseIndex,
+          scriptSegmentIndex: scripted.nextSegmentIndex,
+          consent: updatedConsent,
+          consentAsked,
+          contactRole: newRole,
+          roleState: newRoleState,
+          transcript: updatedTranscript,
+          turn: state.turn + 1,
+          step: "conversation",
+        });
+      }
+
+      if (scripted.done && appointmentAt) {
+        decision.action = "end_success";
+        if (!decision.appointmentNote?.trim()) {
+          decision.appointmentNote = `Termin vom Interessenten genannt: ${heardText}`;
+        }
+      }
+
+      if (scripted.done && decision.action === "continue" && !appointmentAt) {
+        decision.reply =
+          "Perfekt, dann gehen wir direkt in die Terminierung. Nennen Sie mir bitte einen konkreten Termin mit Datum und Uhrzeit, der Ihnen gut passt.";
+        forceReply = true;
+      }
+    }
+
     if (newRole !== "decision-maker" && decision.action === "end_success") {
       decision.action = "continue";
       decision.reply = buildGatekeeperTransferLine(state.contactName);
       appointmentAt = undefined;
     }
 
-    // Order guardrail 2: As soon as the decision-maker is on the line, ask consent first.
-    if (newRole === "decision-maker" && !consentAsked) {
-      decision.action = "continue";
-      decision.reply = buildConsentPrompt(activeScript);
-      consentAsked = true;
-      appointmentAt = undefined;
-    }
+    // Deterministic decision-maker flow is handled above.
 
-    // For PKV, health questions are mandatory before ending successfully.
-    if (
-      state.topic === "private Krankenversicherung" &&
-      newRole === "decision-maker" &&
-      !hasHealthQuestionsCovered(state.transcript)
-    ) {
-      decision.action = "continue";
-      decision.reply = pickHealthQuestion(activeScript);
-      appointmentAt = undefined;
-    }
-
-    // Never finish as successful appointment without exact date-time.
     if (decision.action === "end_success" && !appointmentAt) {
       decision.action = "continue";
       decision.reply =
         "Sehr gern. Damit ich den Termin fest eintrage, brauche ich bitte ein genaues Datum mit Uhrzeit. Was passt Ihnen konkret?";
+      forceReply = true;
     }
 
     const unavailableAtReception =
-      newRole !== "decision-maker" && signalsUnavailable(heardText);
+      newRole !== "decision-maker" &&
+      /(nicht\s+da|nicht\s+verf[üu]gbar|nicht\s+erreichbar|im\s+termin|au[ßs]er\s+haus|heute\s+nicht|gerade\s+nicht|im\s+gespr[äa]ch)/i.test(
+        heardText,
+      );
 
     if (unavailableAtReception && !appointmentAt) {
       decision.action = "continue";
       decision.reply =
         "Danke für die Info. Wann erreiche ich Herrn oder Frau am besten erneut, bitte mit konkretem Datum und Uhrzeit?";
+      forceReply = true;
     }
 
     if ((unavailableAtReception || decision.action === "end_callback") && !directDial) {
       decision.action = "continue";
       decision.reply =
         "Danke. Damit ich beim Rückruf direkt durchkomme: Wie lautet bitte die direkte Durchwahl oder Mobilnummer?";
+      forceReply = true;
     }
 
     if (decision.action === "end_callback" && !appointmentAt) {
       decision.action = "continue";
       decision.reply =
         "Gern notiere ich die Wiedervorlage. Bitte nennen Sie mir ein konkretes Datum mit Uhrzeit für den Rückruf.";
+      forceReply = true;
+    }
+
+    if (newRole !== "decision-maker" && isShortAffirmative(heardText) && !forceReply) {
+      decision.action = "continue";
+      decision.reply = buildGatekeeperTransferLine(state.contactName);
+      appointmentAt = undefined;
+      forceReply = true;
     }
 
     const nextStep: TokenizedCallState["step"] =
@@ -707,20 +1557,10 @@ export async function POST(request: Request): Promise<NextResponse> {
               ? "appointment"
               : "conversation";
 
-    const phase = detectPhase({
-      role: newRole,
-      topic: state.topic,
-      consent: updatedConsent,
-      appointmentAt,
-      action: decision.action,
-      transcript: state.transcript,
-      reply: decision.reply,
-    });
-
     const updatedTranscript = trimTranscript(
       [
         state.transcript,
-        `Phase: ${phase}`,
+        `Phase: ${newRoleState}`,
         `Interessent: ${heardText}`,
         `Gloria: ${decision.reply}`,
       ]
@@ -728,7 +1568,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         .join("\n"),
     );
 
-    // ── End call ──────────────────────────────────────────────────────────────
     if (decision.action !== "continue") {
       const outcome: ReportOutcome =
         decision.action === "end_success"
@@ -737,51 +1576,94 @@ export async function POST(request: Request): Promise<NextResponse> {
             ? "Wiedervorlage"
             : "Absage";
 
-      await finalizeCall(
-        {
+      if (
+        outcome === "Termin" &&
+        state.topic === "private Krankenversicherung" &&
+        updatedConsent === "yes" &&
+        appointmentAt
+      ) {
+        const pkvQuestions = getPkvHealthQuestions(activeScript);
+        const firstQuestion = pkvQuestions[0];
+        const firstPrompt = firstQuestion
+          ? `${getPkvHealthIntro(activeScript)} ${firstQuestion}`
+          : getPkvHealthIntro(activeScript);
+        const updatedTranscriptForHealth = trimTranscript(
+          [
+            state.transcript,
+            `Phase: ${newRoleState}`,
+            `Interessent: ${heardText}`,
+            `Gloria: ${firstPrompt}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+
+        return await respondWithGather(baseUrl, firstPrompt, {
+          ...toStatePayload(state),
+          contactRole: newRole,
+          roleState: newRoleState,
+          consent: updatedConsent,
+          consentAsked,
+          appointmentAtDraft: appointmentAt,
+          appointmentNoteDraft: decision.appointmentNote,
+          pkvHealthIntroDone: true,
+          healthQuestionIndex: firstQuestion ? 1 : 0,
+          transcript: updatedTranscriptForHealth,
+          turn: state.turn + 1,
+          step: "conversation",
+        });
+      }
+
+      await finalizeCall({
+        state: {
           ...state,
           directDial,
+          scriptPhaseIndex: nextScriptPhaseIndex,
+          healthQuestionIndex: nextHealthQuestionIndex,
           consent: updatedConsent,
           consentAsked,
           contactRole: newRole,
+          roleState: newRoleState,
           transcript: updatedTranscript,
           turn: state.turn + 1,
           step: nextStep,
         },
         outcome,
-        decision.appointmentNote,
-        outcome === "Termin" ? appointmentAt : undefined,
-        outcome === "Wiedervorlage" ? appointmentAt : undefined,
+        note: decision.appointmentNote,
+        appointmentAt: outcome === "Termin" ? appointmentAt : undefined,
+        nextCallAt: outcome === "Wiedervorlage" ? appointmentAt : undefined,
         directDial,
-      );
-      return respondWithHangup(twiml, baseUrl, decision.reply);
+        baseUrl,
+      });
+      return respondWithHangup(baseUrl, decision.reply);
     }
 
-    // ── Continue conversation ─────────────────────────────────────────────────
-    return respondWithGather(twiml, baseUrl, decision.reply, {
+    return await respondWithGather(baseUrl, decision.reply, {
       ...toStatePayload(state),
       directDial,
+      scriptPhaseIndex: nextScriptPhaseIndex,
+      healthQuestionIndex: nextHealthQuestionIndex,
       consent: updatedConsent,
       consentAsked,
       contactRole: newRole,
+      roleState: newRoleState,
       transcript: updatedTranscript,
       turn: state.turn + 1,
       step: nextStep,
     });
   } catch (error) {
     console.error("[gloria/process] Unhandled error:", error);
-    twiml.say(
-      { voice: "alice", language: "de-DE" },
-      "Entschuldigung, es ist ein technischer Fehler aufgetreten. Ich melde mich nochmals.",
+    return new NextResponse(
+      buildSayHangupTwiml({
+        sayText: "Entschuldigung, es ist ein technischer Fehler aufgetreten. Ich melde mich nochmals.",
+      }),
+      {
+        headers: { "Content-Type": "text/xml; charset=utf-8" },
+      },
     );
-    twiml.hangup();
-    return new NextResponse(twiml.toString(), {
-      headers: { "Content-Type": "text/xml; charset=utf-8" },
-    });
   }
 }
 
-// GET is used when Twilio follows a redirect within an ongoing call
 export async function GET(request: Request): Promise<NextResponse> {
   return POST(request);
 }

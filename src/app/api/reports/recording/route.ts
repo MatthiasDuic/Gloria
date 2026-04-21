@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteReportRecording } from "@/lib/storage";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
+import { getDashboardData } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
   const url = request.nextUrl.searchParams.get("url");
 
   if (!url) {
@@ -23,6 +30,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Nur Twilio-Aufnahmen können abgerufen werden." }, { status: 403 });
   }
 
+  if (sessionUser.role !== "master") {
+    const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
+    const ownsRecording = ownData.reports.some((report) => report.recordingUrl === url);
+
+    if (!ownsRecording) {
+      return NextResponse.json({ error: "Keine Berechtigung für diese Aufnahme." }, { status: 403 });
+    }
+  }
+
   const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
 
@@ -30,7 +46,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Twilio-Zugangsdaten nicht konfiguriert." }, { status: 503 });
   }
 
-  const credentials = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+  const credentials = btoa(`${accountSid}:${authToken}`);
 
   try {
     const twilioResponse = await fetch(url, {
@@ -67,12 +83,36 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
   const reportId = request.nextUrl.searchParams.get("reportId");
 
   if (!reportId) {
     return NextResponse.json({ error: "reportId fehlt." }, { status: 400 });
   }
 
-  await deleteReportRecording(reportId);
+  if (sessionUser.role !== "master") {
+    const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
+    const owned = ownData.reports.some((report) => report.id === reportId);
+    if (!owned) {
+      return NextResponse.json({ error: "Keine Berechtigung." }, { status: 403 });
+    }
+  }
+
+  const baseUrl = `${request.nextUrl.protocol}//${request.nextUrl.host}`;
+  const forwarded = await fetch(`${baseUrl}/api/reports?reportId=${encodeURIComponent(reportId)}`, {
+    method: "DELETE",
+    headers: { cookie: request.headers.get("cookie") || "" },
+    cache: "no-store",
+  });
+
+  if (!forwarded.ok) {
+    return NextResponse.json({ error: "Aufnahme konnte nicht gelöscht werden." }, { status: 502 });
+  }
+
   return NextResponse.json({ ok: true });
 }

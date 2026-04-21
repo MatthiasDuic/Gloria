@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { sendReportEmail } from "@/lib/mailer";
-import { storeCallReport } from "@/lib/storage";
 import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 function normalizeTopic(value?: string | null): Topic {
   const found = TOPICS.find((topic) => topic === value);
@@ -26,51 +24,38 @@ export async function POST(request: Request) {
   const callSid = String(form.get("CallSid") || "").trim();
   const callStatus = String(form.get("CallStatus") || form.get("RecordingStatus") || "").trim();
   const recordingUrl = recordingUrlWithFormat(String(form.get("RecordingUrl") || "").trim());
+  const userId = url.searchParams.get("userId") || undefined;
+  const phoneNumberId = url.searchParams.get("phoneNumberId") || undefined;
   const company = url.searchParams.get("company") || "Testanruf";
   const contactName = url.searchParams.get("contactName") || undefined;
   const leadId = url.searchParams.get("leadId") || undefined;
   const topic = normalizeTopic(url.searchParams.get("topic"));
+  const baseUrl = `${url.protocol}//${url.host}`;
 
   if (callSid && (callStatus === "completed" || Boolean(recordingUrl))) {
     try {
-      const report = await storeCallReport({
-        callSid,
-        leadId,
-        company,
-        contactName,
-        topic,
-        // Don't overwrite the conversation summary set by the voice processor.
-        // Only set a minimal note if recordingUrl arrived without a prior voice summary.
-        summary: undefined,
-        recordingConsent: recordingUrl ? true : undefined,
-        recordingUrl: recordingUrl || undefined,
-        attempts: 1,
-      });
-
-      if (recordingUrl) {
-        await sendReportEmail(report).catch(() => undefined);
-      }
-    } catch (error) {
-      console.error("Twilio status report could not be saved", error);
-
-      if (recordingUrl) {
-        await sendReportEmail({
-          id: `status-${Date.now()}`,
+      await fetch(`${baseUrl}/api/calls/webhook`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          phoneNumberId,
           callSid,
           leadId,
           company,
           contactName,
           topic,
-          summary: "Aufnahme gespeichert.",
-          outcome: "Kein Kontakt",
-          conversationDate: new Date().toISOString(),
+          summary: undefined,
+          recordingConsent: recordingUrl ? true : undefined,
+          recordingUrl: recordingUrl || undefined,
           attempts: 1,
-          recordingConsent: true,
-          recordingUrl,
-          emailedTo:
-            process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
-        }).catch(() => undefined);
-      }
+        }),
+        cache: "no-store",
+      });
+    } catch (error) {
+      console.error("Twilio status report could not be saved", error);
     }
   }
 

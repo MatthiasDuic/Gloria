@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
+import {
+  generateElevenLabsTelephonyStream,
+  isElevenLabsConfigured,
+  maybeWarmupElevenLabsVoice,
+} from "@/lib/elevenlabs";
 import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
 import type { Topic } from "@/lib/types";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 function buildTopicPitch(topic: Topic) {
@@ -84,26 +88,30 @@ export async function GET(request: Request) {
     );
   }
 
+  void maybeWarmupElevenLabsVoice();
+
   const { searchParams } = new URL(request.url);
   const text = buildAudioText(searchParams);
-  const voiceResult = await generateElevenLabsPreview(text);
+  try {
+    const voiceStream = await generateElevenLabsTelephonyStream(text);
 
-  if (voiceResult.provider !== "elevenlabs" || !voiceResult.audioBase64) {
+    return new NextResponse(voiceStream.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "audio/basic",
+        "Cache-Control": "no-store, max-age=0",
+        "X-Audio-Format": "ulaw_8000",
+      },
+    });
+  } catch (error) {
     return NextResponse.json(
       {
-        error: voiceResult.error || "ElevenLabs konnte kein Telefon-Audio erzeugen.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "ElevenLabs konnte kein Telefon-Audio erzeugen.",
       },
       { status: 502 },
     );
   }
-
-  const audioBuffer = Buffer.from(voiceResult.audioBase64, "base64");
-
-  return new NextResponse(audioBuffer, {
-    headers: {
-      "Content-Type": voiceResult.audioMimeType || "audio/mpeg",
-      "Cache-Control": "no-store, max-age=0",
-      "Content-Length": String(audioBuffer.length),
-    },
-  });
 }
