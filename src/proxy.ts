@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifySessionTokenEdge } from "@/lib/session-edge";
 
-const PUBLIC_PATH_PREFIXES = ["/_next", "/api/twilio", "/api/calls/webhook", "/api/health"];
-const PUBLIC_PATHS = ["/favicon.ico"];
+const PUBLIC_PATH_PREFIXES = [
+  "/_next",
+  "/api/twilio",
+  "/api/calls/webhook",
+  "/api/health",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/me",
+];
+const PUBLIC_PATHS = ["/favicon.ico", "/logout", "/login"];
 
 function isPublicPath(pathname: string) {
   return (
@@ -10,61 +19,24 @@ function isPublicPath(pathname: string) {
   );
 }
 
-function buildUnauthorizedResponse() {
-  return new NextResponse("Anmeldung erforderlich.", {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": 'Basic realm="Gloria Admin", charset="UTF-8"',
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  const username = process.env.BASIC_AUTH_USERNAME?.trim();
-  const password = process.env.BASIC_AUTH_PASSWORD?.trim();
+  const token = request.cookies.get("gloria_session")?.value;
+  const sessionUser = await verifySessionTokenEdge(token);
 
-  if (!username || !password) {
-    if (process.env.NODE_ENV === "development") {
-      return NextResponse.next();
-    }
-
-    return new NextResponse(
-      "Admin-Zugang noch nicht konfiguriert. Bitte BASIC_AUTH_USERNAME und BASIC_AUTH_PASSWORD setzen.",
-      {
-        status: 503,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
+  if (sessionUser) {
+    return NextResponse.next();
   }
 
-  const authorization = request.headers.get("authorization");
-
-  if (!authorization?.startsWith("Basic ")) {
-    return buildUnauthorizedResponse();
-  }
-
-  try {
-    const base64 = authorization.split(" ")[1] || "";
-    const [providedUser = "", ...passwordParts] = atob(base64).split(":");
-    const providedPassword = passwordParts.join(":");
-
-    if (providedUser === username && providedPassword === password) {
-      return NextResponse.next();
-    }
-  } catch {
-    return buildUnauthorizedResponse();
-  }
-
-  return buildUnauthorizedResponse();
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/login";
+  loginUrl.searchParams.set("next", pathname);
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {

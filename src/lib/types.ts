@@ -12,6 +12,9 @@ export type ReportOutcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontak
 
 export interface Lead {
   id: string;
+  userId?: string;
+  listId?: string;
+  listName?: string;
   company: string;
   contactName: string;
   phone: string;
@@ -31,52 +34,26 @@ export interface ScriptConfig {
   discovery: string;
   objectionHandling: string;
   close: string;
-  // Full Leitfaden fields – editable and saved to JSON, override the .ts defaults
-  receptionIntro?: string;
-  receptionIfAskedWhatTopic?: string;
-  receptionIfBlocked?: string;
-  receptionIfEmailSuggested?: string;
-  receptionIfEmailInsisted?: string;
-  decisionMakerIntro?: string;
-  needsQuestions?: string;        // newline-separated list
-  needsReinforcement?: string;
-  problemText?: string;
-  conceptText?: string;
-  pressureText?: string;
-  closeMain?: string;
-  closeIfNoTime?: string;
-  closeIfAskWhatExactly?: string;
-  objectionsText?: string;        // "Einwand: Antwort" per line
-  dataCollectionIntro?: string;
-  dataCollectionFields?: string;  // newline-separated list
-  dataCollectionIfDetailsDeclined?: string;
-  dataCollectionClosing?: string;
-  finalText?: string;
-  // Twilio voice process hardcoded prompts → extracted to Dashboard
+  aiKeyInfo?: string;
   consentPrompt?: string;
-  decisionMakerGreeting?: string;
-  topicExplanation?: string;
-  preparationConsent?: string;
-  problemBenefitConfirmation?: string;
-  appointmentOffer?: string;
-  appointmentConfirmation?: string;
-  // OpenAI-driven call configuration (replaces hard-coded prompts)
-  aiKeyInfo?: string;              // Basisinformationen für den Anruf
-  gatekeeperTask?: string;         // Aufgabe beim Empfang
-  gatekeeperBehavior?: string;     // Verhalten beim Empfang
-  decisionMakerTask?: string;      // Aufgabe beim Entscheider
-  decisionMakerBehavior?: string;  // Verhalten beim Entscheider
-  appointmentGoal?: string;        // Zielbeschreibung für erfolgreichen Abschluss
-  recordingConsentLine?: string;   // Zusätzliche Einwilligungsformulierung (JA/NEIN)
-  healthCheckQuestions?: string;   // Gesundheitsfragen als Liste/Textblock
-  appointmentTransition?: string;  // Übergang von Bedarf/Einwand in Terminierung
-  appointmentSchedulingRules?: string; // Konkrete Regeln für Datum/Uhrzeit/Alternativen
+  pkvHealthIntro?: string;
+  pkvHealthQuestions?: string;
+  gatekeeperTask?: string;
+  gatekeeperBehavior?: string;
+  gatekeeperExample?: string;
+  decisionMakerTask?: string;
+  decisionMakerBehavior?: string;
+  decisionMakerExample?: string;
+  appointmentGoal?: string;
 }
 
 export interface CallReport {
   id: string;
+  userId?: string;
+  phoneNumberId?: string;
   callSid?: string;
   leadId?: string;
+  directDial?: string;
   company: string;
   contactName?: string;
   topic: Topic;

@@ -1,6 +1,8 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { CallReport, ConversationEvent, Lead, ReportOutcome, ScriptConfig, Topic } from "./types";
+import { hashPassword, verifyPassword, type UserRole } from "./session";
+import { defaultScripts } from "./sample-data";
 
 export interface RecordingEntry {
   id: string;
@@ -15,6 +17,33 @@ export interface RecordingEntry {
 export interface ReportDatabase {
   reports: CallReport[];
   recordings: RecordingEntry[];
+}
+
+export interface CampaignListStateRow {
+  listId: string;
+  listName: string;
+  active: boolean;
+  startedAt?: string;
+  stoppedAt?: string;
+  lastRunAt?: string;
+}
+
+export interface AppUser {
+  id: string;
+  username: string;
+  realName: string;
+  companyName: string;
+  passwordHash: string;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface UserPhoneNumber {
+  id: string;
+  userId: string;
+  phoneNumber: string;
+  label: string;
+  active: boolean;
 }
 
 let pool: Pool | null = null;
@@ -77,12 +106,64 @@ async function ensureSchema() {
   const db = getPool();
 
   await db.query(`
-    CREATE TABLE IF NOT EXISTS gloria_reports (
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+        CREATE TYPE user_role AS ENUM ('master', 'user');
+      END IF;
+    END$$;
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      real_name TEXT NOT NULL,
+      company_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role user_role NOT NULL DEFAULT 'user',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS phone_numbers (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      phone_number TEXT NOT NULL,
+      label TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS phone_numbers_user_id_idx
+    ON phone_numbers (user_id);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS scripts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      topic TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_from_default BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, topic)
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS call_reports (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      phone_number_id TEXT REFERENCES phone_numbers(id) ON DELETE SET NULL,
       call_sid TEXT,
       lead_id TEXT,
       company TEXT NOT NULL,
       contact_name TEXT,
+      direct_dial TEXT,
       topic TEXT NOT NULL,
       summary TEXT NOT NULL,
       outcome TEXT NOT NULL,
@@ -95,6 +176,43 @@ async function ensureSchema() {
       emailed_to TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_reports (
+      id TEXT PRIMARY KEY,
+      call_sid TEXT,
+      lead_id TEXT,
+      company TEXT NOT NULL,
+      contact_name TEXT,
+      direct_dial TEXT,
+      topic TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      conversation_date TIMESTAMPTZ NOT NULL,
+      appointment_at TIMESTAMPTZ,
+      next_call_at TIMESTAMPTZ,
+      attempts INTEGER NOT NULL,
+      recording_consent BOOLEAN NOT NULL,
+      recording_url TEXT,
+      emailed_to TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_reports
+    ADD COLUMN IF NOT EXISTS direct_dial TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_reports
+    ADD COLUMN IF NOT EXISTS user_id TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_reports
+    ADD COLUMN IF NOT EXISTS phone_number_id TEXT;
   `);
 
   await db.query(`
@@ -147,7 +265,389 @@ async function ensureSchema() {
     );
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_leads (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      list_id TEXT,
+      list_name TEXT,
+      company TEXT NOT NULL,
+      contact_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      direct_dial TEXT,
+      email TEXT,
+      topic TEXT NOT NULL,
+      note TEXT,
+      next_call_at TIMESTAMPTZ,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_leads
+    ADD COLUMN IF NOT EXISTS user_id TEXT;
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
+    ON gloria_leads (status);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_campaign_lists (
+      user_id TEXT,
+      list_id TEXT PRIMARY KEY,
+      list_name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT FALSE,
+      started_at TIMESTAMPTZ,
+      stopped_at TIMESTAMPTZ,
+      last_run_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_campaign_lists
+    ADD COLUMN IF NOT EXISTS user_id TEXT;
+  `);
+
   schemaReady = true;
+}
+
+function makeId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function ensureMasterAdmin(): Promise<void> {
+  if (!shouldUsePostgres()) {
+    return;
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const username = process.env.BASIC_AUTH_USERNAME?.trim() || "mduic";
+  const password = process.env.BASIC_AUTH_PASSWORD?.trim() || "ChangeMe123!";
+
+  const existing = await db.query(
+    `SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+    [username],
+  );
+
+  if (existing.rows[0]) {
+    await db.query(
+      `
+      UPDATE users
+      SET
+        username = $2,
+        real_name = $3,
+        company_name = $4,
+        password_hash = $5,
+        role = 'master'
+      WHERE id = $1
+      `,
+      [
+        String(existing.rows[0].id),
+        username,
+        "Matthias Duic",
+        "Agentur Duic Sprockhoevel",
+        hashPassword(password),
+      ],
+    );
+    return;
+  }
+
+  await db.query(
+    `
+    INSERT INTO users (id, username, real_name, company_name, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,'master',NOW())
+    `,
+    [
+      makeId("usr"),
+      username,
+      "Matthias Duic",
+      "Agentur Duic Sprockhoevel",
+      hashPassword(password),
+    ],
+  );
+}
+
+export async function findUserByUsername(username: string): Promise<AppUser | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `
+    SELECT id, username, real_name, company_name, password_hash, role, created_at
+    FROM users
+    WHERE LOWER(username) = LOWER($1)
+    LIMIT 1
+    `,
+    [username],
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    realName: String(row.real_name),
+    companyName: String(row.company_name),
+    passwordHash: String(row.password_hash),
+    role: row.role === "master" ? "master" : "user",
+    createdAt: toIso(row.created_at) || new Date().toISOString(),
+  };
+}
+
+export async function findUserById(userId: string): Promise<AppUser | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `
+    SELECT id, username, real_name, company_name, password_hash, role, created_at
+    FROM users
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [userId],
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    realName: String(row.real_name),
+    companyName: String(row.company_name),
+    passwordHash: String(row.password_hash),
+    role: row.role === "master" ? "master" : "user",
+    createdAt: toIso(row.created_at) || new Date().toISOString(),
+  };
+}
+
+export function verifyUserPassword(rawPassword: string, passwordHash: string): boolean {
+  return verifyPassword(rawPassword, passwordHash);
+}
+
+export async function listUsers(): Promise<AppUser[]> {
+  if (!shouldUsePostgres()) {
+    return [];
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `
+    SELECT id, username, real_name, company_name, password_hash, role, created_at
+    FROM users
+    ORDER BY created_at DESC
+    `,
+  );
+
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    username: String(row.username),
+    realName: String(row.real_name),
+    companyName: String(row.company_name),
+    passwordHash: String(row.password_hash),
+    role: row.role === "master" ? "master" : "user",
+    createdAt: toIso(row.created_at) || new Date().toISOString(),
+  }));
+}
+
+export async function createUser(input: {
+  username: string;
+  realName: string;
+  companyName: string;
+  password: string;
+  role?: UserRole;
+}): Promise<AppUser> {
+  await ensureSchema();
+  const db = getPool();
+  const id = makeId("usr");
+  const role = input.role === "master" ? "master" : "user";
+
+  await db.query(
+    `
+    INSERT INTO users (id, username, real_name, company_name, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,NOW())
+    `,
+    [id, input.username, input.realName, input.companyName, hashPassword(input.password), role],
+  );
+
+  const created = await findUserByUsername(input.username);
+
+  if (!created) {
+    throw new Error("Benutzer konnte nicht erstellt werden.");
+  }
+
+  if (created.role === "user") {
+    await bootstrapUserScriptsFromDefaults(created.id, defaultScripts);
+  }
+
+  return created;
+}
+
+export async function updateUser(
+  userId: string,
+  input: {
+    realName?: string;
+    companyName?: string;
+    password?: string;
+    role?: UserRole;
+  },
+): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+
+  if (input.realName) {
+    await db.query(`UPDATE users SET real_name = $2 WHERE id = $1`, [userId, input.realName]);
+  }
+  if (input.companyName) {
+    await db.query(`UPDATE users SET company_name = $2 WHERE id = $1`, [userId, input.companyName]);
+  }
+  if (input.password) {
+    await db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(input.password)]);
+  }
+  if (input.role) {
+    await db.query(`UPDATE users SET role = $2 WHERE id = $1`, [userId, input.role]);
+  }
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(`DELETE FROM users WHERE id = $1`, [userId]);
+}
+
+export async function listPhoneNumbersByUser(userId: string): Promise<UserPhoneNumber[]> {
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `
+    SELECT id, user_id, phone_number, label, active
+    FROM phone_numbers
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    `,
+    [userId],
+  );
+
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    userId: String(row.user_id),
+    phoneNumber: String(row.phone_number),
+    label: String(row.label),
+    active: Boolean(row.active),
+  }));
+}
+
+export async function listAllPhoneNumbers(): Promise<UserPhoneNumber[]> {
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `SELECT id, user_id, phone_number, label, active FROM phone_numbers ORDER BY created_at DESC`,
+  );
+
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    userId: String(row.user_id),
+    phoneNumber: String(row.phone_number),
+    label: String(row.label),
+    active: Boolean(row.active),
+  }));
+}
+
+export async function createPhoneNumber(input: {
+  userId: string;
+  phoneNumber: string;
+  label: string;
+  active?: boolean;
+}): Promise<UserPhoneNumber> {
+  await ensureSchema();
+  const db = getPool();
+  const id = makeId("pn");
+
+  await db.query(
+    `
+    INSERT INTO phone_numbers (id, user_id, phone_number, label, active, created_at)
+    VALUES ($1,$2,$3,$4,$5,NOW())
+    `,
+    [id, input.userId, input.phoneNumber, input.label, input.active !== false],
+  );
+
+  return {
+    id,
+    userId: input.userId,
+    phoneNumber: input.phoneNumber,
+    label: input.label,
+    active: input.active !== false,
+  };
+}
+
+export async function updatePhoneNumber(
+  id: string,
+  payload: { label?: string; active?: boolean; phoneNumber?: string },
+): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+
+  if (payload.label !== undefined) {
+    await db.query(`UPDATE phone_numbers SET label = $2 WHERE id = $1`, [id, payload.label]);
+  }
+  if (payload.active !== undefined) {
+    await db.query(`UPDATE phone_numbers SET active = $2 WHERE id = $1`, [id, payload.active]);
+  }
+  if (payload.phoneNumber !== undefined) {
+    await db.query(`UPDATE phone_numbers SET phone_number = $2 WHERE id = $1`, [id, payload.phoneNumber]);
+  }
+}
+
+export async function deletePhoneNumber(id: string): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(`DELETE FROM phone_numbers WHERE id = $1`, [id]);
+}
+
+export async function findPhoneNumberById(id: string): Promise<UserPhoneNumber | null> {
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `
+    SELECT id, user_id, phone_number, label, active
+    FROM phone_numbers
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [id],
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    phoneNumber: String(row.phone_number),
+    label: String(row.label),
+    active: Boolean(row.active),
+  };
 }
 
 export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> {
@@ -245,10 +745,13 @@ export async function readReportDatabaseFromPostgres(): Promise<ReportDatabase |
     const reportsResult = await db.query(`
       SELECT
         id,
+        user_id,
+        phone_number_id,
         call_sid,
         lead_id,
         company,
         contact_name,
+        direct_dial,
         topic,
         summary,
         outcome,
@@ -271,10 +774,13 @@ export async function readReportDatabaseFromPostgres(): Promise<ReportDatabase |
 
     const reports: CallReport[] = reportsResult.rows.map((row) => ({
       id: String(row.id),
+      userId: row.user_id ? String(row.user_id) : undefined,
+      phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
       callSid: row.call_sid ? String(row.call_sid) : undefined,
       leadId: row.lead_id ? String(row.lead_id) : undefined,
       company: String(row.company),
       contactName: row.contact_name ? String(row.contact_name) : undefined,
+      directDial: row.direct_dial ? String(row.direct_dial) : undefined,
       topic: normalizeTopic(String(row.topic)),
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
@@ -322,10 +828,13 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
           `
           INSERT INTO gloria_reports (
             id,
+            user_id,
+            phone_number_id,
             call_sid,
             lead_id,
             company,
             contact_name,
+            direct_dial,
             topic,
             summary,
             outcome,
@@ -338,14 +847,17 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             emailed_to,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            phone_number_id = EXCLUDED.phone_number_id,
             call_sid = EXCLUDED.call_sid,
             lead_id = EXCLUDED.lead_id,
             company = EXCLUDED.company,
             contact_name = EXCLUDED.contact_name,
+            direct_dial = EXCLUDED.direct_dial,
             topic = EXCLUDED.topic,
             summary = EXCLUDED.summary,
             outcome = EXCLUDED.outcome,
@@ -360,10 +872,13 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
           `,
           [
             report.id,
+            report.userId || null,
+            report.phoneNumberId || null,
             report.callSid || null,
             report.leadId || null,
             report.company,
             report.contactName || null,
+            report.directDial || null,
             report.topic,
             report.summary,
             report.outcome,
@@ -592,5 +1107,417 @@ export async function writeScriptToPostgres(script: ScriptConfig): Promise<boole
   } catch (error) {
     console.error("Postgres single script write failed, fallback to file storage", error);
     return false;
+  }
+}
+
+export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(`
+      SELECT
+        id,
+        user_id,
+        list_id,
+        list_name,
+        company,
+        contact_name,
+        phone,
+        direct_dial,
+        email,
+        topic,
+        note,
+        next_call_at,
+        status,
+        attempts
+      FROM gloria_leads
+      ${userId ? "WHERE user_id = $1" : ""}
+      ORDER BY updated_at DESC;
+    `, userId ? [userId] : []);
+
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      userId: row.user_id ? String(row.user_id) : undefined,
+      listId: row.list_id ? String(row.list_id) : undefined,
+      listName: row.list_name ? String(row.list_name) : undefined,
+      company: String(row.company),
+      contactName: String(row.contact_name || "Empfang"),
+      phone: String(row.phone || ""),
+      directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+      email: row.email ? String(row.email) : undefined,
+      topic: normalizeTopic(String(row.topic)),
+      note: row.note ? String(row.note) : undefined,
+      nextCallAt: toIso(row.next_call_at),
+      status:
+        row.status === "neu" ||
+        row.status === "angerufen" ||
+        row.status === "termin" ||
+        row.status === "absage" ||
+        row.status === "wiedervorlage"
+          ? row.status
+          : "neu",
+      attempts: Number(row.attempts || 0),
+    }));
+  } catch (error) {
+    console.error("Postgres lead read failed, fallback to file storage", error);
+    return null;
+  }
+}
+
+export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const client = await db.connect();
+
+    try {
+      await client.query("BEGIN");
+      if (userId) {
+        await client.query("DELETE FROM gloria_leads WHERE user_id = $1", [userId]);
+      } else {
+        await client.query("DELETE FROM gloria_leads");
+      }
+
+      for (const lead of leads) {
+        await client.query(
+          `
+          INSERT INTO gloria_leads (
+            id,
+            user_id,
+            list_id,
+            list_name,
+            company,
+            contact_name,
+            phone,
+            direct_dial,
+            email,
+            topic,
+            note,
+            next_call_at,
+            status,
+            attempts,
+            updated_at
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW()
+          );
+          `,
+          [
+            lead.id,
+            lead.userId || userId || null,
+            lead.listId || null,
+            lead.listName || null,
+            lead.company,
+            lead.contactName,
+            lead.phone,
+            lead.directDial || null,
+            lead.email || null,
+            lead.topic,
+            lead.note || null,
+            lead.nextCallAt || null,
+            lead.status,
+            lead.attempts,
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Postgres lead write failed, fallback to file storage", error);
+    return false;
+  }
+}
+
+export async function readCampaignListsStateFromPostgres(userId?: string): Promise<CampaignListStateRow[] | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(`
+      SELECT list_id, list_name, active, started_at, stopped_at, last_run_at
+      FROM gloria_campaign_lists
+      ${userId ? "WHERE user_id = $1" : ""}
+      ORDER BY updated_at DESC;
+    `, userId ? [userId] : []);
+
+    return result.rows.map((row) => ({
+      listId: String(row.list_id),
+      listName: String(row.list_name),
+      active: Boolean(row.active),
+      startedAt: toIso(row.started_at),
+      stoppedAt: toIso(row.stopped_at),
+      lastRunAt: toIso(row.last_run_at),
+    }));
+  } catch (error) {
+    console.error("Postgres campaign list read failed, fallback to file storage", error);
+    return null;
+  }
+}
+
+export async function writeCampaignListsStateToPostgres(
+  lists: CampaignListStateRow[],
+  userId?: string,
+): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const client = await db.connect();
+
+    try {
+      await client.query("BEGIN");
+      if (userId) {
+        await client.query("DELETE FROM gloria_campaign_lists WHERE user_id = $1", [userId]);
+      } else {
+        await client.query("DELETE FROM gloria_campaign_lists");
+      }
+
+      for (const list of lists) {
+        await client.query(
+          `
+          INSERT INTO gloria_campaign_lists (
+            user_id,
+            list_id,
+            list_name,
+            active,
+            started_at,
+            stopped_at,
+            last_run_at,
+            updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW());
+          `,
+          [
+            userId || null,
+            list.listId,
+            list.listName,
+            list.active,
+            list.startedAt || null,
+            list.stoppedAt || null,
+            list.lastRunAt || null,
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Postgres campaign list write failed, fallback to file storage", error);
+    return false;
+  }
+}
+
+export async function readUserScriptsFromPostgres(userId: string): Promise<ScriptConfig[] | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(
+      `
+      SELECT topic, content
+      FROM scripts
+      WHERE user_id = $1
+      ORDER BY topic ASC
+      `,
+      [userId],
+    );
+
+    if (!result.rows.length) {
+      return null;
+    }
+
+    return result.rows.map((row) => {
+      const data = JSON.parse(String(row.content || "{}")) as Partial<ScriptConfig>;
+      const topic = normalizeTopic(String(row.topic));
+
+      return {
+        id: String(data.id || `skript-${topic}`),
+        topic,
+        opener: String(data.opener || ""),
+        discovery: String(data.discovery || ""),
+        objectionHandling: String(data.objectionHandling || ""),
+        close: String(data.close || ""),
+        aiKeyInfo: typeof data.aiKeyInfo === "string" ? data.aiKeyInfo : undefined,
+        consentPrompt: typeof data.consentPrompt === "string" ? data.consentPrompt : undefined,
+        pkvHealthIntro: typeof data.pkvHealthIntro === "string" ? data.pkvHealthIntro : undefined,
+        pkvHealthQuestions: typeof data.pkvHealthQuestions === "string" ? data.pkvHealthQuestions : undefined,
+        gatekeeperTask: typeof data.gatekeeperTask === "string" ? data.gatekeeperTask : undefined,
+        gatekeeperBehavior: typeof data.gatekeeperBehavior === "string" ? data.gatekeeperBehavior : undefined,
+        gatekeeperExample: typeof data.gatekeeperExample === "string" ? data.gatekeeperExample : undefined,
+        decisionMakerTask: typeof data.decisionMakerTask === "string" ? data.decisionMakerTask : undefined,
+        decisionMakerBehavior: typeof data.decisionMakerBehavior === "string" ? data.decisionMakerBehavior : undefined,
+        decisionMakerExample: typeof data.decisionMakerExample === "string" ? data.decisionMakerExample : undefined,
+        appointmentGoal: typeof data.appointmentGoal === "string" ? data.appointmentGoal : undefined,
+      };
+    });
+  } catch (error) {
+    console.error("Postgres user script read failed", error);
+    return null;
+  }
+}
+
+export async function writeUserScriptToPostgres(
+  userId: string,
+  script: ScriptConfig,
+  createdFromDefault = false,
+): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `
+      INSERT INTO scripts (id, user_id, topic, content, created_from_default, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (user_id, topic)
+      DO UPDATE SET
+        content = EXCLUDED.content,
+        created_from_default = EXCLUDED.created_from_default,
+        updated_at = NOW()
+      `,
+      [
+        script.id || makeId("usr-script"),
+        userId,
+        script.topic,
+        JSON.stringify(script),
+        createdFromDefault,
+      ],
+    );
+
+    return true;
+  } catch (error) {
+    console.error("Postgres user script write failed", error);
+    return false;
+  }
+}
+
+export async function bootstrapUserScriptsFromDefaults(
+  userId: string,
+  defaults: ScriptConfig[],
+): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const existing = await readUserScriptsFromPostgres(userId);
+    if (existing && existing.length > 0) {
+      return true;
+    }
+
+    for (const script of defaults) {
+      await writeUserScriptToPostgres(
+        userId,
+        {
+          ...script,
+          id: makeId("usr-script"),
+        },
+        true,
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Postgres user script bootstrap failed", error);
+    return false;
+  }
+}
+
+export async function findReportByIdFromPostgres(reportId: string): Promise<CallReport | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        user_id,
+        phone_number_id,
+        call_sid,
+        lead_id,
+        company,
+        contact_name,
+        direct_dial,
+        topic,
+        summary,
+        outcome,
+        conversation_date,
+        appointment_at,
+        next_call_at,
+        attempts,
+        recording_consent,
+        recording_url,
+        emailed_to
+      FROM gloria_reports
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [reportId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: String(row.id),
+      userId: row.user_id ? String(row.user_id) : undefined,
+      phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
+      callSid: row.call_sid ? String(row.call_sid) : undefined,
+      leadId: row.lead_id ? String(row.lead_id) : undefined,
+      company: String(row.company),
+      contactName: row.contact_name ? String(row.contact_name) : undefined,
+      directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+      topic: normalizeTopic(String(row.topic)),
+      summary: String(row.summary || ""),
+      outcome: normalizeOutcome(String(row.outcome)),
+      conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
+      appointmentAt: toIso(row.appointment_at),
+      nextCallAt: toIso(row.next_call_at),
+      attempts: Number(row.attempts || 1),
+      recordingConsent: Boolean(row.recording_consent),
+      recordingUrl: row.recording_url ? String(row.recording_url) : undefined,
+      emailedTo: String(row.emailed_to || process.env.REPORT_TO_EMAIL || ""),
+    };
+  } catch (error) {
+    console.error("Postgres report lookup failed", error);
+    return null;
   }
 }
