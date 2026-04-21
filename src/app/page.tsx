@@ -1410,6 +1410,26 @@ export default function HomePage() {
                     </p>
                     <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
 
+                    <p className="subtle top-gap"><strong>2a. Empfangsphase – Aufgabe</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Was Gloria am Empfang/bei der Zentrale erreichen soll (z. B. „Höflich nach der zuständigen Person fragen und
+                      durchgestellt werden, ohne das Thema im Detail zu nennen"). Fließt in den KI-Prompt ein.
+                    </p>
+                    <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>2b. Empfangsphase – Verhalten</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Tonalität und Verhaltensregeln beim Empfang (z. B. „Freundlich, kurz, professionell. Keine Produktinfos preisgeben.
+                      Bei Rückfragen nur sagen: es geht um ein kurzes Fachthema für die Geschäftsführung.").
+                    </p>
+                    <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>2c. Empfangsphase – Formulierungsbeispiel</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Beispielsatz, an dem sich Gloria beim Empfang orientiert. Wird nicht zwingend wörtlich gesagt, dient als Muster.
+                    </p>
+                    <textarea value={activeDraft.gatekeeperExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperExample: event.target.value } }))} />
+
                     <p className="subtle top-gap"><strong>3. Bedarfsermittlung</strong></p>
                     <p className="subtle" style={{ marginTop: 0 }}>
                       Leitfragen, mit denen Gloria den Bedarf ermittelt. Sie formuliert daraus passende offene Fragen.
@@ -1427,6 +1447,30 @@ export default function HomePage() {
                       Formulierung, mit der Gloria den Termin mit Herrn Duic reserviert. Wird wörtlich vorgelesen, sobald die Bedarfsphase abgeschlossen ist.
                     </p>
                     <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>5a. Entscheiderphase – Aufgabe</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Was Gloria beim Entscheider erreichen soll (z. B. „Interesse wecken, Bedarf verstehen, verbindlichen Termin sichern").
+                    </p>
+                    <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>5b. Entscheiderphase – Verhalten</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Verhaltensregeln beim Entscheider (z. B. „Kurz, auf Augenhöhe, nie aufdringlich. Nutzen in 1–2 Sätzen benennen, dann Frage stellen.").
+                    </p>
+                    <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>5c. Entscheiderphase – Formulierungsbeispiel</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Beispielhafter Gesprächseinstieg beim Entscheider. Als Muster, nicht zwingend wörtlich.
+                    </p>
+                    <textarea value={activeDraft.decisionMakerExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerExample: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>5d. Terminziel</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Konkretes Ziel des Termins (z. B. „15-minütiger Online-Termin mit Herrn Duic zur unverbindlichen Einordnung").
+                    </p>
+                    <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
 
                     <p className="subtle top-gap"><strong>6. Aufzeichnungsfrage (optional)</strong></p>
                     <p className="subtle" style={{ marginTop: 0 }}>
