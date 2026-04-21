@@ -118,8 +118,14 @@ function buildOptimizedScript(script: ScriptConfig, reports: CallReport[]): Scri
   };
 }
 
-export async function getLearningResponse(): Promise<LearningResponse> {
-  const data = await getDashboardData();
+export async function getLearningResponse(options?: {
+  userId?: string;
+  role?: "master" | "user";
+}): Promise<LearningResponse> {
+  const data = await getDashboardData({
+    userId: options?.userId,
+    role: options?.role,
+  });
 
   const insights: LearningInsight[] = TOPICS.map((topic) => {
     const script = data.scripts.find((entry) => entry.topic === topic);
@@ -170,15 +176,20 @@ export async function getLearningResponse(): Promise<LearningResponse> {
   };
 }
 
-export async function applyLearningSuggestion(topic: Topic) {
-  const learning = await getLearningResponse();
+export async function applyLearningSuggestion(
+  topic: Topic,
+  options?: { userId?: string; role?: "master" | "user" },
+) {
+  const learning = await getLearningResponse(options);
   const insight = learning.insights.find((entry) => entry.topic === topic);
 
   if (!insight) {
     throw new Error(`Kein Learning für ${topic} gefunden.`);
   }
 
-  const saved = await saveScript(topic, insight.optimizedScript);
+  const saved = await saveScript(topic, insight.optimizedScript, {
+    userId: options?.userId,
+  });
 
   return {
     topic,

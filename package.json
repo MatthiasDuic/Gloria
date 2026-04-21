@@ -15,7 +15,8 @@
     "pg": "^8.20.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "twilio": "^5.13.1"
+    "twilio": "^5.13.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

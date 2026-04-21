@@ -3,13 +3,20 @@ import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import {
   appendConversationEventToPostgres,
+  bootstrapUserScriptsFromDefaults,
   clearReportRecordingInPostgres,
   deleteReportFromPostgres,
+  readCampaignListsStateFromPostgres,
   readConversationEventsFromPostgres,
+  readLeadsFromPostgres,
   readReportDatabaseFromPostgres,
   readScriptsFromPostgres,
+  readUserScriptsFromPostgres,
+  writeCampaignListsStateToPostgres,
+  writeLeadsToPostgres,
   writeScriptToPostgres,
   writeReportDatabaseToPostgres,
+  writeUserScriptToPostgres,
   writeScriptsToPostgres,
 } from "./report-db";
 import type { RecordingEntry, ReportDatabase } from "./report-db";
@@ -30,6 +37,21 @@ const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
 const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
 const EVENTS_FILE = path.join(DATA_DIR, "conversation-events.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
+const CAMPAIGN_STATE_FILE = path.join(DATA_DIR, "campaign-state.json");
+
+interface CampaignListState {
+  userId?: string;
+  listId: string;
+  listName: string;
+  active: boolean;
+  startedAt?: string;
+  stoppedAt?: string;
+  lastRunAt?: string;
+}
+
+interface CampaignStateFile {
+  lists: CampaignListState[];
+}
 
 async function ensureFile<T>(filePath: string, fallback: T) {
   await mkdir(DATA_DIR, { recursive: true });
@@ -159,7 +181,23 @@ function normalizeTopic(input: string): Topic {
   return "Energie";
 }
 
-function parseCsvLine(line: string): string[] {
+function detectCsvDelimiter(line: string): string {
+  const candidates = [",", ";", "\t", "|"];
+  let best = ",";
+  let bestCount = -1;
+
+  for (const delimiter of candidates) {
+    const count = line.split(delimiter).length - 1;
+    if (count > bestCount) {
+      best = delimiter;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}
+
+function parseCsvLine(line: string, delimiter = ","): string[] {
   const values: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -168,11 +206,18 @@ function parseCsvLine(line: string): string[] {
     const char = line[index];
 
     if (char === '"') {
+      const nextChar = line[index + 1];
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        index += 1;
+        continue;
+      }
+
       inQuotes = !inQuotes;
       continue;
     }
 
-    if (char === "," && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       values.push(current.trim());
       current = "";
       continue;
@@ -185,6 +230,111 @@ function parseCsvLine(line: string): string[] {
   return values;
 }
 
+function normalizeHeaderKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[ä]/g, "ae")
+    .replace(/[ö]/g, "oe")
+    .replace(/[ü]/g, "ue")
+    .replace(/[ß]/g, "ss")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function createLeadId(indexHint = 0): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `lead-${crypto.randomUUID()}`;
+  }
+
+  return `lead-${Date.now()}-${indexHint}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function ensureUniqueLeadIds(leads: Lead[]): Lead[] {
+  const seen = new Set<string>();
+
+  return leads.map((lead, index) => {
+    let nextId = (lead.id || "").trim();
+
+    if (!nextId || seen.has(nextId)) {
+      nextId = createLeadId(index);
+    }
+
+    seen.add(nextId);
+
+    if (nextId === lead.id) {
+      return lead;
+    }
+
+    return {
+      ...lead,
+      id: nextId,
+    };
+  });
+}
+
+const CSV_HEADER_ALIASES: Record<string, string[]> = {
+  company: ["company", "firma", "unternehmen", "firmenname"],
+  contactName: ["contactname", "ansprechpartner", "kontakt", "kontaktperson", "name"],
+  phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
+  directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
+  email: ["email", "mail", "e-mail"],
+  topic: ["topic", "thema", "bereich"],
+  note: ["note", "notiz", "bemerkung", "hinweis"],
+  nextCallAt: ["nextcallat", "naechsteranruf", "nachsteranruf", "naechsterrueckruf", "ruckrufzeitpunkt", "callback", "rueckruf"],
+};
+
+function buildHeaderIndex(headerRow: string[]): Record<string, number> {
+  const normalizedHeader = headerRow.map((value) => normalizeHeaderKey(value));
+  const indexMap: Record<string, number> = {};
+
+  for (const [canonical, aliases] of Object.entries(CSV_HEADER_ALIASES)) {
+    const candidates = aliases.map((entry) => normalizeHeaderKey(entry));
+    const idx = normalizedHeader.findIndex((entry) => candidates.includes(entry));
+    if (idx >= 0) {
+      indexMap[canonical] = idx;
+    }
+  }
+
+  return indexMap;
+}
+
+function normalizePhoneForMatch(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  const plus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/[^\d]/g, "");
+
+  if (!digits) {
+    return "";
+  }
+
+  return plus ? `+${digits}` : digits;
+}
+
+function phoneMatches(a: string | undefined, b: string | undefined): boolean {
+  const left = normalizePhoneForMatch(a);
+  const right = normalizePhoneForMatch(b);
+
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  const leftDigits = left.replace(/^\+/, "");
+  const rightDigits = right.replace(/^\+/, "");
+
+  return (
+    leftDigits.endsWith(rightDigits) ||
+    rightDigits.endsWith(leftDigits)
+  );
+}
+
 async function readConversationEvents(): Promise<ConversationEvent[]> {
   const postgresData = await readConversationEventsFromPostgres();
 
@@ -195,10 +345,26 @@ async function readConversationEvents(): Promise<ConversationEvent[]> {
   return await readJson<ConversationEvent[]>(EVENTS_FILE, []);
 }
 
-async function readScriptsWithMode(): Promise<{
+async function readScriptsWithMode(userId?: string): Promise<{
   data: ScriptConfig[];
   mode: "postgres" | "file";
 }> {
+  if (userId) {
+    const userScripts = await readUserScriptsFromPostgres(userId);
+
+    if (userScripts && userScripts.length > 0) {
+      return { data: userScripts, mode: "postgres" };
+    }
+
+    const bootstrapped = await bootstrapUserScriptsFromDefaults(userId, defaultScripts);
+    if (bootstrapped) {
+      const afterBootstrap = await readUserScriptsFromPostgres(userId);
+      if (afterBootstrap && afterBootstrap.length > 0) {
+        return { data: afterBootstrap, mode: "postgres" };
+      }
+    }
+  }
+
   const postgresData = await readScriptsFromPostgres();
 
   if (postgresData) {
@@ -218,9 +384,110 @@ async function readScriptsWithMode(): Promise<{
   };
 }
 
-async function readScripts(): Promise<ScriptConfig[]> {
-  const scriptsState = await readScriptsWithMode();
+async function readScripts(userId?: string): Promise<ScriptConfig[]> {
+  const scriptsState = await readScriptsWithMode(userId);
   return scriptsState.data;
+}
+
+async function readLeads(userId?: string): Promise<Lead[]> {
+  const postgresLeads = await readLeadsFromPostgres(userId);
+  if (postgresLeads) {
+    return postgresLeads;
+  }
+
+  const fileLeads = await readJson(LEADS_FILE, defaultLeads);
+  if (!userId) {
+    return fileLeads;
+  }
+
+  return fileLeads.filter((lead) => lead.userId === userId);
+}
+
+export async function findLeadForInboundCallbackByPhone(fromNumber: string): Promise<Lead | undefined> {
+  const leads = await readLeads();
+
+  const candidates = leads.filter((lead) => {
+    if (lead.status === "absage") {
+      return false;
+    }
+
+    return phoneMatches(fromNumber, lead.phone) || phoneMatches(fromNumber, lead.directDial);
+  });
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return [...candidates].sort((a, b) => {
+    const byAttempts = (b.attempts || 0) - (a.attempts || 0);
+    if (byAttempts !== 0) {
+      return byAttempts;
+    }
+
+    const aTs = Date.parse(a.nextCallAt || "") || 0;
+    const bTs = Date.parse(b.nextCallAt || "") || 0;
+    return bTs - aTs;
+  })[0];
+}
+
+async function writeLeads(leads: Lead[], userId?: string): Promise<void> {
+  const sanitizedLeads = ensureUniqueLeadIds(leads);
+  const wroteToPostgres = await writeLeadsToPostgres(sanitizedLeads, userId);
+
+  if (wroteToPostgres) {
+    return;
+  }
+
+  if (!userId) {
+    await writeJsonStrict(LEADS_FILE, sanitizedLeads);
+    return;
+  }
+
+  const existingFileLeads = await readJson(LEADS_FILE, defaultLeads);
+  const merged = [
+    ...existingFileLeads.filter((lead) => lead.userId !== userId),
+    ...sanitizedLeads,
+  ];
+  await writeJsonStrict(LEADS_FILE, merged);
+}
+
+async function readCampaignState(userId?: string): Promise<CampaignStateFile> {
+  const postgresLists = await readCampaignListsStateFromPostgres(userId);
+
+  if (postgresLists) {
+    return { lists: postgresLists };
+  }
+
+  const fileState = await readJson<CampaignStateFile>(CAMPAIGN_STATE_FILE, { lists: [] });
+  if (!userId) {
+    return fileState;
+  }
+
+  return {
+    lists: fileState.lists.filter((entry) => (entry as { userId?: string }).userId === userId),
+  };
+}
+
+async function writeCampaignState(state: CampaignStateFile, userId?: string): Promise<void> {
+  const wroteToPostgres = await writeCampaignListsStateToPostgres(state.lists, userId);
+
+  if (wroteToPostgres) {
+    return;
+  }
+
+  if (!userId) {
+    await writeJsonStrict(CAMPAIGN_STATE_FILE, state);
+    return;
+  }
+
+  const existing = await readJson<CampaignStateFile>(CAMPAIGN_STATE_FILE, { lists: [] });
+  const merged = {
+    lists: [
+      ...existing.lists.filter((entry) => (entry as { userId?: string }).userId !== userId),
+      ...state.lists,
+    ],
+  };
+  await writeJsonStrict(CAMPAIGN_STATE_FILE, merged);
 }
 
 export async function appendConversationEvent(
@@ -265,15 +532,18 @@ function buildMetrics(
   };
 }
 
-export async function getDashboardData(): Promise<DashboardData> {
+export async function getDashboardData(options?: { userId?: string; role?: "master" | "user" }): Promise<DashboardData> {
+  const userId = options?.role === "user" ? options.userId : undefined;
   const [leads, reportState, scriptsState, events] = await Promise.all([
-    readJson(LEADS_FILE, defaultLeads),
+    readLeads(userId),
     readReportDatabaseWithMode(),
-    readScriptsWithMode(),
+    readScriptsWithMode(userId),
     readConversationEvents(),
   ]);
 
-  const reports = reportState.data.reports;
+  const reports = userId
+    ? reportState.data.reports.filter((report) => report.userId === userId)
+    : reportState.data.reports;
 
   return {
     leads,
@@ -285,8 +555,13 @@ export async function getDashboardData(): Promise<DashboardData> {
   };
 }
 
-export async function importLeadsFromCsv(csvText: string) {
-  const existing = await readJson(LEADS_FILE, defaultLeads);
+export async function importLeadsFromCsv(
+  csvText: string,
+  options?: { listId?: string; listName?: string; userId?: string },
+) {
+  const existing = await readLeads(options?.userId);
+  const listId = options?.listId || `list-${Date.now()}`;
+  const listName = options?.listName?.trim() || `Import ${new Date().toLocaleString("de-DE")}`;
   const lines = csvText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -296,25 +571,33 @@ export async function importLeadsFromCsv(csvText: string) {
     return { imported: 0, total: existing.length };
   }
 
-  const header = parseCsvLine(lines[0]).map((value) => value.toLowerCase());
+  const delimiter = detectCsvDelimiter(lines[0]);
+  const header = parseCsvLine(lines[0], delimiter);
+  const headerIndex = buildHeaderIndex(header);
   const newLeads: Lead[] = lines.slice(1).map((line, index) => {
-    const cols = parseCsvLine(line);
-    const lookup = (name: string) => {
-      const position = header.indexOf(name.toLowerCase());
-      return position >= 0 ? cols[position] || "" : "";
+    const cols = parseCsvLine(line, delimiter);
+    const lookup = (canonical: keyof typeof CSV_HEADER_ALIASES) => {
+      const position = headerIndex[canonical];
+      return typeof position === "number" ? (cols[position] || "").trim() : "";
     };
 
     const nextCallAt = lookup("nextCallAt");
     const directDial = lookup("directDial");
+    const company = lookup("company");
+    const contactName = lookup("contactName");
+    const topic = lookup("topic");
 
     return {
-      id: `lead-${Date.now()}-${index}`,
-      company: lookup("company") || `Firma ${index + 1}`,
-      contactName: lookup("contactName") || "Empfang",
+      id: createLeadId(index),
+      userId: options?.userId,
+      listId,
+      listName,
+      company: company || `Firma ${index + 1}`,
+      contactName: contactName || "Empfang",
       phone: lookup("phone") || "",
       directDial: directDial || undefined,
       email: lookup("email") || undefined,
-      topic: normalizeTopic(lookup("topic") || "Energie"),
+      topic: normalizeTopic(topic || "Energie"),
       note: lookup("note") || undefined,
       nextCallAt: nextCallAt || undefined,
       status: nextCallAt ? "wiedervorlage" : "neu",
@@ -323,16 +606,31 @@ export async function importLeadsFromCsv(csvText: string) {
   });
 
   const merged = [...newLeads, ...existing];
-  await writeJson(LEADS_FILE, merged);
+  await writeLeads(merged, options?.userId);
+
+  const campaignState = await readCampaignState(options?.userId);
+  const alreadyKnown = campaignState.lists.some((list) => list.listId === listId);
+  if (!alreadyKnown) {
+    campaignState.lists.unshift({
+      listId,
+      listName,
+      active: false,
+      stoppedAt: new Date().toISOString(),
+      ...(options?.userId ? { userId: options.userId } : {}),
+    } as CampaignListState);
+    await writeCampaignState(campaignState, options?.userId);
+  }
 
   return {
+    listId,
+    listName,
     imported: newLeads.length,
     total: merged.length,
   };
 }
 
-export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
-  const scripts = await readScripts();
+export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, options?: { userId?: string }) {
+  const scripts = await readScripts(options?.userId);
   const updated = scripts.map((script) =>
     script.topic === topic
       ? {
@@ -346,6 +644,24 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
 
   if (!updatedScript) {
     throw new Error(`Skript für Thema ${topic} konnte nicht gefunden werden.`);
+  }
+
+  if (options?.userId) {
+    const wroteUserScript = await writeUserScriptToPostgres(options.userId, updatedScript, false);
+
+    if (wroteUserScript) {
+      const persistedScripts = await readUserScriptsFromPostgres(options.userId);
+      const persistedScript = persistedScripts?.find((script) => script.topic === topic);
+
+      if (!persistedScript) {
+        throw new Error("Skript wurde nicht persistent in der Datenbank gefunden.");
+      }
+
+      return {
+        script: persistedScript,
+        storageMode: "postgres" as const,
+      };
+    }
   }
 
   const wroteToPostgres = await writeScriptToPostgres(updatedScript);
@@ -373,12 +689,15 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>) {
 }
 
 export async function storeCallReport(payload: {
+  userId?: string;
+  phoneNumberId?: string;
   callSid?: string;
   leadId?: string;
   company: string;
   contactName?: string;
   topic: Topic;
   summary?: string;
+  summaryChunk?: string;
   outcome?: ReportOutcome;
   appointmentAt?: string;
   nextCallAt?: string;
@@ -388,7 +707,7 @@ export async function storeCallReport(payload: {
   recordingUrl?: string;
 }) {
   const [leads, reportDb] = await Promise.all([
-    readJson(LEADS_FILE, defaultLeads),
+    readLeads(payload.userId),
     readReportDatabase(),
   ]);
   const reports = reportDb.reports;
@@ -398,14 +717,49 @@ export async function storeCallReport(payload: {
     : -1;
   const existingReport = existingIndex >= 0 ? reports[existingIndex] : undefined;
 
+  const mergeSummary = (existing: string, incoming?: string, chunk?: string) => {
+    let merged = (existing || "").trim();
+    const normalizedIncoming = (incoming || "").trim();
+    const normalizedChunk = (chunk || "").trim();
+
+    if (normalizedIncoming) {
+      if (!merged) {
+        merged = normalizedIncoming;
+      } else if (normalizedIncoming.includes(merged)) {
+        merged = normalizedIncoming;
+      } else if (!merged.includes(normalizedIncoming)) {
+        merged = `${merged}\n${normalizedIncoming}`.trim();
+      }
+    }
+
+    if (normalizedChunk) {
+      if (!merged) {
+        merged = normalizedChunk;
+      } else if (!merged.includes(normalizedChunk)) {
+        merged = `${merged}\n${normalizedChunk}`.trim();
+      }
+    }
+
+    return merged;
+  };
+
+  const mergedSummary = mergeSummary(
+    existingReport?.summary || "",
+    payload.summary,
+    payload.summaryChunk,
+  );
+
   const report: CallReport = {
     id: existingReport?.id || `report-${Date.now()}`,
+    userId: payload.userId || existingReport?.userId,
+    phoneNumberId: payload.phoneNumberId || existingReport?.phoneNumberId,
     callSid: payload.callSid || existingReport?.callSid,
     leadId: payload.leadId || existingReport?.leadId,
+    directDial: payload.directDial || existingReport?.directDial,
     company: payload.company,
     contactName: payload.contactName || existingReport?.contactName,
     topic: payload.topic,
-    summary: payload.summary || existingReport?.summary || "",
+    summary: mergedSummary,
     outcome: payload.outcome || existingReport?.outcome || "Kein Kontakt",
     conversationDate: existingReport?.conversationDate || new Date().toISOString(),
     appointmentAt: payload.appointmentAt || existingReport?.appointmentAt,
@@ -442,7 +796,7 @@ export async function storeCallReport(payload: {
       ]
     : reportDb.recordings;
 
-  const updatedLeads = leads.map((lead) => {
+  const updatedLeads: Lead[] = leads.map((lead) => {
     const sameLead = payload.leadId
       ? lead.id === payload.leadId
       : lead.company.toLowerCase() === payload.company.toLowerCase();
@@ -457,26 +811,26 @@ export async function storeCallReport(payload: {
       directDial: payload.directDial || lead.directDial,
       status:
         payload.outcome === "Termin"
-          ? "termin"
+          ? ("termin" as const)
           : payload.outcome === "Absage"
-            ? "absage"
+            ? ("absage" as const)
             : payload.outcome === "Wiedervorlage"
-              ? "wiedervorlage"
-              : "angerufen",
+              ? ("wiedervorlage" as const)
+              : ("angerufen" as const),
       nextCallAt: payload.nextCallAt,
     };
   });
 
   await Promise.all([
     writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
-    writeJson(LEADS_FILE, updatedLeads),
+    writeLeads(updatedLeads, payload.userId),
   ]);
 
   return report;
 }
 
 export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
-  const leads = await readJson(LEADS_FILE, defaultLeads);
+  const leads = await readLeads();
   const now = Date.now();
 
   return leads
@@ -501,7 +855,7 @@ export async function markLeadCallbackScheduled(leadId: string): Promise<void> {
     return;
   }
 
-  const leads = await readJson(LEADS_FILE, defaultLeads);
+  const leads = await readLeads();
   const updated = leads.map((lead) =>
     lead.id === leadId
       ? {
@@ -512,7 +866,170 @@ export async function markLeadCallbackScheduled(leadId: string): Promise<void> {
       : lead,
   );
 
-  await writeJson(LEADS_FILE, updated);
+  await writeLeads(updated);
+}
+
+export async function getCampaignListsSummary(userId?: string): Promise<
+  Array<{
+    listId: string;
+    listName: string;
+    active: boolean;
+    total: number;
+    pending: number;
+    called: number;
+    appointments: number;
+    callbacks: number;
+    rejections: number;
+  }>
+> {
+  const leads = await readLeads(userId);
+  const campaignState = await readCampaignState(userId);
+
+  const grouped = new Map<
+    string,
+    {
+      listId: string;
+      listName: string;
+      total: number;
+      pending: number;
+      called: number;
+      appointments: number;
+      callbacks: number;
+      rejections: number;
+    }
+  >();
+
+  for (const lead of leads) {
+    const listId = lead.listId || "legacy";
+    const listName = lead.listName || "Standardliste";
+    const existing = grouped.get(listId) || {
+      listId,
+      listName,
+      total: 0,
+      pending: 0,
+      called: 0,
+      appointments: 0,
+      callbacks: 0,
+      rejections: 0,
+    };
+
+    existing.total += 1;
+    if (lead.status === "neu") {
+      existing.pending += 1;
+    }
+    if (lead.status === "angerufen") {
+      existing.called += 1;
+    }
+    if (lead.status === "termin") {
+      existing.appointments += 1;
+    }
+    if (lead.status === "wiedervorlage") {
+      existing.callbacks += 1;
+    }
+    if (lead.status === "absage") {
+      existing.rejections += 1;
+    }
+
+    grouped.set(listId, existing);
+  }
+
+  return [...grouped.values()]
+    .map((list) => ({
+      ...list,
+      active: Boolean(
+        campaignState.lists.find((entry) => entry.listId === list.listId)?.active,
+      ),
+    }))
+    .sort((a, b) => a.listName.localeCompare(b.listName, "de"));
+}
+
+export async function setCampaignListActive(
+  listId: string,
+  active: boolean,
+  userId?: string,
+): Promise<void> {
+  const leads = await readLeads(userId);
+  const listLead = leads.find((lead) => (lead.listId || "legacy") === listId);
+  const listName = listLead?.listName || (listId === "legacy" ? "Standardliste" : listId);
+
+  const campaignState = await readCampaignState(userId);
+  const existingIndex = campaignState.lists.findIndex((entry) => entry.listId === listId);
+  const next = {
+    listId,
+    listName,
+    active,
+    startedAt: active ? new Date().toISOString() : campaignState.lists[existingIndex]?.startedAt,
+    stoppedAt: active ? undefined : new Date().toISOString(),
+    lastRunAt: campaignState.lists[existingIndex]?.lastRunAt,
+  };
+
+  if (existingIndex >= 0) {
+    campaignState.lists[existingIndex] = next;
+  } else {
+    campaignState.lists.unshift(next);
+  }
+
+  await writeCampaignState(campaignState, userId);
+}
+
+export async function deleteCampaignList(listId: string, userId?: string): Promise<{ removedLeads: number }> {
+  const leads = await readLeads(userId);
+  const campaignState = await readCampaignState(userId);
+
+  const isInList = (lead: Lead) => {
+    const leadListId = lead.listId || "legacy";
+    return leadListId === listId;
+  };
+
+  const removedLeads = leads.filter(isInList).length;
+  const nextLeads = leads.filter((lead) => !isInList(lead));
+  const nextState = {
+    lists: campaignState.lists.filter((entry) => entry.listId !== listId),
+  };
+
+  await Promise.all([
+    writeLeads(nextLeads, userId),
+    writeCampaignState(nextState, userId),
+  ]);
+
+  return { removedLeads };
+}
+
+export async function isCampaignListActive(listId: string, userId?: string): Promise<boolean> {
+  const campaignState = await readCampaignState(userId);
+  return Boolean(campaignState.lists.find((entry) => entry.listId === listId)?.active);
+}
+
+export async function pullNextLeadForCampaignList(listId: string, userId?: string): Promise<Lead | undefined> {
+  const leads = await readLeads(userId);
+  const index = leads.findIndex(
+    (lead) => (lead.listId || "legacy") === listId && lead.status === "neu" && Boolean(lead.phone?.trim()),
+  );
+
+  if (index < 0) {
+    return undefined;
+  }
+
+  const lead = leads[index];
+  leads[index] = {
+    ...lead,
+    status: "angerufen",
+    attempts: (lead.attempts || 0) + 1,
+  };
+
+  await writeLeads(leads, userId);
+
+  const campaignState = await readCampaignState(userId);
+  const stateIndex = campaignState.lists.findIndex((entry) => entry.listId === listId);
+  if (stateIndex >= 0) {
+    campaignState.lists[stateIndex] = {
+      ...campaignState.lists[stateIndex],
+      lastRunAt: new Date().toISOString(),
+    };
+    await writeCampaignState(campaignState, userId);
+  }
+
+  return leads[index];
 }
 
 export async function deleteReport(reportId: string): Promise<void> {

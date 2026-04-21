@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDashboardData } from "@/lib/storage";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 function csvEscape(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
@@ -18,8 +19,14 @@ function formatTimePart(date: Date) {
   return `${hours}:${minutes}`;
 }
 
-export async function GET() {
-  const data = await getDashboardData();
+export async function GET(request: Request) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
   const appointments = data.reports.filter((report) => report.appointmentAt);
 
   const header = [

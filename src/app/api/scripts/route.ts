@@ -1,8 +1,40 @@
 import { NextResponse } from "next/server";
-import { saveScript } from "@/lib/storage";
+import { getDashboardData, saveScript } from "@/lib/storage";
 import type { ScriptConfig } from "@/lib/types";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
+
+export async function GET(request: Request) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const targetUserId = url.searchParams.get("userId")?.trim();
+  const resolvedUserId =
+    sessionUser.role === "master" && targetUserId ? targetUserId : sessionUser.id;
+
+  const data = await getDashboardData({
+    userId: resolvedUserId,
+    role: sessionUser.role === "master" && !targetUserId ? "master" : "user",
+  });
+
+  return NextResponse.json({ scripts: data.scripts, scriptsStorageMode: data.scriptsStorageMode });
+}
 
 export async function POST(request: Request) {
+  const sessionUser = getSessionUserFromRequest(request);
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const targetUserId = url.searchParams.get("userId")?.trim();
+  const resolvedUserId =
+    sessionUser.role === "master" && targetUserId ? targetUserId : sessionUser.id;
+
   const payload = (await request.json()) as Partial<ScriptConfig> & { topic?: ScriptConfig["topic"] };
 
   if (!payload.topic) {
@@ -10,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await saveScript(payload.topic, payload);
+    const result = await saveScript(payload.topic, payload, { userId: resolvedUserId });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json(
