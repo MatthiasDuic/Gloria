@@ -93,6 +93,14 @@ textarea {
   font-weight: 600;
 }
 
+.hero-meta-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .hero-actions {
   display: flex;
   flex-direction: column;
@@ -160,6 +168,46 @@ textarea {
 .stack {
   display: grid;
   gap: 16px;
+}
+
+.accordion-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.collapsible-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.panel-summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel-summary::after {
+  content: "▾";
+  color: #3f5f8f;
+  font-size: 1rem;
+  transition: transform 160ms ease;
+}
+
+.collapsible-panel:not([open]) .panel-summary::after {
+  transform: rotate(-90deg);
+}
+
+.panel-content {
+  padding: 0 16px 16px;
+  border-top: 1px solid #e3e9f4;
 }
 
 .panel,
@@ -411,6 +459,10 @@ td {
   position: relative;
 }
 
+.settings-modal {
+  width: min(980px, 100%);
+}
+
 .modal-close {
   position: absolute;
   top: 16px;
@@ -476,6 +528,10 @@ td {
   }
 
   .hero-actions {
+    align-items: flex-start;
+  }
+
+  .hero-meta-row {
     align-items: flex-start;
   }
 

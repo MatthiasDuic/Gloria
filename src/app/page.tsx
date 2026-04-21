@@ -1,35 +1,170 @@
 ﻿"use client";
 
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
+import { TOPICS } from "@/lib/types";
+
+const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
+Musterbau GmbH,Herr Neumann,+49 2339 555100,neumann@musterbau.de,betriebliche Krankenversicherung,120 Mitarbeitende; Recruiting Thema,
+Sprockhoevel Energieberatung,Frau Peters,+49 2324 555200,peters@se-beratung.de,Energie,Vertragsverlängerung in 90 Tagen,2026-04-15T10:00:00.000Z`;
+
+const EMPTY_DATA: DashboardData = {
+  leads: [],
+  reports: [],
+  scripts: [],
+  reportStorageMode: "file",
+  scriptsStorageMode: "file",
+  metrics: {
+    dialAttempts: 0,
+    conversations: 0,
+    appointments: 0,
+    rejections: 0,
+    callbacksOpen: 0,
+    gatekeeperLoops: 0,
+    transferSuccessRate: 0,
+  },
+};
+
+const EMPTY_LEARNING: LearningResponse = {
+  insights: [],
+  globalSummary: [],
+};
+
+function formatDate(value?: string) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function toDateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function speakText(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "de-DE";
+
+  const germanVoice = window.speechSynthesis
+    .getVoices()
+    .find((voice) => voice.lang.toLowerCase().startsWith("de"));
+
+  if (germanVoice) {
+    utterance.voice = germanVoice;
+  }
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
+function buildConversationLines(summary: string) {
+  return summary
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
+    .map((l) => {
+      const isGloria = l.startsWith("Gloria:");
+      return { speaker: isGloria ? "Gloria" : "Interessent", text: l.replace(/^Gloria:|^Interessent:/, "").trim() };
+    });
+}
+
+function detectLostStage(summary: string): string {
+  const t = summary.toLowerCase();
+  if (t.includes("appt_slot_iso") || t.includes("appt_slot_label")) {
+    return "Terminbestätigung – Interessent hat nach Terminvorschlag abgesagt";
+  }
+  if (t.includes("prep_mode") || t.includes("prep_short") || t.includes("wann passt")) {
+    return "Terminvereinbarung – Abbruch beim Erfassen der Termindaten";
+  }
+  if (t.includes("problem_confirm_pending") || t.includes("stellen sie sich vor")) {
+    return "Nutzenargumentation – Interessent hat Mehrwert nicht gesehen";
+  }
+  if (t.includes("discovery") || t.includes("wie zufrieden") || t.includes("was wäre für sie")) {
+    return "Bedarfsermittlung – kein Interesse nach Bedarfsabfrage";
+  }
+  if (t.includes("aufzeichnung") || t.includes("consent")) {
+    return "Einwilligung – Gespräch nach Aufnahme-Abfrage abgebrochen";
+  }
+  return "Gesprächseinstieg – Entscheider nicht oder kaum erreicht";
+}
+
+function pickText(value: string | undefined, fallback?: string) {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+
+  return fallback ?? "";
+}
+
+function CollapsiblePanel({
+  title,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details className="panel collapsible-panel" open={defaultOpen}>
+      <summary className="panel-summary">
+        <h2>{title}</h2>
+      </summary>
+      <div className="panel-content">{children}</div>
+    </details>
+  );
+}
+
 export default function HomePage() {
+  type SessionUser = {
+    id: string;
+    username: string;
+    role: "master" | "user";
+    realName: string;
+    companyName: string;
+  };
+
+  type AdminUser = {
+    id: string;
+    username: string;
+    role: "master" | "user";
+    realName: string;
+    companyName: string;
+    createdAt?: string;
+  };
+
+  type ManagedPhoneNumber = {
+    id: string;
+    userId: string;
+    phoneNumber: string;
+    label: string;
+    active: boolean;
+  };
+
+  type CampaignListSummary = {
+    listId: string;
+    listName: string;
+    active: boolean;
+    total: number;
+    pending: number;
+    called: number;
+    appointments: number;
+    callbacks: number;
+    rejections: number;
+  };
+
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  // Accordion helper
-  function Accordion({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
-    const [open, setOpen] = useState(defaultOpen);
-    return (
-      <section className="accordion-section panel" style={{ marginBottom: 16 }}>
-        <button
-          className="accordion-toggle"
-          style={{
-            width: "100%",
-            textAlign: "left",
-            fontWeight: 700,
-            fontSize: "1.15rem",
-            background: "none",
-            border: "none",
-            padding: "12px 0",
-            cursor: "pointer",
-          }}
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-        >
-          {open ? "▼ " : "► "}{title}
-        </button>
-        {open && <div style={{ paddingTop: 4 }}>{children}</div>}
-      </section>
-    );
-  }
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importListName, setImportListName] = useState("");
   const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
@@ -37,115 +172,70 @@ export default function HomePage() {
   const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
   const [twilioTarget, setTwilioTarget] = useState("");
   const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
-  const [twilioContactName, setTwilioContactName] = useState("Max Neumann");
+  const [twilioContactName, setTwilioContactName] = useState("Herr Neumann");
   const [twilioTopic, setTwilioTopic] = useState<Topic>(TOPICS[0]);
+  const [twilioFromOptions, setTwilioFromOptions] = useState<Array<{ id?: string; number: string; label: string }>>([]);
+  const [twilioFrom, setTwilioFrom] = useState("");
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [managedPhoneNumbers, setManagedPhoneNumbers] = useState<ManagedPhoneNumber[]>([]);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRealName, setNewRealName] = useState("");
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newRole, setNewRole] = useState<"master" | "user">("user");
+  const [newPhoneUserId, setNewPhoneUserId] = useState("");
+  const [newPhoneNumber, setNewPhoneNumber] = useState("");
+  const [newPhoneLabel, setNewPhoneLabel] = useState("");
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
-  const [manualAppointment, setManualAppointment] = useState({
-    company: "",
-    contactName: "",
-    topic: TOPICS[0] as Topic,
-    appointmentAt: toDateTimeLocalInput(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-    summary: "",
-  });
+  const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
 
-  // Methoden wieder innerhalb der Komponente, aber vor dem return:
-  async function createManualAppointment() {
-    if (!manualAppointment.company.trim()) {
-      setNotice("Bitte zuerst eine Firma für den Termin eintragen.");
-      return;
-    }
-    if (!manualAppointment.appointmentAt.trim()) {
-      setNotice("Bitte Datum und Uhrzeit für den Termin auswählen.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(manualAppointment),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error || "Termin konnte nicht angelegt werden.");
+  const activeDraft = draftScripts[detailTopic];
+  const reportRows = useMemo(() => data.reports, [data.reports]);
+  const appointmentReports = useMemo(
+    () => data.reports.filter((report) => Boolean(report.appointmentAt)),
+    [data.reports],
+  );
+  const appointmentsByDay = useMemo(() => {
+    const grouped = new Map<string, DashboardData["reports"]>();
+
+    for (const report of appointmentReports) {
+      if (!report.appointmentAt) {
+        continue;
       }
-      setNotice("Termin wurde im Kalender und Report-Bereich gespeichert.");
-      setManualAppointment((current) => ({
-        ...current,
-        company: "",
-        contactName: "",
-        summary: "",
-      }));
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Termin speichern fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
-  async function deleteRecording(reportId: string) {
-    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-      return;
+      const dayKey = toDateKey(new Date(report.appointmentAt));
+      const existing = grouped.get(dayKey) || [];
+      grouped.set(dayKey, [...existing, report]);
     }
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
-        { method: "DELETE" },
+
+    for (const [key, reports] of grouped) {
+      grouped.set(
+        key,
+        [...reports].sort((a, b) => {
+          const aTime = a.appointmentAt ? Date.parse(a.appointmentAt) : 0;
+          const bTime = b.appointmentAt ? Date.parse(b.appointmentAt) : 0;
+          return aTime - bTime;
+        }),
       );
-      if (!response.ok) {
-        throw new Error("Aufnahme konnte nicht gelöscht werden.");
-      }
-      setNotice("Aufnahme erfolgreich gelöscht.");
-      setSelectedReport((current) =>
-        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
-      );
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
     }
-  }
 
-  async function deleteReport(reportId: string) {
-    if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `/api/reports?reportId=${encodeURIComponent(reportId)}`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) {
-        throw new Error("Report konnte nicht gelöscht werden.");
-      }
-      setNotice("Report erfolgreich gelöscht.");
-      setSelectedReport(null);
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-
+    return grouped;
+  }, [appointmentReports]);
   const calendarDays = useMemo(() => {
     const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
-    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // Monday=0
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
     const start = new Date(firstOfMonth);
     start.setDate(firstOfMonth.getDate() - firstWeekday);
 
@@ -161,7 +251,6 @@ export default function HomePage() {
       };
     });
   }, [appointmentsByDay, calendarMonth]);
-
   const selectedDayAppointments = useMemo(
     () => appointmentsByDay.get(selectedDayKey) || [],
     [appointmentsByDay, selectedDayKey],
@@ -178,60 +267,167 @@ export default function HomePage() {
 
     setData(payload);
     setLearning(learningPayload);
-    setDraftScripts(
-      payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
-        acc[script.topic] = {
-          ...script,
-          // KI-Konfiguration (OpenAI-driven fields)
-          aiKeyInfo: pickText(script.aiKeyInfo, ""),
-          gatekeeperTask: pickText(
-            script.gatekeeperTask,
-            "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft.",
-          ),
-          gatekeeperBehavior: pickText(
-            script.gatekeeperBehavior,
-            "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
-          ),
-          decisionMakerTask: pickText(
-            script.decisionMakerTask,
-            "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
-          ),
-          decisionMakerBehavior: pickText(
-            script.decisionMakerBehavior,
-            "Erkläre den Mehrwert klar und präzise. Gehe auf Einwände ein. Schlage konkrete Terminoptionen vor.",
-          ),
-          appointmentGoal: pickText(
-            script.appointmentGoal,
-            "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart, inklusive Datum und Uhrzeit.",
-          ),
-          recordingConsentLine: pickText(
-            script.recordingConsentLine,
-            'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
-          ),
-          healthCheckQuestions: pickText(
-            script.healthCheckQuestions,
-            "Bei Gesundheitsthemen bitte konkret fragen: gesetzlich/privat versichert, laufende/geplante Behandlungen, regelmäßige Medikamente und bekannte Diagnosen der letzten 5 Jahre.",
-          ),
-          appointmentTransition: pickText(
-            script.appointmentTransition,
-            "Nach bestätigtem Interesse kurz Nutzen zusammenfassen und direkt mit zwei konkreten Terminvorschlägen in die Terminierung überleiten.",
-          ),
-          appointmentSchedulingRules: pickText(
-            script.appointmentSchedulingRules,
-            "Nenne immer zwei konkrete Optionen in der nächsten Woche mit Datum und Uhrzeit. Wenn beides nicht passt, aktiv einen Alternativtermin mit Datum und Uhrzeit erfragen und bestätigen.",
-          ),
+    const nextDrafts = payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
+      acc[script.topic] = {
+        id: script.id,
+        topic: script.topic,
+        opener: pickText(script.opener, ""),
+        discovery: pickText(script.discovery, ""),
+        objectionHandling: pickText(script.objectionHandling, ""),
+        close: pickText(script.close, ""),
+        aiKeyInfo: pickText(script.aiKeyInfo, ""),
+        consentPrompt: pickText(
+          script.consentPrompt,
+          'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
+        ),
+        pkvHealthIntro: pickText(
+          script.pkvHealthIntro,
+          "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
+        ),
+        pkvHealthQuestions: pickText(
+          script.pkvHealthQuestions,
+          [
+            "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
+            "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
+            "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+            "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
+            "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
+            "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
+            "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
+            "Gab es in den letzten zehn Jahren psychische Behandlungen?",
+            "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
+            "Bestehen bei Ihnen bekannte Allergien?",
+          ].join("\n"),
+        ),
+        gatekeeperTask: pickText(
+          script.gatekeeperTask,
+          "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
+        ),
+        gatekeeperBehavior: pickText(
+          script.gatekeeperBehavior,
+          "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
+        ),
+        gatekeeperExample: pickText(script.gatekeeperExample, ""),
+        decisionMakerTask: pickText(
+          script.decisionMakerTask,
+          "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
+        ),
+        decisionMakerBehavior: pickText(
+          script.decisionMakerBehavior,
+          "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
+        ),
+        decisionMakerExample: pickText(script.decisionMakerExample, ""),
+        appointmentGoal: pickText(
+          script.appointmentGoal,
+          "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
+        ),
+      };
+      return acc;
+    }, {});
+
+    // Keep the settings area available even if one topic has no persisted script yet.
+    for (const topic of TOPICS) {
+      if (!nextDrafts[topic]) {
+        nextDrafts[topic] = {
+          id: `skript-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+          topic,
+          opener: "",
+          discovery: "",
+          objectionHandling: "",
+          close: "",
+          aiKeyInfo: "",
+          consentPrompt: 'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
+          pkvHealthIntro: "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
+          pkvHealthQuestions: [
+            "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
+            "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
+            "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+            "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
+            "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
+            "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
+            "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
+            "Gab es in den letzten zehn Jahren psychische Behandlungen?",
+            "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
+            "Bestehen bei Ihnen bekannte Allergien?",
+          ].join("\n"),
+          gatekeeperTask: "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
+          gatekeeperBehavior: "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
+          gatekeeperExample: "",
+          decisionMakerTask: "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
+          decisionMakerBehavior: "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
+          decisionMakerExample: "",
+          appointmentGoal: "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
         };
-        return acc;
-      }, {}),
-    );
+      }
+    }
+
+    setDraftScripts(nextDrafts);
     setNotice(
       `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
     );
     setLoading(false);
   }
 
+  async function loadCampaignLists() {
+    const response = await fetch("/api/campaigns/lists", { cache: "no-store" });
+    const payload = (await response.json()) as { lists?: CampaignListSummary[] };
+    if (response.ok) {
+      setCampaignLists(payload.lists || []);
+    }
+  }
+
+  async function loadSessionAndAdminData() {
+    const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
+    const mePayload = (await meResponse.json().catch(() => ({}))) as { user?: SessionUser };
+    if (!meResponse.ok || !mePayload.user) {
+      return;
+    }
+
+    setCurrentUser(mePayload.user);
+
+    const phoneResponse = await fetch("/api/admin/phone-numbers", { cache: "no-store" });
+    const phonePayload = (await phoneResponse.json().catch(() => ({}))) as {
+      phoneNumbers?: ManagedPhoneNumber[];
+    };
+    if (phoneResponse.ok) {
+      setManagedPhoneNumbers(phonePayload.phoneNumbers || []);
+    }
+
+    if (mePayload.user.role === "master") {
+      const usersResponse = await fetch("/api/admin/users", { cache: "no-store" });
+      const usersPayload = (await usersResponse.json().catch(() => ({}))) as { users?: AdminUser[] };
+      if (usersResponse.ok) {
+        setAdminUsers(usersPayload.users || []);
+      }
+    }
+  }
+
   useEffect(() => {
     void loadDashboard();
+    void loadCampaignLists();
+    void loadSessionAndAdminData();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/twilio/call-options", { cache: "no-store" });
+        const payload = (await response.json()) as {
+          fromOptions?: Array<{ id?: string; number: string; label: string }>;
+          defaultFrom?: string;
+        };
+
+        if (!response.ok) {
+          return;
+        }
+
+        const fromOptions = payload.fromOptions || [];
+        setTwilioFromOptions(fromOptions);
+        setTwilioFrom(payload.defaultFrom || fromOptions[0]?.number || "");
+      } catch {
+        // Optional UI data; keep call form usable even if this fetch fails.
+      }
+    })();
   }, []);
 
   function downloadSampleCsv() {
@@ -248,35 +444,171 @@ export default function HomePage() {
 
   async function handleCsvImport() {
     setBusy(true);
+
     try {
-      let csvContent = csvText;
-      // Wenn Datei hochgeladen wurde, lese sie aus
-      if (csvFile) {
-        csvContent = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.onerror = (e) => reject(e);
-          reader.readAsText(csvFile);
-        });
-      }
       const response = await fetch("/api/campaigns/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csvText: csvContent }),
+        body: JSON.stringify({
+          csvText,
+          listName: importListName.trim() || undefined,
+        }),
       });
-      const payload = (await response.json()) as { imported?: number; error?: string };
+      const payload = (await response.json()) as {
+        imported?: number;
+        error?: string;
+        listName?: string;
+      };
+
       if (!response.ok) {
         throw new Error(payload.error || "CSV konnte nicht importiert werden.");
       }
-      setNotice(`CSV importiert: ${payload.imported ?? 0} neue Firmen in Gloria geladen.`);
-      setCsvFile(null);
+
+      setNotice(`Liste "${payload.listName || importListName || "Import"}" importiert: ${payload.imported ?? 0} neue Firmen in Gloria geladen.`);
       await loadDashboard();
+      await loadCampaignLists();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Import fehlgeschlagen.");
     } finally {
       setBusy(false);
     }
   }
+
+  async function handleFileImport() {
+    if (!importFile) {
+      setNotice("Bitte zuerst eine CSV- oder Excel-Datei auswählen.");
+      return;
+    }
+
+    setBusy(true);
+    setNotice(`Dateiimport läuft (${importFile.name}) ...`);
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const formData = new FormData();
+      formData.set("file", importFile);
+      formData.set("listName", importListName.trim() || importFile.name.replace(/\.[^.]+$/, ""));
+
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), 45_000);
+
+      const response = await fetch("/api/campaigns/import", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+
+      const raw = await response.text();
+      const payload = ((() => {
+        try {
+          return JSON.parse(raw) as {
+            imported?: number;
+            error?: string;
+            listName?: string;
+          };
+        } catch {
+          return {} as {
+            imported?: number;
+            error?: string;
+            listName?: string;
+          };
+        }
+      })()) as {
+        imported?: number;
+        error?: string;
+        listName?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || raw || "Datei konnte nicht importiert werden.");
+      }
+
+      setNotice(`Liste "${payload.listName || importListName || importFile.name}" importiert: ${payload.imported ?? 0} neue Firmen in Gloria geladen.`);
+      setImportFile(null);
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Dateiimport fehlgeschlagen.",
+      );
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      setBusy(false);
+    }
+  }
+
+  async function controlCampaignList(listId: string, action: "start" | "stop" | "delete") {
+    if (action === "delete") {
+      const confirmed = confirm("Moechten Sie diese Liste wirklich loeschen? Alle zugehoerigen Firmen werden entfernt.");
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, listId }),
+      });
+      const payload = (await response.json()) as {
+        lists?: CampaignListSummary[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Liste konnte nicht aktualisiert werden.");
+      }
+
+      setCampaignLists(payload.lists || []);
+      if (action === "start") {
+        setNotice("Liste wurde gestartet.");
+      } else if (action === "stop") {
+        setNotice("Liste wurde gestoppt.");
+      } else {
+        setNotice("Liste wurde geloescht.");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Aktion fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    const activeLists = campaignLists.filter((list) => list.active);
+
+    if (activeLists.length === 0) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      void (async () => {
+        for (const list of activeLists) {
+          await fetch("/api/campaigns/lists", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "run", listId: list.listId }),
+          }).catch(() => undefined);
+        }
+        await loadCampaignLists();
+        await loadDashboard();
+      })();
+    }, 15000);
+
+    return () => clearInterval(timer);
+  }, [campaignLists]);
 
   async function applyLearning(topic: Topic) {
     const confirmed = confirm(
@@ -287,157 +619,322 @@ export default function HomePage() {
       return;
     }
 
+    setBusy(true);
 
-      <main className="dashboard-page">
-        <header className="duic-hero">
-          <div>
-            <p className="eyebrow">Agentur Duic Sprockhövel</p>
-            <h1>Gloria Admin Dashboard</h1>
-            <p className="hero-copy">
-              Vertrieb, Telefonie und Lernlogik in einer Leitstelle: klar, schnell und auf Termine ausgerichtet.
-            </p>
-            <p className="hero-note">{loading ? "Lade Daten ..." : notice}</p>
-          </div>
-          <div className="hero-actions">
-            <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
-            <span className="pill">
-              Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-            </span>
-            <span className="pill">
-              Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-            </span>
-            <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
-          </div>
-        </header>
+    try {
+      const response = await fetch("/api/learning", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
+      const payload = (await response.json()) as { error?: string };
 
-        <section className="stats-grid">
-          <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
-          <article className="stat-card"><span>Gespräche</span><strong>{data.metrics.conversations}</strong></article>
-          <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
-          <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
-          <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
-          <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
-          <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
-        </section>
+      if (!response.ok) {
+        throw new Error(payload.error || "Optimierung konnte nicht angewendet werden.");
+      }
 
-        {/* Accordion-Bereiche, vertikal untereinander */}
-        <div className="accordion-stack" style={{ maxWidth: 900, margin: "0 auto", display: "flex", flexDirection: "column", gap: 0 }}>
-          <Accordion title="Compliance & Ablauf" defaultOpen>
-            <ul>
-              <li><strong>Offenlegung:</strong> Gloria stellt sich immer als digitale Vertriebsassistentin der Agentur Duic Sprockhövel vor.</li>
-              <li><strong>Aufzeichnung:</strong> Die Aufnahmefreigabe wird immer vor dem eigentlichen Gespräch klar und eindeutig abgefragt. Ohne Zustimmung keine Aufnahme.</li>
-              <li><strong>Datenschutz:</strong> Alle Gesprächsdaten und Aufnahmen werden ausschließlich für Schulungs- und Qualitätszwecke verwendet und DSGVO-konform gespeichert.</li>
-              <li><strong>Gesprächsziele:</strong> Mögliche Ausgänge sind Terminvereinbarung, Wiedervorlage (Rückruf) oder klare Absage.</li>
-              <li><strong>Transparenz:</strong> Gesprächsreports und Aufnahmen sind jederzeit im Dashboard einsehbar.</li>
-              <li><strong>Webhook für Telefonie:</strong> /api/calls/webhook</li>
-              <li><strong>Technischer Ablauf:</strong> Jeder Anruf wird in einzelne Gesprächsrunden unterteilt, KI-gestützt analysiert und dokumentiert.</li>
-              <li><strong>Protokollierung:</strong> Alle Aktionen und Gesprächsphasen werden nachvollziehbar protokolliert.</li>
-              <li><strong>Rechte:</strong> Nur berechtigte Nutzer haben Zugriff auf Reports und Aufnahmen.</li>
-            </ul>
-          </Accordion>
+      setNotice(`Gloria hat das Skript für ${topic} anhand der Gesprächsreports optimiert.`);
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-          <Accordion title="Aufträge per CSV/Excel laden">
-            <p className="subtle">Lade eine CSV- oder Excel-Datei mit Firmen auftraggebern hoch. Format: company, contactName, phone, email, topic, note, nextCallAt</p>
-            <input
-              type="file"
-              accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-              onChange={(e) => {
-                const file = e.target.files?.[0] || null;
-                setCsvFile(file);
-                if (!file) return;
-                if (file.name.endsWith(".csv")) {
-                  // CSV kann direkt gelesen werden
-                  const reader = new FileReader();
-                  reader.onload = (ev) => setCsvText(ev.target?.result as string);
-                  reader.readAsText(file);
-                } else {
-                  // Excel: Hinweis
-                  setCsvText("Excel-Import wird noch nicht direkt unterstützt. Bitte als CSV speichern und erneut hochladen.");
-                }
-              }}
-              style={{ marginBottom: 8 }}
-            />
-            <textarea
-              value={csvText}
-              onChange={(event) => setCsvText(event.target.value)}
-              style={{ width: "100%", minHeight: 80, marginBottom: 8 }}
-              placeholder="CSV-Inhalt anzeigen oder bearbeiten..."
-            />
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV importieren</button>
-              <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
-            </div>
-            <p className="subtle" style={{ marginTop: 8 }}>
-              Nach dem Import werden alle Firmen automatisch in die <strong>Offene Firmenliste</strong> übernommen.
-            </p>
-          </Accordion>
+  async function saveScript(topic: Topic) {
+    const draft = draftScripts[topic];
 
-          <Accordion title="Anruf Einzelfirma">
-            <div className="field-grid">
-              <div>
-                <label>Zielnummer</label>
-                <input value={twilioTarget} onChange={(event) => setTwilioTarget(event.target.value)} placeholder="+492339123456" />
-              </div>
-              <div>
-                <label>Firma</label>
-                <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
-              </div>
-              <div>
-                <label>Ansprechpartner (Vorname + Nachname)</label>
-                <input
-                  value={twilioContactName}
-                  onChange={(event) => setTwilioContactName(event.target.value)}
-                  placeholder="z. B. Max Neumann"
-                />
-              </div>
-              <div>
-                <label>Thema</label>
-                <select value={twilioTopic} onChange={(event) => setTwilioTopic(event.target.value as Topic)}>
-                  {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
-                {busy ? "Anruf startet ..." : "Testanruf starten"}
-              </button>
-            </div>
-          </Accordion>
+    if (!draft) {
+      return;
+    }
 
-          <Accordion title="Gloria testen">
-            <div className="row">
-              <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
-                {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-              </select>
-              <button className="btn" onClick={() => void testVoice()} disabled={busy}>
-                {busy ? "Vorschau lädt ..." : "Stimme testen"}
-              </button>
-            </div>
-            <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
-            {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
-          </Accordion>
+    setBusy(true);
+    setSaveStatus(null);
 
-          <Accordion title="Gloria lernt aus Gesprächen">
-            <ul>
-              {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-            <div className="insight-grid">
-              {learning.insights.map((insight) => (
-                <div key={insight.topic} className="mini-panel">
-                  <h3>{insight.topic}</h3>
-                  <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
-                  <ul>
-                    {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
-                  </ul>
-                  <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
-                </div>
-              ))}
-            </div>
-          </Accordion>
-        </div>
-      {/* Ende Accordion-Stack */}
-    );
+    try {
+      const response = await fetch("/api/scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        storageMode?: "postgres" | "file";
+      };
 
+      if (!response.ok) {
+        throw new Error(payload.error || "Skript konnte nicht gespeichert werden.");
+      }
+
+      setNotice(
+        `Skript für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
+      );
+      setSaveStatus({
+        type: "success",
+        message: `Erfolgreich gespeichert (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
+      });
+      await loadDashboard();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.";
+      setNotice(errorMessage);
+      setSaveStatus({ type: "error", message: errorMessage });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testVoice() {
+    setBusy(true);
+
+    setVoicePreview("Vorschau wird geladen ...");
+    setVoiceAudioUrl("");
+
+    try {
+      const response = await fetch("/api/voice-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: voiceTopic }),
+      });
+
+      const payload = (await response.json()) as {
+        preview?: string;
+        provider?: "elevenlabs" | "browser";
+        audioBase64?: string;
+        audioMimeType?: string;
+        message?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || "Stimmtest konnte nicht geladen werden.");
+      }
+
+      setVoicePreview(payload.preview || "Keine Vorschau verfügbar.");
+
+      if (payload.audioBase64 && payload.audioMimeType) {
+        const url = `data:${payload.audioMimeType};base64,${payload.audioBase64}`;
+        setVoiceAudioUrl(url);
+        void new Audio(url).play().catch(() => undefined);
+      } else {
+        setVoiceAudioUrl("");
+        speakText(payload.preview || "");
+      }
+
+      setNotice(payload.message || `Stimmtest für ${voiceTopic} gestartet.`);
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `${error.message} - die Textvorschau konnte nicht geladen werden.`
+          : "Stimmtest konnte nicht geladen werden.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startTwilioTestCall() {
+    if (!twilioTarget.trim()) {
+      setNotice("Bitte zuerst eine Zielnummer im internationalen Format eingeben, z. B. +492339123456.");
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const selectedFrom = twilioFromOptions.find((option) => option.number === twilioFrom);
+      const response = await fetch("/api/twilio/test-call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: twilioTarget,
+          company: twilioCompany,
+          contactName: twilioContactName,
+          topic: twilioTopic,
+          from: twilioFrom || undefined,
+          phoneNumberId: selectedFrom?.id,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        sid?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Twilio-Testanruf konnte nicht gestartet werden.");
+      }
+
+      setNotice(`${payload.message || "Anruf gestartet."} SID: ${payload.sid || "-"}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Anruf fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteRecording(reportId: string) {
+    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch(
+        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error("Aufnahme konnte nicht gelöscht werden.");
+      }
+
+      setNotice("Aufnahme erfolgreich gelöscht.");
+      setSelectedReport((current) =>
+        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
+      );
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteReport(reportId: string) {
+    if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch(
+        `/api/reports?reportId=${encodeURIComponent(reportId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error("Report konnte nicht gelöscht werden.");
+      }
+
+      setNotice("Report erfolgreich gelöscht.");
+      setSelectedReport(null);
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createUserByAdmin() {
+    if (!newUsername || !newPassword || !newRealName || !newCompanyName) {
+      setNotice("Bitte alle Felder für den Benutzer angeben.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: newUsername,
+          password: newPassword,
+          realName: newRealName,
+          companyName: newCompanyName,
+          role: newRole,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Benutzer konnte nicht erstellt werden.");
+      }
+
+      setNewUsername("");
+      setNewPassword("");
+      setNewRealName("");
+      setNewCompanyName("");
+      setNewRole("user");
+      setNotice("Benutzer erfolgreich erstellt.");
+      await loadSessionAndAdminData();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Benutzer konnte nicht erstellt werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createPhoneByAdmin() {
+    if (!newPhoneUserId || !newPhoneNumber || !newPhoneLabel) {
+      setNotice("Bitte User, Nummer und Label angeben.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/admin/phone-numbers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: newPhoneUserId,
+          phoneNumber: newPhoneNumber,
+          label: newPhoneLabel,
+          active: true,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Rufnummer konnte nicht gespeichert werden.");
+      }
+
+      setNewPhoneNumber("");
+      setNewPhoneLabel("");
+      setNotice("Rufnummer gespeichert.");
+      await loadSessionAndAdminData();
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Rufnummer konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteUserByAdmin(userId: string, username: string) {
+    if (currentUser?.id === userId) {
+      setNotice("Der aktuell angemeldete Master-Benutzer kann hier nicht gelöscht werden.");
+      return;
+    }
+
+    const confirmed = confirm(`Benutzer \"${username}\" wirklich löschen?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Benutzer konnte nicht gelöscht werden.");
+      }
+
+      setNotice(`Benutzer \"${username}\" wurde gelöscht.`);
+      await loadSessionAndAdminData();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Benutzer konnte nicht gelöscht werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <main className="dashboard-page">
@@ -449,336 +946,319 @@ export default function HomePage() {
             Vertrieb, Telefonie und Lernlogik in einer Leitstelle: klar, schnell und auf Termine ausgerichtet.
           </p>
           <p className="hero-note">{loading ? "Lade Daten ..." : notice}</p>
-
-      </div>
+          <div className="hero-meta-row">
+            <span className="pill">
+              Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+            </span>
+            <span className="pill">
+              Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+            </span>
+            <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
+          </div>
+        </div>
         <div className="hero-actions">
-          <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
-          <span className="pill">
-            Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-          </span>
-          <span className="pill">
-            Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-          </span>
-          <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
+          <a className="btn ghost" href="/logout">Abmelden</a>
+          <button className="btn ghost" onClick={() => setSettingsOpen(true)}>Einstellungen</button>
         </div>
       </header>
 
-      <section className="stats-grid">
-        <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
-        <article className="stat-card"><span>Gespräche</span><strong>{data.metrics.conversations}</strong></article>
-        <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
-        <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
-        <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
-        <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
-        <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
-      </section>
+      <CollapsiblePanel title="Kennzahlen" defaultOpen>
+        <section className="stats-grid">
+          <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
+          <article className="stat-card"><span>Gespräche</span><strong>{data.metrics.conversations}</strong></article>
+          <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
+          <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
+          <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
+          <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
+          <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
+        </section>
+      </CollapsiblePanel>
 
-      <section className="workbench">
-        <div className="stack">
-          <article className="panel">
-            <h2>Aufträge per CSV laden</h2>
-            <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
-            <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV importieren</button>
-              <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
+      <section className="stack top-section">
+        <CollapsiblePanel title="Compliance & Ablauf" defaultOpen>
+          <p className="subtle">
+            Dieser Bereich dokumentiert die verbindlichen Leitplanken für Gloria im Live-Telefonieprozess.
+          </p>
+
+          <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
+          <ul>
+            <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
+            <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Skripte für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+            <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
+            <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
+            <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>2) Verhaltensregeln und Gesprächsführung</strong></p>
+          <ul>
+            <li>Gloria kommuniziert kurz, klar, höflich, professionell und lösungsorientiert.</li>
+            <li>Gloria verwendet keine erfundenen Fakten und argumentiert ausschließlich auf Basis der hinterlegten Informationen.</li>
+            <li>Gesprächsziele sind Terminvereinbarung, Wiedervorlage (mit dokumentiertem Zeitpunkt) oder eine klare Absage.</li>
+            <li>Während Warteschleifen oder beim Durchstellen befindet sich Gloria im Listen-Only-Modus und startet erst, wenn ein realer Gesprächspartner spricht.</li>
+            <li>Bei Terminierung bietet Gloria konkrete Zeitoptionen an; passen diese nicht, kann der Gesprächspartner eigene Vorschläge machen.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>3) Einwilligung und Aufzeichnung (DSGVO-konform)</strong></p>
+          <ul>
+            <li>Eine Aufzeichnung erfolgt ausschließlich nach ausdrücklicher Einwilligung des Entscheiders.</li>
+            <li>Die Einwilligung wird vor Beginn der Aufzeichnung abgefragt und protokolliert.</li>
+            <li>Ohne Einwilligung wird keine Aufnahme gestartet.</li>
+            <li>Der Einwilligungsstatus wird im Report gespeichert und im Dashboard angezeigt.</li>
+            <li>Bei vorhandener Aufnahme wird nur die URL-Referenz gespeichert; die Datei selbst verbleibt beim Telefonieanbieter.</li>
+            <li>Der Nutzer kann über das Dashboard Aufnahmen löschen, was die gespeicherten Referenzen unmittelbar entfernt.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>4) Technischer Prozessablauf</strong></p>
+          <ul>
+            <li>Start des Gesprächs über die Twilio-Call-APIs.</li>
+            <li>Gesprächssteuerung erfolgt turn-basiert über /api/twilio/voice und /api/twilio/voice/process.</li>
+            <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
+            <li>Skriptfortschritt und Zustände werden signiert im Call-State geführt.</li>
+            <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
+            <li>Kalender- und Report-Ansichten beziehen Termine direkt aus den gespeicherten Gesprächsreports.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>5) Datenschutz, Datenspeicherung und Löschung (DSGVO-konform)</strong></p>
+          <p className="subtle top-gap"><strong>5.1 Speicherort</strong></p>
+          <ul>
+            <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
+            <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, scripts.json, report-database.json, conversation-events.json).</li>
+            <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>5.2 Verarbeitete Daten</strong></p>
+          <p className="subtle">Verarbeitet werden ausschließlich für den Zweck der Gesprächsdurchführung erforderliche Daten, unter anderem:</p>
+          <ul>
+            <li>Firmenname</li>
+            <li>Ansprechpartner</li>
+            <li>Thema des Gesprächs</li>
+            <li>Gesprächsergebnis</li>
+            <li>Termin oder Wiedervorlage</li>
+            <li>Einwilligungsstatus</li>
+            <li>Anzahl der Kontaktversuche</li>
+            <li>Gesprächszusammenfassung</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>5.3 Speicherdauer</strong></p>
+          <ul>
+            <li>Alle Gesprächsdaten werden maximal 30 Tage gespeichert, sofern keine gesetzliche Pflicht zur längeren Aufbewahrung besteht.</li>
+            <li>Nach Ablauf der 30 Tage werden die Daten automatisch gelöscht.</li>
+            <li>Aufnahmen (URL-Referenzen) werden ebenfalls nach 30 Tagen gelöscht oder sofort, wenn der Nutzer dies verlangt.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>5.4 Rechte der Betroffenen</strong></p>
+          <p className="subtle">Betroffene können jederzeit:</p>
+          <ul>
+            <li>Auskunft über gespeicherte Daten verlangen</li>
+            <li>Berichtigung verlangen</li>
+            <li>Löschung verlangen</li>
+            <li>Widerspruch gegen Verarbeitung einlegen</li>
+            <li>Löschfunktionen für Reports und Aufnahmen sind im Dashboard integriert und wirken sofort auf die gespeicherten Datensätze.</li>
+          </ul>
+
+          <p className="subtle top-gap"><strong>6) Externe Dienstleister im Laufzeitpfad</strong></p>
+          <ul>
+            <li>Twilio: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
+            <li>OpenAI: Gesprächslogik in freien Dialogphasen</li>
+            <li>ElevenLabs (optional): Sprachsynthese</li>
+          </ul>
+          <p className="subtle">Alle Dienstleister werden ausschließlich im Rahmen der Auftragsverarbeitung genutzt. Es findet keine Weitergabe zu Werbezwecken statt.</p>
+        </CollapsiblePanel>
+
+        <CollapsiblePanel title="Anruf bei Firma starten" defaultOpen>
+          <div className="field-grid">
+            <div>
+              <label>Ausgangsnummer</label>
+              <select
+                value={twilioFrom}
+                onChange={(event) => setTwilioFrom(event.target.value)}
+                disabled={twilioFromOptions.length === 0}
+              >
+                {twilioFromOptions.length === 0 ? (
+                  <option value="">Keine Nummer konfiguriert</option>
+                ) : (
+                  twilioFromOptions.map((option) => (
+                    <option key={option.number} value={option.number}>{option.label} ({option.number})</option>
+                  ))
+                )}
+              </select>
             </div>
-          </article>
-
-          <article className="panel">
-            <h2>Gloria testen</h2>
-            <div className="row">
-              <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
+            <div>
+              <label>Zielnummer</label>
+              <input value={twilioTarget} onChange={(event) => setTwilioTarget(event.target.value)} placeholder="+492339123456" />
+            </div>
+            <div>
+              <label>Firma</label>
+              <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
+            </div>
+            <div>
+              <label>Ansprechpartner</label>
+              <input value={twilioContactName} onChange={(event) => setTwilioContactName(event.target.value)} />
+            </div>
+            <div>
+              <label>Thema</label>
+              <select value={twilioTopic} onChange={(event) => setTwilioTopic(event.target.value as Topic)}>
                 {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
               </select>
-              <button className="btn" onClick={() => void testVoice()} disabled={busy}>
-                {busy ? "Vorschau lädt ..." : "Stimme testen"}
-              </button>
             </div>
-            <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
-            {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
-          </article>
-
-          <article className="panel">
-            <h2>Twilio Live-Testanruf</h2>
-            <div className="field-grid">
-              <div>
-                <label>Zielnummer</label>
-                <input value={twilioTarget} onChange={(event) => setTwilioTarget(event.target.value)} placeholder="+492339123456" />
-              </div>
-              <div>
-                <label>Firma</label>
-                <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
-              </div>
-              <div>
-                <label>Ansprechpartner (Vorname + Nachname)</label>
-                <input
-                  value={twilioContactName}
-                  onChange={(event) => setTwilioContactName(event.target.value)}
-                  placeholder="z. B. Max Neumann"
-                />
-              </div>
-              <div>
-                <label>Thema</label>
-                <select value={twilioTopic} onChange={(event) => setTwilioTopic(event.target.value as Topic)}>
-                  {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
-                {busy ? "Anruf startet ..." : "Twilio-Testanruf starten"}
-              </button>
-            </div>
-          </article>
-        </div>
-
-        <div className="stack">
-          <article className="panel">
-            <h2>Compliance & Ablauf</h2>
-            <ul>
-              <li>Direkte Offenlegung als digitale Assistentin im ersten Satz</li>
-              <li>Aufnahmefreigabe wird immer vor dem eigentlichen Gespräch abgefragt</li>
-              <li>Zielausgänge: Termin, Wiedervorlage oder klare Absage</li>
-              <li>Gesprächsreports und Aufnahmen landen gesammelt im Dashboard</li>
-              <li>Webhook für Telefonie: /api/calls/webhook</li>
-            </ul>
-          </article>
-
-          <article className="panel">
-            <h2>Gloria lernt aus Gesprächen</h2>
-            <ul>
-              {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-            <div className="insight-grid">
-              {learning.insights.map((insight) => (
-                <div key={insight.topic} className="mini-panel">
-                  <h3>{insight.topic}</h3>
-                  <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
-                  <ul>
-                    {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
-                  </ul>
-                  <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
-                </div>
-              ))}
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section className="panel top-section">
-        <div className="row spread">
-          <h2>Skripte für Gloria bearbeiten</h2>
-          <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
-            {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-          </select>
-        </div>
-
-        {activeDraft ? (
-          <>
-            <p className="subtle">
-              Diese Konfiguration steuert den OpenAI-Call-Flow direkt. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
-              Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
-            </p>
-
-            <p className="subtle top-gap"><strong>0) KI-Konfiguration</strong> – Diese Felder steuern das OpenAI-Gespräch. Gloria nutzt sie auf jeder Gesprächsrunde für Rollenerkennung und Antwortgenerierung.</p>
-            <label>Basisinformationen (was bieten wir an – Kontext für OpenAI)</label>
-            <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
-            <label>Aufgabe beim Empfang (was soll Gloria beim Gatekeeper erreichen)</label>
-            <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
-            <label>Verhalten beim Empfang (wie soll Gloria sich verhalten)</label>
-            <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
-            <label>Aufgabe beim Entscheider (was soll Gloria beim Entscheider erreichen)</label>
-            <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
-            <label>Verhalten beim Entscheider (Argumentationsstil, Einwandbehandlung)</label>
-            <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
-            <label>Abschlussziel / Erfolgsdefinition (wann ist der Anruf erfolgreich)</label>
-            <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
-            <label>Aufzeichnungserlaubnis (inkl. klare JA/NEIN-Antwort anfordern)</label>
-            <textarea value={activeDraft.recordingConsentLine ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], recordingConsentLine: event.target.value } }))} />
-            <label>Gesundheitsfragen (konkrete Fragen statt nur "grundsätzlich gesund")</label>
-            <textarea value={activeDraft.healthCheckQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], healthCheckQuestions: event.target.value } }))} />
-            <label>Überleitung in die Terminierung</label>
-            <textarea value={activeDraft.appointmentTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentTransition: event.target.value } }))} />
-            <label>Terminierungsregeln (Datum + Uhrzeit + Alternative erfragen)</label>
-            <textarea value={activeDraft.appointmentSchedulingRules ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentSchedulingRules: event.target.value } }))} />
-
-            <p className="subtle top-gap">
-              Hinweis: Die bisherigen Leitfaden-Felder sind in der Admin-UI ausgeblendet.
-              Für den neuen OpenAI-Twilio-Flow werden nur die KI-Konfigurationsfelder oben verwendet.
-            </p>
-
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
-              <span className="subtle">Alle Felder werden gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
-            </div>
-            {saveStatus ? (
-              <p
-                className="subtle"
-                role="status"
-                style={{
-                  marginTop: 8,
-                  color: saveStatus.type === "success" ? "#1f7a42" : "#b42318",
-                  fontWeight: 700,
-                }}
-              >
-                {saveStatus.message}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>
-        )}
-      </section>
-
-      <section className="panel top-section">
-        <div className="row spread">
-          <h2>Terminkalender</h2>
-          <div className="row">
-            <button
-              className="btn ghost"
-              onClick={() =>
-                setCalendarMonth(
-                  (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
-                )
-              }
-            >
-              ← Monat zurück
+          </div>
+          <div className="row top-gap">
+            <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
+              {busy ? "Anruf startet ..." : "Anruf bei Firma starten"}
             </button>
+          </div>
+        </CollapsiblePanel>
+
+        <CollapsiblePanel title="Offene Firmenliste" defaultOpen>
+          {campaignLists.length === 0 ? (
+            <p className="subtle">Noch keine Listen vorhanden. Bitte zuerst CSV oder Excel hochladen.</p>
+          ) : (
+            <div className="stack">
+              {campaignLists.map((list) => {
+                const leadsForList = data.leads.filter((lead) => (lead.listId || "legacy") === list.listId);
+
+                return (
+                  <div key={list.listId} className="mini-panel">
+                    <div className="row spread">
+                      <h3>{list.listName}</h3>
+                      <div className="row">
+                        <span className="pill">Gesamt: {list.total}</span>
+                        <span className="pill">Offen: {list.pending}</span>
+                        <span className="pill">Termine: {list.appointments}</span>
+                        <button
+                          className="btn"
+                          onClick={() => void controlCampaignList(list.listId, "start")}
+                          disabled={busy || list.active || list.pending === 0}
+                        >
+                          Starten
+                        </button>
+                        <button
+                          className="btn ghost"
+                          onClick={() => void controlCampaignList(list.listId, "stop")}
+                          disabled={busy || !list.active}
+                        >
+                          Stoppen
+                        </button>
+                        <button
+                          className="btn danger"
+                          onClick={() => void controlCampaignList(list.listId, "delete")}
+                          disabled={busy}
+                        >
+                          Loeschen
+                        </button>
+                      </div>
+                    </div>
+
+                    <table className="top-gap">
+                      <thead>
+                        <tr><th>Firma</th><th>Ansprechpartner</th><th>Thema</th><th>Status</th><th>Nächster Anruf</th></tr>
+                      </thead>
+                      <tbody>
+                        {leadsForList.map((lead) => (
+                          <tr key={lead.id}>
+                            <td><strong>{lead.company}</strong></td>
+                            <td>{lead.contactName || "-"}</td>
+                            <td>{lead.topic}</td>
+                            <td>{lead.status}</td>
+                            <td>{formatDate(lead.nextCallAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CollapsiblePanel>
+
+        <CollapsiblePanel title="Kalender" defaultOpen>
+          <div className="row spread">
             <strong>
               {new Intl.DateTimeFormat("de-DE", {
                 month: "long",
                 year: "numeric",
               }).format(calendarMonth)}
             </strong>
-            <button
-              className="btn ghost"
-              onClick={() =>
-                setCalendarMonth(
-                  (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
-                )
-              }
-            >
-              Monat vor →
-            </button>
-          </div>
-        </div>
-
-        <div className="calendar-grid top-gap">
-          {[
-            "Mo",
-            "Di",
-            "Mi",
-            "Do",
-            "Fr",
-            "Sa",
-            "So",
-          ].map((weekday) => (
-            <div key={weekday} className="calendar-weekday">{weekday}</div>
-          ))}
-          {calendarDays.map((day) => {
-            const isSelected = day.key === selectedDayKey;
-            return (
+            <div className="row">
               <button
-                key={day.key}
-                className={`calendar-day ${day.inMonth ? "" : "outside"} ${isSelected ? "selected" : ""}`}
-                onClick={() => setSelectedDayKey(day.key)}
+                className="btn ghost"
+                onClick={() =>
+                  setCalendarMonth(
+                    (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                  )
+                }
               >
-                <span>{day.date.getDate()}</span>
-                <small>{day.items.length > 0 ? `${day.items.length} Termin(e)` : "-"}</small>
+                ← Monat zurück
               </button>
-            );
-          })}
-        </div>
-
-        <div className="calendar-detail top-gap">
-          <div className="mini-panel">
-            <h3>
-              Termine am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
-            </h3>
-            {selectedDayAppointments.length > 0 ? (
-              <div className="calendar-list top-gap">
-                {selectedDayAppointments.map((report) => (
-                  <button
-                    key={report.id}
-                    className="calendar-item"
-                    onClick={() => setSelectedReport(report)}
-                  >
-                    <strong>{formatDate(report.appointmentAt)}</strong>
-                    <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
-                    <small>{report.topic}</small>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="subtle top-gap">Für diesen Tag sind noch keine Termine eingetragen.</p>
-            )}
+              <button
+                className="btn ghost"
+                onClick={() =>
+                  setCalendarMonth(
+                    (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                  )
+                }
+              >
+                Monat vor →
+              </button>
+            </div>
           </div>
 
-          <div className="mini-panel">
-            <h3>Termin direkt eintragen</h3>
-            <div className="field-grid top-gap">
-              <div>
-                <label>Firma</label>
-                <input
-                  value={manualAppointment.company}
-                  onChange={(event) =>
-                    setManualAppointment((current) => ({ ...current, company: event.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label>Ansprechpartner</label>
-                <input
-                  value={manualAppointment.contactName}
-                  onChange={(event) =>
-                    setManualAppointment((current) => ({ ...current, contactName: event.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label>Thema</label>
-                <select
-                  value={manualAppointment.topic}
-                  onChange={(event) =>
-                    setManualAppointment((current) => ({ ...current, topic: event.target.value as Topic }))
-                  }
+          <div className="calendar-grid top-gap">
+            {["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((weekday) => (
+              <div key={weekday} className="calendar-weekday">{weekday}</div>
+            ))}
+            {calendarDays.map((day) => {
+              const isSelected = day.key === selectedDayKey;
+              return (
+                <button
+                  key={day.key}
+                  className={`calendar-day ${day.inMonth ? "" : "outside"} ${isSelected ? "selected" : ""}`}
+                  onClick={() => setSelectedDayKey(day.key)}
                 >
-                  {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-                </select>
-              </div>
-              <div>
-                <label>Datum & Uhrzeit</label>
-                <input
-                  type="datetime-local"
-                  value={manualAppointment.appointmentAt}
-                  onChange={(event) =>
-                    setManualAppointment((current) => ({ ...current, appointmentAt: event.target.value }))
-                  }
-                />
-              </div>
+                  <span>{day.date.getDate()}</span>
+                  <small>{day.items.length > 0 ? `${day.items.length} Termin(e)` : "-"}</small>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="calendar-detail top-gap">
+            <div className="mini-panel">
+              <h3>
+                Termine am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
+              </h3>
+              {selectedDayAppointments.length > 0 ? (
+                <div className="calendar-list top-gap">
+                  {selectedDayAppointments.map((report) => (
+                    <button
+                      key={report.id}
+                      className="calendar-item"
+                      onClick={() => setSelectedReport(report)}
+                    >
+                      <strong>{formatDate(report.appointmentAt)}</strong>
+                      <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
+                      <small>{report.topic} · {report.recordingUrl ? "mit Aufnahme" : "ohne Aufnahme"}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="subtle top-gap">Für diesen Tag sind noch keine Termine eingetragen.</p>
+              )}
             </div>
-            <label>Notiz</label>
-            <textarea
-              value={manualAppointment.summary}
-              onChange={(event) =>
-                setManualAppointment((current) => ({ ...current, summary: event.target.value }))
-              }
-              style={{ minHeight: 80 }}
-            />
-            <div className="row top-gap">
-              <button className="btn" onClick={() => void createManualAppointment()} disabled={busy}>
-                {busy ? "Speichert ..." : "Termin speichern"}
-              </button>
-              <a className="btn ghost" href="/api/export/outlook">Outlook-CSV exportieren</a>
+            <div className="mini-panel">
+              <h3>Automatische Einträge</h3>
+              <p className="subtle top-gap">
+                Gloria trägt Termine automatisch nach dem Telefonat ein. Gesprächsreport und Aufnahmen werden direkt mit dem Termin verknüpft und sind per Klick im Detaildialog einsehbar.
+              </p>
+              <p className="subtle top-gap">
+                Quelle: Telefonie-Webhook und Abschlussreport.
+              </p>
             </div>
           </div>
-        </div>
-      </section>
+        </CollapsiblePanel>
 
-      <section className="report-grid top-section">
-        <article className="panel">
-          <h2>Gesprächsreports & Aufnahmen</h2>
+        <CollapsiblePanel title="Gesprächsreports & Aufnahmen" defaultOpen>
           <table>
             <thead>
               <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
@@ -833,28 +1313,248 @@ export default function HomePage() {
               ))}
             </tbody>
           </table>
-        </article>
-
-        <article className="panel">
-          <h2>Offene Firmenliste</h2>
-          <table>
-            <thead>
-              <tr><th>Firma</th><th>Ansprechpartner</th><th>Thema</th><th>Status</th><th>Nächster Anruf</th></tr>
-            </thead>
-            <tbody>
-              {data.leads.map((lead) => (
-                <tr key={lead.id}>
-                  <td><strong>{lead.company}</strong></td>
-                  <td>{lead.contactName || "-"}</td>
-                  <td>{lead.topic}</td>
-                  <td>{lead.status}</td>
-                  <td>{formatDate(lead.nextCallAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
+        </CollapsiblePanel>
       </section>
+
+      {settingsOpen ? (
+        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="modal settings-modal" onClick={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSettingsOpen(false)}>✕</button>
+            <h2>Einstellungen</h2>
+
+            <div className="stack top-gap">
+              <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
+                <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
+                <label>Listenname</label>
+                <input
+                  value={importListName}
+                  onChange={(event) => setImportListName(event.target.value)}
+                  placeholder="z. B. April-Kampagne Industrie"
+                />
+                <label>Datei hochladen (CSV / XLSX / XLS)</label>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={(event) => setImportFile(event.target.files?.[0] || null)}
+                />
+                <div className="row top-gap">
+                  <button className="btn" onClick={() => void handleFileImport()} disabled={busy || !importFile}>Datei importieren</button>
+                  {importFile ? <span className="subtle">Ausgewählt: {importFile.name}</span> : null}
+                </div>
+                <p className="subtle top-gap">Optional: CSV-Inhalt manuell einfügen.</p>
+                <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
+                <div className="row top-gap">
+                  <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV-Text importieren</button>
+                  <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Gloria testen" defaultOpen>
+                <div className="row">
+                  <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
+                    {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                  </select>
+                  <button className="btn" onClick={() => void testVoice()} disabled={busy}>
+                    {busy ? "Vorschau lädt ..." : "Stimme testen"}
+                  </button>
+                </div>
+                <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
+                {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Gloria lernt aus Gesprächen" defaultOpen>
+                <ul>
+                  {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+                <div className="insight-grid">
+                  {learning.insights.map((insight) => (
+                    <div key={insight.topic} className="mini-panel">
+                      <h3>{insight.topic}</h3>
+                      <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
+                      <ul>
+                        {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+                      </ul>
+                      <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
+                    </div>
+                  ))}
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Skript-Einstellungen" defaultOpen>
+                <div className="row spread">
+                  <h2>Skript-Einstellungen</h2>
+                  <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
+                    {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                  </select>
+                </div>
+
+                {activeDraft ? (
+                  <>
+                    <p className="subtle">
+                      Hier bearbeiten Sie das Skript pro Thema. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
+                      Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
+                    </p>
+
+                    <p className="subtle top-gap"><strong>Hauptprompt</strong> – Basisinformationen für Gloria.</p>
+                    <label>Basisinformationen / Kontext</label>
+                    <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>Leitfaden</strong> – Fester Gesprächsrahmen.</p>
+                    <label>Gesprächseinstieg</label>
+                    <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
+                    <label>Bedarfsermittlung</label>
+                    <textarea value={activeDraft.discovery ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
+                    <label>Einwandbehandlung</label>
+                    <textarea value={activeDraft.objectionHandling ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
+                    <label>Terminabschluss</label>
+                    <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
+
+                    <p className="subtle top-gap"><strong>Gesprächssteuerung</strong> – feste Textbausteine im Live-Flow.</p>
+                    <label>Aufzeichnungsfrage (Consent)</label>
+                    <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
+                    <label>PKV: Einleitung Basisinformationen (nach Terminierung)</label>
+                    <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
+                    <label>PKV: Fragenkatalog (eine Frage pro Zeile, Reihenfolge wird eingehalten)</label>
+                    <textarea value={activeDraft.pkvHealthQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
+
+                    <div className="row top-gap">
+                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
+                      <span className="subtle">Das Kernskript wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
+                    </div>
+                    {saveStatus ? (
+                      <p
+                        className="subtle"
+                        role="status"
+                        style={{
+                          marginTop: 8,
+                          color: saveStatus.type === "success" ? "#1f7a42" : "#b42318",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {saveStatus.message}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>
+                )}
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Benutzer & Rufnummern" defaultOpen>
+                {currentUser?.role === "master" ? (
+                  <>
+                    <p className="subtle">Master-Admin Bereich: Benutzer und Rufnummern verwalten.</p>
+
+                    <div className="mini-panel top-gap">
+                      <h3>Neuen Benutzer anlegen</h3>
+                      <div className="field-grid top-gap">
+                        <div>
+                          <label>Benutzername</label>
+                          <input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} />
+                        </div>
+                        <div>
+                          <label>Passwort</label>
+                          <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                        </div>
+                        <div>
+                          <label>Realer Name</label>
+                          <input value={newRealName} onChange={(event) => setNewRealName(event.target.value)} />
+                        </div>
+                        <div>
+                          <label>Firma</label>
+                          <input value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} />
+                        </div>
+                        <div>
+                          <label>Rolle</label>
+                          <select value={newRole} onChange={(event) => setNewRole(event.target.value as "master" | "user")}>
+                            <option value="user">user</option>
+                            <option value="master">master</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="row top-gap">
+                        <button className="btn" onClick={() => void createUserByAdmin()} disabled={busy}>Benutzer anlegen</button>
+                      </div>
+                    </div>
+
+                    <div className="mini-panel top-gap">
+                      <h3>Rufnummer zuweisen</h3>
+                      <div className="field-grid top-gap">
+                        <div>
+                          <label>Benutzer</label>
+                          <select value={newPhoneUserId} onChange={(event) => setNewPhoneUserId(event.target.value)}>
+                            <option value="">Bitte wählen</option>
+                            {adminUsers.map((entry) => (
+                              <option key={entry.id} value={entry.id}>{entry.username} ({entry.companyName})</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label>Rufnummer</label>
+                          <input value={newPhoneNumber} onChange={(event) => setNewPhoneNumber(event.target.value)} placeholder="+49..." />
+                        </div>
+                        <div>
+                          <label>Label</label>
+                          <input value={newPhoneLabel} onChange={(event) => setNewPhoneLabel(event.target.value)} placeholder="z. B. Vertrieb" />
+                        </div>
+                      </div>
+                      <div className="row top-gap">
+                        <button className="btn" onClick={() => void createPhoneByAdmin()} disabled={busy}>Rufnummer speichern</button>
+                      </div>
+                    </div>
+
+                    <div className="mini-panel top-gap">
+                      <h3>Benutzerliste</h3>
+                      <table className="top-gap">
+                        <thead>
+                          <tr><th>Benutzername</th><th>Rolle</th><th>Name</th><th>Firma</th><th>Aktion</th></tr>
+                        </thead>
+                        <tbody>
+                          {adminUsers.map((entry) => (
+                            <tr key={entry.id}>
+                              <td>{entry.username}</td>
+                              <td>{entry.role}</td>
+                              <td>{entry.realName}</td>
+                              <td>{entry.companyName}</td>
+                              <td>
+                                <button
+                                  className="btn danger"
+                                  onClick={() => void deleteUserByAdmin(entry.id, entry.username)}
+                                  disabled={busy || currentUser?.id === entry.id}
+                                >
+                                  Löschen
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="subtle">Ihre zugewiesenen Rufnummern:</p>
+                    <table className="top-gap">
+                      <thead>
+                        <tr><th>Label</th><th>Rufnummer</th><th>Status</th></tr>
+                      </thead>
+                      <tbody>
+                        {managedPhoneNumbers.map((entry) => (
+                          <tr key={entry.id}>
+                            <td>{entry.label}</td>
+                            <td>{entry.phoneNumber}</td>
+                            <td>{entry.active ? "aktiv" : "inaktiv"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </CollapsiblePanel>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedReport && (() => {
         const conversationLines = buildConversationLines(selectedReport.summary || "");
@@ -882,6 +1582,10 @@ export default function HomePage() {
                 <div className="report-detail-field">
                   <label>Thema</label>
                   <p>{selectedReport.topic}</p>
+                </div>
+                <div className="report-detail-field">
+                  <label>Direkte Durchwahl</label>
+                  <p>{selectedReport.directDial || "–"}</p>
                 </div>
                 <div className="report-detail-field">
                   <label>Gesprächsversuche</label>
@@ -926,33 +1630,11 @@ export default function HomePage() {
                             padding: "6px 10px",
                             borderRadius: 8,
                             fontSize: "0.88rem",
-                            background:
-                              line.speaker === "Phase"
-                                ? "rgba(183,135,34,0.14)"
-                                : line.speaker === "Gloria"
-                                  ? "rgba(43,101,217,0.07)"
-                                  : "rgba(32,57,93,0.05)",
-                            borderLeft: `3px solid ${
-                              line.speaker === "Phase"
-                                ? "var(--gold-600)"
-                                : line.speaker === "Gloria"
-                                  ? "var(--blue-500)"
-                                  : "var(--gold-500)"
-                            }`,
+                            background: line.speaker === "Gloria" ? "rgba(43,101,217,0.07)" : "rgba(32,57,93,0.05)",
+                            borderLeft: `3px solid ${line.speaker === "Gloria" ? "var(--blue-500)" : "var(--gold-500)"}`,
                           }}
                         >
-                          <span
-                            style={{
-                              fontWeight: 700,
-                              fontSize: "0.78rem",
-                              color:
-                                line.speaker === "Phase"
-                                  ? "#8a5e18"
-                                  : line.speaker === "Gloria"
-                                    ? "var(--blue-600)"
-                                    : "var(--gold-600)",
-                            }}
-                          >
+                          <span style={{ fontWeight: 700, fontSize: "0.78rem", color: line.speaker === "Gloria" ? "var(--blue-600)" : "var(--gold-600)" }}>
                             {line.speaker}
                           </span>
                           <br />
@@ -962,6 +1644,13 @@ export default function HomePage() {
                     </div>
                   </div>
                 )}
+
+                <div className="report-detail-field report-detail-full">
+                  <label>Vollständiges Protokoll (Rohdaten)</label>
+                  <pre className="code-box" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
+                    {selectedReport.summary || "Kein Protokoll vorhanden."}
+                  </pre>
+                </div>
 
                 {selectedReport.callSid && (
                   <div className="report-detail-field">
@@ -1018,3 +1707,4 @@ export default function HomePage() {
       })()}
     </main>
   );
+}
