@@ -533,15 +533,16 @@ function buildMetrics(
 }
 
 export async function getDashboardData(options?: { userId?: string; role?: "master" | "user" }): Promise<DashboardData> {
-  const userId = options?.role === "user" ? options.userId : undefined;
+  const userId = options?.userId;
+  const scopeReportsToUser = options?.role === "user" && Boolean(userId);
   const [leads, reportState, scriptsState, events] = await Promise.all([
-    readLeads(userId),
+    readLeads(scopeReportsToUser ? userId : undefined),
     readReportDatabaseWithMode(),
     readScriptsWithMode(userId),
     readConversationEvents(),
   ]);
 
-  const reports = userId
+  const reports = scopeReportsToUser
     ? reportState.data.reports.filter((report) => report.userId === userId)
     : reportState.data.reports;
 

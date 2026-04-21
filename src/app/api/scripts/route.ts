@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   const data = await getDashboardData({
     userId: resolvedUserId,
-    role: sessionUser.role === "master" && !targetUserId ? "master" : "user",
+    role: "user",
   });
 
   return NextResponse.json({ scripts: data.scripts, scriptsStorageMode: data.scriptsStorageMode });
