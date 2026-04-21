@@ -1391,31 +1391,75 @@ export default function HomePage() {
                 {activeDraft ? (
                   <>
                     <p className="subtle">
-                      Hier bearbeiten Sie das Skript pro Thema. Gespeicherte Änderungen werden sofort von Gloria für neue Gespräche verwendet.
-                      Aktuelle Skript-Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.
+                      Hier bearbeiten Sie das Skript für dieses Thema. Ihre Änderungen gelten ausschließlich für Ihren Account und werden
+                      direkt in der Datenbank gespeichert. Andere Nutzer sind davon nicht betroffen.
+                      Datenquelle: {data.scriptsStorageMode === "postgres" ? "PostgreSQL (pro Nutzer)" : "Datei-Fallback"}.
                     </p>
 
-                    <p className="subtle top-gap"><strong>Hauptprompt</strong> – Basisinformationen für Gloria.</p>
-                    <label>Basisinformationen / Kontext</label>
+                    <p className="subtle top-gap"><strong>1. Basisinformationen / Kontext</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Hintergrundwissen für Gloria. Diese Informationen spricht sie nicht wörtlich aus, nutzt sie aber,
+                      um Rückfragen und Einwände fachlich passend zu beantworten.
+                    </p>
                     <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
 
-                    <p className="subtle top-gap"><strong>Leitfaden</strong> – Fester Gesprächsrahmen.</p>
-                    <label>Gesprächseinstieg</label>
+                    <p className="subtle top-gap"><strong>2. Gesprächseinstieg (Opener)</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Erster Satz, den Gloria zum Entscheider sagt – inkl. Begrüßung, Vorstellung und Einverständnis-Frage
+                      zur Aufzeichnung. Wird wörtlich vorgelesen.
+                    </p>
                     <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
-                    <label>Bedarfsermittlung</label>
+
+                    <p className="subtle top-gap"><strong>3. Bedarfsermittlung</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Leitfragen, mit denen Gloria den Bedarf ermittelt. Sie formuliert daraus passende offene Fragen.
+                    </p>
                     <textarea value={activeDraft.discovery ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
-                    <label>Einwandbehandlung</label>
+
+                    <p className="subtle top-gap"><strong>4. Einwandbehandlung</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Antworten auf typische Einwände („keine Zeit", „kein Interesse", „schicken Sie Unterlagen"). Gloria nutzt sie als Leitplanke.
+                    </p>
                     <textarea value={activeDraft.objectionHandling ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
-                    <label>Terminabschluss</label>
+
+                    <p className="subtle top-gap"><strong>5. Terminabschluss</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Formulierung, mit der Gloria den Termin mit Herrn Duic reserviert. Wird wörtlich vorgelesen, sobald die Bedarfsphase abgeschlossen ist.
+                    </p>
                     <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
 
-                    <p className="subtle top-gap"><strong>Gesprächssteuerung</strong> – feste Textbausteine im Live-Flow.</p>
-                    <label>Aufzeichnungsfrage (Consent)</label>
+                    <p className="subtle top-gap"><strong>6. Aufzeichnungsfrage (optional)</strong></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Alternative Formulierung der Einwilligungsfrage. Leer lassen, wenn die Frage bereits im Opener enthalten ist.
+                    </p>
                     <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
-                    <label>PKV: Einleitung Basisinformationen (nach Terminierung)</label>
+
+                    <p className="subtle top-gap"><strong>7. PKV – Einleitung Basisdaten</strong> <em>(nur Thema PKV)</em></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Überleitung nach der Terminvereinbarung, bevor Gloria die Gesundheits- und Vertragsfragen stellt.
+                    </p>
                     <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
-                    <label>PKV: Fragenkatalog (eine Frage pro Zeile, Reihenfolge wird eingehalten)</label>
+
+                    <p className="subtle top-gap"><strong>8. PKV – Fragenkatalog</strong> <em>(nur Thema PKV)</em></p>
+                    <p className="subtle" style={{ marginTop: 0 }}>
+                      Eine Frage pro Zeile. Gloria arbeitet sie in genau dieser Reihenfolge ab.
+                    </p>
                     <textarea value={activeDraft.pkvHealthQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
+
+                    <details className="mini-panel top-gap">
+                      <summary><strong>Feste Systemtexte (nicht editierbar)</strong></summary>
+                      <p className="subtle top-gap">
+                        Diese Sätze sind fest in der Telefon-Steuerung hinterlegt und werden situativ ergänzend zum Skript gesprochen.
+                        Damit Sie sehen, was Gloria außerhalb des bearbeitbaren Skripts noch sagt:
+                      </p>
+                      <ul className="subtle">
+                        <li><strong>Vor dem Aufbau:</strong> „Bitte einen kleinen Moment, die Verbindung wird hergestellt."</li>
+                        <li><strong>Bei längerer Pause:</strong> „Ich bin noch dran. Nehmen Sie sich ruhig einen Moment und sprechen Sie in Ruhe weiter."</li>
+                        <li><strong>Rückruf – Verbindung:</strong> „Vielen Dank für Ihren Rückruf. Ich verbinde Sie jetzt mit dem zuständigen Ansprechpartner."</li>
+                        <li><strong>Rückruf – nicht erreichbar:</strong> „Vielen Dank für Ihren Rückruf. Aktuell ist kein Ansprechpartner verfügbar. Wir melden uns zeitnah bei Ihnen."</li>
+                        <li><strong>Bei technischem Fehler:</strong> „Entschuldigung, es ist ein technischer Fehler aufgetreten. Ich melde mich nochmals."</li>
+                      </ul>
+                    </details>
 
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
