@@ -1446,18 +1446,98 @@ export default function HomePage() {
                     </p>
                     <textarea value={activeDraft.pkvHealthQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
 
-                    <details className="mini-panel top-gap">
-                      <summary><strong>Feste Systemtexte (nicht editierbar)</strong></summary>
+                    <details className="mini-panel top-gap" open>
+                      <summary><strong>Kompletter Gesprächsablauf (alle Textbausteine, die Gloria spricht)</strong></summary>
                       <p className="subtle top-gap">
-                        Diese Sätze sind fest in der Telefon-Steuerung hinterlegt und werden situativ ergänzend zum Skript gesprochen.
-                        Damit Sie sehen, was Gloria außerhalb des bearbeitbaren Skripts noch sagt:
+                        Diese Übersicht zeigt transparent jeden Satz, den Gloria vom ersten Abheben bis zur Verabschiedung sagt.
+                        Die mit „<em>bearbeitbar oben</em>" markierten Bausteine stammen aus Ihren Skript-Feldern (pro Nutzer).
+                        Die übrigen Sätze sind fest in der Telefon-Steuerung hinterlegt und werden situationsabhängig eingesetzt.
                       </p>
+
+                      <p className="subtle top-gap"><strong>1) Verbindungsaufbau</strong></p>
                       <ul className="subtle">
-                        <li><strong>Vor dem Aufbau:</strong> „Bitte einen kleinen Moment, die Verbindung wird hergestellt."</li>
-                        <li><strong>Bei längerer Pause:</strong> „Ich bin noch dran. Nehmen Sie sich ruhig einen Moment und sprechen Sie in Ruhe weiter."</li>
-                        <li><strong>Rückruf – Verbindung:</strong> „Vielen Dank für Ihren Rückruf. Ich verbinde Sie jetzt mit dem zuständigen Ansprechpartner."</li>
-                        <li><strong>Rückruf – nicht erreichbar:</strong> „Vielen Dank für Ihren Rückruf. Aktuell ist kein Ansprechpartner verfügbar. Wir melden uns zeitnah bei Ihnen."</li>
-                        <li><strong>Bei technischem Fehler:</strong> „Entschuldigung, es ist ein technischer Fehler aufgetreten. Ich melde mich nochmals."</li>
+                        <li>„Bitte einen kleinen Moment, die Verbindung wird hergestellt." <em>(nur wenn ElevenLabs noch initialisiert)</em></li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>2) Empfang / erste Reaktion</strong></p>
+                      <ul className="subtle">
+                        <li><em>Gloria hört zunächst still zu</em>, bis der Angerufene sich gemeldet hat.</li>
+                        <li>Wenn der Empfang sich meldet: „Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von {`{Ihre Firma}`}. Ich rufe im Auftrag von {`{Ihr Name}`} an." <em>+ erster Satz aus Ihrem Opener (bearbeitbar oben).</em></li>
+                        <li>Wenn keine Antwort kommt: „Ich bin noch dran. Nehmen Sie sich ruhig einen Moment und sprechen Sie in Ruhe weiter."</li>
+                        <li>Wenn der Empfang kurz zustimmt („Einen Moment"): „Danke. Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?"</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>3) Weiterleitung zum Entscheider</strong></p>
+                      <ul className="subtle">
+                        <li><em>Gloria schweigt währenddessen und wartet</em>, bis der Entscheider am Apparat ist.</li>
+                        <li>Sobald der Entscheider spricht: „Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von {`{Ihre Firma}`}. Ich rufe im Auftrag von {`{Ihr Name}`} an." <em>+ Opener (bearbeitbar oben).</em></li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>4) Einverständnis zur Aufzeichnung</strong></p>
+                      <ul className="subtle">
+                        <li>Aus Ihrem Opener bzw. <em>Aufzeichnungsfrage</em> (bearbeitbar oben).</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>5) Bedarfsermittlung</strong></p>
+                      <ul className="subtle">
+                        <li>Gloria formuliert offene Fragen auf Basis Ihres Felds <em>Bedarfsermittlung</em> (bearbeitbar oben).</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>6) Einwandbehandlung</strong></p>
+                      <ul className="subtle">
+                        <li>Gloria reagiert auf Bedenken mit Ihrem Feld <em>Einwandbehandlung</em> (bearbeitbar oben).</li>
+                        <li>Bei Verbindungsstörung: „Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da."</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>7) Terminvereinbarung</strong></p>
+                      <ul className="subtle">
+                        <li>Aus Ihrem Feld <em>Terminabschluss</em> (bearbeitbar oben).</li>
+                        <li>Wenn der Termin unklar bleibt: „Sehr gern. Damit ich den Termin fest eintrage, brauche ich bitte ein genaues Datum mit Uhrzeit. Was passt Ihnen konkret?"</li>
+                        <li>Bei Absage des Terminvorschlags: „Kein Problem. Dann nennen Sie mir bitte einfach Ihren Wunschtermin, zum Beispiel nächsten Mittwoch oder übernächsten Donnerstag jeweils mit Uhrzeit."</li>
+                        <li>Nach Bestätigung des Entscheiders: „Perfekt, dann gehen wir direkt in die Terminierung. Nennen Sie mir bitte einen konkreten Termin mit Datum und Uhrzeit, der Ihnen gut passt."</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>8) Rückruf / Wiedervorlage</strong> <em>(falls kein Termin zustande kommt)</em></p>
+                      <ul className="subtle">
+                        <li>„Danke für die Info. Wann erreiche ich Herrn oder Frau am besten erneut, bitte mit konkretem Datum und Uhrzeit?"</li>
+                        <li>„Danke. Damit ich beim Rückruf direkt durchkomme: Wie lautet bitte die direkte Durchwahl oder Mobilnummer?"</li>
+                        <li>„Gern notiere ich die Wiedervorlage. Bitte nennen Sie mir ein konkretes Datum mit Uhrzeit für den Rückruf."</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>9) PKV-Basisdaten</strong> <em>(nur Thema „private Krankenversicherung")</em></p>
+                      <ul className="subtle">
+                        <li>Einleitung: Ihr Feld <em>PKV-Einleitung</em> (bearbeitbar oben) oder Standard „Damit wir den Termin optimal vorbereiten können, müssen wir kurz ein paar Basisinformationen abklären."</li>
+                        <li>Fragenkatalog: Ihr Feld <em>PKV-Fragenkatalog</em> (bearbeitbar oben), Standardreihenfolge:
+                          <ol>
+                            <li>„Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?"</li>
+                            <li>„Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?"</li>
+                            <li>„Bei welchem Krankenversicherer sind Sie derzeit versichert?"</li>
+                            <li>„Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?"</li>
+                            <li>„Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?"</li>
+                            <li>„Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?"</li>
+                            <li>„Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?"</li>
+                            <li>„Gab es in den letzten zehn Jahren psychische Behandlungen?"</li>
+                            <li>„Fehlen aktuell Zähne oder ist Zahnersatz geplant?"</li>
+                            <li>„Bestehen bei Ihnen bekannte Allergien?"</li>
+                          </ol>
+                        </li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>10) Verabschiedung</strong></p>
+                      <ul className="subtle">
+                        <li>Nach erfolgreichem PKV-Fragenkatalog: „Vielen Dank für die Angaben. Der Termin ist fest eingeplant. Ich freue mich auf das Gespräch. Auf Wiederhören."</li>
+                        <li>Standardabschluss (alle anderen Themen): Gloria formuliert eine freundliche Verabschiedung aus dem KI-Kontext.</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>11) Eingehende Rückrufe auf Ihre Gloria-Nummer</strong></p>
+                      <ul className="subtle">
+                        <li>Bei verfügbarem Kontakt: „Vielen Dank für Ihren Rückruf. Ich verbinde Sie jetzt mit dem zuständigen Ansprechpartner."</li>
+                        <li>Ohne verfügbaren Kontakt: „Vielen Dank für Ihren Rückruf. Aktuell ist kein Ansprechpartner verfügbar. Wir melden uns zeitnah bei Ihnen."</li>
+                      </ul>
+
+                      <p className="subtle top-gap"><strong>12) Fehlerfall</strong></p>
+                      <ul className="subtle">
+                        <li>„Entschuldigung, es ist ein technischer Fehler aufgetreten. Ich melde mich nochmals."</li>
                       </ul>
                     </details>
 
