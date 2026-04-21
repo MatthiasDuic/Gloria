@@ -1,4 +1,4 @@
-kannd{
+{
   "crons": [
     {
       "path": "/api/callbacks/run",

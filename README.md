@@ -2,6 +2,18 @@
 
 Dieses Projekt erstellt eine **einsatzbereite Admin-Oberfläche** für `Gloria`, die digitale Vertriebsassistentin im Auftrag von **Herrn Matthias Duic**.
 
+## 🚀 Produktionsstatus
+
+| Status | Details |
+|--------|---------|
+| **Live** | https://gloria.agentur-duic-sprockhoevel.de |
+| **Alias** | https://gloria-ki-assistant.vercel.app |
+| **E2E Tests** | 14/14 bestanden (API-Sicherheit + Kampagnen-Flow) |
+| **Deployment** | April 21, 2026 via Vercel |
+| **Health Check** | `/api/health` → 200 OK |
+
+Für Deployment-Details siehe [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 ## Enthaltene Funktionen
 
 - **CSV-basierte Aufträge** mit Firmenliste und Themen
@@ -45,8 +57,6 @@ Danach im Browser öffnen:
 | Twilio-Sprachdialog (Webhook) | `/api/twilio/voice` |
 | Twilio-Status-Webhook | `/api/twilio/status` |
 | Automatische Wiedervorlagen ausführen | `/api/callbacks/run` |
-| Live-Agent-Konfiguration | `/api/live-agent` |
-| Freie KI-Antwort simulieren | `/api/live-agent/respond` |
 | Outlook-Termine exportieren | `/api/export/outlook` |
 
 ## Beispiel: Gesprächsergebnis per Webhook speichern
@@ -68,14 +78,14 @@ curl -X POST http://localhost:3000/api/calls/webhook \
 
 ## Admin-Zugang schützen
 
-Die Gloria-Oberfläche ist jetzt per **HTTP Basic Auth** absicherbar. Lege dafür in deiner Umgebung diese Variablen an:
+Die Gloria-Oberfläche ist jetzt per **Session-Login** abgesichert. Für den initialen Master-Benutzer werden diese Variablen verwendet:
 
 ```env
 BASIC_AUTH_USERNAME=MDUIC
 BASIC_AUTH_PASSWORD=dein_starkes_passwort
 ```
 
-Wichtig: Die Admin-Seite und internen APIs sind dann geschützt. Die Twilio-Webhooks für Telefonie bleiben bewusst erreichbar.
+Wichtig: Die Admin-Seite und internen APIs sind geschützt. Die Twilio-Webhooks für Telefonie bleiben bewusst erreichbar.
 
 ## SMTP / E-Mail konfigurieren
 
@@ -95,17 +105,17 @@ DATABASE_URL=postgres://user:pass@host:5432/dbname
 
 Sobald `DATABASE_URL` gesetzt ist, werden Gesprächsreports, Aufnahmen und die bearbeiteten Skripte in PostgreSQL persistiert (inkl. automatischer Tabellenanlage). Bereits vorhandene Skripte aus dem JSON-Fallback werden beim Laden automatisch in PostgreSQL übernommen. Ohne `DATABASE_URL` nutzt Gloria weiterhin den bestehenden JSON-Fallback.
 
-## Live-KI für freie Gesprächsführung aktivieren
+## OpenAI-Modelle konsistent setzen
 
 Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotzdem konsequent auf den Termin hinarbeiten soll, trage zusätzlich einen OpenAI-Key ein:
 
 ```env
-LIVE_AI_PROVIDER=openai
 OPENAI_API_KEY=dein_openai_key
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
 ```
 
-Dann kann der Endpoint `/api/live-agent/respond` spontane Aussagen des Interessenten in eine passende nächste Gloria-Antwort übersetzen. Ohne Key greift automatisch eine zielorientierte Fallback-Logik.
+Die Chat-Logik nutzt `OPENAI_MODEL`, die Realtime-Telefonie nutzt `OPENAI_REALTIME_MODEL`.
 
 ## ElevenLabs-Stimme aktivieren
 
