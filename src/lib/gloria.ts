@@ -79,6 +79,8 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
 
   const dmExample = script.decisionMakerExample?.trim();
 
+  const dmContext = script.decisionMakerContext?.trim();
+
   const goal =
     script.appointmentGoal?.trim() ||
     `Ein konkreter Beratungstermin mit Herrn ${principal} ist vereinbart.`;
@@ -93,7 +95,7 @@ ${keyInfo}
 
 LEITFADEN:
 Gesprächseinstieg: ${script.opener}
-Bedarfsermittlung: ${script.discovery}
+${dmContext ? `Informationsbereich vor der Bedarfsermittlung (Entscheider): ${dmContext}\n` : ""}Bedarfsermittlung: ${script.discovery}
 Einwandbehandlung: ${script.objectionHandling}
 Terminabschluss: ${script.close}
 

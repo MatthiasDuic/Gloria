@@ -44,6 +44,7 @@ export interface ScriptConfig {
   decisionMakerTask?: string;
   decisionMakerBehavior?: string;
   decisionMakerExample?: string;
+  decisionMakerContext?: string;
   appointmentGoal?: string;
 }
 
