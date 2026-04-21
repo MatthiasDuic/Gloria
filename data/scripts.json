@@ -26,10 +26,14 @@
   {
     "id": "skript-pkv",
     "topic": "private Krankenversicherung",
-    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema Beitragsstabilität in der Krankenversicherung, weil für viele Menschen vor allem die langfristige Planbarkeit im Alter immer wichtiger wird. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "discovery": "Wie sehen Sie das Thema für sich aktuell? Sind Sie derzeit gesetzlich oder privat versichert, und ist für Sie eher die aktuelle Beitragshöhe oder die langfristige Bezahlbarkeit im Ruhestand der wichtigere Punkt?",
+    "opener": "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Es geht um das Thema Beitragsentwicklung und Stabilität in der Krankenversicherung, weil für viele Menschen vor allem die langfristige Planbarkeit im Alter immer wichtiger wird. Vorab, dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "discovery": "Haben Sie für sich schon einen Plan, wie Sie die Krankenversicherung im Alter gestalten möchten?",
     "objectionHandling": "Das kann ich gut nachvollziehen. Genau dafür haben wir ein Konzept: Herr Duic zeigt in einem kurzen, verständlichen Gespräch, welche Möglichkeiten es gibt, Beiträge langfristig planbarer und stabiler aufzustellen. Es geht nicht um einen schnellen Abschluss, sondern zunächst um eine klare und ruhige Einordnung.",
-    "close": "Wenn das für Sie grundsätzlich interessant ist: Sollen wir direkt einen kurzen Termin mit Herrn Duic vereinbaren? Für die Vorbereitung klären wir nur ein paar Rahmendaten. Passt Ihnen eher ein Vormittag oder eher ein Nachmittag?"
+    "close": "Schauen wir doch mal gemeinsam in den Kalender. Was passt Ihnen denn generell besser? Eher vormittags oder nachmittags?",
+    "receptionTopicReason": "Ich habe eine fachliche Frage zum Thema Beitragsentwicklung in der Krankenversicherung.",
+    "problemBuildup": "Die Krankenversicherungsbeiträge steigen Jahr für Jahr – egal ob gesetzlich oder privat. Schauen Sie mal ein paar Jahre zurück: Erinnern Sie sich noch, mit welchem Beitrag Sie damals gestartet sind? [kurze Pause für Zustimmung] Genau. Und diese Entwicklung wird sich weiter fortsetzen. Täglich werden neue Gesundheitsreformen geplant und diskutiert – und am Ende landet vieles davon bei den Beiträgen der Versicherten.",
+    "conceptTransition": "Das verstehe ich gut. Aber stellen Sie sich vor, Sie und Herr Duic sitzen nächste Woche zusammen und er zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihre Beiträge bis zum Ruhestand entwickeln – realistisch, nachvollziehbar, ohne Schönfärben. Und direkt daneben sehen Sie, wie unser Konzept diese Entwicklung stabilisieren und planbarer machen kann. Wenn Sie diese Klarheit bekommen könnten: Wäre das für Sie verlorene Zeit? [Antwort abwarten, zustimmend reagieren] Genau das ist der Grund, warum so viele Menschen dieses kurze Orientierungsgespräch nutzen. Es gibt Ihnen zum ersten Mal eine echte, belegbare Perspektive.",
+    "appointmentConfirmation": "Alles klar, so machen wir es. Herr Duic wird am [Datum] um [Uhrzeit] bei Ihnen sein."
   },
   {
     "id": "skript-energie",

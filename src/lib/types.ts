@@ -46,6 +46,11 @@ export interface ScriptConfig {
   decisionMakerExample?: string;
   decisionMakerContext?: string;
   appointmentGoal?: string;
+  receptionTopicReason?: string;
+  problemBuildup?: string;
+  conceptTransition?: string;
+  appointmentConfirmation?: string;
+  availableAppointmentSlots?: string;
 }
 
 export interface CallReport {

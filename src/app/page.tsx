@@ -1412,30 +1412,41 @@ export default function HomePage() {
                       <p className="subtle" style={{ marginTop: 0 }}>Tonalität und Regeln (z. B. „freundlich, kurz, keine Produktdetails preisgeben").</p>
                       <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
 
+                      <label className="top-gap">Kurzer Grund (wenn der Empfang nachfragt)</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Ein Satz, den Gloria nutzt, wenn gefragt wird, worum es geht. Beispiel PKV: „Ich habe eine fachliche Frage zum Thema Beitragsentwicklung in der Krankenversicherung."</p>
+                      <textarea value={activeDraft.receptionTopicReason ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))} />
+
                       <label className="top-gap">Formulierungsbeispiel (optional)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Beispielsatz als Muster – nicht zwingend wörtlich.</p>
                       <textarea value={activeDraft.gatekeeperExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperExample: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 3 · Entscheider – Begrüßung</strong> <span className="subtle">(Wird wörtlich gesprochen)</span></summary>
+                      <summary><strong>Phase 3 · Entscheider – Begrüßung & Aufzeichnung</strong> <span className="subtle">(Wird wörtlich gesprochen)</span></summary>
                       <label className="top-gap">Gesprächseinstieg (Opener)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Erster Satz zum Entscheider inkl. Vorstellung und Aufzeichnungsfrage.</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Erster Satz zum Entscheider inkl. Vorstellung und – falls gewünscht – Aufzeichnungsfrage.</p>
                       <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
 
-                      <label className="top-gap">Aufzeichnungsfrage (optional)</label>
+                      <label className="top-gap">Aufzeichnungsfrage (optional, separat)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Leer lassen, wenn die Einwilligung schon im Opener steht.</p>
                       <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 4 · Entscheider – Gesprächsführung</strong> <span className="subtle">(Informationen → Bedarf → Einwände)</span></summary>
-                      <label className="top-gap">Informationsbereich</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Aufhänger / Mehrwert nach dem Opener – bevor Gloria Fragen stellt.</p>
+                      <summary><strong>Phase 4 · Problemaufbau</strong> <span className="subtle">(Warum das Thema jetzt relevant ist)</span></summary>
+                      <label className="top-gap">Problemaufbau-Text</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>2–3 Sätze mit rhetorischen Fragen. Gloria lässt nach jeder Frage Pausen für Zustimmung.</p>
+                      <textarea value={activeDraft.problemBuildup ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
+                    </details>
+
+                    <details className="mini-panel top-gap" open>
+                      <summary><strong>Phase 5 · Bedarfsermittlung & Einwände</strong></summary>
+                      <label className="top-gap">Informationsbereich (optional)</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Zusätzlicher Mehrwert / Aufhänger, falls vor der Bedarfsfrage nötig.</p>
                       <textarea value={activeDraft.decisionMakerContext ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))} />
 
                       <label className="top-gap">Bedarfsermittlung</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Leitfragen, aus denen Gloria offene Fragen formuliert.</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Eine offene Leitfrage – Gloria wartet auf die Antwort, bevor sie weitergeht.</p>
                       <textarea value={activeDraft.discovery ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
 
                       <label className="top-gap">Einwandbehandlung</label>
@@ -1454,10 +1465,25 @@ export default function HomePage() {
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 5 · Terminabschluss</strong> <span className="subtle">(Ziel des Gesprächs)</span></summary>
-                      <label className="top-gap">Abschlussformulierung</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Wörtlich gesprochen, sobald die Bedarfsphase abgeschlossen ist.</p>
+                      <summary><strong>Phase 6 · Übergang zum Konzept</strong> <span className="subtle">(Brücke vom Bedarf zum Termin)</span></summary>
+                      <label className="top-gap">Übergangstext</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Beschreibt, was Herr Duic im Termin konkret zeigt. Gloria wartet anschließend auf Zustimmung.</p>
+                      <textarea value={activeDraft.conceptTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))} />
+                    </details>
+
+                    <details className="mini-panel top-gap" open>
+                      <summary><strong>Phase 7 · Terminierung</strong> <span className="subtle">(Vormittag/Nachmittag → 2 Vorschläge → Bestätigung)</span></summary>
+                      <label className="top-gap">Einstieg Terminierung (Abschlussformulierung)</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Wörtlich gesprochen. Sollte mit der Frage vormittags/nachmittags enden.</p>
                       <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
+
+                      <label className="top-gap">Verfügbare Terminfenster (nächste Woche)</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Listen Sie hier frei verfügbare Slots – z. B. „Mo 10:00, Di 14:30, Do 11:00". Gloria schlägt AUSSCHLIESSLICH Slots aus dieser Liste vor (keine Doppelbuchungen). Leer lassen für freie Vorschläge.</p>
+                      <textarea value={activeDraft.availableAppointmentSlots ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], availableAppointmentSlots: event.target.value } }))} />
+
+                      <label className="top-gap">Terminbestätigung</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Wiederholung zur Bestätigung. Gloria setzt [Datum] und [Uhrzeit] automatisch ein.</p>
+                      <textarea value={activeDraft.appointmentConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
 
                       <label className="top-gap">Terminziel (intern)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Was als Erfolg gilt (z. B. „15-minütiger Online-Termin mit Herrn Duic").</p>
@@ -1466,7 +1492,7 @@ export default function HomePage() {
 
                     {detailTopic === "private Krankenversicherung" ? (
                       <details className="mini-panel top-gap" open>
-                        <summary><strong>Phase 6 · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminvereinbarung)</span></summary>
+                        <summary><strong>Phase 8 · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></summary>
                         <label className="top-gap">Einleitung Basisdaten</label>
                         <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
 
