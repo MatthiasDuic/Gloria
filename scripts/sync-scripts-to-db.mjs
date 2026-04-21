@@ -88,7 +88,7 @@ async function main() {
     );
 
     if (includeUsers) {
-      const userRows = await client.query(`SELECT id FROM users WHERE role = 'user'`);
+      const userRows = await client.query(`SELECT id FROM users`);
       for (const row of userRows.rows) {
         for (const script of scripts) {
           await client.query(
