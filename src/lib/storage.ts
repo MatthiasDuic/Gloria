@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
+import { phoneMatches, normalizePhoneForMatch } from "./phone-utils";
 import {
   appendConversationEventToPostgres,
   bootstrapUserScriptsFromDefaults,
@@ -349,43 +350,6 @@ function buildHeaderIndex(headerRow: string[]): Record<string, number> {
   }
 
   return indexMap;
-}
-
-function normalizePhoneForMatch(value: string | undefined): string {
-  if (!value) {
-    return "";
-  }
-
-  const trimmed = value.trim();
-  const plus = trimmed.startsWith("+");
-  const digits = trimmed.replace(/[^\d]/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  return plus ? `+${digits}` : digits;
-}
-
-function phoneMatches(a: string | undefined, b: string | undefined): boolean {
-  const left = normalizePhoneForMatch(a);
-  const right = normalizePhoneForMatch(b);
-
-  if (!left || !right) {
-    return false;
-  }
-
-  if (left === right) {
-    return true;
-  }
-
-  const leftDigits = left.replace(/^\+/, "");
-  const rightDigits = right.replace(/^\+/, "");
-
-  return (
-    leftDigits.endsWith(rightDigits) ||
-    rightDigits.endsWith(leftDigits)
-  );
 }
 
 async function readConversationEvents(): Promise<ConversationEvent[]> {

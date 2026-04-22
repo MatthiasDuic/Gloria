@@ -6,6 +6,12 @@ import { buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
 import { buildSignedAudioUrl } from "@/lib/audio-url";
 import { validateTwilioRequest } from "@/lib/twilio-signature";
 import { log } from "@/lib/log";
+import { buildInternalHeaders } from "@/lib/internal-auth";
+import {
+  normalizeContactName,
+  normalizeDirectDial,
+  extractDirectDialFromText,
+} from "@/lib/phone-utils";
 import { AI_CONFIG } from "@/lib/ai-config";
 import {
   decodeCallStateToken,
@@ -15,6 +21,7 @@ import {
   type TokenizedCallState,
 } from "@/lib/call-state-token";
 import type { ReportOutcome, ScriptConfig, Topic } from "@/lib/types";
+import { z } from "zod";
 
 export const runtime = "edge";
 
@@ -35,15 +42,39 @@ const SCRIPT_CACHE_MS = 60_000;
 
 type StatePayload = Omit<TokenizedCallState, "issuedAt" | "expiresAt">;
 
-interface GloriaDecision {
-  detectedRole: "gatekeeper" | "decision-maker" | "unknown";
-  reply: string;
-  action: "continue" | "end_success" | "end_rejection" | "end_callback";
-  appointmentNote: string;
-  appointmentAtISO: string;
-  directDial: string;
-  consentGiven: boolean | null;
-}
+const GloriaDecisionSchema = z.object({
+  detectedRole: z.enum(["gatekeeper", "decision-maker", "unknown"]).catch("unknown"),
+  reply: z
+    .string()
+    .trim()
+    .min(1)
+    .catch("Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da."),
+  action: z
+    .enum(["continue", "end_success", "end_rejection", "end_callback"])
+    .catch("continue"),
+  appointmentNote: z.string().catch(""),
+  appointmentAtISO: z
+    .string()
+    .transform((v) => v.trim())
+    .catch(""),
+  directDial: z
+    .string()
+    .transform((v) => v.trim())
+    .catch(""),
+  consentGiven: z.boolean().nullable().catch(null),
+});
+
+type GloriaDecision = z.infer<typeof GloriaDecisionSchema>;
+
+const GLORIA_DECISION_FALLBACK: GloriaDecision = {
+  detectedRole: "unknown",
+  reply: "Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da.",
+  action: "continue",
+  appointmentNote: "",
+  appointmentAtISO: "",
+  directDial: "",
+  consentGiven: null,
+};
 
 const PRIVATE_HEALTH_QUESTIONS = [
   "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
@@ -89,63 +120,6 @@ const scriptsCacheByUser: Record<string, Partial<Record<Topic, ScriptConfig>>> =
 const scriptsCacheAtByUser: Record<string, number> = {};
 const scriptsSyncInFlightByUser: Record<string, Promise<void> | null> = {};
 const scriptOriginByUser: Record<string, Partial<Record<Topic, "user-db" | "fallback">>> = {};
-
-function buildInternalHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const username = process.env.BASIC_AUTH_USERNAME?.trim();
-  const password = process.env.BASIC_AUTH_PASSWORD?.trim();
-  const token = process.env.CALL_STATE_SECRET?.trim() || process.env.CRON_SECRET?.trim();
-
-  if (username && password) {
-    headers.authorization = `Basic ${btoa(`${username}:${password}`)}`;
-  }
-
-  if (token) {
-    headers["x-gloria-internal-token"] = token;
-  }
-
-  return headers;
-}
-
-function normalizeContactName(raw: string | undefined): string {
-  if (!raw) {
-    return "";
-  }
-
-  return raw
-    .replace(/\s+/g, " ")
-    .replace(/^(herr|frau)\s+/i, "")
-    .trim();
-}
-
-function normalizeDirectDial(raw: string | undefined): string | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  const compact = raw.trim().replace(/\(0\)/g, "");
-  const keepsPlus = compact.startsWith("+");
-  const digits = compact.replace(/[^\d]/g, "");
-
-  if (digits.length < 6) {
-    return undefined;
-  }
-
-  if (keepsPlus) {
-    return `+${digits}`;
-  }
-
-  if (digits.startsWith("00")) {
-    return `+${digits.slice(2)}`;
-  }
-
-  return digits;
-}
-
-function extractDirectDialFromText(text: string): string | undefined {
-  const match = text.match(/(\+?\d[\d\s()\/-]{5,}\d)/);
-  return normalizeDirectDial(match?.[1]);
-}
 
 function parseConsentAnswer(text: string): "yes" | "no" | null {
   const s = text.toLowerCase();
@@ -686,37 +660,25 @@ async function askOpenAI(
       role: currentRole,
     });
 
-    let parsed: Partial<GloriaDecision> = {};
+    let parsed: unknown = {};
     try {
-      parsed = JSON.parse(payload.choices?.[0]?.message?.content || "{}") as Partial<GloriaDecision>;
-    } catch {
-      parsed = {};
+      parsed = JSON.parse(payload.choices?.[0]?.message?.content || "{}");
+    } catch (error) {
+      log.warn("openai.json_parse_failed", {
+        event: "openai.chat_completions",
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
 
-    const validActions = [
-      "continue",
-      "end_success",
-      "end_rejection",
-      "end_callback",
-    ] as const;
-    const validRoles = ["gatekeeper", "decision-maker", "unknown"] as const;
-
-    return {
-      detectedRole: validRoles.includes(parsed.detectedRole as (typeof validRoles)[number])
-        ? (parsed.detectedRole as GloriaDecision["detectedRole"])
-        : "unknown",
-      reply:
-        typeof parsed.reply === "string" && parsed.reply.trim().length > 0
-          ? parsed.reply.trim()
-          : "Entschuldigung, ich hatte kurz eine Verbindungsstörung. Ich bin wieder da.",
-      action: validActions.includes(parsed.action as (typeof validActions)[number])
-        ? (parsed.action as GloriaDecision["action"])
-        : "continue",
-      appointmentNote: typeof parsed.appointmentNote === "string" ? parsed.appointmentNote : "",
-      appointmentAtISO: typeof parsed.appointmentAtISO === "string" ? parsed.appointmentAtISO.trim() : "",
-      directDial: typeof parsed.directDial === "string" ? parsed.directDial.trim() : "",
-      consentGiven: typeof parsed.consentGiven === "boolean" ? parsed.consentGiven : null,
-    };
+    const validation = GloriaDecisionSchema.safeParse(parsed);
+    if (!validation.success) {
+      log.warn("openai.schema_rejected", {
+        event: "openai.chat_completions",
+        reason: validation.error.message.slice(0, 200),
+      });
+      return GLORIA_DECISION_FALLBACK;
+    }
+    return validation.data;
   } finally {
     clearTimeout(timer);
   }

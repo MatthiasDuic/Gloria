@@ -11,6 +11,8 @@ import { buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twi
 import { buildSignedAudioUrl } from "@/lib/audio-url";
 import { validateTwilioRequest } from "@/lib/twilio-signature";
 import { log } from "@/lib/log";
+import { buildInternalHeaders } from "@/lib/internal-auth";
+import { normalizePhoneForMatch, phoneMatches } from "@/lib/phone-utils";
 
 export const runtime = "edge";
 
@@ -50,23 +52,6 @@ function normalizeTopic(value: string): Topic {
 }
 
 // Audio-URL wird zentral und signiert in @/lib/audio-url gebaut.
-
-function buildInternalHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const username = process.env.BASIC_AUTH_USERNAME?.trim();
-  const password = process.env.BASIC_AUTH_PASSWORD?.trim();
-  const token = process.env.CALL_STATE_SECRET?.trim() || process.env.CRON_SECRET?.trim();
-
-  if (username && password) {
-    headers.authorization = `Basic ${btoa(`${username}:${password}`)}`;
-  }
-
-  if (token) {
-    headers["x-gloria-internal-token"] = token;
-  }
-
-  return headers;
-}
 
 async function getIncomingTwilioForm(request: Request): Promise<{
   from?: string;
@@ -116,40 +101,6 @@ async function getIncomingTwilioForm(request: Request): Promise<{
       callSid: callSidFromQuery,
     };
   }
-}
-
-function normalizePhoneForMatch(value: string | undefined): string {
-  if (!value) {
-    return "";
-  }
-
-  const trimmed = value.trim();
-  const plus = trimmed.startsWith("+");
-  const digits = trimmed.replace(/[^\d]/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  return plus ? `+${digits}` : digits;
-}
-
-function phoneMatches(leftRaw: string | undefined, rightRaw: string | undefined): boolean {
-  const left = normalizePhoneForMatch(leftRaw);
-  const right = normalizePhoneForMatch(rightRaw);
-
-  if (!left || !right) {
-    return false;
-  }
-
-  if (left === right) {
-    return true;
-  }
-
-  const leftDigits = left.replace(/^\+/, "");
-  const rightDigits = right.replace(/^\+/, "");
-
-  return leftDigits.endsWith(rightDigits) || rightDigits.endsWith(leftDigits);
 }
 
 async function lookupInboundLead(baseUrl: string, from: string): Promise<
