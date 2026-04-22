@@ -271,11 +271,51 @@ async function renderVoiceResponse(request: Request) {
   const processAction = `${baseUrl}/api/twilio/voice/process?step=intro&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
   const fallbackAction = `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
 
+  const contactNameTrim = context.contactName?.trim();
+  const validContactName =
+    contactNameTrim && !/^(ansprechpartner|ansprechpartnerin|kontakt|kontaktperson|name)$/i.test(contactNameTrim)
+      ? contactNameTrim
+      : "";
+  const receptionOpener = [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel.",
+    "Ich melde mich im Auftrag von Herrn Matthias Duic.",
+    validContactName
+      ? `Könnten Sie mich bitte kurz mit ${validContactName} verbinden?`
+      : "Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?",
+  ].join(" ");
+
+  // Initialer State-Token sorgt dafür, dass /api/twilio/voice/process
+  // weiß, dass Gloria den Opener bereits gesprochen hat (Turn 1, keine
+  // erneute Vorstellung beim Empfang).
+  const initialStateToken = await encodeCallStateToken({
+    userId: context.userId,
+    phoneNumberId: context.phoneNumberId,
+    leadId: context.leadId,
+    ownerRealName: context.ownerRealName,
+    ownerCompanyName: context.ownerCompanyName,
+    company: context.company,
+    contactName: validContactName,
+    topic: normalizeTopic(context.topic),
+    step: "intro",
+    consent: "no",
+    turn: 1,
+    transcript: `Gloria: ${receptionOpener}`,
+    contactRole: "gatekeeper",
+    roleState: "reception",
+  });
+  const stateQuery = `&state=${encodeURIComponent(initialStateToken)}`;
+  const processActionWithState = `${processAction}${stateQuery}`;
+  const fallbackActionWithState = `${fallbackAction}${stateQuery}`;
+
+  const elevenReady = isElevenLabsConfigured();
   const twiml = buildGatherTwiml({
+    ...(elevenReady
+      ? { playUrl: await buildSignedAudioUrl(baseUrl, receptionOpener) }
+      : { sayText: receptionOpener }),
     gather: {
       input: "speech dtmf",
       numDigits: 1,
-      action: processAction,
+      action: processActionWithState,
       method: "POST",
       language: "de-DE",
       speechModel: TWILIO_SPEECH_MODEL,
@@ -285,7 +325,7 @@ async function renderVoiceResponse(request: Request) {
       actionOnEmptyResult: true,
       hints: GATHER_HINTS,
     },
-    redirectUrl: fallbackAction,
+    redirectUrl: fallbackActionWithState,
     redirectMethod: "POST",
   });
 
