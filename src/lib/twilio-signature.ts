@@ -45,7 +45,8 @@ export interface TwilioSignatureValidationResult {
 }
 
 function shouldSkipValidation(): boolean {
-  return (process.env.TWILIO_SKIP_SIGNATURE_VALIDATION || "").toLowerCase() === "true";
+  const raw = (process.env.TWILIO_SKIP_SIGNATURE_VALIDATION || "").trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
 }
 
 /**
@@ -100,6 +101,22 @@ export async function validateTwilioRequest(
   const expected = await hmacSha1Base64(authToken, message);
 
   if (!timingSafeEqual(expected, header)) {
+    // Debug-Ausgabe hilft, die Ursache für Mismatches zu finden (anderer
+    // Host zwischen TwiML-Generator und Twilio-Webhook, nicht-kanonische
+    // Form-Parameter, Proxy-Rewrites, etc.). Enthält keine Secrets.
+    if ((process.env.TWILIO_SIGNATURE_DEBUG || "").toLowerCase() === "true") {
+      console.log(
+        JSON.stringify({
+          level: "warn",
+          message: "twilio.signature_debug",
+          publicUrl,
+          receivedHeader: header,
+          expectedSignature: expected,
+          method: request.method,
+          paramKeys: form ? Array.from(form.keys()).sort() : undefined,
+        }),
+      );
+    }
     return { ok: false, reason: "mismatch", publicUrl, form };
   }
 
