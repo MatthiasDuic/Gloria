@@ -15,18 +15,29 @@ interface ElevenLabsConfig {
   style: number;
   speed: number;
   useSpeakerBoost: boolean;
+  languageCode: string;
 }
 
+// Defaults sind darauf ausgelegt, dass Gloria am Telefon natuerlich klingt
+// und nicht nach "KI-Roboter":
+//   - modelId eleven_multilingual_v2: hoechste Natuerlichkeit fuer Deutsch
+//   - latencyMode 0: keine Qualitaetsreduktion zugunsten Latenz
+//     (Level 2+ macht die Stimme spuerbar blechern/roboterhaft)
+//   - stability 0.5: ruhig und konsistent, aber nicht monoton
+//   - style 0.3: natuerliche Betonung ohne ueberdrehten Schauspieler-Ton
+//   - speed 0.95: minimal entschleunigt, wirkt weniger gehetzt
+//   - languageCode "de": saubere deutsche Aussprache
 const ELEVENLABS_CONFIG: ElevenLabsConfig = {
   apiKey: process.env.ELEVENLABS_API_KEY?.trim() || "",
   voiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || "",
   modelId: process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_multilingual_v2",
-  latencyMode: process.env.ELEVENLABS_LATENCY_MODE?.trim() || "2",
-  stability: Number(process.env.ELEVENLABS_STABILITY || 0.34),
-  similarityBoost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.88),
-  style: Number(process.env.ELEVENLABS_STYLE || 0.42),
-  speed: Number(process.env.ELEVENLABS_SPEED || 0.9),
+  latencyMode: process.env.ELEVENLABS_LATENCY_MODE?.trim() || "0",
+  stability: Number(process.env.ELEVENLABS_STABILITY || 0.5),
+  similarityBoost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.85),
+  style: Number(process.env.ELEVENLABS_STYLE || 0.3),
+  speed: Number(process.env.ELEVENLABS_SPEED || 0.95),
   useSpeakerBoost: (process.env.ELEVENLABS_USE_SPEAKER_BOOST || "true") === "true",
+  languageCode: process.env.ELEVENLABS_LANGUAGE_CODE?.trim() || "de",
 };
 
 const WARMUP_INTERVAL_MS = 60_000;
@@ -50,8 +61,13 @@ function buildSpeechText(text: string): string {
     .replaceAll("zu Schulungs und Qualitaetszwecken", "für Schulung und Qualitätssicherung")
     .replaceAll("im Auftrag von Herrn Matthias Duic", "im Auftrag von Matthias Duic")
     .replaceAll("von Herrn Matthias Duic", "von Matthias Duic")
-    .replaceAll(" - ", ", ")
+    // Gedankenstriche zu echten kurzen Pausen machen (Komma statt Bindestrich-Sound).
+    .replace(/\s+-\s+/g, ", ")
     .replace(/[–—]/g, ", ")
+    // Eckige Regie-Klammern wie "[kurze Pause für Zustimmung]" oder
+    // "[Antwort abwarten]" wuerde ElevenLabs sonst woertlich vorlesen.
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\s+([,.!?;:])/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/([.!?])\1+/g, "$1")
     .trim();
@@ -61,6 +77,8 @@ function buildSpeechBody(text: string) {
   return {
     text: buildSpeechText(text),
     model_id: ELEVENLABS_CONFIG.modelId,
+    language_code: ELEVENLABS_CONFIG.languageCode,
+    apply_text_normalization: "auto" as const,
     voice_settings: {
       stability: ELEVENLABS_CONFIG.stability,
       similarity_boost: ELEVENLABS_CONFIG.similarityBoost,
