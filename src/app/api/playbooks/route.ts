@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDashboardData, saveScript } from "@/lib/storage";
-import type { ScriptConfig } from "@/lib/types";
+import type { PlaybookConfig } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 export async function GET(request: Request) {
@@ -20,7 +20,10 @@ export async function GET(request: Request) {
     role: "user",
   });
 
-  return NextResponse.json({ scripts: data.scripts, scriptsStorageMode: data.scriptsStorageMode });
+  return NextResponse.json({
+    playbooks: data.playbooks,
+    playbooksStorageMode: data.playbooksStorageMode,
+  });
 }
 
 export async function POST(request: Request) {
@@ -35,7 +38,9 @@ export async function POST(request: Request) {
   const resolvedUserId =
     sessionUser.role === "master" && targetUserId ? targetUserId : sessionUser.id;
 
-  const payload = (await request.json()) as Partial<ScriptConfig> & { topic?: ScriptConfig["topic"] };
+  const payload = (await request.json()) as Partial<PlaybookConfig> & {
+    topic?: PlaybookConfig["topic"];
+  };
 
   if (!payload.topic) {
     return NextResponse.json({ error: "Thema fehlt." }, { status: 400 });
@@ -43,14 +48,18 @@ export async function POST(request: Request) {
 
   try {
     const result = await saveScript(payload.topic, payload, { userId: resolvedUserId });
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({
+      ok: true,
+      playbook: result.script,
+      storageMode: result.storageMode,
+    });
   } catch (error) {
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Skript konnte nicht gespeichert werden.",
+            : "Playbook konnte nicht gespeichert werden.",
       },
       { status: 500 },
     );

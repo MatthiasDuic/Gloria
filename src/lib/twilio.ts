@@ -241,7 +241,6 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
     topic: payload.topic,
     prepared: preparedForStream ? "1" : undefined,
     preparedAt: preparation.preparedAt,
-    rtSessionId: preparation.realtimeSessionId,
     rtProfileKey: preparation.topicProfileKey,
     prepMode: preparedForStream ? "ready" : "degraded",
   });

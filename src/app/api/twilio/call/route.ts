@@ -84,10 +84,8 @@ export async function POST(request: Request) {
       message: "Anruf wurde gestartet.",
       preinit: {
         openAiReady: runtimeSnapshot.openAiReady,
-        openAiRealtimeReady: runtimeSnapshot.openAiRealtimeReady,
         elevenLabsWarm: runtimeSnapshot.elevenLabsWarm,
         scriptsReady: runtimeSnapshot.scriptsReady,
-        lastRealtimeError: runtimeSnapshot.lastRealtimeError,
       },
     });
   } catch (error) {

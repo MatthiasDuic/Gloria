@@ -128,7 +128,7 @@ export async function getLearningResponse(options?: {
   });
 
   const insights: LearningInsight[] = TOPICS.map((topic) => {
-    const script = data.scripts.find((entry) => entry.topic === topic);
+    const script = data.playbooks.find((entry) => entry.topic === topic);
     const reports = data.reports.filter((report) => report.topic === topic);
     const appointments = reports.filter((report) => report.outcome === "Termin").length;
     const rejections = reports.filter((report) => report.outcome === "Absage").length;
@@ -137,7 +137,7 @@ export async function getLearningResponse(options?: {
     const appointmentRate = percentage(appointments, totalConversations);
 
     const fallbackScript: ScriptConfig =
-      script || data.scripts[0] || {
+      script || data.playbooks[0] || {
         id: `fallback-${topic}`,
         topic,
         opener: "",
@@ -155,7 +155,7 @@ export async function getLearningResponse(options?: {
       appointmentRate,
       signals: collectSignals(reports),
       recommendations: buildRecommendations(topic, reports, appointmentRate),
-      optimizedScript: buildOptimizedScript(fallbackScript, reports),
+      optimizedPlaybook: buildOptimizedScript(fallbackScript, reports),
     };
   });
 
@@ -187,7 +187,7 @@ export async function applyLearningSuggestion(
     throw new Error(`Kein Learning für ${topic} gefunden.`);
   }
 
-  const saved = await saveScript(topic, insight.optimizedScript, {
+  const saved = await saveScript(topic, insight.optimizedPlaybook, {
     userId: options?.userId,
   });
 

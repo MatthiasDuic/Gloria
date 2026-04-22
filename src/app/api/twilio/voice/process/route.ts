@@ -42,12 +42,6 @@ interface GloriaDecision {
   consentGiven: boolean | null;
 }
 
-const DECISION_MAKER_SCRIPT_PHASES = [
-  "discovery",
-  "objectionHandling",
-  "close",
-] as const;
-
 const PRIVATE_HEALTH_QUESTIONS = [
   "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
   "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
@@ -259,48 +253,6 @@ function splitByAnswerWaitMarker(text: string): string[] {
     .split(/\[\s*antwort\s+abwarten\s*\]/i)
     .map((part) => part.replace(/\s+/g, " ").trim())
     .filter((part) => part.length > 0);
-}
-
-function getNextDecisionMakerScriptSegment(
-  script: ScriptConfig,
-  phaseIndex = 0,
-  segmentIndex = 0,
-): {
-  reply?: string;
-  nextPhaseIndex: number;
-  nextSegmentIndex: number;
-  done: boolean;
-} {
-  let p = Math.max(0, phaseIndex);
-  let s = Math.max(0, segmentIndex);
-
-  while (p < DECISION_MAKER_SCRIPT_PHASES.length) {
-    const phaseKey = DECISION_MAKER_SCRIPT_PHASES[p];
-    const segments = splitByAnswerWaitMarker(script[phaseKey] || "");
-
-    if (segments.length === 0) {
-      p += 1;
-      s = 0;
-      continue;
-    }
-
-    const safeSegment = Math.min(s, segments.length - 1);
-    const reply = segments[safeSegment];
-    const isLastInPhase = safeSegment >= segments.length - 1;
-
-    return {
-      reply,
-      nextPhaseIndex: isLastInPhase ? p + 1 : p,
-      nextSegmentIndex: isLastInPhase ? 0 : safeSegment + 1,
-      done: false,
-    };
-  }
-
-  return {
-    nextPhaseIndex: DECISION_MAKER_SCRIPT_PHASES.length,
-    nextSegmentIndex: 0,
-    done: true,
-  };
 }
 
 function trimTranscript(text: string, maxLen = 3500): string {
@@ -609,7 +561,7 @@ async function syncScripts(baseUrl: string, userId?: string): Promise<void> {
   scriptsSyncInFlightByUser[cacheKey] = (async () => {
     const internalHeaders = buildInternalHeaders();
 
-    const scriptsUrl = new URL(`${baseUrl}/api/twilio/scripts`);
+    const scriptsUrl = new URL(`${baseUrl}/api/twilio/playbooks`);
     if (userId) {
       scriptsUrl.searchParams.set("userId", userId);
     }
@@ -635,10 +587,10 @@ async function syncScripts(baseUrl: string, userId?: string): Promise<void> {
       return;
     }
 
-    const payload = (await response.json()) as { scripts?: ScriptConfig[] };
+    const payload = (await response.json()) as { playbooks?: ScriptConfig[] };
     const next: Partial<Record<Topic, ScriptConfig>> = {};
 
-    for (const script of payload.scripts || []) {
+    for (const script of payload.playbooks || []) {
       next[script.topic] = script;
     }
 
@@ -722,7 +674,7 @@ async function askOpenAI(
       body: JSON.stringify({
         model: AI_MODEL,
         response_format: { type: "json_object" },
-        temperature: 0.1,
+        temperature: 0.3,
         max_tokens: 220,
         messages: [
           { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
@@ -1137,197 +1089,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // Fast path: once the decision-maker is identified and consent is given,
-    // continue the configured script deterministically without waiting for an OpenAI round-trip.
-    if (state.contactRole === "decision-maker" && updatedConsent === "yes") {
-      const scripted = getNextDecisionMakerScriptSegment(
-        activeScript,
-        state.scriptPhaseIndex ?? 0,
-        state.scriptSegmentIndex ?? 0,
-      );
-
-      if (!scripted.done && scripted.reply) {
-        const updatedTranscript = trimTranscript(
-          [
-            state.transcript,
-            "Phase: decision_maker",
-            `Interessent: ${heardText}`,
-            `Gloria: ${scripted.reply}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        );
-
-        return await respondWithGather(baseUrl, scripted.reply, {
-          ...toStatePayload(state),
-          decisionMakerIntroDone: true,
-          scriptPhaseIndex: scripted.nextPhaseIndex,
-          scriptSegmentIndex: scripted.nextSegmentIndex,
-          consent: updatedConsent,
-          consentAsked,
-          contactRole: "decision-maker",
-          roleState: "decision_maker",
-          transcript: updatedTranscript,
-          turn: state.turn + 1,
-          step: "conversation",
-        });
-      }
-
-      const spokenAppointmentAt = parseSpokenAppointmentAt(heardText);
-      const pickedSuggestedAt = pickSuggestedAppointmentAt(
-        heardText,
-        state.appointmentOptionAAt,
-        state.appointmentOptionBAt,
-      );
-      const resolvedAppointmentAt = spokenAppointmentAt || pickedSuggestedAt;
-
-      if (resolvedAppointmentAt) {
-        const appointmentNote = `Termin bestätigt: ${formatAppointmentLabel(resolvedAppointmentAt)}`;
-
-        if (state.topic === "private Krankenversicherung") {
-          const pkvQuestions = getPkvHealthQuestions(activeScript);
-          const firstQuestion = pkvQuestions[0];
-          const firstPrompt = firstQuestion
-            ? `${getPkvHealthIntro(activeScript)} ${firstQuestion}`
-            : getPkvHealthIntro(activeScript);
-          const updatedTranscriptForHealth = trimTranscript(
-            [
-              state.transcript,
-              "Phase: decision_maker",
-              `Interessent: ${heardText}`,
-              `Gloria: ${firstPrompt}`,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          );
-
-          return await respondWithGather(baseUrl, firstPrompt, {
-            ...toStatePayload(state),
-            contactRole: "decision-maker",
-            roleState: "decision_maker",
-            consent: updatedConsent,
-            consentAsked,
-            appointmentAtDraft: resolvedAppointmentAt,
-            appointmentNoteDraft: appointmentNote,
-            pkvHealthIntroDone: true,
-            healthQuestionIndex: firstQuestion ? 1 : 0,
-            transcript: updatedTranscriptForHealth,
-            turn: state.turn + 1,
-            step: "conversation",
-          });
-        }
-
-        const updatedTranscriptForSuccess = trimTranscript(
-          [
-            state.transcript,
-            "Phase: decision_maker",
-            `Interessent: ${heardText}`,
-            `Gloria: Vielen Dank. Dann habe ich den Termin verbindlich eingetragen: ${formatAppointmentLabel(
-              resolvedAppointmentAt,
-            )}.`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        );
-
-        await finalizeCall({
-          state: {
-            ...state,
-            consent: updatedConsent,
-            consentAsked,
-            contactRole: "decision-maker",
-            roleState: "decision_maker",
-            transcript: updatedTranscriptForSuccess,
-            turn: state.turn + 1,
-            step: "finished",
-          },
-          outcome: "Termin",
-          note: appointmentNote,
-          appointmentAt: resolvedAppointmentAt,
-          baseUrl,
-        });
-
-        return respondWithHangup(
-          baseUrl,
-          `Perfekt, vielen Dank. Dann steht unser Termin am ${formatAppointmentLabel(resolvedAppointmentAt)}. Auf Wiederhören.`,
-        );
-      }
-
-      if (!state.appointmentProposalAsked) {
-        const explicitPreference = detectAppointmentPreference(heardText);
-        const rememberedPreference =
-          state.appointmentPreference && state.appointmentPreference !== "any"
-            ? state.appointmentPreference
-            : detectAppointmentPreferenceFromTranscript(state.transcript);
-        const preference = explicitPreference !== "any" ? explicitPreference : rememberedPreference;
-        const options = buildNextWeekAppointmentOptions(preference);
-        const prompt = `Sehr gerne. Ich kann Ihnen direkt zwei Termine in der nächsten Woche anbieten: erstens ${formatAppointmentLabel(
-          options.optionAAt,
-        )} oder zweitens ${formatAppointmentLabel(
-          options.optionBAt,
-        )}. Welcher passt Ihnen besser?`;
-
-        const updatedTranscript = trimTranscript(
-          [
-            state.transcript,
-            "Phase: decision_maker",
-            `Interessent: ${heardText}`,
-            `Gloria: ${prompt}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        );
-
-        return await respondWithGather(baseUrl, prompt, {
-          ...toStatePayload(state),
-          appointmentProposalAsked: true,
-          appointmentPreference: preference,
-          appointmentOptionAAt: options.optionAAt,
-          appointmentOptionBAt: options.optionBAt,
-          consent: updatedConsent,
-          consentAsked,
-          contactRole: "decision-maker",
-          roleState: "decision_maker",
-          transcript: updatedTranscript,
-          turn: state.turn + 1,
-          step: "appointment",
-        });
-      }
-
-      const rejectedBothSuggestions = wantsToRejectBothSuggestions(heardText);
-      const optionALabel = state.appointmentOptionAAt
-        ? formatAppointmentLabel(state.appointmentOptionAAt)
-        : "Option 1";
-      const optionBLabel = state.appointmentOptionBAt
-        ? formatAppointmentLabel(state.appointmentOptionBAt)
-        : "Option 2";
-      const followUpPrompt = rejectedBothSuggestions
-        ? "Kein Problem. Dann nennen Sie mir bitte einfach Ihren Wunschtermin, zum Beispiel nächsten Mittwoch oder übernächsten Donnerstag jeweils mit Uhrzeit."
-        : `Danke. Welcher der beiden Vorschläge passt besser: ${optionALabel} oder ${optionBLabel}?`;
-
-      const updatedTranscript = trimTranscript(
-        [
-          state.transcript,
-          "Phase: decision_maker",
-          `Interessent: ${heardText}`,
-          `Gloria: ${followUpPrompt}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
-
-      return await respondWithGather(baseUrl, followUpPrompt, {
-        ...toStatePayload(state),
-        consent: updatedConsent,
-        consentAsked,
-        contactRole: "decision-maker",
-        roleState: "decision_maker",
-        transcript: updatedTranscript,
-        turn: state.turn + 1,
-        step: "appointment",
-      });
-    }
-
     let decision: GloriaDecision;
     try {
       decision = await askOpenAI(
@@ -1378,9 +1139,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     const newRole = roleResolution.contactRole;
     const newRoleState = roleResolution.roleState;
     let nextDecisionMakerIntroDone = state.decisionMakerIntroDone ?? false;
-    let nextScriptPhaseIndex = state.scriptPhaseIndex ?? 0;
-    let nextScriptSegmentIndex = state.scriptSegmentIndex ?? 0;
-    let nextHealthQuestionIndex = state.healthQuestionIndex ?? 0;
     let forceReply = false;
 
     if (
@@ -1449,61 +1207,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     }
 
-    if (newRole === "decision-maker" && updatedConsent === "yes") {
-      const scripted = getNextDecisionMakerScriptSegment(
-        activeScript,
-        nextScriptPhaseIndex,
-        nextScriptSegmentIndex,
-      );
-
-      if (!scripted.done && scripted.reply) {
-        const updatedTranscript = trimTranscript(
-          [
-            state.transcript,
-            `Phase: ${newRoleState}`,
-            `Interessent: ${heardText}`,
-            `Gloria: ${scripted.reply}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        );
-
-        return await respondWithGather(baseUrl, scripted.reply, {
-          ...toStatePayload(state),
-          decisionMakerIntroDone: true,
-          scriptPhaseIndex: scripted.nextPhaseIndex,
-          scriptSegmentIndex: scripted.nextSegmentIndex,
-          consent: updatedConsent,
-          consentAsked,
-          contactRole: newRole,
-          roleState: newRoleState,
-          transcript: updatedTranscript,
-          turn: state.turn + 1,
-          step: "conversation",
-        });
-      }
-
-      if (scripted.done && appointmentAt) {
-        decision.action = "end_success";
-        if (!decision.appointmentNote?.trim()) {
-          decision.appointmentNote = `Termin vom Interessenten genannt: ${heardText}`;
-        }
-      }
-
-      if (scripted.done && decision.action === "continue" && !appointmentAt) {
-        decision.reply =
-          "Perfekt, dann gehen wir direkt in die Terminierung. Nennen Sie mir bitte einen konkreten Termin mit Datum und Uhrzeit, der Ihnen gut passt.";
-        forceReply = true;
-      }
-    }
-
     if (newRole !== "decision-maker" && decision.action === "end_success") {
       decision.action = "continue";
       decision.reply = buildGatekeeperTransferLine(state.contactName);
       appointmentAt = undefined;
     }
-
-    // Deterministic decision-maker flow is handled above.
 
     if (decision.action === "end_success" && !appointmentAt) {
       decision.action = "continue";
@@ -1618,8 +1326,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         state: {
           ...state,
           directDial,
-          scriptPhaseIndex: nextScriptPhaseIndex,
-          healthQuestionIndex: nextHealthQuestionIndex,
           consent: updatedConsent,
           consentAsked,
           contactRole: newRole,
@@ -1641,8 +1347,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     return await respondWithGather(baseUrl, decision.reply, {
       ...toStatePayload(state),
       directDial,
-      scriptPhaseIndex: nextScriptPhaseIndex,
-      healthQuestionIndex: nextHealthQuestionIndex,
       consent: updatedConsent,
       consentAsked,
       contactRole: newRole,

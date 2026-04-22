@@ -46,8 +46,8 @@ export async function GET(request: Request) {
     const data = await getDashboardData({ userId, role: userId ? "user" : "master" });
     return NextResponse.json(
       {
-        scripts: data.scripts,
-        scriptsStorageMode: data.scriptsStorageMode,
+        playbooks: data.playbooks,
+        playbooksStorageMode: data.playbooksStorageMode,
       },
       {
         headers: {
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Skripte konnten nicht geladen werden.",
+            : "Playbooks konnten nicht geladen werden.",
       },
       { status: 500 },
     );

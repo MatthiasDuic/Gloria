@@ -27,7 +27,7 @@ export interface Lead {
   attempts: number;
 }
 
-export interface ScriptConfig {
+export interface PlaybookConfig {
   id: string;
   topic: Topic;
   opener: string;
@@ -52,6 +52,9 @@ export interface ScriptConfig {
   appointmentConfirmation?: string;
   availableAppointmentSlots?: string;
 }
+
+/** @deprecated Use PlaybookConfig. Retained as alias during the Skript → Playbook migration. */
+export type ScriptConfig = PlaybookConfig;
 
 export interface CallReport {
   id: string;
@@ -106,7 +109,7 @@ export interface LearningInsight {
   appointmentRate: number;
   signals: string[];
   recommendations: string[];
-  optimizedScript: ScriptConfig;
+  optimizedPlaybook: PlaybookConfig;
 }
 
 export interface LearningResponse {
@@ -117,8 +120,8 @@ export interface LearningResponse {
 export interface DashboardData {
   leads: Lead[];
   reports: CallReport[];
-  scripts: ScriptConfig[];
+  playbooks: PlaybookConfig[];
   metrics: MetricSummary;
   reportStorageMode: "postgres" | "file";
-  scriptsStorageMode: "postgres" | "file";
+  playbooksStorageMode: "postgres" | "file";
 }

@@ -1,20 +1,17 @@
 import { isElevenLabsConfigured, maybeWarmupElevenLabsVoice } from "./elevenlabs";
-import { buildCallSystemPrompt } from "./gloria";
 import { TOPICS } from "./types";
 import type { ScriptConfig, Topic } from "./types";
 import type { ContactRole } from "@/lib/call-state-token";
-import { AI_CONFIG } from "@/lib/ai-config";
 
 export type RoleState = "reception" | "transfer" | "decision_maker";
 
 interface DashboardScriptsPayload {
-  scripts?: ScriptConfig[];
+  playbooks?: ScriptConfig[];
 }
 
 interface TelephonyRuntimeState {
   initializedAt?: string;
   openAiReady: boolean;
-  openAiRealtimeReady: boolean;
   elevenLabsWarm: boolean;
   audioPipelineReady: boolean;
   roleMachineReady: boolean;
@@ -22,35 +19,24 @@ interface TelephonyRuntimeState {
   scriptProfiles: Partial<Record<Topic, ScriptConfig>>;
   lastScriptSyncAt?: string;
   lastOpenAiHeartbeatAt?: string;
-  realtimeSessionByTopic: Partial<Record<Topic, { id: string; expiresAt: string }>>;
-  lastRealtimeError?: string;
   lastInitError?: string;
 }
 
 const runtimeState: TelephonyRuntimeState = {
   openAiReady: false,
-  openAiRealtimeReady: false,
   elevenLabsWarm: false,
   audioPipelineReady: false,
   roleMachineReady: false,
   scriptsReady: false,
   scriptProfiles: {},
-  realtimeSessionByTopic: {},
-  lastRealtimeError: undefined,
   lastInitError: undefined,
 };
 
 const scriptProfilesByUser: Record<string, Partial<Record<Topic, ScriptConfig>>> = {};
 const scriptsReadyByUser: Record<string, boolean> = {};
-const realtimeSessionByTopicByUser: Record<
-  string,
-  Partial<Record<Topic, { id: string; expiresAt: string }>>
-> = {};
 
 let runtimeInitPromise: Promise<void> | null = null;
 let heartbeatInFlight = false;
-let realtimeSessionInFlight: Promise<void> | null = null;
-const realtimeSessionInFlightByUser: Record<string, Promise<void> | null> = {};
 
 function getRuntimeCacheKey(userId?: string): string {
   return userId || "global";
@@ -135,14 +121,6 @@ function initRoleMachine() {
   runtimeState.roleMachineReady = true;
 }
 
-function getRealtimeModel() {
-  return AI_CONFIG.realtimeModel;
-}
-
-function getRealtimeVoice() {
-  return AI_CONFIG.realtimeVoice;
-}
-
 function buildTopicProfileKey(script: ScriptConfig): string {
   const base = [
     script.topic,
@@ -151,13 +129,22 @@ function buildTopicProfileKey(script: ScriptConfig): string {
     script.objectionHandling,
     script.close,
     script.aiKeyInfo || "",
+    script.consentPrompt || "",
+    script.receptionTopicReason || "",
     script.gatekeeperTask || "",
     script.gatekeeperBehavior || "",
     script.gatekeeperExample || "",
     script.decisionMakerTask || "",
     script.decisionMakerBehavior || "",
     script.decisionMakerExample || "",
+    script.decisionMakerContext || "",
     script.appointmentGoal || "",
+    script.problemBuildup || "",
+    script.conceptTransition || "",
+    script.appointmentConfirmation || "",
+    script.availableAppointmentSlots || "",
+    script.pkvHealthIntro || "",
+    script.pkvHealthQuestions || "",
   ].join("|");
 
   let hash = 2166136261;
@@ -174,124 +161,27 @@ function buildTopicProfileKey(script: ScriptConfig): string {
   return `p-${(hash >>> 0).toString(36)}`;
 }
 
+// Stub kept for compatibility with older call sites. Gloria never uses the
+// OpenAI Realtime audio API — the voice output is always produced by the
+// ElevenLabs TTS service through /api/twilio/audio.
 async function ensureOpenAiRealtimeSessions(
-  baseUrl: string,
-  topics: readonly Topic[] = TOPICS,
-  userId?: string,
+  _baseUrl: string,
+  _topics: readonly Topic[] = TOPICS,
+  _userId?: string,
 ) {
-  const cacheKey = getRuntimeCacheKey(userId);
-  const scopedScriptsReady = scriptsReadyByUser[cacheKey] || false;
-
-  if (!runtimeState.openAiReady || !scopedScriptsReady) {
-    runtimeState.openAiRealtimeReady = false;
-    runtimeState.lastRealtimeError = "OpenAI Client oder Skripte noch nicht bereit.";
-    return;
-  }
-
-  if (realtimeSessionInFlightByUser[cacheKey]) {
-    await realtimeSessionInFlightByUser[cacheKey];
-    return;
-  }
-
-  realtimeSessionInFlightByUser[cacheKey] = (async () => {
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) {
-      runtimeState.openAiRealtimeReady = false;
-      runtimeState.lastRealtimeError = "OPENAI_API_KEY fehlt.";
-      return;
-    }
-
-    const scopedScripts = scriptProfilesByUser[cacheKey] || {};
-    const nextSessions: Partial<Record<Topic, { id: string; expiresAt: string }>> = {
-      ...(realtimeSessionByTopicByUser[cacheKey] || {}),
-    };
-
-    for (const topic of topics) {
-      const script = scopedScripts[topic];
-      if (!script) {
-        continue;
-      }
-
-      const existing = nextSessions[topic];
-      const existingValid = existing && Date.parse(existing.expiresAt) - Date.now() > 60_000;
-
-      if (existingValid) {
-        continue;
-      }
-
-      const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: getRealtimeModel(),
-          voice: getRealtimeVoice(),
-          instructions: buildCallSystemPrompt(script),
-          metadata: {
-            source: "gloria-telephony-runtime",
-            topic,
-            baseUrl,
-            userId: userId || "global",
-          },
-        }),
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        const details = await response.text().catch(() => "");
-        runtimeState.openAiRealtimeReady = false;
-        runtimeState.lastRealtimeError = `Realtime Session fehlgeschlagen (${response.status}): ${details}`.slice(0, 500);
-        return;
-      }
-
-      const payload = (await response.json()) as {
-        id?: string;
-        expires_at?: number;
-      };
-
-      if (!payload.id) {
-        runtimeState.openAiRealtimeReady = false;
-        runtimeState.lastRealtimeError = "Realtime Session ohne Session-ID empfangen.";
-        return;
-      }
-
-      const expiresAtIso = payload.expires_at
-        ? new Date(payload.expires_at * 1000).toISOString()
-        : new Date(Date.now() + 9 * 60 * 1000).toISOString();
-
-      nextSessions[topic] = {
-        id: payload.id,
-        expiresAt: expiresAtIso,
-      };
-    }
-
-    realtimeSessionByTopicByUser[cacheKey] = nextSessions;
-    runtimeState.realtimeSessionByTopic = nextSessions;
-    runtimeState.openAiRealtimeReady = TOPICS.every((topic) => Boolean(nextSessions[topic]));
-    if (runtimeState.openAiRealtimeReady) {
-      runtimeState.lastRealtimeError = undefined;
-    }
-  })();
-
-  try {
-    await realtimeSessionInFlightByUser[cacheKey];
-  } finally {
-    realtimeSessionInFlightByUser[cacheKey] = null;
-  }
+  return;
 }
 
 async function syncScripts(baseUrl: string, userId?: string) {
   const cacheKey = getRuntimeCacheKey(userId);
   const internalHeaders = buildInternalHeaders();
 
-  const scriptsUrl = new URL(`${baseUrl}/api/twilio/scripts`);
+  const scriptsUrl = new URL(`${baseUrl}/api/twilio/playbooks`);
   if (userId) {
     scriptsUrl.searchParams.set("userId", userId);
   }
 
-  // Prefer dedicated telephony scripts endpoint to avoid admin-auth middleware paths.
+  // Prefer dedicated telephony playbooks endpoint to avoid admin-auth middleware paths.
   let response = await fetch(scriptsUrl.toString(), {
     method: "GET",
     headers: internalHeaders,
@@ -314,7 +204,7 @@ async function syncScripts(baseUrl: string, userId?: string) {
   const payload = (await response.json()) as DashboardScriptsPayload;
   const byTopic: Partial<Record<Topic, ScriptConfig>> = {};
 
-  for (const script of payload.scripts || []) {
+  for (const script of payload.playbooks || []) {
     byTopic[script.topic] = script;
   }
 
@@ -353,10 +243,6 @@ export async function ensureTelephonyRuntimeInitialized(params?: {
     initRoleMachine();
     await initAudioPipeline();
     await syncScripts(baseUrl);
-    // Realtime sessions can be slow on cold starts; warm them up in background.
-    void ensureOpenAiRealtimeSessions(baseUrl).catch(() => {
-      // prepareCall handles topic-specific realtime setup synchronously.
-    });
     runtimeState.initializedAt = new Date().toISOString();
     runtimeState.lastInitError = undefined;
   })();
@@ -424,7 +310,6 @@ export async function prepareCall(params: {
   ready: boolean;
   topicProfileLoaded: boolean;
   preparedAt: string;
-  realtimeSessionId?: string;
   topicProfileKey?: string;
 }> {
   const baseUrl = resolveBaseUrl(params.baseUrl, params.request);
@@ -437,31 +322,23 @@ export async function prepareCall(params: {
     await syncScripts(baseUrl, params.userId);
   }
 
-  await ensureOpenAiRealtimeSessions(baseUrl, [params.topic], params.userId);
-
   void heartbeatOpenAi();
 
   const activeScripts = scriptProfilesByUser[cacheKey] || {};
-  const activeRealtimeSessions = realtimeSessionByTopicByUser[cacheKey] || {};
   const topicProfileLoaded = Boolean(activeScripts[params.topic]);
-  const realtimeSession = activeRealtimeSessions[params.topic];
-  const topicRealtimeReady = Boolean(realtimeSession?.id);
   const topicScript = activeScripts[params.topic];
 
   runtimeState.scriptProfiles = activeScripts;
   runtimeState.scriptsReady = scriptsReadyByUser[cacheKey] || false;
-  runtimeState.realtimeSessionByTopic = activeRealtimeSessions;
 
   return {
     ready:
       runtimeState.openAiReady &&
-      topicRealtimeReady &&
       runtimeState.audioPipelineReady &&
       runtimeState.roleMachineReady &&
       topicProfileLoaded,
     topicProfileLoaded,
     preparedAt: new Date().toISOString(),
-    realtimeSessionId: realtimeSession?.id,
     topicProfileKey: topicScript ? buildTopicProfileKey(topicScript) : undefined,
   };
 }

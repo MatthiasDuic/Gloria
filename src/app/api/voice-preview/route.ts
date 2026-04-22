@@ -15,7 +15,7 @@ async function buildVoicePayload(request: Request, topic?: Topic) {
   }
 
   const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
-  const script = data.scripts.find((entry) => entry.topic === topic) || data.scripts[0];
+  const script = data.playbooks.find((entry) => entry.topic === topic) || data.playbooks[0];
   const preview = buildVoicePreview(script);
   const voiceResult = await generateElevenLabsPreview(preview);
 

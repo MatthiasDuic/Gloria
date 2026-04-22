@@ -36,7 +36,8 @@ const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
 const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
 const EVENTS_FILE = path.join(DATA_DIR, "conversation-events.json");
-const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
+const SCRIPTS_FILE = path.join(DATA_DIR, "playbooks.json");
+const LEGACY_SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 const CAMPAIGN_STATE_FILE = path.join(DATA_DIR, "campaign-state.json");
 
 interface CampaignListState {
@@ -51,6 +52,58 @@ interface CampaignListState {
 
 interface CampaignStateFile {
   lists: CampaignListState[];
+}
+
+const LEGACY_STANDARD_OPENERS: Record<Topic, string[]> = {
+  "betriebliche Krankenversicherung": [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Krankenversicherung, weil viele Unternehmen damit Mitarbeiterbindung und Arbeitgeberattraktivität deutlich verbessern. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich hoffe, ich störe Sie gerade nicht. Viele Unternehmen nutzen die betriebliche Krankenversicherung inzwischen gezielt, um Fachkräfte leichter zu gewinnen und zu binden. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+  ],
+  "betriebliche Altersvorsorge": [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich zum Thema betriebliche Altersvorsorge, weil viele Arbeitgeber ihre bAV aktuell verständlicher und attraktiver für Mitarbeitende aufstellen möchten. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Altersvorsorge, weil viele Arbeitgeber hier nach verständlichen und attraktiven Lösungen suchen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+  ],
+  "gewerbliche Versicherungen": [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Hintergrund ist, dass viele Unternehmen ihre gewerblichen Versicherungen gerade neu bewerten, um Preis, Leistung und Risikoschutz sauber abzugleichen. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an, weil viele Unternehmen ihre gewerblichen Versicherungen momentan neu vergleichen, um Preis und Leistung sauber abzugleichen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+  ],
+  "private Krankenversicherung": [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Es geht um das Thema Beitragsentwicklung und Stabilität in der Krankenversicherung, weil für viele Menschen vor allem die langfristige Planbarkeit im Alter immer wichtiger wird. Vorab, dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Wir haben ein Konzept entwickelt, mit dem sich Krankenversicherungsbeiträge im Alter planbarer und stabiler aufstellen lassen. Denn egal ob gesetzlich oder privat versichert: Die Beiträge steigen meist Jahr für Jahr. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+  ],
+  Energie: [
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema gewerbliche Strom- und Gasoptimierung, weil sich dort oft schnell Einsparpotenziale und bessere Konditionen aufzeigen lassen. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an und melde mich kurz zum Thema gewerbliche Strom- und Gasoptimierung, weil sich dort häufig schnell Einsparpotenziale zeigen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
+  ],
+};
+
+function normalizeLegacyScriptOpeners(scripts: ScriptConfig[]): ScriptConfig[] {
+  return scripts.map((script) => {
+    const currentDefault = defaultScripts.find((entry) => entry.topic === script.topic)?.opener;
+    const legacyValues = LEGACY_STANDARD_OPENERS[script.topic];
+
+    if (!currentDefault || !legacyValues.includes(script.opener)) {
+      return script;
+    }
+
+    return {
+      ...script,
+      opener: currentDefault,
+    };
+  });
+}
+
+async function readLegacyPlaybooksFile(): Promise<ScriptConfig[]> {
+  try {
+    const raw = await readFile(LEGACY_SCRIPTS_FILE, "utf8");
+    const parsed = JSON.parse(raw) as ScriptConfig[];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // No legacy file — fall back to defaults.
+  }
+  return defaultScripts;
 }
 
 async function ensureFile<T>(filePath: string, fallback: T) {
@@ -353,14 +406,14 @@ async function readScriptsWithMode(userId?: string): Promise<{
     const userScripts = await readUserScriptsFromPostgres(userId);
 
     if (userScripts && userScripts.length > 0) {
-      return { data: userScripts, mode: "postgres" };
+      return { data: normalizeLegacyScriptOpeners(userScripts), mode: "postgres" };
     }
 
     const bootstrapped = await bootstrapUserScriptsFromDefaults(userId, defaultScripts);
     if (bootstrapped) {
       const afterBootstrap = await readUserScriptsFromPostgres(userId);
       if (afterBootstrap && afterBootstrap.length > 0) {
-        return { data: afterBootstrap, mode: "postgres" };
+        return { data: normalizeLegacyScriptOpeners(afterBootstrap), mode: "postgres" };
       }
     }
   }
@@ -368,18 +421,18 @@ async function readScriptsWithMode(userId?: string): Promise<{
   const postgresData = await readScriptsFromPostgres();
 
   if (postgresData) {
-    return { data: postgresData, mode: "postgres" };
+    return { data: normalizeLegacyScriptOpeners(postgresData), mode: "postgres" };
   }
 
-  const fallbackScripts = await readJson(SCRIPTS_FILE, defaultScripts);
+  const fallbackScripts = await readJson(SCRIPTS_FILE, await readLegacyPlaybooksFile());
   const bootstrappedToPostgres = await writeScriptsToPostgres(fallbackScripts);
 
   if (bootstrappedToPostgres) {
-    return { data: fallbackScripts, mode: "postgres" };
+    return { data: normalizeLegacyScriptOpeners(fallbackScripts), mode: "postgres" };
   }
 
   return {
-    data: fallbackScripts,
+    data: normalizeLegacyScriptOpeners(fallbackScripts),
     mode: "file",
   };
 }
@@ -549,10 +602,10 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
   return {
     leads,
     reports,
-    scripts: scriptsState.data,
+    playbooks: scriptsState.data,
     metrics: buildMetrics(leads, reports, events),
     reportStorageMode: reportState.mode,
-    scriptsStorageMode: scriptsState.mode,
+    playbooksStorageMode: scriptsState.mode,
   };
 }
 

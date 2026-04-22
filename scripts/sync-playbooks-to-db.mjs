@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Einmaliges Sync-Tool: Liest data/scripts.json und schreibt sie in Postgres (gloria_scripts).
-// Optional mit --include-users werden auch die benutzerspezifischen scripts-Zeilen
-// auf den Default-Inhalt zurueckgesetzt (pro Topic).
+// Einmaliges Sync-Tool: Liest data/playbooks.json und schreibt sie nach Postgres
+// (Tabelle `gloria_playbooks`). Mit --include-users werden auch die
+// benutzerspezifischen Playbooks (Tabelle `user_playbooks`) auf den Default
+// zurueckgesetzt.
 //
-// Ausfuehren: node scripts/sync-scripts-to-db.mjs [--include-users]
+// Ausfuehren: node scripts/sync-playbooks-to-db.mjs [--include-users]
 
 import fs from "node:fs";
 import path from "node:path";
@@ -30,6 +31,14 @@ function loadEnvLocal() {
   }
 }
 
+function resolvePlaybooksFile() {
+  const preferred = path.resolve(process.cwd(), "data/playbooks.json");
+  if (fs.existsSync(preferred)) return preferred;
+  const legacy = path.resolve(process.cwd(), "data/scripts.json");
+  if (fs.existsSync(legacy)) return legacy;
+  return preferred;
+}
+
 async function main() {
   loadEnvLocal();
 
@@ -39,10 +48,10 @@ async function main() {
     process.exit(1);
   }
 
-  const scriptsPath = path.resolve(process.cwd(), "data/scripts.json");
-  const scripts = JSON.parse(fs.readFileSync(scriptsPath, "utf8"));
-  if (!Array.isArray(scripts) || scripts.length === 0) {
-    console.error("data/scripts.json enthaelt keine Skripte.");
+  const playbooksPath = resolvePlaybooksFile();
+  const playbooks = JSON.parse(fs.readFileSync(playbooksPath, "utf8"));
+  if (!Array.isArray(playbooks) || playbooks.length === 0) {
+    console.error(`${playbooksPath} enthaelt keine Playbooks.`);
     process.exit(1);
   }
 
@@ -60,40 +69,56 @@ async function main() {
   try {
     await client.query("BEGIN");
 
+    // Migration: rename legacy tables if still present.
     await client.query(`
-      CREATE TABLE IF NOT EXISTS gloria_scripts (
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scripts')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'user_playbooks') THEN
+          ALTER TABLE scripts RENAME TO user_playbooks;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'gloria_scripts')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'gloria_playbooks') THEN
+          ALTER TABLE gloria_scripts RENAME TO gloria_playbooks;
+        END IF;
+      END
+      $$;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS gloria_playbooks (
         topic TEXT PRIMARY KEY,
         data JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
 
-    for (const script of scripts) {
+    for (const playbook of playbooks) {
       await client.query(
         `
-        INSERT INTO gloria_scripts (topic, data, updated_at)
+        INSERT INTO gloria_playbooks (topic, data, updated_at)
         VALUES ($1, $2::jsonb, NOW())
         ON CONFLICT (topic) DO UPDATE SET
           data = EXCLUDED.data,
           updated_at = NOW();
         `,
-        [script.topic, JSON.stringify(script)],
+        [playbook.topic, JSON.stringify(playbook)],
       );
-      console.log(`gloria_scripts aktualisiert: ${script.topic}`);
+      console.log(`gloria_playbooks aktualisiert: ${playbook.topic}`);
     }
 
     await client.query(
-      `DELETE FROM gloria_scripts WHERE topic <> ALL($1::text[])`,
-      [scripts.map((script) => script.topic)],
+      `DELETE FROM gloria_playbooks WHERE topic <> ALL($1::text[])`,
+      [playbooks.map((playbook) => playbook.topic)],
     );
 
     if (includeUsers) {
       const userRows = await client.query(`SELECT id FROM users`);
       for (const row of userRows.rows) {
-        for (const script of scripts) {
+        for (const playbook of playbooks) {
           await client.query(
             `
-            INSERT INTO scripts (id, user_id, topic, content, created_from_default, updated_at)
+            INSERT INTO user_playbooks (id, user_id, topic, content, created_from_default, updated_at)
             VALUES ($1, $2, $3, $4, TRUE, NOW())
             ON CONFLICT (user_id, topic) DO UPDATE SET
               content = EXCLUDED.content,
@@ -101,14 +126,14 @@ async function main() {
               updated_at = NOW();
             `,
             [
-              `usr-script-${row.id}-${script.topic}`,
+              `usr-playbook-${row.id}-${playbook.topic}`,
               row.id,
-              script.topic,
-              JSON.stringify({ ...script, id: `usr-script-${row.id}-${script.topic}` }),
+              playbook.topic,
+              JSON.stringify({ ...playbook, id: `usr-playbook-${row.id}-${playbook.topic}` }),
             ],
           );
         }
-        console.log(`Benutzer-Skripte zurueckgesetzt: ${row.id}`);
+        console.log(`Benutzer-Playbooks zurueckgesetzt: ${row.id}`);
       }
     }
 
@@ -123,4 +148,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -2,20 +2,17 @@ import { NextResponse } from "next/server";
 import {
   getAppBaseUrl,
   getTwilioCallerIds,
-  getTwilioConversationMode,
-  getTwilioMediaStreamUrl,
 } from "@/lib/twilio";
 import { encodeCallStateToken } from "@/lib/call-state-token";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { prepareCall } from "@/lib/telephony-runtime";
 import { TOPICS, type Topic } from "@/lib/types";
-import { buildConnectStreamTwiml, buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
+import { buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
 
 export const runtime = "edge";
 
 const GATHER_HINTS =
   "zuständig, richtige Ansprechperson, worum geht es, ja bitte, einen Moment";
-const WAIT_PROMPT = "Bitte einen kleinen Moment, die Verbindung wird hergestellt.";
 const INITIAL_GATHER_TIMEOUT_SECONDS = Math.min(
   6,
   Math.max(1, Number.parseInt(process.env.TWILIO_INITIAL_GATHER_TIMEOUT_SECONDS || "1", 10)),
@@ -40,7 +37,6 @@ function getContext(request: Request) {
     company: url.searchParams.get("company") || "Ihr Unternehmen",
     contactName: url.searchParams.get("contactName") || "",
     topic: url.searchParams.get("topic") || "betriebliche Krankenversicherung",
-    rtSessionId: url.searchParams.get("rtSessionId") || undefined,
     rtProfileKey: url.searchParams.get("rtProfileKey") || undefined,
   };
 }
@@ -220,8 +216,6 @@ async function renderVoiceResponse(request: Request) {
       !fromIsTwilioNumber,
   );
   const isPrepared = incomingUrl.searchParams.get("prepared") === "1";
-  const mode = getTwilioConversationMode();
-  const streamUrl = getTwilioMediaStreamUrl();
 
   if (isInboundCallback && incomingForm.from) {
     const matchedLead = await lookupInboundLead(baseUrl, incomingForm.from);
@@ -312,25 +306,8 @@ async function renderVoiceResponse(request: Request) {
     );
   }
 
-  // Fast start path: answer immediately and hand audio off to realtime WebSocket.
-  if (streamUrl && mode !== "guided" && isPrepared) {
-    const twiml = buildConnectStreamTwiml({
-      streamUrl,
-      parameters: {
-        leadId: context.leadId,
-        company: context.company,
-        contactName: context.contactName,
-        topic: context.topic,
-        rtSessionId: context.rtSessionId,
-        rtProfileKey: context.rtProfileKey,
-      },
-      waitPrompt: WAIT_PROMPT,
-    });
-
-    return new NextResponse(twiml, {
-      headers: { "Content-Type": "text/xml; charset=utf-8" },
-    });
-  }
+  // Gloria spricht ausschließlich über ElevenLabs TTS über das Gather/Play-
+  // Playbook unten. Der OpenAI Realtime-Streaming-Pfad ist bewusst entfernt.
 
   if (!isPrepared) {
     void prepareCall({

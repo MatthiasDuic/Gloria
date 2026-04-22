@@ -142,8 +142,25 @@ async function ensureSchema() {
     ON phone_numbers (user_id);
   `);
 
+  // --- Migration (Skript → Playbook) ---
+  // Rename legacy tables in-place so existing data moves to the new names.
   await db.query(`
-    CREATE TABLE IF NOT EXISTS scripts (
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scripts')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'user_playbooks') THEN
+        ALTER TABLE scripts RENAME TO user_playbooks;
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'gloria_scripts')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'gloria_playbooks') THEN
+        ALTER TABLE gloria_scripts RENAME TO gloria_playbooks;
+      END IF;
+    END
+    $$;
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_playbooks (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       topic TEXT NOT NULL,
@@ -258,7 +275,7 @@ async function ensureSchema() {
   `);
 
   await db.query(`
-    CREATE TABLE IF NOT EXISTS gloria_scripts (
+    CREATE TABLE IF NOT EXISTS gloria_playbooks (
       topic TEXT PRIMARY KEY,
       data JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -660,7 +677,7 @@ export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> 
     const db = getPool();
     const result = await db.query(`
       SELECT topic, data
-      FROM gloria_scripts
+      FROM gloria_playbooks
       ORDER BY topic ASC;
     `);
 
@@ -673,7 +690,7 @@ export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> 
 
       return {
         ...data,
-        id: String(data.id || `skript-${String(row.topic)}`),
+        id: String(data.id || `playbook-${String(row.topic)}`),
         topic: normalizeTopic(String(row.topic)),
         opener: String(data.opener || ""),
         discovery: String(data.discovery || ""),
@@ -703,7 +720,7 @@ export async function writeScriptsToPostgres(scripts: ScriptConfig[]): Promise<b
       for (const script of scripts) {
         await client.query(
           `
-          INSERT INTO gloria_scripts (topic, data, updated_at)
+          INSERT INTO gloria_playbooks (topic, data, updated_at)
           VALUES ($1, $2::jsonb, NOW())
           ON CONFLICT (topic)
           DO UPDATE SET
@@ -715,7 +732,7 @@ export async function writeScriptsToPostgres(scripts: ScriptConfig[]): Promise<b
       }
 
       await client.query(
-        `DELETE FROM gloria_scripts WHERE topic <> ALL($1::text[])`,
+        `DELETE FROM gloria_playbooks WHERE topic <> ALL($1::text[])`,
         [scripts.map((script) => script.topic)],
       );
 
@@ -1094,7 +1111,7 @@ export async function writeScriptToPostgres(script: ScriptConfig): Promise<boole
     const db = getPool();
     await db.query(
       `
-      INSERT INTO gloria_scripts (topic, data, updated_at)
+      INSERT INTO gloria_playbooks (topic, data, updated_at)
       VALUES ($1, $2::jsonb, NOW())
       ON CONFLICT (topic)
       DO UPDATE SET
@@ -1343,7 +1360,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
     const result = await db.query(
       `
       SELECT topic, content
-      FROM scripts
+      FROM user_playbooks
       WHERE user_id = $1
       ORDER BY topic ASC
       `,
@@ -1359,7 +1376,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
       const topic = normalizeTopic(String(row.topic));
 
       return {
-        id: String(data.id || `skript-${topic}`),
+        id: String(data.id || `playbook-${topic}`),
         topic,
         opener: String(data.opener || ""),
         discovery: String(data.discovery || ""),
@@ -1375,7 +1392,15 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
         decisionMakerTask: typeof data.decisionMakerTask === "string" ? data.decisionMakerTask : undefined,
         decisionMakerBehavior: typeof data.decisionMakerBehavior === "string" ? data.decisionMakerBehavior : undefined,
         decisionMakerExample: typeof data.decisionMakerExample === "string" ? data.decisionMakerExample : undefined,
+        decisionMakerContext: typeof data.decisionMakerContext === "string" ? data.decisionMakerContext : undefined,
         appointmentGoal: typeof data.appointmentGoal === "string" ? data.appointmentGoal : undefined,
+        receptionTopicReason: typeof data.receptionTopicReason === "string" ? data.receptionTopicReason : undefined,
+        problemBuildup: typeof data.problemBuildup === "string" ? data.problemBuildup : undefined,
+        conceptTransition: typeof data.conceptTransition === "string" ? data.conceptTransition : undefined,
+        appointmentConfirmation:
+          typeof data.appointmentConfirmation === "string" ? data.appointmentConfirmation : undefined,
+        availableAppointmentSlots:
+          typeof data.availableAppointmentSlots === "string" ? data.availableAppointmentSlots : undefined,
       };
     });
   } catch (error) {
@@ -1398,7 +1423,7 @@ export async function writeUserScriptToPostgres(
     const db = getPool();
     await db.query(
       `
-      INSERT INTO scripts (id, user_id, topic, content, created_from_default, updated_at)
+      INSERT INTO user_playbooks (id, user_id, topic, content, created_from_default, updated_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
       ON CONFLICT (user_id, topic)
       DO UPDATE SET
@@ -1407,7 +1432,7 @@ export async function writeUserScriptToPostgres(
         updated_at = NOW()
       `,
       [
-        script.id || makeId("usr-script"),
+        script.id || makeId("usr-playbook"),
         userId,
         script.topic,
         JSON.stringify(script),
@@ -1442,7 +1467,7 @@ export async function bootstrapUserScriptsFromDefaults(
         userId,
         {
           ...script,
-          id: makeId("usr-script"),
+          id: makeId("usr-playbook"),
         },
         true,
       );

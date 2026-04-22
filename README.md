@@ -112,10 +112,10 @@ Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotz
 ```env
 OPENAI_API_KEY=dein_openai_key
 OPENAI_MODEL=gpt-4.1-mini
-OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
+OPENAI_REALTIME_MODEL=gpt-realtime-1.5
 ```
 
-Die Chat-Logik nutzt `OPENAI_MODEL`, die Realtime-Telefonie nutzt `OPENAI_REALTIME_MODEL`.
+Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. `OPENAI_REALTIME_MODEL` wird für vorbereitete Realtime-Sessions und die Telephony-Runtime-Konfiguration genutzt.
 
 ## ElevenLabs-Stimme aktivieren
 

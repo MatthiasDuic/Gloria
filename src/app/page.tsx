@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DashboardData, LearningResponse, ScriptConfig, Topic } from "@/lib/types";
+import type { DashboardData, LearningResponse, PlaybookConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -11,9 +11,9 @@ Sprockhoevel Energieberatung,Frau Peters,+49 2324 555200,peters@se-beratung.de,E
 const EMPTY_DATA: DashboardData = {
   leads: [],
   reports: [],
-  scripts: [],
+  playbooks: [],
   reportStorageMode: "file",
-  scriptsStorageMode: "file",
+  playbooksStorageMode: "file",
   metrics: {
     dialAttempts: 0,
     conversations: 0,
@@ -190,7 +190,7 @@ export default function HomePage() {
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [draftScripts, setDraftScripts] = useState<Record<string, ScriptConfig>>({});
+  const [draftScripts, setDraftScripts] = useState<Record<string, PlaybookConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -267,7 +267,7 @@ export default function HomePage() {
 
     setData(payload);
     setLearning(learningPayload);
-    const nextDrafts = payload.scripts.reduce<Record<string, ScriptConfig>>((acc, script) => {
+    const nextDrafts = payload.playbooks.reduce<Record<string, PlaybookConfig>>((acc, script) => {
       acc[script.topic] = {
         id: script.id,
         topic: script.topic,
@@ -307,6 +307,7 @@ export default function HomePage() {
           script.gatekeeperBehavior,
           "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
         ),
+        receptionTopicReason: pickText(script.receptionTopicReason, ""),
         gatekeeperExample: pickText(script.gatekeeperExample, ""),
         decisionMakerTask: pickText(
           script.decisionMakerTask,
@@ -317,6 +318,11 @@ export default function HomePage() {
           "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
         ),
         decisionMakerExample: pickText(script.decisionMakerExample, ""),
+        decisionMakerContext: pickText(script.decisionMakerContext, ""),
+        problemBuildup: pickText(script.problemBuildup, ""),
+        conceptTransition: pickText(script.conceptTransition, ""),
+        appointmentConfirmation: pickText(script.appointmentConfirmation, ""),
+        availableAppointmentSlots: pickText(script.availableAppointmentSlots, ""),
         appointmentGoal: pickText(
           script.appointmentGoal,
           "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
@@ -329,7 +335,7 @@ export default function HomePage() {
     for (const topic of TOPICS) {
       if (!nextDrafts[topic]) {
         nextDrafts[topic] = {
-          id: `skript-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+          id: `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
           topic,
           opener: "",
           discovery: "",
@@ -352,10 +358,16 @@ export default function HomePage() {
           ].join("\n"),
           gatekeeperTask: "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
           gatekeeperBehavior: "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
+          receptionTopicReason: "",
           gatekeeperExample: "",
           decisionMakerTask: "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
           decisionMakerBehavior: "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
           decisionMakerExample: "",
+          decisionMakerContext: "",
+          problemBuildup: "",
+          conceptTransition: "",
+          appointmentConfirmation: "",
+          availableAppointmentSlots: "",
           appointmentGoal: "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
         };
       }
@@ -633,7 +645,7 @@ export default function HomePage() {
         throw new Error(payload.error || "Optimierung konnte nicht angewendet werden.");
       }
 
-      setNotice(`Gloria hat das Skript für ${topic} anhand der Gesprächsreports optimiert.`);
+      setNotice(`Gloria hat das Playbook für ${topic} anhand der Gesprächsreports optimiert.`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
@@ -653,7 +665,7 @@ export default function HomePage() {
     setSaveStatus(null);
 
     try {
-      const response = await fetch("/api/scripts", {
+      const response = await fetch("/api/playbooks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draft),
@@ -664,11 +676,11 @@ export default function HomePage() {
       };
 
       if (!response.ok) {
-        throw new Error(payload.error || "Skript konnte nicht gespeichert werden.");
+        throw new Error(payload.error || "Playbook konnte nicht gespeichert werden.");
       }
 
       setNotice(
-        `Skript für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
+        `Playbook für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
       );
       setSaveStatus({
         type: "success",
@@ -676,7 +688,7 @@ export default function HomePage() {
       });
       await loadDashboard();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Skript speichern fehlgeschlagen.";
+      const errorMessage = error instanceof Error ? error.message : "Playbook speichern fehlgeschlagen.";
       setNotice(errorMessage);
       setSaveStatus({ type: "error", message: errorMessage });
     } finally {
@@ -951,7 +963,7 @@ export default function HomePage() {
               Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
             </span>
             <span className="pill">
-              Skripte: {data.scriptsStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
+              Playbooks: {data.playbooksStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
             </span>
             <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
           </div>
@@ -983,7 +995,7 @@ export default function HomePage() {
           <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
           <ul>
             <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
-            <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Skripte für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+            <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Playbooks für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
             <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
             <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
             <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
@@ -1013,7 +1025,7 @@ export default function HomePage() {
             <li>Start des Gesprächs über die Twilio-Call-APIs.</li>
             <li>Gesprächssteuerung erfolgt turn-basiert über /api/twilio/voice und /api/twilio/voice/process.</li>
             <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
-            <li>Skriptfortschritt und Zustände werden signiert im Call-State geführt.</li>
+            <li>Playbook-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
             <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
             <li>Kalender- und Report-Ansichten beziehen Termine direkt aus den gespeicherten Gesprächsreports.</li>
           </ul>
@@ -1022,7 +1034,7 @@ export default function HomePage() {
           <p className="subtle top-gap"><strong>5.1 Speicherort</strong></p>
           <ul>
             <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
-            <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, scripts.json, report-database.json, conversation-events.json).</li>
+            <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, playbooks.json, report-database.json, conversation-events.json).</li>
             <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
           </ul>
 
@@ -1380,9 +1392,9 @@ export default function HomePage() {
                 </div>
               </CollapsiblePanel>
 
-              <CollapsiblePanel title="Skript-Einstellungen" defaultOpen>
+              <CollapsiblePanel title="Themen-Playbook" defaultOpen>
                 <div className="row spread">
-                  <h2>Skript-Einstellungen</h2>
+                  <h2>Themen-Playbook</h2>
                   <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
                     {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
                   </select>
@@ -1391,90 +1403,91 @@ export default function HomePage() {
                 {activeDraft ? (
                   <>
                     <p className="subtle">
-                      Skript für <strong>{detailTopic}</strong>. Änderungen gelten nur für Ihren Account und werden direkt in der
-                      Datenbank gespeichert. Bearbeiten Sie die Phasen in der Reihenfolge, in der Gloria telefoniert – von oben nach unten.
+                      Playbook für <strong>{detailTopic}</strong>. Änderungen gelten nur für Ihren Account und werden direkt in der
+                      Datenbank gespeichert. Die meisten Felder sind Leitplanken für Ziel, Verhalten, Kernthema und Einwände. Nur Pflichtbausteine wie Einstieg,
+                      Aufzeichnungsfrage und Terminbestätigung sollten fest formuliert sein.
                     </p>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 1 · Hintergrundwissen</strong> <span className="subtle">(Was Gloria wissen muss, aber nicht wörtlich sagt)</span></summary>
-                      <label className="top-gap">Basisinformationen / Kontext</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Fachliches Hintergrundwissen, auf das Gloria bei Rückfragen oder Einwänden zurückgreift.</p>
+                      <summary><strong>Playbook · Thema & Fachlichkeit</strong> <span className="subtle">(Was Gloria wissen und verstehen muss)</span></summary>
+                      <label className="top-gap">Fakten / Hintergrundwissen</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Fachliche Informationen, die Gloria situativ nutzen darf, ohne sie als Werbetext herunterzulesen.</p>
                       <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 2 · Empfang</strong> <span className="subtle">(Zentrale / Sekretariat – Ziel: durchgestellt werden)</span></summary>
-                      <label className="top-gap">Aufgabe am Empfang</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Was Gloria erreichen soll (z. B. höflich nach dem Entscheider fragen).</p>
+                      <summary><strong>Playbook · Empfang</strong> <span className="subtle">(Zentrale / Sekretariat)</span></summary>
+                      <label className="top-gap">Ziel am Empfang</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Was Gloria dort erreichen soll, bevor sie mit dem eigentlichen Ansprechpartner spricht.</p>
                       <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
 
                       <label className="top-gap">Verhalten am Empfang</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Tonalität und Regeln (z. B. „freundlich, kurz, keine Produktdetails preisgeben").</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Tonalität und Grenzen am Empfang, zum Beispiel kurz, höflich und ohne langen Pitch.</p>
                       <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
 
                       <label className="top-gap">Kurzer Grund (wenn der Empfang nachfragt)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Ein Satz, den Gloria nutzt, wenn gefragt wird, worum es geht. Beispiel PKV: „Ich habe eine fachliche Frage zum Thema Beitragsentwicklung in der Krankenversicherung."</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Ein kurzer Anlasssatz. Das ist ein Leitanker, kein vollständiger Mini-Pitch.</p>
                       <textarea value={activeDraft.receptionTopicReason ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))} />
 
                       <label className="top-gap">Formulierungsbeispiel (optional)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Beispielsatz als Muster – nicht zwingend wörtlich.</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Nur als Ton-Muster. Gloria soll daraus frei und natürlich sprechen.</p>
                       <textarea value={activeDraft.gatekeeperExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperExample: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 3 · Entscheider – Begrüßung & Aufzeichnung</strong> <span className="subtle">(Wird wörtlich gesprochen)</span></summary>
-                      <label className="top-gap">Gesprächseinstieg (Opener)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Erster Satz zum Entscheider inkl. Vorstellung und – falls gewünscht – Aufzeichnungsfrage.</p>
+                      <summary><strong>Verbindliche Anker · Einstieg & Einwilligung</strong> <span className="subtle">(Pflichtbausteine)</span></summary>
+                      <label className="top-gap">Fester Einstieg beim Entscheider</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Dieser Einstieg darf verbindlich formuliert sein. Ab danach soll Gloria wieder frei und situativ sprechen.</p>
                       <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
 
                       <label className="top-gap">Aufzeichnungsfrage (optional, separat)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Leer lassen, wenn die Einwilligung schon im Opener steht.</p>
+                      <p className="subtle" style={{ marginTop: 0 }}>Leer lassen, wenn die Einwilligung schon im Einstieg steckt.</p>
                       <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 4 · Problemaufbau</strong> <span className="subtle">(Warum das Thema jetzt relevant ist)</span></summary>
-                      <label className="top-gap">Problemaufbau-Text</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>2–3 Sätze mit rhetorischen Fragen. Gloria lässt nach jeder Frage Pausen für Zustimmung.</p>
+                      <summary><strong>Playbook · Kernthema & Relevanz</strong> <span className="subtle">(Warum das Thema gerade zählt)</span></summary>
+                      <label className="top-gap">Problemrahmen / Relevanz</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria das Thema aufhängt. Das ist eine Gesprächsrichtung, kein Pflichttext.</p>
                       <textarea value={activeDraft.problemBuildup ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 5 · Bedarfsermittlung & Einwände</strong></summary>
-                      <label className="top-gap">Informationsbereich (optional)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Zusätzlicher Mehrwert / Aufhänger, falls vor der Bedarfsfrage nötig.</p>
+                      <summary><strong>Playbook · Ziel, Verhalten & Gesprächsführung</strong></summary>
+                      <label className="top-gap">Kernthema / Perspektive</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Welche Sicht Gloria beim Entscheider klar machen soll.</p>
                       <textarea value={activeDraft.decisionMakerContext ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))} />
 
-                      <label className="top-gap">Bedarfsermittlung</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Eine offene Leitfrage – Gloria wartet auf die Antwort, bevor sie weitergeht.</p>
+                      <label className="top-gap">Frageanker</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Leitfrage als Orientierung. Gloria soll sie natürlich und passend zum Gespräch formulieren.</p>
                       <textarea value={activeDraft.discovery ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
 
-                      <label className="top-gap">Einwandbehandlung</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Antworten auf typische Einwände („keine Zeit", „kein Interesse").</p>
+                      <label className="top-gap">Einwandstrategie</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria auf typische Einwände reagieren soll, ohne in Standardsätze zu kippen.</p>
                       <textarea value={activeDraft.objectionHandling ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
 
                       <details className="mini-panel top-gap">
-                        <summary className="subtle">Feinjustierung (optional)</summary>
-                        <label className="top-gap">Aufgabe beim Entscheider</label>
+                        <summary className="subtle">Ziel und Tonalität (optional)</summary>
+                        <label className="top-gap">Ziel beim Entscheider</label>
                         <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
-                        <label className="top-gap">Verhalten beim Entscheider</label>
+                        <label className="top-gap">Verhalten / Tonalität</label>
                         <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
-                        <label className="top-gap">Formulierungsbeispiel</label>
+                        <label className="top-gap">Beispielton</label>
                         <textarea value={activeDraft.decisionMakerExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerExample: event.target.value } }))} />
                       </details>
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 6 · Übergang zum Konzept</strong> <span className="subtle">(Brücke vom Bedarf zum Termin)</span></summary>
-                      <label className="top-gap">Übergangstext</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Beschreibt, was Herr Duic im Termin konkret zeigt. Gloria wartet anschließend auf Zustimmung.</p>
+                      <summary><strong>Playbook · Brücke zum Termin</strong> <span className="subtle">(Vom Interesse zur Kalenderfrage)</span></summary>
+                      <label className="top-gap">Terminbrücke</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria vom Thema sauber zur Terminierung überleitet, ohne steif zu klingen.</p>
                       <textarea value={activeDraft.conceptTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
-                      <summary><strong>Phase 7 · Terminierung</strong> <span className="subtle">(Vormittag/Nachmittag → 2 Vorschläge → Bestätigung)</span></summary>
-                      <label className="top-gap">Einstieg Terminierung (Abschlussformulierung)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Wörtlich gesprochen. Sollte mit der Frage vormittags/nachmittags enden.</p>
+                      <summary><strong>Verbindliche Anker · Terminierung & Abschluss</strong> <span className="subtle">(Kalender, Bestätigung, Erfolg)</span></summary>
+                      <label className="top-gap">Termin-Einstieg / Anker</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Ein stabiler Start in die Terminierung. Gloria darf danach frei und passend zum Gespräch weiterführen.</p>
                       <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
 
                       <label className="top-gap">Verfügbare Terminfenster (nächste Woche)</label>
@@ -1485,14 +1498,14 @@ export default function HomePage() {
                       <p className="subtle" style={{ marginTop: 0 }}>Wiederholung zur Bestätigung. Gloria setzt [Datum] und [Uhrzeit] automatisch ein.</p>
                       <textarea value={activeDraft.appointmentConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
 
-                      <label className="top-gap">Terminziel (intern)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Was als Erfolg gilt (z. B. „15-minütiger Online-Termin mit Herrn Duic").</p>
+                      <label className="top-gap">Erfolgskriterium</label>
+                      <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria intern erkennt, dass das Gespräch sein Ziel erreicht hat.</p>
                       <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
                     </details>
 
                     {detailTopic === "private Krankenversicherung" ? (
                       <details className="mini-panel top-gap" open>
-                        <summary><strong>Phase 8 · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></summary>
+                        <summary><strong>Pflichtblock · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></summary>
                         <label className="top-gap">Einleitung Basisdaten</label>
                         <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
 
@@ -1517,8 +1530,8 @@ export default function HomePage() {
                     </details>
 
                     <div className="row top-gap">
-                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Skript speichern</button>
-                      <span className="subtle">Das Kernskript wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
+                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Playbook speichern</button>
+                      <span className="subtle">Das Playbook wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
                     </div>
                     {saveStatus ? (
                       <p
@@ -1535,7 +1548,7 @@ export default function HomePage() {
                     ) : null}
                   </>
                 ) : (
-                  <p className="subtle">Für dieses Thema ist noch kein Skript geladen.</p>
+                  <p className="subtle">Für dieses Thema ist noch kein Playbook geladen.</p>
                 )}
               </CollapsiblePanel>
 
