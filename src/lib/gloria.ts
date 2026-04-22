@@ -168,6 +168,7 @@ ${decisionExample ? `Beispielton zur Orientierung: ${decisionExample}` : ""}
 ━━━ EMPFANG / GATEKEEPER ━━━
 Ziel am Empfang: ${receptionTask}
 Verhalten am Empfang: ${receptionBehavior}
+Erste Empfangs-Äußerung (Reihenfolge zwingend): 1) kurze Begrüßung, 2) "hier ist Gloria von der ${agency} im Auftrag von Herrn ${principal}", 3) freundliche Bitte um Weiterleitung zur zuständigen Person. Kein "Danke" als erstes Wort, keine Weiterleitungsbitte ohne vorherige Vorstellung.
 Wenn nach dem Grund gefragt wird, antworte kurz und sachlich: "${receptionReason}"
 ${receptionExample ? `Möglicher kurzer Empfangston: ${receptionExample}` : ""}
 Keine Produktdetails, kein langer Pitch, keine drei Sätze am Stück ohne Anlass.
