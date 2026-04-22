@@ -43,7 +43,15 @@ export function normalizeContactName(raw: string | undefined): string {
     return "";
   }
 
-  return raw.replace(/\s+/g, " ").replace(/^(herr|frau)\s+/i, "").trim();
+  const cleaned = raw.replace(/\s+/g, " ").replace(/^(herr|frau)\s+/i, "").trim();
+
+  // Platzhalter aus Testformularen dürfen nicht als echter Name in den
+  // Dialog geraten ("... mit Ansprechpartner verbinden?").
+  if (/^(ansprechpartner|ansprechpartnerin|kontakt|kontaktperson|name)$/i.test(cleaned)) {
+    return "";
+  }
+
+  return cleaned;
 }
 
 export function normalizeDirectDial(raw: string | undefined): string | undefined {

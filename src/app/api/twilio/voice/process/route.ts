@@ -1210,12 +1210,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       forceReply = true;
     }
 
-    if (newRole !== "decision-maker" && isShortAffirmative(heardText) && !forceReply) {
-      decision.action = "continue";
-      decision.reply = buildGatekeeperTransferLine(state.contactName);
-      appointmentAt = undefined;
-      forceReply = true;
-    }
+    // Hinweis: Früher gab es hier einen deterministischen Override, der bei
+    // kurzen bejahenden Antworten der Rezeption ("Ja bitte?") Glorias
+    // LLM-Antwort durch eine starre "Könnten Sie mich bitte mit X verbinden"-
+    // Zeile ersetzt hat. Das lief schon direkt nach der Begrüßung und hat den
+    // Playbook-Flow komplett ausgehöhlt. Jetzt vertrauen wir ausschließlich
+    // der LLM-Antwort.
 
     const nextStep: TokenizedCallState["step"] =
       decision.action !== "continue"
