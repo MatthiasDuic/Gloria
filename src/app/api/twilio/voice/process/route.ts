@@ -1030,6 +1030,35 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     }
 
+    // Kurze Bejahung ("Ja", "Gerne", "Moment") am Empfang, nachdem Gloria
+    // gerade um Weiterleitung gebeten hat → listen-only abwarten, damit
+    // Gloria nicht erneut ihre Vorstellung abspult.
+    {
+      const prevGloria = state.transcript
+        .split("\n")
+        .reverse()
+        .find((l) => l.startsWith("Gloria:"));
+      const justAskedTransfer = Boolean(
+        prevGloria &&
+          /\b(verbinden|zust[aä]ndigen\s+person|sprech[e]?\s+ich\s+mit)\b/i.test(prevGloria),
+      );
+      if (
+        state.contactRole !== "decision-maker" &&
+        justAskedTransfer &&
+        isShortAffirmative(heardText) &&
+        !isDecisionMakerAlreadyOnLine(heardText)
+      ) {
+        return await respondWithListenOnly(baseUrl, {
+          ...toStatePayload(state),
+          transcript: trimTranscript(`${state.transcript}\nInteressent: ${heardText}`),
+          turn: state.turn + 1,
+          step: "intro",
+          contactRole: "gatekeeper",
+          roleState: "transfer",
+        });
+      }
+    }
+
     let updatedConsent = state.consent;
     let consentAsked = state.consentAsked || hasGloriaAskedConsent(state.transcript);
     const consentAnswer = parseConsentAnswer(heardText);
