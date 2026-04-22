@@ -177,6 +177,57 @@ function isLikelyTransferAcknowledgement(text: string): boolean {
   );
 }
 
+/**
+ * Bestimmt anhand der allerersten Begrüßung des Gegenübers, ob wir direkt
+ * mit dem Entscheider sprechen oder noch beim Empfang sind. Signal:
+ * enthält die Begrüßung einen Namens-Token aus `contactName` (Nachname
+ * >=3 Zeichen), ist der Entscheider wahrscheinlich dran. Sonst Empfang.
+ */
+function classifyInitialGreeting(params: {
+  heardText: string;
+  contactName?: string;
+}): "decision-maker" | "gatekeeper" {
+  const normalized = normalizeContactName(params.contactName) || "";
+  if (!normalized) return "gatekeeper";
+
+  const heardLower = params.heardText.toLowerCase();
+
+  // "Sprechen Sie mit {Name}" / "{Name} am Apparat" / "Hier {Name}"
+  const nameTokens = normalized
+    .split(/\s+/)
+    .map((t) => t.toLowerCase().replace(/[.,;:!?]/g, ""))
+    .filter((t) => t.length >= 3 && !/^(herr|frau|dr|prof|dipl|ing)$/.test(t));
+
+  if (nameTokens.length === 0) return "gatekeeper";
+
+  const matchesName = nameTokens.some((token) =>
+    new RegExp(`\\b${token.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\b`, "i").test(heardLower),
+  );
+
+  if (matchesName) {
+    return "decision-maker";
+  }
+
+  return "gatekeeper";
+}
+
+function buildGatekeeperOpenerLine(state: TokenizedCallState): string {
+  const identity = getOwnerIdentity(state);
+  const name = normalizeContactName(state.contactName);
+  const transferAsk = name
+    ? `Könnten Sie mich bitte kurz mit ${name} verbinden?`
+    : "Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?";
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich melde mich im Auftrag von ${identity.ownerName}. ${transferAsk}`;
+}
+
+function buildDecisionMakerOpenerLine(state: TokenizedCallState): string {
+  const identity = getOwnerIdentity(state);
+  const name = normalizeContactName(state.contactName);
+  const salutation = name ? `Guten Tag ${name}` : "Guten Tag";
+  const topicText = (state.topic || "").toString().trim() || "einem kurzen Thema";
+  return `${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich melde mich im Auftrag von ${identity.ownerName} — es geht um ${topicText}. Passt es Ihnen gerade einen kurzen Moment?`;
+}
+
 function detectRoleState(params: {
   currentRole: ContactRole;
   modelDetectedRole: GloriaDecision["detectedRole"];
@@ -429,11 +480,6 @@ function getOwnerIdentity(state: TokenizedCallState): { ownerCompany: string; ow
     ownerCompany: state.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel",
     ownerName: state.ownerRealName?.trim() || "Herrn Matthias Duic",
   };
-}
-
-function buildOwnerIntroLine(state: TokenizedCallState): string {
-  const identity = getOwnerIdentity(state);
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich rufe im Auftrag von ${identity.ownerName} an.`;
 }
 
 function buildInitialState(params: {
@@ -903,6 +949,50 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Systemprompt (receptionTopicReason, gatekeeperTask, gatekeeperExample,
     // opener) liefert dem Modell dafür die passenden Leitplanken.
 
+    // --- Turn 0: Begrüßung des Gegenübers abwarten und klassifizieren ---
+    // Gloria hat beim Annehmen noch nichts gesagt. Der/die Angerufene meldet
+    // sich zuerst. Anhand dieser Begrüßung entscheiden wir deterministisch,
+    // ob wir am Empfang sind (Weiterleitung erbitten) oder direkt den
+    // Entscheider am Apparat haben (Name + Thema + Zeit-Einstieg).
+    if (state.turn === 0 && heardText && !isFallback) {
+      const detected = classifyInitialGreeting({
+        heardText,
+        contactName: state.contactName,
+      });
+      log.info("voice.initial_greeting_classified", {
+        callSid: state.callSid,
+        heardText,
+        detectedRole: detected,
+      });
+
+      if (detected === "decision-maker") {
+        const openerLine = buildDecisionMakerOpenerLine(state);
+        return await respondWithGather(baseUrl, openerLine, {
+          ...toStatePayload(state),
+          turn: state.turn + 1,
+          step: "intro",
+          contactRole: "decision-maker",
+          roleState: "decision_maker",
+          decisionMakerIntroDone: true,
+          transcript: trimTranscript(
+            `Interessent: ${heardText}\nGloria: ${openerLine}`,
+          ),
+        });
+      }
+
+      const openerLine = buildGatekeeperOpenerLine(state);
+      return await respondWithGather(baseUrl, openerLine, {
+        ...toStatePayload(state),
+        turn: state.turn + 1,
+        step: "intro",
+        contactRole: "gatekeeper",
+        roleState: "reception",
+        transcript: trimTranscript(
+          `Interessent: ${heardText}\nGloria: ${openerLine}`,
+        ),
+      });
+    }
+
     if (!heardText || isFallback) {
       if (state.turn > 0 || state.roleState === "transfer") {
         return await respondWithListenOnly(baseUrl, {
@@ -914,15 +1004,17 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
-      const introLine =
-        state.turn === 0
-          ? buildOwnerIntroLine(state)
-          : "Ich bin noch dran. Nehmen Sie sich ruhig einen Moment und sprechen Sie in Ruhe weiter.";
+      // Turn 0 ohne verständliche Begrüßung (Timeout/leeres SpeechResult):
+      // Safety-Net – Gloria initiiert mit dem Gatekeeper-Opener, damit auf
+      // jeden Fall etwas Sinnvolles gesprochen wird.
+      const introLine = buildGatekeeperOpenerLine(state);
 
       return await respondWithGather(baseUrl, introLine, {
         ...toStatePayload(state),
-        turn: state.turn,
-        step: state.step,
+        turn: state.turn + 1,
+        step: "intro",
+        contactRole: "gatekeeper",
+        roleState: "reception",
         transcript: trimTranscript(`${state.transcript}\nGloria: ${introLine}`),
       });
     }
