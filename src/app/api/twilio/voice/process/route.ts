@@ -724,6 +724,14 @@ async function askOpenAI(
       });
       return GLORIA_DECISION_FALLBACK;
     }
+    log.info("openai.decision", {
+      event: "openai.chat_completions",
+      step: currentStep,
+      role: currentRole,
+      action: validation.data.action,
+      detectedRole: validation.data.detectedRole,
+      reply: validation.data.reply?.slice(0, 400),
+    });
     return validation.data;
   } finally {
     clearTimeout(timer);
