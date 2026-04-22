@@ -5,6 +5,8 @@ import {
   maybeWarmupElevenLabsVoice,
 } from "@/lib/elevenlabs";
 import { REQUIRED_GLORIA_INTRO } from "@/lib/gloria";
+import { verifyAudioText } from "@/lib/audio-signature";
+import { log } from "@/lib/log";
 import type { Topic } from "@/lib/types";
 
 export const runtime = "edge";
@@ -91,9 +93,28 @@ export async function GET(request: Request) {
   void maybeWarmupElevenLabsVoice();
 
   const { searchParams } = new URL(request.url);
+  const directText = searchParams.get("text");
+
+  // Wenn der Aufrufer konkreten Text schickt, MUSS er signiert sein.
+  // Die vordefinierten Step/Topic-Varianten werden weiterhin ohne Signatur
+  // akzeptiert, weil sie serverseitig aus einer geschlossenen Menge stammen.
+  if (directText && directText.trim()) {
+    const verification = await verifyAudioText(
+      directText,
+      searchParams.get("exp"),
+      searchParams.get("sig"),
+    );
+    if (!verification.ok) {
+      log.warn("audio.signature_rejected", { reason: verification.reason });
+      return NextResponse.json({ error: "invalid or expired audio signature" }, { status: 403 });
+    }
+  }
+
   const text = buildAudioText(searchParams);
+  const started = Date.now();
   try {
     const voiceStream = await generateElevenLabsTelephonyStream(text);
+    log.info("audio.stream_ready", { latencyMs: Date.now() - started });
 
     return new NextResponse(voiceStream.body, {
       status: 200,
@@ -104,6 +125,10 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    log.error("audio.elevenlabs_failed", {
+      latencyMs: Date.now() - started,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       {
         error:

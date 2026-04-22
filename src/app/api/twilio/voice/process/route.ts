@@ -3,6 +3,9 @@ import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { buildCallSystemPrompt } from "@/lib/gloria";
 import { getAppBaseUrl } from "@/lib/twilio";
 import { buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
+import { buildSignedAudioUrl } from "@/lib/audio-url";
+import { validateTwilioRequest } from "@/lib/twilio-signature";
+import { log } from "@/lib/log";
 import { AI_CONFIG } from "@/lib/ai-config";
 import {
   decodeCallStateToken,
@@ -504,11 +507,7 @@ function buildInitialState(params: {
   };
 }
 
-function buildAudioUrl(baseUrl: string, text: string): string {
-  const u = new URL(`${baseUrl}/api/twilio/audio`);
-  u.searchParams.set("text", text);
-  return u.toString();
-}
+// Audio-URL wird zentral und signiert in @/lib/audio-url gebaut.
 
 function buildNameGuidance(contactNameRaw?: string): string {
   const contactName = normalizeContactName(contactNameRaw);
@@ -644,6 +643,7 @@ async function askOpenAI(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+  const started = Date.now();
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -668,12 +668,23 @@ async function askOpenAI(
 
     if (!response.ok) {
       const details = await response.text().catch(() => "");
+      log.error("openai.http_error", {
+        event: "openai.chat_completions",
+        status: response.status,
+        latencyMs: Date.now() - started,
+      });
       throw new Error(`OpenAI error (${response.status}): ${details}`);
     }
 
     const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
+    log.info("openai.reply", {
+      event: "openai.chat_completions",
+      latencyMs: Date.now() - started,
+      step: currentStep,
+      role: currentRole,
+    });
 
     let parsed: Partial<GloriaDecision> = {};
     try {
@@ -766,7 +777,7 @@ async function respondWithGather(
 
   const twiml = buildGatherTwiml({
     ...(isElevenLabsConfigured()
-      ? { playUrl: buildAudioUrl(baseUrl, text) }
+      ? { playUrl: await buildSignedAudioUrl(baseUrl, text) }
       : { sayText: text }),
     gather: {
       input: "speech",
@@ -835,7 +846,7 @@ async function respondWithListenOnly(
   });
 }
 
-function respondWithHangup(baseUrl: string, text: string): NextResponse {
+async function respondWithHangup(baseUrl: string, text: string): Promise<NextResponse> {
   const normalized = text.trim();
   const hasThanks = /danke|vielen\s+dank/i.test(normalized);
   const hasGoodbye = /auf\s+wiederh[oö]ren|tsch[uü]ss|bis\s+bald/i.test(normalized);
@@ -844,7 +855,7 @@ function respondWithHangup(baseUrl: string, text: string): NextResponse {
 
   const twiml = buildSayHangupTwiml(
     isElevenLabsConfigured()
-      ? { playUrl: buildAudioUrl(baseUrl, finalText) }
+      ? { playUrl: await buildSignedAudioUrl(baseUrl, finalText) }
       : { sayText: finalText },
   );
 
@@ -856,9 +867,23 @@ function respondWithHangup(baseUrl: string, text: string): NextResponse {
 export async function POST(request: Request): Promise<NextResponse> {
   const baseUrl = getAppBaseUrl(request);
 
+  const signature = await validateTwilioRequest(request);
+  if (!signature.ok) {
+    log.warn("twilio.signature_rejected", {
+      event: "voice.process",
+      reason: signature.reason,
+    });
+    return new NextResponse(
+      buildSayHangupTwiml({
+        sayText: "Diese Anfrage konnte nicht verifiziert werden.",
+      }),
+      { status: 403, headers: { "Content-Type": "text/xml; charset=utf-8" } },
+    );
+  }
+
   try {
     const url = new URL(request.url);
-    const form = await request.formData();
+    const form = signature.form ?? (await request.formData());
     const tokenFromQuery = url.searchParams.get("state") || "";
     const tokenFromForm = String(form.get("state") || "").trim();
     const speech = String(form.get("SpeechResult") || "").trim();
@@ -1040,7 +1065,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
-      await finalizeCall({
+      void finalizeCall({
         state: {
           ...state,
           transcript: trimTranscript(`${state.transcript}\nInteressent: ${heardText}`),
@@ -1051,9 +1076,15 @@ export async function POST(request: Request): Promise<NextResponse> {
         note: state.appointmentNoteDraft || "",
         appointmentAt: state.appointmentAtDraft,
         baseUrl,
+      }).catch((error) => {
+        log.error("finalize_call.failed", {
+          event: "finalize_call",
+          callSid: state.callSid,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       });
 
-      return respondWithHangup(
+      return await respondWithHangup(
         baseUrl,
         "Vielen Dank für die Angaben. Der Termin ist fest eingeplant. Ich freue mich auf das Gespräch. Auf Wiederhören.",
       );
@@ -1292,7 +1323,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
-      await finalizeCall({
+      void finalizeCall({
         state: {
           ...state,
           directDial,
@@ -1310,8 +1341,14 @@ export async function POST(request: Request): Promise<NextResponse> {
         nextCallAt: outcome === "Wiedervorlage" ? appointmentAt : undefined,
         directDial,
         baseUrl,
+      }).catch((error) => {
+        log.error("finalize_call.failed", {
+          event: "finalize_call",
+          callSid: state.callSid,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       });
-      return respondWithHangup(baseUrl, decision.reply);
+      return await respondWithHangup(baseUrl, decision.reply);
     }
 
     return await respondWithGather(baseUrl, decision.reply, {

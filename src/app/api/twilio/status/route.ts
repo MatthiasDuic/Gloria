@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
+import { validateTwilioRequest } from "@/lib/twilio-signature";
+import { log } from "@/lib/log";
 
 export const runtime = "edge";
 
@@ -18,8 +20,14 @@ function recordingUrlWithFormat(value: string) {
 }
 
 export async function POST(request: Request) {
+  const signature = await validateTwilioRequest(request);
+  if (!signature.ok) {
+    log.warn("twilio.signature_rejected", { event: "status", reason: signature.reason });
+    return NextResponse.json({ error: "invalid twilio signature" }, { status: 403 });
+  }
+
   const url = new URL(request.url);
-  const form = await request.formData();
+  const form = signature.form ?? (await request.formData());
   const isTestCall = url.searchParams.get("testCall") === "1";
   const callSid = String(form.get("CallSid") || "").trim();
   const callStatus = String(form.get("CallStatus") || form.get("RecordingStatus") || "").trim();

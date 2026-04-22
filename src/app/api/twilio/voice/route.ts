@@ -8,6 +8,9 @@ import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { prepareCall } from "@/lib/telephony-runtime";
 import { TOPICS, type Topic } from "@/lib/types";
 import { buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
+import { buildSignedAudioUrl } from "@/lib/audio-url";
+import { validateTwilioRequest } from "@/lib/twilio-signature";
+import { log } from "@/lib/log";
 
 export const runtime = "edge";
 
@@ -46,11 +49,7 @@ function normalizeTopic(value: string): Topic {
   return found || TOPICS[0];
 }
 
-function buildAudioUrl(baseUrl: string, text: string): string {
-  const u = new URL(`${baseUrl}/api/twilio/audio`);
-  u.searchParams.set("text", text);
-  return u.toString();
-}
+// Audio-URL wird zentral und signiert in @/lib/audio-url gebaut.
 
 function buildInternalHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -259,7 +258,7 @@ async function renderVoiceResponse(request: Request) {
 
       const twiml = buildGatherTwiml({
         ...(isElevenLabsConfigured()
-          ? { playUrl: buildAudioUrl(baseUrl, callbackGreeting) }
+          ? { playUrl: await buildSignedAudioUrl(baseUrl, callbackGreeting) }
           : { sayText: callbackGreeting }),
         gather: {
           input: "speech",
@@ -345,9 +344,25 @@ async function renderVoiceResponse(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const signature = await validateTwilioRequest(request);
+  if (!signature.ok) {
+    log.warn("twilio.signature_rejected", { event: "voice", reason: signature.reason });
+    return new NextResponse(
+      buildSayHangupTwiml({ sayText: "Diese Anfrage konnte nicht verifiziert werden." }),
+      { status: 403, headers: { "Content-Type": "text/xml; charset=utf-8" } },
+    );
+  }
   return await renderVoiceResponse(request);
 }
 
 export async function POST(request: Request) {
+  const signature = await validateTwilioRequest(request);
+  if (!signature.ok) {
+    log.warn("twilio.signature_rejected", { event: "voice", reason: signature.reason });
+    return new NextResponse(
+      buildSayHangupTwiml({ sayText: "Diese Anfrage konnte nicht verifiziert werden." }),
+      { status: 403, headers: { "Content-Type": "text/xml; charset=utf-8" } },
+    );
+  }
   return await renderVoiceResponse(request);
 }
