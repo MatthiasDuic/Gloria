@@ -6,3 +6,5 @@ out
 coverage
 .vercel
 .env*.local
+
+vercel_last.log
