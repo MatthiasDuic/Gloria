@@ -177,6 +177,31 @@ function isLikelyTransferAcknowledgement(text: string): boolean {
   );
 }
 
+function normalizeForLoopCheck(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-zäöüß\s]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function computeJaccardSimilarity(a: string, b: string): number {
+  const stopwords = new Set([
+    "der","die","das","und","oder","aber","ist","sind","ein","eine","einen","einem","einer","eines",
+    "zu","zum","zur","im","in","an","am","auf","mit","von","vom","bei","beim","für","über","unter",
+    "sie","ich","wir","mir","sich","sein","seine","ihr","ihre","ihren","ihrem","ihres","es","den","dem",
+    "ja","nein","nicht","so","auch","als","wie","was","wo","wer","welche","welcher","welches",
+    "bitte","danke","gerne","ok","okay","mal","noch","schon","hier","jetzt","mal"
+  ]);
+  const tokensA = new Set(a.split(" ").filter((t) => t.length >= 4 && !stopwords.has(t)));
+  const tokensB = new Set(b.split(" ").filter((t) => t.length >= 4 && !stopwords.has(t)));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const token of tokensA) if (tokensB.has(token)) intersection++;
+  const union = tokensA.size + tokensB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
 /**
  * Bestimmt anhand der allerersten Begrüßung des Gegenübers, ob wir direkt
  * mit dem Entscheider sprechen oder noch beim Empfang sind. Signal:
@@ -1345,6 +1370,34 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Zeile ersetzt hat. Das lief schon direkt nach der Begrüßung und hat den
     // Playbook-Flow komplett ausgehöhlt. Jetzt vertrauen wir ausschließlich
     // der LLM-Antwort.
+
+    // Discovery-Loop-Schutz: Wenn Gloria beim Entscheider fast die gleiche
+    // Frage zum zweiten Mal stellt, zwingen wir sie in den Terminvorschlag.
+    if (
+      newRole === "decision-maker" &&
+      decision.action === "continue" &&
+      !appointmentAt
+    ) {
+      const lastGloriaLines = state.transcript
+        .split("\n")
+        .filter((line) => line.startsWith("Gloria:"))
+        .slice(-3);
+      const newReplyNorm = normalizeForLoopCheck(decision.reply);
+      const isRepeat = lastGloriaLines.some((line) => {
+        const prev = normalizeForLoopCheck(line.replace(/^Gloria:\s*/i, ""));
+        if (!prev || !newReplyNorm) return false;
+        return computeJaccardSimilarity(prev, newReplyNorm) >= 0.55;
+      });
+      if (isRepeat) {
+        log.info("voice.loop_guard_triggered", {
+          callSid: state.callSid,
+          originalReply: decision.reply.slice(0, 200),
+        });
+        decision.reply =
+          "Ich merke, wir drehen uns ein bisschen im Kreis. Lassen Sie uns das lieber in Ruhe in einem kurzen Termin besprechen. Passt Ihnen kommende Woche eher vormittags oder nachmittags?";
+        forceReply = true;
+      }
+    }
 
     const nextStep: TokenizedCallState["step"] =
       decision.action !== "continue"
