@@ -178,12 +178,6 @@ function isDecisionMakerAlreadyOnLine(text: string): boolean {
   );
 }
 
-function isLikelyReceptionGreeting(text: string): boolean {
-  return /\b(guten\s+tag|hallo|firma|zentrale|empfang|sekretariat|buero|büro|ja\s+bitte|was\s+kann\s+ich\s+fuer\s+sie\s+tun|was\s+kann\s+ich\s+für\s+sie\s+tun)\b/i.test(
-    text,
-  );
-}
-
 function isLikelyDecisionMakerGreeting(text: string): boolean {
   const lower = text.toLowerCase();
 
@@ -225,19 +219,6 @@ function detectRoleState(params: {
   }
 
   return { contactRole: "gatekeeper", roleState: "reception" };
-}
-
-function buildFastFirstReply(
-  contactNameRaw: string | undefined,
-  identity: { ownerCompany: string; ownerName: string },
-): string {
-  const target = normalizeContactName(contactNameRaw);
-  const introBase = `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich rufe im Auftrag von ${identity.ownerName} an.`;
-  if (target) {
-    return `${introBase} Könnten Sie mich bitte kurz mit ${target} verbinden?`;
-  }
-
-  return `${introBase} Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?`;
 }
 
 function buildGatekeeperTransferLine(contactNameRaw: string | undefined): string {
@@ -928,23 +909,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     }
 
-    if (state.turn === 0 && heardText && isLikelyReceptionGreeting(heardText)) {
-      const quickReply = buildFastFirstReply(state.contactName, getOwnerIdentity(state));
-      const updatedTranscript = trimTranscript(
-        [state.transcript, "Phase: Empfang", `Interessent: ${heardText}`, `Gloria: ${quickReply}`]
-          .filter(Boolean)
-          .join("\n"),
-      );
-
-      return await respondWithGather(baseUrl, quickReply, {
-        ...toStatePayload(state),
-        transcript: updatedTranscript,
-        turn: state.turn + 1,
-        step: "intro",
-        contactRole: "gatekeeper",
-        roleState: "reception",
-      });
-    }
+    // Bewusst KEIN deterministischer Fast-Reply auf Empfangs-Greeting mehr:
+    // Gloria soll nicht abrupt "Könnten Sie mich bitte mit X verbinden?" sagen,
+    // sondern sich kurz vorstellen, den Grund aus dem Playbook einordnen und
+    // dann freundlich um Weiterleitung bitten. Der komplette Playbook-
+    // Systemprompt (receptionTopicReason, gatekeeperTask, gatekeeperExample,
+    // opener) liefert dem Modell dafür die passenden Leitplanken.
 
     if (!heardText || isFallback) {
       if (state.turn > 0 || state.roleState === "transfer") {
