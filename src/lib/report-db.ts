@@ -172,6 +172,81 @@ async function ensureSchema() {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS playbook_revisions (
+      id TEXT PRIMARY KEY,
+      playbook_id TEXT NOT NULL REFERENCES user_playbooks(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      topic TEXT NOT NULL,
+      content TEXT NOT NULL,
+      reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS playbook_revisions_playbook_id_idx
+    ON playbook_revisions (playbook_id);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value_json JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, key)
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS campaigns_user_id_idx
+    ON campaigns (user_id);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS campaign_leads (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      company TEXT NOT NULL,
+      contact_name TEXT,
+      phone TEXT NOT NULL,
+      direct_dial TEXT,
+      email TEXT,
+      topic TEXT NOT NULL,
+      note TEXT,
+      next_call_at TIMESTAMPTZ,
+      status TEXT NOT NULL DEFAULT 'neu',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS campaign_leads_campaign_id_idx
+    ON campaign_leads (campaign_id);
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS campaign_leads_user_id_idx
+    ON campaign_leads (user_id);
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS call_reports (
       id TEXT PRIMARY KEY,
       user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -193,6 +268,29 @@ async function ensureSchema() {
       emailed_to TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS call_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      phone_number_id TEXT REFERENCES phone_numbers(id) ON DELETE SET NULL,
+      campaign_id TEXT REFERENCES campaigns(id) ON DELETE SET NULL,
+      lead_id TEXT,
+      call_sid TEXT,
+      company TEXT,
+      topic TEXT,
+      outcome TEXT,
+      recording_url TEXT,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS call_logs_user_id_idx
+    ON call_logs (user_id);
   `);
 
   await db.query(`
