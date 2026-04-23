@@ -308,7 +308,6 @@ export default function HomePage() {
           "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
         ),
         receptionTopicReason: pickText(script.receptionTopicReason, ""),
-        gatekeeperExample: pickText(script.gatekeeperExample, ""),
         decisionMakerTask: pickText(
           script.decisionMakerTask,
           "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
@@ -317,7 +316,6 @@ export default function HomePage() {
           script.decisionMakerBehavior,
           "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
         ),
-        decisionMakerExample: pickText(script.decisionMakerExample, ""),
         decisionMakerContext: pickText(script.decisionMakerContext, ""),
         problemBuildup: pickText(script.problemBuildup, ""),
         conceptTransition: pickText(script.conceptTransition, ""),
@@ -359,10 +357,8 @@ export default function HomePage() {
           gatekeeperTask: "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
           gatekeeperBehavior: "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
           receptionTopicReason: "",
-          gatekeeperExample: "",
           decisionMakerTask: "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
           decisionMakerBehavior: "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
-          decisionMakerExample: "",
           decisionMakerContext: "",
           problemBuildup: "",
           conceptTransition: "",
@@ -1428,10 +1424,6 @@ export default function HomePage() {
                       <label className="top-gap">Kurzer Grund (wenn der Empfang nachfragt)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Ein kurzer Anlasssatz. Das ist ein Leitanker, kein vollständiger Mini-Pitch.</p>
                       <textarea value={activeDraft.receptionTopicReason ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))} />
-
-                      <label className="top-gap">Formulierungsbeispiel (optional)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Nur als Ton-Muster. Gloria soll daraus frei und natürlich sprechen.</p>
-                      <textarea value={activeDraft.gatekeeperExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperExample: event.target.value } }))} />
                     </details>
 
                     <details className="mini-panel top-gap" open>
@@ -1472,8 +1464,6 @@ export default function HomePage() {
                         <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
                         <label className="top-gap">Verhalten / Tonalität</label>
                         <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
-                        <label className="top-gap">Beispielton</label>
-                        <textarea value={activeDraft.decisionMakerExample ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerExample: event.target.value } }))} />
                       </details>
                     </details>
 

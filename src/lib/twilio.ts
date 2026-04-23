@@ -272,18 +272,37 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
   body.set("RecordingStatusCallbackMethod", "POST");
 
   const authHeader = btoa(`${accountSid}:${authToken}`);
-  const response = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${authHeader}`,
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-      },
-      body,
-      cache: "no-store",
-    },
+  const twilioApiTimeoutMs = Math.max(
+    3_000,
+    Math.min(30_000, Number.parseInt(process.env.TWILIO_API_TIMEOUT_MS || "10000", 10)),
   );
+  const twilioController = new AbortController();
+  const twilioTimer = setTimeout(() => twilioController.abort(), twilioApiTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${authHeader}`,
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body,
+        cache: "no-store",
+        signal: twilioController.signal,
+      },
+    );
+  } catch (error) {
+    if ((error as { name?: string }).name === "AbortError") {
+      throw new Error(
+        `Twilio API hat nicht innerhalb von ${twilioApiTimeoutMs}ms geantwortet. Bitte erneut versuchen.`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(twilioTimer);
+  }
 
   if (!response.ok) {
     const details = await response.text();

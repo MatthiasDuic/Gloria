@@ -76,8 +76,8 @@ const call = await req("/api/twilio/test-call", {
   json: {
     to: "+4915755806701",
     company: "Testanruf Copilot",
-    contactName: "",
-    topic: "betriebliche Krankenversicherung",
+    contactName: "Branko Duic",
+    topic: "private Krankenversicherung",
     phoneNumberId: firstPhone.id,
   },
 });

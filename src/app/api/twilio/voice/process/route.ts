@@ -13,10 +13,7 @@ import {
   extractDirectDialFromText,
 } from "@/lib/phone-utils";
 import {
-  buildDecisionMakerDiscoveryQuestion,
   buildDecisionMakerOpenerLine,
-  buildDecisionMakerTransitionToAppointment,
-  buildGatekeeperObjectionReply,
   buildGatekeeperOpenerLine,
   classifyInitialGreeting,
 } from "@/lib/call-flow-states";
@@ -35,8 +32,12 @@ export const runtime = "edge";
 
 const AI_MODEL = AI_CONFIG.chatModel;
 const AI_TIMEOUT_MS = Math.min(
-  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "1200", 10), 700),
-  3200,
+  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "2500", 10), 1800),
+  4000,
+);
+const AI_RETRY_ATTEMPTS = Math.min(
+  3,
+  Math.max(parseInt(process.env.LIVE_AI_RETRY_ATTEMPTS || "2", 10), 1),
 );
 const REPLY_GATHER_TIMEOUT_SECONDS = Math.min(
   6,
@@ -237,13 +238,6 @@ function buildGatekeeperTransferLine(contactNameRaw: string | undefined): string
     return "Danke. Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?";
   }
   return `Danke. Könnten Sie mich bitte kurz mit ${name} verbinden?`;
-}
-
-function splitByAnswerWaitMarker(text: string): string[] {
-  return text
-    .split(/\[\s*antwort\s+abwarten\s*\]/i)
-    .map((part) => part.replace(/\s+/g, " ").trim())
-    .filter((part) => part.length > 0);
 }
 
 function trimTranscript(text: string, maxLen = 3500): string {
@@ -688,14 +682,20 @@ async function askOpenAI(
       role: currentRole,
     });
 
+    const rawContent = payload.choices?.[0]?.message?.content || "{}";
     let parsed: unknown = {};
     try {
-      parsed = JSON.parse(payload.choices?.[0]?.message?.content || "{}");
+      parsed = JSON.parse(rawContent);
     } catch (error) {
       log.warn("openai.json_parse_failed", {
         event: "openai.chat_completions",
         reason: error instanceof Error ? error.message : String(error),
+        rawPreview: rawContent.slice(0, 400),
       });
+      // In den Retry laufen lassen, damit wir nicht sofort stumm werden.
+      throw new Error(
+        `OpenAI response was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     const validation = GloriaDecisionSchema.safeParse(parsed);
@@ -703,8 +703,11 @@ async function askOpenAI(
       log.warn("openai.schema_rejected", {
         event: "openai.chat_completions",
         reason: validation.error.message.slice(0, 200),
+        rawPreview: rawContent.slice(0, 400),
       });
-      return GLORIA_DECISION_FALLBACK;
+      // Schema-Fehler = defekter Decision-JSON → Retry geben, nicht
+      // stillen Fallback.
+      throw new Error("OpenAI response failed schema validation");
     }
     log.info("openai.decision", {
       event: "openai.chat_completions",
@@ -718,6 +721,58 @@ async function askOpenAI(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function askOpenAIWithRetry(
+  systemPrompt: string,
+  contactName: string | undefined,
+  transcript: string,
+  latestSpeech: string,
+  currentRole: ContactRole,
+  currentStep: TokenizedCallState["step"],
+  callSid?: string,
+): Promise<GloriaDecision> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= AI_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await askOpenAI(
+        systemPrompt,
+        contactName,
+        transcript,
+        latestSpeech,
+        currentRole,
+        currentStep,
+      );
+    } catch (error) {
+      lastError = error;
+      const shouldRetry = attempt < AI_RETRY_ATTEMPTS;
+      log.warn("openai.retry", {
+        event: "openai.chat_completions",
+        callSid,
+        attempt,
+        maxAttempts: AI_RETRY_ATTEMPTS,
+        step: currentStep,
+        role: currentRole,
+        willRetry: shouldRetry,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      // Kurzes exponentielles Backoff (150ms, 300ms), damit wir bei einer
+      // kurzzeitig überlasteten OpenAI-API nicht sofort den nächsten Request
+      // hinterherjagen und das Latenzbudget komplett verbrennen.
+      const backoffMs = Math.min(600, 150 * attempt);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, backoffMs);
+      });
+    }
+  }
+
+  throw (lastError instanceof Error ? lastError : new Error("OpenAI retry failed"));
 }
 
 async function finalizeCall(params: {
@@ -954,8 +1009,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Gloria soll nicht abrupt "Könnten Sie mich bitte mit X verbinden?" sagen,
     // sondern sich kurz vorstellen, den Grund aus dem Playbook einordnen und
     // dann freundlich um Weiterleitung bitten. Der komplette Playbook-
-    // Systemprompt (receptionTopicReason, gatekeeperTask, gatekeeperExample,
-    // opener) liefert dem Modell dafür die passenden Leitplanken.
+    // Systemprompt (receptionTopicReason, gatekeeperTask und opener)
+    // liefert dem Modell dafür die passenden Leitplanken.
 
     // --- Turn 0: Begrüßung des Gegenübers abwarten und klassifizieren ---
     // Gloria hat beim Annehmen noch nichts gesagt. Der/die Angerufene meldet
@@ -973,31 +1028,43 @@ export async function POST(request: Request): Promise<NextResponse> {
         detectedRole: detected,
       });
 
-      if (detected === "decision-maker") {
-        const openerLine = buildDecisionMakerOpenerLine(state);
-        return await respondWithGather(baseUrl, openerLine, {
+      let initialDecision: GloriaDecision;
+      try {
+        initialDecision = await askOpenAIWithRetry(
+          systemPrompt,
+          state.contactName,
+          state.transcript,
+          heardText,
+          detected,
+          "intro",
+          state.callSid,
+        );
+      } catch {
+        log.warn("voice.initial_openai_fallback", {
+          callSid: state.callSid,
+          detectedRole: detected,
+        });
+        const bridgeLine = "Einen kleinen Moment bitte.";
+        return await respondWithGather(baseUrl, bridgeLine, {
           ...toStatePayload(state),
           turn: state.turn + 1,
           step: "intro",
-          contactRole: "decision-maker",
-          roleState: "decision_maker",
-          decisionMakerIntroDone: true,
+          contactRole: detected,
+          roleState: detected === "decision-maker" ? "decision_maker" : "reception",
           transcript: trimTranscript(
-            `Interessent: ${heardText}\nGloria: ${openerLine}`,
+            `${state.transcript}\nInteressent: ${heardText}\nGloria: ${bridgeLine}`,
           ),
         });
       }
 
-      const openerLine = buildGatekeeperOpenerLine(state);
-      return await respondWithGather(baseUrl, openerLine, {
+      return await respondWithGather(baseUrl, initialDecision.reply, {
         ...toStatePayload(state),
         turn: state.turn + 1,
-        step: "intro",
-        contactRole: "gatekeeper",
-        roleState: "reception",
-        transcript: trimTranscript(
-          `Interessent: ${heardText}\nGloria: ${openerLine}`,
-        ),
+        step: detected === "decision-maker" ? "conversation" : "intro",
+        contactRole: detected,
+        roleState: detected === "decision-maker" ? "decision_maker" : "reception",
+        decisionMakerIntroDone: detected === "decision-maker",
+        transcript: trimTranscript(`Interessent: ${heardText}\nGloria: ${initialDecision.reply}`),
       });
     }
 
@@ -1052,16 +1119,44 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
       }
 
-      const openerLine = buildDecisionMakerOpenerLine(state);
-      return await respondWithGather(baseUrl, openerLine, {
+      let transferDecision: GloriaDecision;
+      try {
+        transferDecision = await askOpenAIWithRetry(
+          systemPrompt,
+          state.contactName,
+          state.transcript,
+          heardText,
+          "decision-maker",
+          "intro",
+          state.callSid,
+        );
+      } catch {
+        log.warn("voice.transfer_openai_fallback", {
+          callSid: state.callSid,
+        });
+        const bridgeLine = "Einen kleinen Moment bitte.";
+        return await respondWithGather(baseUrl, bridgeLine, {
+          ...toStatePayload(state),
+          turn: state.turn + 1,
+          step: "conversation",
+          contactRole: "decision-maker",
+          roleState: "decision_maker",
+          decisionMakerIntroDone: true,
+          transcript: trimTranscript(
+            `${state.transcript}\nInteressent: ${heardText}\nGloria: ${bridgeLine}`,
+          ),
+        });
+      }
+
+      return await respondWithGather(baseUrl, transferDecision.reply, {
         ...toStatePayload(state),
         turn: state.turn + 1,
-        step: "intro",
+        step: "conversation",
         contactRole: "decision-maker",
         roleState: "decision_maker",
         decisionMakerIntroDone: true,
         transcript: trimTranscript(
-          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${openerLine}`,
+          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${transferDecision.reply}`,
         ),
       });
     }
@@ -1095,22 +1190,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    if (state.contactRole !== "decision-maker") {
-      const gatekeeperReply = buildGatekeeperObjectionReply(state, heardText);
-      if (gatekeeperReply) {
-        return await respondWithGather(baseUrl, gatekeeperReply, {
-          ...toStatePayload(state),
-          transcript: trimTranscript(
-            `${state.transcript}\nInteressent: ${heardText}\nGloria: ${gatekeeperReply}`,
-          ),
-          turn: state.turn + 1,
-          step: "intro",
-          contactRole: "gatekeeper",
-          roleState: state.roleState === "transfer" ? "transfer" : "reception",
-        });
-      }
-    }
-
     let updatedConsent = state.consent;
     let consentAsked = state.consentAsked || hasGloriaAskedConsent(state.transcript);
     const consentAnswer = parseConsentAnswer(heardText);
@@ -1120,42 +1199,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       .reverse()
       .find((l) => l.startsWith("Gloria:"));
 
-    const askedForContactBefore = Boolean(
-      lastGloria &&
-        /\b(verbinden|zust[aä]ndigen\s+person|sprech[e]?\s+ich\s+mit|mit\s+\w+)\b/i.test(lastGloria),
-    );
-
-    if (
-      state.contactRole !== "decision-maker" &&
-      askedForContactBefore &&
-      isDecisionMakerAlreadyOnLine(heardText)
-    ) {
-      const openerSegments = splitByAnswerWaitMarker(activeScript.opener || "");
-      const openerReply =
-        openerSegments[0] ||
-        "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an.";
-      const updatedTranscript = trimTranscript(
-        [
-          state.transcript,
-          "Phase: decision_maker",
-          `Interessent: ${heardText}`,
-          `Gloria: ${openerReply}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
-
-      return await respondWithGather(baseUrl, openerReply, {
-        ...toStatePayload(state),
-        decisionMakerIntroDone: true,
-        contactRole: "decision-maker",
-        roleState: "decision_maker",
-        transcript: updatedTranscript,
-        turn: state.turn + 1,
-        step: "conversation",
-      });
-    }
-
     if (lastGloria && /aufzeichn|aufnahme|mitschnitt/i.test(lastGloria)) {
       consentAsked = true;
       if (consentAnswer === "yes") {
@@ -1163,29 +1206,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       } else if (consentAnswer === "no") {
         updatedConsent = "no";
       }
-    }
-
-    // Direkter Consent-Übergang beim Entscheider: Sobald ein klares "Ja"
-    // auf die Aufzeichnungsfrage kommt, starten wir deterministisch mit der
-    // kurzen Discovery-Frage statt in eine lange LLM-Formulierung zu laufen.
-    if (
-      state.contactRole === "decision-maker" &&
-      consentAnswer === "yes" &&
-      updatedConsent === "yes" &&
-      (state.scriptPhaseIndex ?? 0) === 0
-    ) {
-      const discoveryQuestion = buildDecisionMakerDiscoveryQuestion(state.topic);
-      return await respondWithGather(baseUrl, discoveryQuestion, {
-        ...toStatePayload(state),
-        transcript: trimTranscript(
-          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${discoveryQuestion}`,
-        ),
-        turn: state.turn + 1,
-        step: "conversation",
-        consent: "yes",
-        consentAsked: true,
-        scriptPhaseIndex: 1,
-      });
     }
 
     const inPkvPostAppointmentFlow =
@@ -1248,70 +1268,34 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // Strukturierter Entscheider-Flow nach Consent:
-    // Phase 0 -> 1: kurze themenspezifische Discovery-Frage
-    // Phase 1 -> 2: kurze Einordnung + klare Terminfrage
-    if (
-      state.contactRole === "decision-maker" &&
-      updatedConsent === "yes" &&
-      (state.scriptPhaseIndex ?? 0) === 0
-    ) {
-      const discoveryQuestion = buildDecisionMakerDiscoveryQuestion(state.topic);
-      return await respondWithGather(baseUrl, discoveryQuestion, {
-        ...toStatePayload(state),
-        transcript: trimTranscript(
-          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${discoveryQuestion}`,
-        ),
-        turn: state.turn + 1,
-        step: "conversation",
-        scriptPhaseIndex: 1,
-      });
-    }
-
-    if (
-      state.contactRole === "decision-maker" &&
-      updatedConsent === "yes" &&
-      (state.scriptPhaseIndex ?? 0) === 1 &&
-      !(state.appointmentProposalAsked ?? false)
-    ) {
-      const transition = buildDecisionMakerTransitionToAppointment(state.topic);
-      return await respondWithGather(baseUrl, transition, {
-        ...toStatePayload(state),
-        transcript: trimTranscript(
-          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${transition}`,
-        ),
-        turn: state.turn + 1,
-        step: "appointment",
-        scriptPhaseIndex: 2,
-        appointmentProposalAsked: true,
-      });
-    }
-
     let decision: GloriaDecision;
     try {
-      decision = await askOpenAI(
+      decision = await askOpenAIWithRetry(
         systemPrompt,
         state.contactName,
         state.transcript,
         heardText,
         state.contactRole,
         state.step,
+        state.callSid,
       );
     } catch {
-      const contextualFallbackReply =
-        state.contactRole !== "decision-maker"
-          ? buildGatekeeperTransferLine(state.contactName)
-          : `Danke. ${activeScript.discovery}`;
-
-      decision = {
-        detectedRole: "unknown",
-        reply: contextualFallbackReply,
-        action: "continue",
-        appointmentNote: "",
-        appointmentAtISO: "",
-        directDial: "",
-        consentGiven: null,
-      };
+      log.warn("voice.openai_turn_fallback", {
+        callSid: state.callSid,
+        step: state.step,
+        role: state.contactRole,
+      });
+      const bridgeLine = "Einen kleinen Moment bitte.";
+      return await respondWithGather(baseUrl, bridgeLine, {
+        ...toStatePayload(state),
+        turn: state.turn + 1,
+        step: state.step,
+        contactRole: state.contactRole,
+        roleState: state.roleState,
+        transcript: trimTranscript(
+          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${bridgeLine}`,
+        ),
+      });
     }
 
     let appointmentAt = normalizeAppointmentAt(decision.appointmentAtISO);
@@ -1359,33 +1343,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     if (newRole === "decision-maker" && !nextDecisionMakerIntroDone) {
-      const openerSegments = splitByAnswerWaitMarker(activeScript.opener || "");
-      const openerReply =
-        openerSegments[0] ||
-        "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an.";
-      const updatedTranscript = trimTranscript(
-        [
-          state.transcript,
-          `Phase: ${newRoleState}`,
-          `Interessent: ${heardText}`,
-          `Gloria: ${openerReply}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
-
-      return await respondWithGather(baseUrl, openerReply, {
-        ...toStatePayload(state),
-        decisionMakerIntroDone: true,
-        contactRole: newRole,
-        roleState: newRoleState,
-        transcript: updatedTranscript,
-        turn: state.turn + 1,
-        step: "conversation",
-      });
+      nextDecisionMakerIntroDone = true;
+      if (!forcedStep) {
+        forcedStep = "conversation";
+      }
     }
 
-    if (newRole === "decision-maker" && !consentAsked) {
+    if (
+      newRole === "decision-maker" &&
+      !consentAsked &&
+      state.contactRole === "decision-maker" &&
+      (state.decisionMakerIntroDone ?? false)
+    ) {
       const consentPrompt = getConsentPrompt(activeScript);
       const updatedTranscript = trimTranscript(
         [

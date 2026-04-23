@@ -3,6 +3,8 @@ import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { findPhoneNumberById } from "@/lib/report-db";
+import { describePreflightFailure, runPreflight } from "@/lib/preflight";
+import { log } from "@/lib/log";
 
 export const runtime = "nodejs";
 
@@ -15,6 +17,7 @@ export async function POST(request: Request) {
     leadId?: string;
     phoneNumberId?: string;
     from?: string;
+    skipPreflight?: boolean;
   };
 
   const sessionUser = getSessionUserFromRequest(request);
@@ -38,6 +41,34 @@ export async function POST(request: Request) {
       },
       { status: 400 },
     );
+  }
+
+  // Preflight: OpenAI + ElevenLabs + Twilio müssen alle erreichbar sein,
+  // bevor der Call ausgelöst wird. Spart Wählgebühren und verhindert,
+  // dass Gloria mitten im Gespräch verstummt, weil ein Dienst offline ist.
+  if (!payload.skipPreflight) {
+    const preflight = await runPreflight({ timeoutMs: 3000 });
+    log.info("testcall.preflight", {
+      ok: preflight.ok,
+      durationMs: preflight.durationMs,
+      checks: preflight.checks.map((c) => ({
+        service: c.service,
+        ok: c.ok,
+        latencyMs: c.latencyMs,
+        status: c.status,
+      })),
+    });
+    if (!preflight.ok) {
+      const reason = describePreflightFailure(preflight);
+      log.warn("testcall.preflight_blocked", { reason });
+      return NextResponse.json(
+        {
+          error: `Verbindung nicht stabil, Anruf wurde nicht ausgelöst. ${reason}`,
+          preflight,
+        },
+        { status: 503 },
+      );
+    }
   }
 
   try {

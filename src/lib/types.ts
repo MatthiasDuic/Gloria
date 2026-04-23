@@ -40,10 +40,8 @@ export interface PlaybookConfig {
   pkvHealthQuestions?: string;
   gatekeeperTask?: string;
   gatekeeperBehavior?: string;
-  gatekeeperExample?: string;
   decisionMakerTask?: string;
   decisionMakerBehavior?: string;
-  decisionMakerExample?: string;
   decisionMakerContext?: string;
   appointmentGoal?: string;
   receptionTopicReason?: string;

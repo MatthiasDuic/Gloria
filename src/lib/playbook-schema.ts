@@ -16,10 +16,8 @@ export const PlaybookPayloadSchema = z
     pkvHealthQuestions: z.string().trim().optional(),
     gatekeeperTask: z.string().trim().optional(),
     gatekeeperBehavior: z.string().trim().optional(),
-    gatekeeperExample: z.string().trim().optional(),
     decisionMakerTask: z.string().trim().optional(),
     decisionMakerBehavior: z.string().trim().optional(),
-    decisionMakerExample: z.string().trim().optional(),
     decisionMakerContext: z.string().trim().optional(),
     appointmentGoal: z.string().trim().optional(),
     receptionTopicReason: z.string().trim().optional(),
@@ -74,10 +72,6 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
       type: "string",
       description: "Verhalten am Empfang.",
     },
-    gatekeeperExample: {
-      type: "string",
-      description: "Beispielton für den Empfang.",
-    },
     decisionMakerTask: {
       type: "string",
       description: "Ziel beim Entscheider.",
@@ -85,10 +79,6 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
     decisionMakerBehavior: {
       type: "string",
       description: "Verhalten beim Entscheider.",
-    },
-    decisionMakerExample: {
-      type: "string",
-      description: "Beispielton beim Entscheider.",
     },
     decisionMakerContext: {
       type: "string",
