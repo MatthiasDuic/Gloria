@@ -17,7 +17,7 @@
 - ✅ User-scoped data isolation (scripts, reports, leads, campaigns)
 - ✅ PostgreSQL on Render with userId foreign keys
 
-### 2. **Telephony Pipeline (Twilio + OpenAI Realtime)**
+### 2. **Telephony Pipeline (Twilio + OpenAI Chat + ElevenLabs)**
 - ✅ Inbound call routing via `/api/twilio/voice`
 - ✅ Outbound campaign calling via `/api/campaigns/lists`
 - ✅ User-scoped script caching in `telephony-runtime.ts`
@@ -60,8 +60,7 @@ TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
-OPENAI_REALTIME_MODEL=gpt-realtime-1.5
-OPENAI_REALTIME_VOICE=alloy
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
 ELEVENLABS_API_KEY=
 ELEVENLABS_VOICE_ID=
 ```
@@ -80,7 +79,7 @@ User calls +4923399255995 (Twilio)
   ↓
 /api/twilio/voice (webhook answer)
   ├─ getContext() → extracts topic, userId
-  ├─ prepareCall() → initializes OpenAI Realtime + ElevenLabs
+  ├─ prepareCall() → initialisiert Laufzeit-Kontext + ElevenLabs
   └─ returns TwiML with Gather/Say
       ↓
 User speaks → Twilio transcribes
@@ -88,7 +87,7 @@ User speaks → Twilio transcribes
 /api/twilio/voice/process (user input handling)
   ├─ getScriptOrigin(topic, userId) → tracks script source
   ├─ getTopicScript() → resolves user-scoped script
-  ├─ OpenAI Realtime conversation
+  ├─ OpenAI Chat-Completions-Entscheidungslogik
   ├─ ElevenLabs voice synthesis
   ├─ POST to /api/calls/webhook → interim report
   └─ returns next TwiML
@@ -133,7 +132,7 @@ User speaks → Twilio transcribes
 ### Monthly
 - [ ] Database backup verification (Render auto-backups)
 - [ ] ElevenLabs quota check
-- [ ] OpenAI API usage (Realtime sessions)
+- [ ] OpenAI API usage (Chat Completions)
 
 ### Security
 - **Don't commit .env.local** (gitignore active)

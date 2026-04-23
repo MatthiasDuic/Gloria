@@ -112,10 +112,10 @@ Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotz
 ```env
 OPENAI_API_KEY=dein_openai_key
 OPENAI_MODEL=gpt-4.1-mini
-OPENAI_REALTIME_MODEL=gpt-realtime-1.5
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
 ```
 
-Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. `OPENAI_REALTIME_MODEL` wird für vorbereitete Realtime-Sessions und die Telephony-Runtime-Konfiguration genutzt.
+Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. `OPENAI_REALTIME_MODEL` ist für zukünftige Realtime-Erweiterungen zentral hinterlegt und bewusst auf `gpt-4o-realtime-preview` fixiert.
 
 ## ElevenLabs-Stimme aktivieren
 
@@ -160,20 +160,13 @@ Twilio ruft dann diese Endpunkte auf:
 
 ## Live-Gespräche auf Vercel
 
-Gloria kann jetzt in einem **Vercel-tauglichen Live-Modus** mehrstufig auf freie Antworten reagieren. Dafür setze optional:
+Gloria läuft auf Vercel stabil im turn-basierten Sprachfluss:
 
-```env
-TWILIO_CONVERSATION_MODE=live
-```
+- Twilio Gather für Spracheingaben
+- OpenAI Chat Completions für Antwortentscheidungen
+- ElevenLabs für Audioausgabe
 
-Wenn du später mit einem echten WebSocket-Stream arbeiten willst, kannst du vorbereitend zusätzlich setzen:
-
-```env
-TWILIO_CONVERSATION_MODE=media-stream
-TWILIO_MEDIA_STREAM_URL=wss://dein-stream-endpunkt
-```
-
-Ohne `TWILIO_MEDIA_STREAM_URL` bleibt Gloria automatisch im funktionierenden Live-Gesprächsmodus auf Basis von Twilio Speech Gather.
+Es wird kein separater Media-Stream-Endpunkt benötigt.
 
 ## So wird daraus echte automatische Telefonie
 
@@ -212,7 +205,7 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `BASIC_AUTH_USERNAME` | Benutzername für Dashboard-Zugriff |
 | `BASIC_AUTH_PASSWORD` | Passwort für Dashboard-Zugriff |
 | `OPENAI_API_KEY` | Live-Antworten im Twilio-Gesprächsfluss |
-| `OPENAI_MODEL` | Empfohlen: `gpt-4o` |
+| `OPENAI_MODEL` | Empfohlen: `gpt-4.1-mini` |
 | `TWILIO_ACCOUNT_SID` | Twilio API-Zugang |
 | `TWILIO_AUTH_TOKEN` | Twilio API-Zugang |
 | `TWILIO_PHONE_NUMBER` | Ausgehende Twilio-Rufnummer |
