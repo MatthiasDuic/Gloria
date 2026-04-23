@@ -100,11 +100,28 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
   const apiKey = process.env.ELEVENLABS_API_KEY!.trim();
   const voiceId = process.env.ELEVENLABS_VOICE_ID!.trim();
 
+  // Wir prüfen exakt den Endpoint, der im Call auch verwendet wird, mit dem
+  // absolut kleinstmöglichen Payload ("Hi"). Das testet die tatsächlich
+  // nötige TTS-Permission statt eines möglicherweise fehlenden voices_read.
+  const url = new URL(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+  );
+  url.searchParams.set("optimize_streaming_latency", "0");
+  url.searchParams.set("output_format", "ulaw_8000");
+
   const { response, error, latencyMs } = await timedFetch(
-    `https://api.elevenlabs.io/v1/voices/${voiceId}`,
+    url.toString(),
     {
-      method: "GET",
-      headers: { "xi-api-key": apiKey },
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "audio/basic",
+        "xi-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        text: "Hi.",
+        model_id: process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_multilingual_v2",
+      }),
     },
     timeoutMs,
   );
@@ -125,8 +142,15 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
       ok: false,
       status: response?.status,
       latencyMs,
-      reason: `ElevenLabs /voices/{id} antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+      reason: `ElevenLabs TTS-Stream antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
     };
+  }
+
+  // Body abbrechen, wir wollen nicht komplette Audio-Bytes laden.
+  try {
+    await response.body?.cancel();
+  } catch {
+    // egal
   }
 
   return {
