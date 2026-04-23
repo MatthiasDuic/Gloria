@@ -45,10 +45,13 @@ export async function POST(request: Request) {
 
   const parsed = PlaybookPayloadSchema.safeParse(payload);
   if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .slice(0, 5);
     return NextResponse.json(
       {
-        error: "Playbook-Payload ist ungültig.",
-        details: parsed.error.issues.map((issue) => issue.message).slice(0, 5),
+        error: `Playbook-Payload ist ungültig: ${details.join("; ")}`,
+        details,
       },
       { status: 400 },
     );

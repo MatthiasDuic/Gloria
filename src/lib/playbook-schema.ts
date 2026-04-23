@@ -5,6 +5,10 @@ const TopicSchema = z.enum(TOPICS);
 
 export const PlaybookPayloadSchema = z
   .object({
+    // id kommt aus dem UI-Draft (PlaybookConfig.id). Der Server vergibt
+    // die finale Id selbst in saveScript, akzeptiert das Feld aber, damit
+    // .strict() keinen kompletten Save blockiert.
+    id: z.string().optional(),
     topic: TopicSchema.optional(),
     opener: z.string().trim().min(1).optional(),
     discovery: z.string().trim().min(1).optional(),
