@@ -1245,6 +1245,29 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
+    // Direkter Consent-Übergang beim Entscheider: Sobald ein klares "Ja"
+    // auf die Aufzeichnungsfrage kommt, starten wir deterministisch mit der
+    // kurzen Discovery-Frage statt in eine lange LLM-Formulierung zu laufen.
+    if (
+      state.contactRole === "decision-maker" &&
+      consentAnswer === "yes" &&
+      updatedConsent === "yes" &&
+      (state.scriptPhaseIndex ?? 0) === 0
+    ) {
+      const discoveryQuestion = buildDecisionMakerDiscoveryQuestion(state.topic);
+      return await respondWithGather(baseUrl, discoveryQuestion, {
+        ...toStatePayload(state),
+        transcript: trimTranscript(
+          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${discoveryQuestion}`,
+        ),
+        turn: state.turn + 1,
+        step: "conversation",
+        consent: "yes",
+        consentAsked: true,
+        scriptPhaseIndex: 1,
+      });
+    }
+
     const inPkvPostAppointmentFlow =
       state.topic === "private Krankenversicherung" &&
       state.contactRole === "decision-maker" &&
