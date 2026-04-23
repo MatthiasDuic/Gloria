@@ -111,11 +111,11 @@ Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotz
 
 ```env
 OPENAI_API_KEY=dein_openai_key
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-5
 OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
 ```
 
-Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. `OPENAI_REALTIME_MODEL` ist für zukünftige Realtime-Erweiterungen zentral hinterlegt und bewusst auf `gpt-4o-realtime-preview` fixiert.
+Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. Wenn dein OpenAI-Account es freigeschaltet hat, kannst du hier direkt auf `gpt-5.4` wechseln. `OPENAI_REALTIME_MODEL` ist für zukünftige Realtime-Erweiterungen zentral hinterlegt und bewusst auf `gpt-4o-realtime-preview` fixiert.
 
 ## ElevenLabs-Stimme aktivieren
 
@@ -205,7 +205,7 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `BASIC_AUTH_USERNAME` | Benutzername für Dashboard-Zugriff |
 | `BASIC_AUTH_PASSWORD` | Passwort für Dashboard-Zugriff |
 | `OPENAI_API_KEY` | Live-Antworten im Twilio-Gesprächsfluss |
-| `OPENAI_MODEL` | Empfohlen: `gpt-4.1-mini` |
+| `OPENAI_MODEL` | Empfohlen: `gpt-5` (optional `gpt-5.4`, falls verfügbar) |
 | `TWILIO_ACCOUNT_SID` | Twilio API-Zugang |
 | `TWILIO_AUTH_TOKEN` | Twilio API-Zugang |
 | `TWILIO_PHONE_NUMBER` | Ausgehende Twilio-Rufnummer |
