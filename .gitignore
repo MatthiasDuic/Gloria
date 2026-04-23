@@ -9,3 +9,4 @@ coverage
 .env*.local
 
 vercel_last.log
+vercel-logs.tmp
