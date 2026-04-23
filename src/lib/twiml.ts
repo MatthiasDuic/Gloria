@@ -99,13 +99,23 @@ export function buildGatherTwiml(params: {
 export function buildSayHangupTwiml(params: {
   sayText?: string;
   playUrl?: string;
+  /**
+   * Sekunden Pause zwischen Goodbye und dem eigentlichen Auflegen.
+   * Telefonisch wirkt ein Anruf deutlich höflicher, wenn Gloria nach
+   * ihrem "Auf Wiederhören" nicht sofort die Leitung kappt, sondern dem
+   * Gegenüber noch kurz Raum lässt, selbst zu reagieren. Twilio-Default
+   * war hier 0s (abruptes Klacken). Wir gehen auf 3s.
+   */
+  trailingPauseSeconds?: number;
 }): string {
   const sayBlock = params.sayText
     ? `<Say${buildAttributes({ voice: "alice", language: "de-DE" })}>${escapeXml(params.sayText)}</Say>`
     : "";
   const playBlock = params.playUrl ? `<Play>${escapeXml(params.playUrl)}</Play>` : "";
+  const pauseSeconds = Math.max(0, Math.min(10, params.trailingPauseSeconds ?? 3));
+  const pauseBlock = pauseSeconds > 0 ? `<Pause${buildAttributes({ length: pauseSeconds })} />` : "";
 
-  return withResponse(`${sayBlock}${playBlock}<Hangup />`);
+  return withResponse(`${sayBlock}${playBlock}${pauseBlock}<Hangup />`);
 }
 
 export function buildDialTwiml(params: {
