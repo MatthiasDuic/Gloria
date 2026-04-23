@@ -35,16 +35,16 @@ export const runtime = "edge";
 
 const AI_MODEL = AI_CONFIG.chatModel;
 const AI_TIMEOUT_MS = Math.min(
-  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "1600", 10), 900),
-  4500,
+  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "1200", 10), 700),
+  3200,
 );
 const REPLY_GATHER_TIMEOUT_SECONDS = Math.min(
   6,
   Math.max(1, Number.parseInt(process.env.TWILIO_REPLY_GATHER_TIMEOUT_SECONDS || "1", 10)),
 );
 const LISTEN_ONLY_TIMEOUT_SECONDS = Math.min(
-  8,
-  Math.max(2, Number.parseInt(process.env.TWILIO_LISTEN_ONLY_TIMEOUT_SECONDS || "3", 10)),
+  6,
+  Math.max(1, Number.parseInt(process.env.TWILIO_LISTEN_ONLY_TIMEOUT_SECONDS || "2", 10)),
 );
 const SCRIPT_CACHE_MS = 60_000;
 
@@ -772,10 +772,12 @@ async function respondWithGather(
 ): Promise<NextResponse> {
   const token = await encodeCallStateToken(nextState);
   const actionUrl = `${baseUrl}/api/twilio/voice/process?state=${encodeURIComponent(token)}`;
+  const useElevenLabs = isElevenLabsConfigured();
+  const playUrl = useElevenLabs ? await buildSignedAudioUrl(baseUrl, text) : undefined;
 
   const twiml = buildGatherTwiml({
-    ...(isElevenLabsConfigured()
-      ? { playUrl: await buildSignedAudioUrl(baseUrl, text) }
+    ...(useElevenLabs
+      ? { playUrl }
       : { sayText: text }),
     gather: {
       input: "speech",
@@ -811,6 +813,14 @@ async function respondWithGather(
       // Transcript chunk persistence is best-effort and must not delay call flow.
     });
   }
+
+  log.info("voice.tts_response", {
+    event: "voice.process",
+    callSid: nextState.callSid,
+    step: nextState.step,
+    ttsProvider: useElevenLabs ? "elevenlabs" : "twilio-say",
+    chars: text.length,
+  });
 
   return new NextResponse(twiml, {
     headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -851,11 +861,19 @@ async function respondWithHangup(baseUrl: string, text: string): Promise<NextRes
   const outro = `${hasThanks ? "" : " Vielen Dank für das Telefonat."}${hasGoodbye ? "" : " Auf Wiederhören."}`;
   const finalText = `${normalized}${outro}`.trim();
 
+  const useElevenLabs = isElevenLabsConfigured();
   const twiml = buildSayHangupTwiml(
-    isElevenLabsConfigured()
+    useElevenLabs
       ? { playUrl: await buildSignedAudioUrl(baseUrl, finalText) }
       : { sayText: finalText },
   );
+
+  log.info("voice.tts_response", {
+    event: "voice.process",
+    step: "finished",
+    ttsProvider: useElevenLabs ? "elevenlabs" : "twilio-say",
+    chars: finalText.length,
+  });
 
   return new NextResponse(twiml, {
     headers: { "Content-Type": "text/xml; charset=utf-8" },
@@ -1017,6 +1035,34 @@ export async function POST(request: Request): Promise<NextResponse> {
         step: "intro",
         contactRole: "gatekeeper",
         roleState: "transfer",
+      });
+    }
+
+    // Harter Transfer-Flow: Sobald die Rezeption das Durchstellen ankündigt,
+    // wartet Gloria nur noch auf die neue Stimme. Kein erneutes "Bitte verbinden".
+    if (state.roleState === "transfer" && state.contactRole !== "decision-maker") {
+      if (!isLikelyDecisionMakerGreeting(heardText)) {
+        return await respondWithListenOnly(baseUrl, {
+          ...toStatePayload(state),
+          transcript: trimTranscript(`${state.transcript}\nInteressent: ${heardText}`),
+          turn: state.turn + 1,
+          step: "intro",
+          contactRole: "gatekeeper",
+          roleState: "transfer",
+        });
+      }
+
+      const openerLine = buildDecisionMakerOpenerLine(state);
+      return await respondWithGather(baseUrl, openerLine, {
+        ...toStatePayload(state),
+        turn: state.turn + 1,
+        step: "intro",
+        contactRole: "decision-maker",
+        roleState: "decision_maker",
+        decisionMakerIntroDone: true,
+        transcript: trimTranscript(
+          `${state.transcript}\nInteressent: ${heardText}\nGloria: ${openerLine}`,
+        ),
       });
     }
 

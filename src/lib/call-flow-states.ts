@@ -46,7 +46,7 @@ export function getTopicReasonLine(topic: Topic): string {
     return "es geht um eine kurze Einordnung zur betrieblichen Altersvorsorge und wie Arbeitgeber damit langfristige Bindung aufbauen";
   }
   if (topic === "private Krankenversicherung") {
-    return "es geht um eine kurze Einordnung zur privaten Krankenversicherung und typische Optimierungspotenziale";
+    return "es geht um die stetig steigenden Beiträge zur Gesundheitsversorgung und wie man sich in der Krankenversicherung langfristig planbarer aufstellen kann";
   }
   return `es geht um eine kurze Einordnung zum Thema ${topic}`;
 }

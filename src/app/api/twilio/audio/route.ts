@@ -114,7 +114,7 @@ export async function GET(request: Request) {
   const started = Date.now();
   try {
     const voiceStream = await generateElevenLabsTelephonyStream(text);
-    log.info("audio.stream_ready", { latencyMs: Date.now() - started });
+    log.info("audio.stream_ready", { latencyMs: Date.now() - started, ttsProvider: "elevenlabs" });
 
     return new NextResponse(voiceStream.body, {
       status: 200,
@@ -122,6 +122,7 @@ export async function GET(request: Request) {
         "Content-Type": "audio/basic",
         "Cache-Control": "no-store, max-age=0",
         "X-Audio-Format": "ulaw_8000",
+        "X-TTS-Provider": "elevenlabs",
       },
     });
   } catch (error) {
