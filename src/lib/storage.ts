@@ -3,6 +3,7 @@ import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import { phoneMatches, normalizePhoneForMatch } from "./phone-utils";
 import {
+  appendCallTranscriptEventToPostgres,
   appendConversationEventToPostgres,
   bootstrapUserScriptsFromDefaults,
   clearReportRecordingInPostgres,
@@ -165,8 +166,8 @@ function buildRecordingEntries(reports: CallReport[]): RecordingEntry[] {
     }));
 }
 
-async function readReportDatabase(): Promise<ReportDatabase> {
-  const postgresData = await readReportDatabaseFromPostgres();
+async function readReportDatabase(userId?: string): Promise<ReportDatabase> {
+  const postgresData = await readReportDatabaseFromPostgres(userId);
 
   if (postgresData) {
     return postgresData;
@@ -183,26 +184,31 @@ async function readReportDatabase(): Promise<ReportDatabase> {
     };
   } catch {
     const legacyReports = await readJson(REPORTS_FILE, defaultReports);
+    const scopedLegacyReports = userId
+      ? legacyReports.filter((report) => report.userId === userId)
+      : legacyReports;
     const migrated: ReportDatabase = {
-      reports: legacyReports,
-      recordings: buildRecordingEntries(legacyReports),
+      reports: scopedLegacyReports,
+      recordings: buildRecordingEntries(scopedLegacyReports),
     };
-    await writeJson(REPORT_DB_FILE, migrated);
+    if (!userId) {
+      await writeJson(REPORT_DB_FILE, migrated);
+    }
     return migrated;
   }
 }
 
-async function readReportDatabaseWithMode(): Promise<{
+async function readReportDatabaseWithMode(userId?: string): Promise<{
   data: ReportDatabase;
   mode: "postgres" | "file";
 }> {
-  const postgresData = await readReportDatabaseFromPostgres();
+  const postgresData = await readReportDatabaseFromPostgres(userId);
 
   if (postgresData) {
     return { data: postgresData, mode: "postgres" };
   }
 
-  const fileData = await readReportDatabase();
+  const fileData = await readReportDatabase(userId);
   return { data: fileData, mode: "file" };
 }
 
@@ -233,6 +239,50 @@ function normalizeTopic(input: string): Topic {
     return "private Krankenversicherung";
   }
   return "Energie";
+}
+
+async function persistTranscriptChunkEvent(payload: {
+  userId?: string;
+  callSid?: string;
+  summaryChunk?: string;
+}) {
+  const callSid = payload.callSid?.trim();
+  const chunk = payload.summaryChunk?.trim();
+  if (!callSid || !chunk) {
+    return;
+  }
+
+  const lines = chunk.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (line.startsWith("[Script:")) {
+      continue;
+    }
+
+    if (line.startsWith("Gloria:")) {
+      const text = line.replace(/^Gloria:\s*/i, "").trim();
+      if (text) {
+        await appendCallTranscriptEventToPostgres({
+          callSid,
+          userId: payload.userId,
+          speaker: "Gloria",
+          text,
+        });
+      }
+      continue;
+    }
+
+    if (line.startsWith("Interessent:")) {
+      const text = line.replace(/^Interessent:\s*/i, "").trim();
+      if (text) {
+        await appendCallTranscriptEventToPostgres({
+          callSid,
+          userId: payload.userId,
+          speaker: "Interessent",
+          text,
+        });
+      }
+    }
+  }
 }
 
 function detectCsvDelimiter(line: string): string {
@@ -352,8 +402,8 @@ function buildHeaderIndex(headerRow: string[]): Record<string, number> {
   return indexMap;
 }
 
-async function readConversationEvents(): Promise<ConversationEvent[]> {
-  const postgresData = await readConversationEventsFromPostgres();
+async function readConversationEvents(userId?: string): Promise<ConversationEvent[]> {
+  const postgresData = await readConversationEventsFromPostgres(userId);
 
   if (postgresData) {
     return postgresData;
@@ -509,6 +559,7 @@ async function writeCampaignState(state: CampaignStateFile, userId?: string): Pr
 
 export async function appendConversationEvent(
   event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
+  options?: { userId?: string },
 ) {
   const normalized: ConversationEvent = {
     ...event,
@@ -516,7 +567,7 @@ export async function appendConversationEvent(
     createdAt: event.createdAt || new Date().toISOString(),
   };
 
-  const wroteToPostgres = await appendConversationEventToPostgres(normalized);
+  const wroteToPostgres = await appendConversationEventToPostgres(normalized, options?.userId);
 
   if (wroteToPostgres) {
     return normalized;
@@ -552,16 +603,15 @@ function buildMetrics(
 export async function getDashboardData(options?: { userId?: string; role?: "master" | "user" }): Promise<DashboardData> {
   const userId = options?.userId;
   const scopeReportsToUser = options?.role === "user" && Boolean(userId);
+  const scopedUserId = scopeReportsToUser ? userId : undefined;
   const [leads, reportState, scriptsState, events] = await Promise.all([
-    readLeads(scopeReportsToUser ? userId : undefined),
-    readReportDatabaseWithMode(),
+    readLeads(scopedUserId),
+    readReportDatabaseWithMode(scopedUserId),
     readScriptsWithMode(userId),
-    readConversationEvents(),
+    readConversationEvents(scopedUserId),
   ]);
 
-  const reports = scopeReportsToUser
-    ? reportState.data.reports.filter((report) => report.userId === userId)
-    : reportState.data.reports;
+  const reports = reportState.data.reports;
 
   return {
     leads,
@@ -724,6 +774,12 @@ export async function storeCallReport(payload: {
   recordingConsent?: boolean;
   recordingUrl?: string;
 }) {
+  await persistTranscriptChunkEvent({
+    userId: payload.userId,
+    callSid: payload.callSid,
+    summaryChunk: payload.summaryChunk,
+  });
+
   const [leads, reportDb] = await Promise.all([
     readLeads(payload.userId),
     readReportDatabase(),

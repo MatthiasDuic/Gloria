@@ -294,6 +294,28 @@ async function ensureSchema() {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS call_transcript_events (
+      id TEXT PRIMARY KEY,
+      call_sid TEXT NOT NULL,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      speaker TEXT NOT NULL,
+      text_value TEXT NOT NULL,
+      phase TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS call_transcript_events_call_sid_idx
+    ON call_transcript_events (call_sid);
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS call_transcript_events_user_id_idx
+    ON call_transcript_events (user_id);
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS gloria_reports (
       id TEXT PRIMARY KEY,
       call_sid TEXT,
@@ -355,6 +377,7 @@ async function ensureSchema() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS gloria_conversation_events (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       call_sid TEXT,
       topic TEXT NOT NULL,
       company TEXT NOT NULL,
@@ -370,6 +393,16 @@ async function ensureSchema() {
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_conversation_events_call_sid_idx
     ON gloria_conversation_events (call_sid);
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_conversation_events
+    ADD COLUMN IF NOT EXISTS user_id TEXT;
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS gloria_conversation_events_user_id_idx
+    ON gloria_conversation_events (user_id);
   `);
 
   await db.query(`
@@ -848,7 +881,7 @@ export async function writeScriptsToPostgres(scripts: ScriptConfig[]): Promise<b
   }
 }
 
-export async function readReportDatabaseFromPostgres(): Promise<ReportDatabase | null> {
+export async function readReportDatabaseFromPostgres(userId?: string): Promise<ReportDatabase | null> {
   if (!shouldUsePostgres()) {
     return null;
   }
@@ -878,8 +911,9 @@ export async function readReportDatabaseFromPostgres(): Promise<ReportDatabase |
         recording_url,
         emailed_to
       FROM gloria_reports
+      ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY conversation_date DESC;
-    `);
+    `, userId ? [userId] : []);
 
     const recordingsResult = await db.query(`
       SELECT id, call_sid, company, contact_name, topic, recording_url, created_at
@@ -1116,7 +1150,7 @@ export async function clearReportRecordingInPostgres(reportId: string): Promise<
   }
 }
 
-export async function readConversationEventsFromPostgres(): Promise<ConversationEvent[] | null> {
+export async function readConversationEventsFromPostgres(userId?: string): Promise<ConversationEvent[] | null> {
   if (!shouldUsePostgres()) {
     return null;
   }
@@ -1127,9 +1161,10 @@ export async function readConversationEventsFromPostgres(): Promise<Conversation
     const result = await db.query(`
       SELECT id, call_sid, topic, company, step, event_type, contact_role, turn, text_value, created_at
       FROM gloria_conversation_events
+      ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY created_at DESC
       LIMIT 5000;
-    `);
+    `, userId ? [userId] : []);
 
     return result.rows.map((row) => ({
       id: String(row.id),
@@ -1154,6 +1189,7 @@ export async function readConversationEventsFromPostgres(): Promise<Conversation
 
 export async function appendConversationEventToPostgres(
   event: ConversationEvent,
+  userId?: string,
 ): Promise<boolean> {
   if (!shouldUsePostgres()) {
     return false;
@@ -1166,6 +1202,7 @@ export async function appendConversationEventToPostgres(
       `
       INSERT INTO gloria_conversation_events (
         id,
+        user_id,
         call_sid,
         topic,
         company,
@@ -1175,11 +1212,12 @@ export async function appendConversationEventToPostgres(
         turn,
         text_value,
         created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       ON CONFLICT (id) DO NOTHING;
       `,
       [
         event.id,
+        userId || null,
         event.callSid || null,
         event.topic,
         event.company,
@@ -1642,5 +1680,41 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
   } catch (error) {
     console.error("Postgres report lookup failed", error);
     return null;
+  }
+}
+
+export async function appendCallTranscriptEventToPostgres(payload: {
+  callSid: string;
+  userId?: string;
+  speaker: "Gloria" | "Interessent";
+  text: string;
+  phase?: string;
+}): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `
+      INSERT INTO call_transcript_events (id, call_sid, user_id, speaker, text_value, phase, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING;
+      `,
+      [
+        `tx-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        payload.callSid,
+        payload.userId || null,
+        payload.speaker,
+        payload.text,
+        payload.phase || null,
+      ],
+    );
+    return true;
+  } catch (error) {
+    console.error("Postgres transcript event write failed", error);
+    return false;
   }
 }
