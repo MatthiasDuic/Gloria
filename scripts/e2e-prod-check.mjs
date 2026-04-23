@@ -164,13 +164,14 @@ let reportId = "";
 
 // 9) user create report
 {
+  const appointmentAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const r = await user.request("/api/reports", {
     method: "POST",
     json: {
       company: "E2E GmbH",
       topic: "Energie",
       summary: "E2E tenant report",
-      outcome: "Kein Kontakt",
+      appointmentAt,
     },
   });
   reportId = r.json?.report?.id || "";
