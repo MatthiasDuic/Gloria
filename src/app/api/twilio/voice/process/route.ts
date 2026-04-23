@@ -1320,13 +1320,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       extractDirectDialFromText(heardText) ||
       normalizeDirectDial(state.directDial);
 
-    if (decision.consentGiven === true) {
-      updatedConsent = "yes";
-      consentAsked = true;
-    }
-    if (decision.consentGiven === false) {
-      updatedConsent = "no";
-      consentAsked = true;
+    // Only process consent from OpenAI response if we're actually in the consent step
+    if (state.step === "consent") {
+      if (decision.consentGiven === true) {
+        updatedConsent = "yes";
+        consentAsked = true;
+      }
+      if (decision.consentGiven === false) {
+        updatedConsent = "no";
+        consentAsked = true;
+      }
     }
 
     const roleResolution = detectRoleState({
