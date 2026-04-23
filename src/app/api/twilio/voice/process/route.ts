@@ -642,22 +642,33 @@ async function askOpenAI(
   const started = Date.now();
 
   try {
+    // GPT-5 verlangt "max_completion_tokens" (nicht mehr "max_tokens") und
+    // unterstützt nur die Default-Temperature. Ältere Modelle (gpt-4o, etc.)
+    // akzeptieren weiterhin das klassische Schema. Wir wechseln anhand des
+    // Modellnamens und lassen die Felder, die gpt-5 nicht kennt, weg.
+    const isGpt5Family = /^gpt-5/i.test(AI_MODEL);
+    const body: Record<string, unknown> = {
+      model: AI_MODEL,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
+        { role: "user", content: userContent },
+      ],
+    };
+    if (isGpt5Family) {
+      body.max_completion_tokens = 260;
+    } else {
+      body.max_tokens = 220;
+      body.temperature = 0.3;
+    }
+
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        response_format: { type: "json_object" },
-        temperature: 0.3,
-        max_tokens: 220,
-        messages: [
-          { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
-          { role: "user", content: userContent },
-        ],
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
       cache: "no-store",
     });
@@ -668,6 +679,8 @@ async function askOpenAI(
         event: "openai.chat_completions",
         status: response.status,
         latencyMs: Date.now() - started,
+        model: AI_MODEL,
+        bodyPreview: details.slice(0, 400),
       });
       throw new Error(`OpenAI error (${response.status}): ${details}`);
     }
@@ -1028,43 +1041,25 @@ export async function POST(request: Request): Promise<NextResponse> {
         detectedRole: detected,
       });
 
-      let initialDecision: GloriaDecision;
-      try {
-        initialDecision = await askOpenAIWithRetry(
-          systemPrompt,
-          state.contactName,
-          state.transcript,
-          heardText,
-          detected,
-          "intro",
-          state.callSid,
-        );
-      } catch {
-        log.warn("voice.initial_openai_fallback", {
-          callSid: state.callSid,
-          detectedRole: detected,
-        });
-        const bridgeLine = "Einen kleinen Moment bitte.";
-        return await respondWithGather(baseUrl, bridgeLine, {
-          ...toStatePayload(state),
-          turn: state.turn + 1,
-          step: "intro",
-          contactRole: detected,
-          roleState: detected === "decision-maker" ? "decision_maker" : "reception",
-          transcript: trimTranscript(
-            `${state.transcript}\nInteressent: ${heardText}\nGloria: ${bridgeLine}`,
-          ),
-        });
-      }
+      // Turn 0 ist hart latenzkritisch: Gloria darf nach dem "Hallo" keine
+      // 5 s stumm bleiben, während 2× OpenAI retried. Deshalb greift hier
+      // gezielt der deterministische Opener aus dem Playbook. OpenAI führt
+      // das Gespräch dann ab Turn 1 natürlich und prompt-gesteuert weiter.
+      const initialReply =
+        detected === "decision-maker"
+          ? buildDecisionMakerOpenerLine(state)
+          : buildGatekeeperOpenerLine(state);
 
-      return await respondWithGather(baseUrl, initialDecision.reply, {
+      return await respondWithGather(baseUrl, initialReply, {
         ...toStatePayload(state),
         turn: state.turn + 1,
         step: detected === "decision-maker" ? "conversation" : "intro",
         contactRole: detected,
         roleState: detected === "decision-maker" ? "decision_maker" : "reception",
         decisionMakerIntroDone: detected === "decision-maker",
-        transcript: trimTranscript(`Interessent: ${heardText}\nGloria: ${initialDecision.reply}`),
+        transcript: trimTranscript(
+          `Interessent: ${heardText}\nGloria: ${initialReply}`,
+        ),
       });
     }
 
