@@ -915,11 +915,19 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
       ORDER BY conversation_date DESC;
     `, userId ? [userId] : []);
 
-    const recordingsResult = await db.query(`
-      SELECT id, call_sid, company, contact_name, topic, recording_url, created_at
-      FROM gloria_recordings
-      ORDER BY created_at DESC;
-    `);
+    const recordingsResult = await db.query(
+      `
+      SELECT r.id, r.call_sid, r.company, r.contact_name, r.topic, r.recording_url, r.created_at
+      FROM gloria_recordings r
+      ${
+        userId
+          ? "WHERE EXISTS (SELECT 1 FROM gloria_reports gr WHERE gr.call_sid = r.call_sid AND gr.user_id = $1)"
+          : ""
+      }
+      ORDER BY r.created_at DESC;
+      `,
+      userId ? [userId] : [],
+    );
 
     const reports: CallReport[] = reportsResult.rows.map((row) => ({
       id: String(row.id),

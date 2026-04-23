@@ -56,6 +56,10 @@ interface CampaignStateFile {
   lists: CampaignListState[];
 }
 
+interface StoredConversationEvent extends ConversationEvent {
+  userId?: string;
+}
+
 const LEGACY_STANDARD_OPENERS: Record<Topic, string[]> = {
   "betriebliche Krankenversicherung": [
     "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Krankenversicherung, weil viele Unternehmen damit Mitarbeiterbindung und Arbeitgeberattraktivität deutlich verbessern. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
@@ -178,9 +182,22 @@ async function readReportDatabase(userId?: string): Promise<ReportDatabase> {
   try {
     const raw = await readFile(REPORT_DB_FILE, "utf8");
     const parsed = JSON.parse(raw) as Partial<ReportDatabase>;
+    const parsedReports = Array.isArray(parsed.reports) ? parsed.reports : [];
+    const scopedReports = userId
+      ? parsedReports.filter((report) => report.userId === userId)
+      : parsedReports;
+    const reportCallSids = new Set(
+      scopedReports
+        .map((report) => report.callSid)
+        .filter((callSid): callSid is string => Boolean(callSid)),
+    );
+    const parsedRecordings = Array.isArray(parsed.recordings) ? parsed.recordings : [];
+    const scopedRecordings = userId
+      ? parsedRecordings.filter((recording) => reportCallSids.has(recording.callSid))
+      : parsedRecordings;
     return {
-      reports: parsed.reports || [],
-      recordings: parsed.recordings || [],
+      reports: scopedReports,
+      recordings: scopedRecordings,
     };
   } catch {
     const legacyReports = await readJson(REPORTS_FILE, defaultReports);
@@ -409,7 +426,11 @@ async function readConversationEvents(userId?: string): Promise<ConversationEven
     return postgresData;
   }
 
-  return await readJson<ConversationEvent[]>(EVENTS_FILE, []);
+  const fileEvents = await readJson<StoredConversationEvent[]>(EVENTS_FILE, []);
+  const scopedEvents = userId
+    ? fileEvents.filter((event) => event.userId === userId)
+    : fileEvents;
+  return scopedEvents.map(({ userId: _userId, ...event }) => event);
 }
 
 async function readScriptsWithMode(userId?: string): Promise<{
@@ -573,8 +594,12 @@ export async function appendConversationEvent(
     return normalized;
   }
 
-  const existing = await readJson<ConversationEvent[]>(EVENTS_FILE, []);
-  const next = [normalized, ...existing].slice(0, 5000);
+  const storedEvent: StoredConversationEvent = {
+    ...normalized,
+    userId: options?.userId,
+  };
+  const existing = await readJson<StoredConversationEvent[]>(EVENTS_FILE, []);
+  const next = [storedEvent, ...existing].slice(0, 5000);
   await writeJson(EVENTS_FILE, next);
   return normalized;
 }
