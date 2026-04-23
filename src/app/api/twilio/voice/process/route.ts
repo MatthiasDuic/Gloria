@@ -1256,7 +1256,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     const newRole = roleResolution.contactRole;
     const newRoleState = roleResolution.roleState;
     let nextDecisionMakerIntroDone = state.decisionMakerIntroDone ?? false;
+    let nextAppointmentProposalAsked = state.appointmentProposalAsked ?? false;
     let forceReply = false;
+    let forcedStep: TokenizedCallState["step"] | undefined;
 
     if (
       state.roleState === "transfer" &&
@@ -1376,7 +1378,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (
       newRole === "decision-maker" &&
       decision.action === "continue" &&
-      !appointmentAt
+      !appointmentAt &&
+      !nextAppointmentProposalAsked
     ) {
       const lastGloriaLines = state.transcript
         .split("\n")
@@ -1395,12 +1398,15 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
         decision.reply =
           "Ich merke, wir drehen uns ein bisschen im Kreis. Lassen Sie uns das lieber in Ruhe in einem kurzen Termin besprechen. Passt Ihnen kommende Woche eher vormittags oder nachmittags?";
+        nextAppointmentProposalAsked = true;
+        forcedStep = "appointment";
         forceReply = true;
       }
     }
 
     const nextStep: TokenizedCallState["step"] =
-      decision.action !== "continue"
+      forcedStep ||
+      (decision.action !== "continue"
         ? "finished"
         : newRole !== "decision-maker"
           ? "intro"
@@ -1408,7 +1414,7 @@ export async function POST(request: Request): Promise<NextResponse> {
             ? "consent"
             : appointmentAt
               ? "appointment"
-              : "conversation";
+              : "conversation");
 
     const updatedTranscript = trimTranscript(
       [
@@ -1500,6 +1506,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       directDial,
       consent: updatedConsent,
       consentAsked,
+      appointmentProposalAsked: nextAppointmentProposalAsked,
       contactRole: newRole,
       roleState: newRoleState,
       transcript: updatedTranscript,
