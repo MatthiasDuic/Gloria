@@ -236,21 +236,78 @@ function classifyInitialGreeting(params: {
   return "gatekeeper";
 }
 
+function getTopicReasonLine(topic: Topic): string {
+  if (topic === "betriebliche Krankenversicherung") {
+    return "es geht um eine kurze Einordnung zur betrieblichen Krankenversicherung und wie Betriebe damit Gesundheitsthemen greifbar entlasten";
+  }
+  if (topic === "betriebliche Altersvorsorge") {
+    return "es geht um eine kurze Einordnung zur betrieblichen Altersvorsorge und wie Arbeitgeber damit langfristige Bindung aufbauen";
+  }
+  if (topic === "private Krankenversicherung") {
+    return "es geht um eine kurze Einordnung zur privaten Krankenversicherung und typische Optimierungspotenziale";
+  }
+  return `es geht um eine kurze Einordnung zum Thema ${topic}`;
+}
+
+function getResponsibleRoleByTopic(topic: Topic): string {
+  if (topic === "betriebliche Krankenversicherung" || topic === "betriebliche Altersvorsorge") {
+    return "der zuständigen Person für Personal oder Benefits";
+  }
+  if (topic === "private Krankenversicherung") {
+    return "der zuständigen Person";
+  }
+  return "der zuständigen Person";
+}
+
 function buildGatekeeperOpenerLine(state: TokenizedCallState): string {
-  const identity = getOwnerIdentity(state);
   const name = normalizeContactName(state.contactName);
-  const transferAsk = name
-    ? `Könnten Sie mich bitte kurz mit ${name} verbinden?`
-    : "Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?";
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich melde mich im Auftrag von ${identity.ownerName}. ${transferAsk}`;
+  const transferTarget = name || getResponsibleRoleByTopic(state.topic);
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich melde mich im Auftrag von Herrn Matthias Duic. Ich würde gerne mit ${transferTarget} verbunden werden.`;
 }
 
 function buildDecisionMakerOpenerLine(state: TokenizedCallState): string {
-  const identity = getOwnerIdentity(state);
   const name = normalizeContactName(state.contactName);
   const salutation = name ? `Guten Tag ${name}` : "Guten Tag";
-  const topicText = (state.topic || "").toString().trim() || "einem kurzen Thema";
-  return `${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${identity.ownerCompany}. Ich melde mich im Auftrag von ${identity.ownerName} — es geht um ${topicText}. Passt es Ihnen gerade einen kurzen Moment?`;
+  const topicReason = getTopicReasonLine(state.topic);
+  return `${salutation}, ich bin Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich melde mich im Auftrag von Herrn Matthias Duic, ${topicReason}. Darf ich Ihnen dazu eine kurze Frage stellen?`;
+}
+
+function isGatekeeperReasonQuestion(text: string): boolean {
+  return /\b(worum\s+geht\s+es|um\s+was\s+geht\s+es|worum\s+gehts|was\s+ist\s+der\s+grund|weshalb|warum\s+rufen\s+sie\s+an)\b/i.test(
+    text,
+  );
+}
+
+function isGatekeeperTargetPersonQuestion(text: string): boolean {
+  return /\b(mit\s+wem|welche[rmn]?\s+person|welchen\s+ansprechpartner|wen\s+soll\s+ich\s+verbinden|wen\s+genau|welcher\s+kollege)\b/i.test(
+    text,
+  );
+}
+
+function isGatekeeperIdentityQuestion(text: string): boolean {
+  return /\b(wer\s+sind\s+sie|wer\s+ist\s+da|mit\s+wem\s+spreche\s+ich|von\s+welcher\s+firma)\b/i.test(
+    text,
+  );
+}
+
+function buildGatekeeperObjectionReply(state: TokenizedCallState, heardText: string): string | null {
+  const name = normalizeContactName(state.contactName);
+  const transferTarget = name || getResponsibleRoleByTopic(state.topic);
+  const topicReason = getTopicReasonLine(state.topic);
+
+  if (isGatekeeperIdentityQuestion(heardText)) {
+    return `Sehr gern: Ich bin Gloria, die digitale Vertriebsassistentin der Agentur Duic im Auftrag von Herrn Matthias Duic. Würden Sie mich bitte kurz mit ${transferTarget} verbinden?`;
+  }
+
+  if (isGatekeeperTargetPersonQuestion(heardText)) {
+    return `Am besten mit ${transferTarget}. Vielen Dank, wenn Sie mich kurz durchstellen.`;
+  }
+
+  if (isGatekeeperReasonQuestion(heardText)) {
+    return `Gern, in einem Satz: ${topicReason}. Ich würde das gern kurz direkt mit ${transferTarget} abstimmen. Würden Sie mich bitte verbinden?`;
+  }
+
+  return null;
 }
 
 function detectRoleState(params: {
@@ -1088,6 +1145,22 @@ export async function POST(request: Request): Promise<NextResponse> {
           step: "intro",
           contactRole: "gatekeeper",
           roleState: "transfer",
+        });
+      }
+    }
+
+    if (state.contactRole !== "decision-maker") {
+      const gatekeeperReply = buildGatekeeperObjectionReply(state, heardText);
+      if (gatekeeperReply) {
+        return await respondWithGather(baseUrl, gatekeeperReply, {
+          ...toStatePayload(state),
+          transcript: trimTranscript(
+            `${state.transcript}\nInteressent: ${heardText}\nGloria: ${gatekeeperReply}`,
+          ),
+          turn: state.turn + 1,
+          step: "intro",
+          contactRole: "gatekeeper",
+          roleState: state.roleState === "transfer" ? "transfer" : "reception",
         });
       }
     }
