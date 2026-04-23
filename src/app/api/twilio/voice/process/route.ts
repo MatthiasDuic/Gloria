@@ -32,8 +32,8 @@ export const runtime = "edge";
 
 const AI_MODEL = AI_CONFIG.chatModel;
 const AI_TIMEOUT_MS = Math.min(
-  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "2500", 10), 1800),
-  4000,
+  Math.max(parseInt(process.env.LIVE_AI_TIMEOUT_MS || "4000", 10), 2000),
+  6000,
 );
 const AI_RETRY_ATTEMPTS = Math.min(
   3,
