@@ -5,6 +5,8 @@ const PUBLIC_PATH_PREFIXES = [
   "/_next",
   "/api/twilio",
   "/api/calls/webhook",
+  "/api/callbacks/run",
+  "/api/reports/cleanup",
   "/api/health",
   "/api/auth/login",
   "/api/auth/logout",
