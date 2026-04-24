@@ -240,6 +240,105 @@ export default function HomePage() {
 
     return grouped;
   }, [appointmentReports]);
+
+  const reportingInsights = useMemo(() => {
+    const reports = data.reports;
+    const total = reports.length;
+    const appointments = reports.filter((r) => r.outcome === "Termin").length;
+    const rejections = reports.filter((r) => r.outcome === "Absage").length;
+    const callbacks = reports.filter((r) => r.outcome === "Wiedervorlage").length;
+    const noContact = reports.filter((r) => r.outcome === "Kein Kontakt").length;
+    const contacts = total - noContact;
+    const contactRate = total > 0 ? Math.round((contacts / total) * 100) : 0;
+    const appointmentRate = contacts > 0 ? Math.round((appointments / contacts) * 100) : 0;
+    const rejectionRate = contacts > 0 ? Math.round((rejections / contacts) * 100) : 0;
+
+    const byTopic = new Map<string, { total: number; termin: number; absage: number; wiedervorlage: number; keinKontakt: number }>();
+    for (const r of reports) {
+      const entry = byTopic.get(r.topic) || { total: 0, termin: 0, absage: 0, wiedervorlage: 0, keinKontakt: 0 };
+      entry.total++;
+      if (r.outcome === "Termin") entry.termin++;
+      else if (r.outcome === "Absage") entry.absage++;
+      else if (r.outcome === "Wiedervorlage") entry.wiedervorlage++;
+      else if (r.outcome === "Kein Kontakt") entry.keinKontakt++;
+      byTopic.set(r.topic, entry);
+    }
+    const topicStats = Array.from(byTopic.entries())
+      .map(([topic, stats]) => ({
+        topic,
+        ...stats,
+        terminRate: stats.total > 0 ? Math.round((stats.termin / stats.total) * 100) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    const reasonBuckets: Array<{ label: string; match: RegExp }> = [
+      { label: "Kein Interesse", match: /kein\s*interesse|nicht\s*interessiert/i },
+      { label: "Bereits versorgt / anderer Anbieter", match: /bereits|schon\s*versichert|vorhanden|anderer\s*anbieter|haben\s*schon/i },
+      { label: "Keine Zeit / spaeter", match: /keine\s*zeit|zu\s*besch(ae|ä)ftigt|sp(ae|ä)ter|momentan\s*nicht/i },
+      { label: "Kein Budget / zu teuer", match: /kein\s*budget|zu\s*teuer|kosten\s*zu\s*hoch/i },
+      { label: "Keine Werbeanrufe", match: /werbung|werbeanruf|nicht\s*anrufen|keine\s*anrufe/i },
+      { label: "Falscher Ansprechpartner", match: /falsch|nicht\s*zust(ae|ä)ndig|nicht\s*der\s*richtige/i },
+      { label: "Entscheidung bereits gefallen", match: /entscheidung\s*gefallen|entschieden|festgelegt/i },
+    ];
+    const reasonCounts = reasonBuckets.map((b) => ({ label: b.label, count: 0 }));
+    let reasonOther = 0;
+    for (const r of reports.filter((x) => x.outcome === "Absage")) {
+      const s = r.summary || "";
+      let matched = false;
+      reasonBuckets.forEach((b, i) => {
+        if (b.match.test(s)) {
+          reasonCounts[i].count++;
+          matched = true;
+        }
+      });
+      if (!matched) reasonOther++;
+    }
+    const topRejections = [...reasonCounts, { label: "Sonstige / Unspezifisch", count: reasonOther }]
+      .filter((r) => r.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    const days: Array<{ key: string; label: string; gespraeche: number; termine: number; absagen: number }> = [];
+    const today = new Date();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      days.push({
+        key: toDateKey(d),
+        label: d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }),
+        gespraeche: 0,
+        termine: 0,
+        absagen: 0,
+      });
+    }
+    const dayIndex = new Map(days.map((d, i) => [d.key, i] as const));
+    for (const r of reports) {
+      if (!r.conversationDate) continue;
+      const key = toDateKey(new Date(r.conversationDate));
+      const idx = dayIndex.get(key);
+      if (idx === undefined) continue;
+      days[idx].gespraeche++;
+      if (r.outcome === "Termin") days[idx].termine++;
+      else if (r.outcome === "Absage") days[idx].absagen++;
+    }
+    const peakDayGespraeche = Math.max(1, ...days.map((d) => d.gespraeche));
+
+    return {
+      total,
+      contacts,
+      appointments,
+      rejections,
+      callbacks,
+      noContact,
+      contactRate,
+      appointmentRate,
+      rejectionRate,
+      topicStats,
+      topRejections,
+      days,
+      peakDayGespraeche,
+    };
+  }, [data.reports]);
+
   const calendarDays = useMemo(() => {
     const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
     const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
@@ -1029,6 +1128,111 @@ export default function HomePage() {
           <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
           <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
         </section>
+      </CollapsiblePanel>
+
+      <CollapsiblePanel title="Reporting & Conversion" defaultOpen={false}>
+        {reportingInsights.total === 0 ? (
+          <p className="subtle">Noch keine Reports verfügbar. Sobald Gespräche geführt werden, erscheinen hier Funnel, Themen-Performance und Ablehnungsgründe.</p>
+        ) : (
+          <div className="stack" style={{ gap: "24px" }}>
+            <div>
+              <p className="subtle" style={{ marginBottom: 8 }}><strong>Conversion-Funnel (alle Gespräche)</strong></p>
+              <section className="stats-grid">
+                <article className="stat-card"><span>Reports gesamt</span><strong>{reportingInsights.total}</strong></article>
+                <article className="stat-card"><span>Kontakte erreicht</span><strong>{reportingInsights.contacts}<small className="subtle"> ({reportingInsights.contactRate}%)</small></strong></article>
+                <article className="stat-card"><span>Termine</span><strong>{reportingInsights.appointments}<small className="subtle"> ({reportingInsights.appointmentRate}% v. Kontakte)</small></strong></article>
+                <article className="stat-card"><span>Wiedervorlagen</span><strong>{reportingInsights.callbacks}</strong></article>
+                <article className="stat-card"><span>Absagen</span><strong>{reportingInsights.rejections}<small className="subtle"> ({reportingInsights.rejectionRate}% v. Kontakte)</small></strong></article>
+                <article className="stat-card"><span>Kein Kontakt</span><strong>{reportingInsights.noContact}</strong></article>
+              </section>
+            </div>
+
+            <div>
+              <p className="subtle" style={{ marginBottom: 8 }}><strong>Performance nach Thema</strong></p>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Thema</th>
+                      <th style={{ textAlign: "right" }}>Reports</th>
+                      <th style={{ textAlign: "right" }}>Termine</th>
+                      <th style={{ textAlign: "right" }}>Absagen</th>
+                      <th style={{ textAlign: "right" }}>Wiedervorlage</th>
+                      <th style={{ textAlign: "right" }}>Kein Kontakt</th>
+                      <th style={{ textAlign: "right" }}>Termin-Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportingInsights.topicStats.map((row) => (
+                      <tr key={row.topic}>
+                        <td>{row.topic}</td>
+                        <td style={{ textAlign: "right" }}>{row.total}</td>
+                        <td style={{ textAlign: "right" }}>{row.termin}</td>
+                        <td style={{ textAlign: "right" }}>{row.absage}</td>
+                        <td style={{ textAlign: "right" }}>{row.wiedervorlage}</td>
+                        <td style={{ textAlign: "right" }}>{row.keinKontakt}</td>
+                        <td style={{ textAlign: "right" }}><strong>{row.terminRate}%</strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <p className="subtle" style={{ marginBottom: 8 }}><strong>Top Ablehnungsgründe</strong></p>
+              {reportingInsights.topRejections.length === 0 ? (
+                <p className="subtle">Noch keine Absagen erfasst.</p>
+              ) : (
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {reportingInsights.topRejections.map((r) => {
+                    const pct = reportingInsights.rejections > 0 ? Math.round((r.count / reportingInsights.rejections) * 100) : 0;
+                    return (
+                      <li key={r.label} style={{ display: "grid", gridTemplateColumns: "260px 1fr 60px", gap: 10, alignItems: "center" }}>
+                        <span>{r.label}</span>
+                        <span style={{ background: "#e8edf5", borderRadius: 6, height: 10, overflow: "hidden" }}>
+                          <span style={{ display: "block", width: `${pct}%`, height: "100%", background: "linear-gradient(135deg, #c24d4d, #a03030)" }} />
+                        </span>
+                        <span style={{ textAlign: "right" }}><strong>{r.count}</strong> <small className="subtle">({pct}%)</small></span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="subtle" style={{ marginTop: 8, fontSize: "0.85rem" }}>
+                Ableitung erfolgt per Textanalyse der Report-Zusammenfassung (Schlagwörter). "Sonstige" umfasst Absagen ohne erkennbares Muster.
+              </p>
+            </div>
+
+            <div>
+              <p className="subtle" style={{ marginBottom: 8 }}><strong>Verlauf letzte 14 Tage</strong></p>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${reportingInsights.days.length}, minmax(28px, 1fr))`, gap: 4, alignItems: "end", minHeight: 120 }}>
+                {reportingInsights.days.map((d) => {
+                  const h = Math.round((d.gespraeche / reportingInsights.peakDayGespraeche) * 100);
+                  const terminPct = d.gespraeche > 0 ? Math.round((d.termine / d.gespraeche) * 100) : 0;
+                  const absagePct = d.gespraeche > 0 ? Math.round((d.absagen / d.gespraeche) * 100) : 0;
+                  return (
+                    <div key={d.key} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <div
+                        title={`${d.label}: ${d.gespraeche} Gespräche, ${d.termine} Termine, ${d.absagen} Absagen`}
+                        style={{ width: "100%", height: `${Math.max(h, 2)}px`, background: "linear-gradient(180deg, #3c6fb5, #27457a)", borderRadius: 3, position: "relative", display: "flex", flexDirection: "column-reverse" }}
+                      >
+                        {terminPct > 0 && <div style={{ height: `${terminPct}%`, background: "#2f8f57" }} />}
+                        {absagePct > 0 && <div style={{ height: `${absagePct}%`, background: "#c24d4d", opacity: 0.85 }} />}
+                      </div>
+                      <small className="subtle" style={{ fontSize: "0.7rem" }}>{d.label}</small>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: "0.85rem" }} className="subtle">
+                <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#3c6fb5", marginRight: 4, borderRadius: 2 }} />Gespräche</span>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#2f8f57", marginRight: 4, borderRadius: 2 }} />Termine</span>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#c24d4d", marginRight: 4, borderRadius: 2 }} />Absagen</span>
+              </div>
+            </div>
+          </div>
+        )}
       </CollapsiblePanel>
 
       <section className="stack top-section">
