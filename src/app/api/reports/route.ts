@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteReport, getDashboardData, storeCallReport } from "@/lib/storage";
+import { deleteAllReports, deleteReport, getDashboardData, storeCallReport } from "@/lib/storage";
 import { TOPICS, type Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
@@ -72,6 +72,20 @@ export async function DELETE(request: NextRequest) {
   }
 
   const reportId = request.nextUrl.searchParams.get("reportId");
+  const all = request.nextUrl.searchParams.get("all");
+
+  // Bulk-Löschung aller Reports des angemeldeten Nutzers.
+  // Master-Accounts löschen global, User-Accounts nur ihre eigenen
+  // Datensätze (über userId-Filter im DB-Layer).
+  if (all === "1" && !reportId) {
+    const scope = sessionUser.role === "master" ? {} : { userId: sessionUser.id };
+    const result = await deleteAllReports(scope);
+    return NextResponse.json({
+      ok: true,
+      deletedReports: result.deletedReports,
+      deletedRecordings: result.deletedRecordings,
+    });
+  }
 
   if (!reportId) {
     return NextResponse.json({ error: "reportId fehlt." }, { status: 400 });

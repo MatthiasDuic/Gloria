@@ -1126,6 +1126,103 @@ export async function deleteReportFromPostgres(reportId: string): Promise<boolea
   }
 }
 
+export async function deleteAllReportsFromPostgres(
+  options: { userId?: string } = {},
+): Promise<{ ok: boolean; deletedReports: number; deletedRecordings: number }> {
+  if (!shouldUsePostgres()) {
+    return { ok: false, deletedReports: 0, deletedRecordings: 0 };
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+
+    const callSidsResult = await db.query<{ call_sid: string | null }>(
+      options.userId
+        ? `SELECT call_sid FROM gloria_reports WHERE user_id = $1 AND call_sid IS NOT NULL`
+        : `SELECT call_sid FROM gloria_reports WHERE call_sid IS NOT NULL`,
+      options.userId ? [options.userId] : [],
+    );
+    const callSids = callSidsResult.rows
+      .map((row) => row.call_sid)
+      .filter((sid): sid is string => Boolean(sid));
+
+    const reportsResult = await db.query(
+      options.userId
+        ? `DELETE FROM gloria_reports WHERE user_id = $1`
+        : `DELETE FROM gloria_reports`,
+      options.userId ? [options.userId] : [],
+    );
+
+    let deletedRecordings = 0;
+    if (callSids.length > 0) {
+      const recordingsResult = await db.query(
+        `DELETE FROM gloria_recordings WHERE call_sid = ANY($1::text[])`,
+        [callSids],
+      );
+      deletedRecordings = recordingsResult.rowCount || 0;
+    }
+
+    return {
+      ok: true,
+      deletedReports: reportsResult.rowCount || 0,
+      deletedRecordings,
+    };
+  } catch (error) {
+    console.error("Postgres bulk delete reports failed", error);
+    return { ok: false, deletedReports: 0, deletedRecordings: 0 };
+  }
+}
+
+export async function deleteReportsOlderThanInPostgres(
+  days: number,
+): Promise<{ ok: boolean; deletedReports: number; deletedRecordings: number }> {
+  if (!shouldUsePostgres()) {
+    return { ok: false, deletedReports: 0, deletedRecordings: 0 };
+  }
+
+  const safeDays = Math.max(1, Math.floor(days));
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+
+    const callSidsResult = await db.query<{ call_sid: string | null }>(
+      `SELECT call_sid FROM gloria_reports
+         WHERE conversation_date < NOW() - ($1::int * INTERVAL '1 day')
+           AND call_sid IS NOT NULL`,
+      [safeDays],
+    );
+    const callSids = callSidsResult.rows
+      .map((row) => row.call_sid)
+      .filter((sid): sid is string => Boolean(sid));
+
+    const reportsResult = await db.query(
+      `DELETE FROM gloria_reports
+         WHERE conversation_date < NOW() - ($1::int * INTERVAL '1 day')`,
+      [safeDays],
+    );
+
+    let deletedRecordings = 0;
+    if (callSids.length > 0) {
+      const recordingsResult = await db.query(
+        `DELETE FROM gloria_recordings WHERE call_sid = ANY($1::text[])`,
+        [callSids],
+      );
+      deletedRecordings = recordingsResult.rowCount || 0;
+    }
+
+    return {
+      ok: true,
+      deletedReports: reportsResult.rowCount || 0,
+      deletedRecordings,
+    };
+  } catch (error) {
+    console.error("Postgres retention delete failed", error);
+    return { ok: false, deletedReports: 0, deletedRecordings: 0 };
+  }
+}
+
 export async function clearReportRecordingInPostgres(reportId: string): Promise<boolean> {
   if (!shouldUsePostgres()) {
     return false;

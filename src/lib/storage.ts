@@ -7,7 +7,9 @@ import {
   appendConversationEventToPostgres,
   bootstrapUserScriptsFromDefaults,
   clearReportRecordingInPostgres,
+  deleteAllReportsFromPostgres,
   deleteReportFromPostgres,
+  deleteReportsOlderThanInPostgres,
   readCampaignListsStateFromPostgres,
   readConversationEventsFromPostgres,
   readLeadsFromPostgres,
@@ -1145,6 +1147,63 @@ export async function deleteReport(reportId: string): Promise<void> {
       : reportDb.recordings;
     await writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings });
   }
+}
+
+export async function deleteAllReports(
+  options: { userId?: string } = {},
+): Promise<{ deletedReports: number; deletedRecordings: number }> {
+  const pg = await deleteAllReportsFromPostgres(options);
+  if (pg.ok) {
+    return { deletedReports: pg.deletedReports, deletedRecordings: pg.deletedRecordings };
+  }
+
+  const reportDb = await readReportDatabase();
+  // Der Datei-Fallback führt keine user_id, deshalb greift userId-Filter
+  // dort nicht — der Master löscht hier alles, ein User nichts.
+  if (options.userId) {
+    return { deletedReports: 0, deletedRecordings: 0 };
+  }
+
+  const deletedReports = reportDb.reports.length;
+  const deletedRecordings = reportDb.recordings.length;
+  await writeReportDatabase({ reports: [], recordings: [] });
+  return { deletedReports, deletedRecordings };
+}
+
+export async function deleteReportsOlderThan(
+  days: number,
+): Promise<{ deletedReports: number; deletedRecordings: number }> {
+  const pg = await deleteReportsOlderThanInPostgres(days);
+  if (pg.ok) {
+    return { deletedReports: pg.deletedReports, deletedRecordings: pg.deletedRecordings };
+  }
+
+  const cutoff = Date.now() - Math.max(1, Math.floor(days)) * 24 * 60 * 60 * 1000;
+  const reportDb = await readReportDatabase();
+  const keep: CallReport[] = [];
+  const removedCallSids = new Set<string>();
+  let deletedReports = 0;
+
+  for (const report of reportDb.reports) {
+    const ts = Date.parse(report.conversationDate);
+    if (!Number.isNaN(ts) && ts < cutoff) {
+      deletedReports += 1;
+      if (report.callSid) {
+        removedCallSids.add(report.callSid);
+      }
+      removedCallSids.add(report.id);
+      continue;
+    }
+    keep.push(report);
+  }
+
+  const keepRecordings = reportDb.recordings.filter(
+    (rec) => !removedCallSids.has(rec.callSid),
+  );
+  const deletedRecordings = reportDb.recordings.length - keepRecordings.length;
+
+  await writeReportDatabase({ reports: keep, recordings: keepRecordings });
+  return { deletedReports, deletedRecordings };
 }
 
 export async function deleteReportRecording(reportId: string): Promise<void> {

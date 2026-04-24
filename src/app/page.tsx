@@ -838,6 +838,48 @@ export default function HomePage() {
     }
   }
 
+  async function deleteAllReports() {
+    if (
+      !confirm(
+        "Wirklich ALLE Gesprächsreports und zugehörigen Aufnahmen unwiderruflich löschen?",
+      )
+    ) {
+      return;
+    }
+    if (
+      !confirm(
+        "Letzte Sicherheitsabfrage: Diese Aktion kann nicht rückgängig gemacht werden. Fortfahren?",
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch(`/api/reports?all=1`, { method: "DELETE" });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        deletedReports?: number;
+        deletedRecordings?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Reports konnten nicht gelöscht werden.");
+      }
+
+      setSelectedReport(null);
+      setNotice(
+        `Alle Gesprächsreports gelöscht (${payload.deletedReports ?? 0} Reports, ${payload.deletedRecordings ?? 0} Aufnahmen entfernt).`,
+      );
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createUserByAdmin() {
     if (!newUsername || !newPassword || !newRealName || !newCompanyName) {
       setNotice("Bitte alle Felder für den Benutzer angeben.");
@@ -1267,6 +1309,19 @@ export default function HomePage() {
         </CollapsiblePanel>
 
         <CollapsiblePanel title="Gesprächsreports & Aufnahmen" defaultOpen>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <span className="subtle">
+              Reports und zugehörige Aufnahmen werden automatisch nach 30 Tagen gelöscht.
+            </span>
+            <button
+              className="btn danger"
+              onClick={() => void deleteAllReports()}
+              disabled={busy || reportRows.length === 0}
+              title="Alle Gesprächsreports & Aufnahmen löschen"
+            >
+              Alle Reports löschen
+            </button>
+          </div>
           <table>
             <thead>
               <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
