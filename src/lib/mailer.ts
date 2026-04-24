@@ -149,6 +149,28 @@ export function buildAppointmentIcs(options: AppointmentInviteOptions): string |
   return lines.join("\r\n");
 }
 
+export async function sendOperationalEmail(options: {
+  subject: string;
+  body: string;
+  to?: string;
+}): Promise<{ delivered: boolean; messageId?: string; reason?: string }> {
+  const transporter = getTransporter();
+  const to = options.to || process.env.REPORT_TO_EMAIL || fallbackRecipient;
+
+  if (!transporter) {
+    return { delivered: false, reason: "SMTP nicht konfiguriert." };
+  }
+
+  const info = await transporter.sendMail({
+    from: process.env.SMTP_FROM || "Gloria <no-reply@example.com>",
+    to,
+    subject: options.subject,
+    text: options.body,
+  });
+
+  return { delivered: true, messageId: info.messageId };
+}
+
 export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
   const { report, attendeeEmail } = options;
   const brokerEmail = process.env.REPORT_TO_EMAIL || fallbackRecipient;

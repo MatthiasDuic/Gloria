@@ -40,9 +40,10 @@ export async function GET(
   }
 
   const user = await findUserById(userId);
+  // Kalender ist immer user-scoped, auch fuer Master.
   const dashboard = await getDashboardData({
     userId,
-    role: user?.role || "user",
+    role: "user",
   });
 
   const now = new Date();

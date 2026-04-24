@@ -205,8 +205,14 @@ export default function HomePage() {
   const activeDraft = draftScripts[detailTopic];
   const reportRows = useMemo(() => data.reports, [data.reports]);
   const appointmentReports = useMemo(
-    () => data.reports.filter((report) => Boolean(report.appointmentAt)),
-    [data.reports],
+    () =>
+      data.reports.filter(
+        (report) =>
+          Boolean(report.appointmentAt) &&
+          // Kalender immer nur eigene Termine, auch fuer Master.
+          (!currentUser || !report.userId || report.userId === currentUser.id),
+      ),
+    [data.reports, currentUser],
   );
   const appointmentsByDay = useMemo(() => {
     const grouped = new Map<string, DashboardData["reports"]>();
