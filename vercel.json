@@ -7,6 +7,10 @@
     {
       "path": "/api/reports/cleanup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/campaigns/run-active",
+      "schedule": "*/2 7-16 * * 1-5"
     }
   ]
 }

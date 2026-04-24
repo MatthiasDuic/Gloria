@@ -1164,6 +1164,9 @@ export default function HomePage() {
             <p className="subtle">Noch keine Listen vorhanden. Bitte zuerst CSV oder Excel hochladen.</p>
           ) : (
             <div className="stack">
+              <p className="subtle">
+                Aktive Listen werden automatisch Mo–Fr von 09:00–12:00 und 13:00–17:00 (Europe/Berlin) abgearbeitet. Bei „Kein Kontakt“ wird der Lead nach 1 Tag und danach nach 3 Tagen erneut versucht (max. 3 Versuche).
+              </p>
               {campaignLists.map((list) => {
                 const leadsForList = data.leads.filter((lead) => (lead.listId || "legacy") === list.listId);
 

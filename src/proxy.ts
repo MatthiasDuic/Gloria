@@ -7,6 +7,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/calls/webhook",
   "/api/callbacks/run",
   "/api/reports/cleanup",
+  "/api/campaigns/run-active",
   "/api/health",
   "/api/auth/login",
   "/api/auth/logout",

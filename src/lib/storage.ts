@@ -58,6 +58,13 @@ interface CampaignStateFile {
   lists: CampaignListState[];
 }
 
+export type ActiveCampaignList = CampaignListState;
+
+export async function listActiveCampaignLists(): Promise<ActiveCampaignList[]> {
+  const state = await readCampaignState();
+  return state.lists.filter((entry) => entry.active);
+}
+
 interface StoredConversationEvent extends ConversationEvent {
   userId?: string;
 }
@@ -906,19 +913,47 @@ export async function storeCallReport(payload: {
       return lead;
     }
 
+    const nextAttempts = payload.attempts ?? lead.attempts + 1;
+
+    // Auto-Retry bei "Kein Kontakt":
+    // Nach Versuch 1 -> erneut in 1 Tag, nach Versuch 2 -> in 3 Tagen,
+    // nach Versuch 3 -> endgueltig "absage". Nur anwenden, wenn der Report
+    // bereits existierte (= Update von Twilio-Status oder finalizeCall), um
+    // den Initial-Platzhalter beim Kampagnen-Start nicht zu ueberschreiben.
+    const isRetryable =
+      payload.outcome === "Kein Kontakt" &&
+      existingIndex >= 0 &&
+      !payload.nextCallAt;
+
+    let resolvedStatus: Lead["status"];
+    let resolvedNextCallAt = payload.nextCallAt;
+
+    if (isRetryable && nextAttempts >= 3) {
+      resolvedStatus = "absage";
+      resolvedNextCallAt = undefined;
+    } else if (isRetryable) {
+      const delayDays = nextAttempts >= 2 ? 3 : 1;
+      const next = new Date();
+      next.setHours(9, 0, 0, 0);
+      next.setDate(next.getDate() + delayDays);
+      resolvedNextCallAt = next.toISOString();
+      resolvedStatus = "wiedervorlage";
+    } else if (payload.outcome === "Termin") {
+      resolvedStatus = "termin";
+    } else if (payload.outcome === "Absage") {
+      resolvedStatus = "absage";
+    } else if (payload.outcome === "Wiedervorlage") {
+      resolvedStatus = "wiedervorlage";
+    } else {
+      resolvedStatus = "angerufen";
+    }
+
     return {
       ...lead,
-      attempts: payload.attempts ?? lead.attempts + 1,
+      attempts: nextAttempts,
       directDial: payload.directDial || lead.directDial,
-      status:
-        payload.outcome === "Termin"
-          ? ("termin" as const)
-          : payload.outcome === "Absage"
-            ? ("absage" as const)
-            : payload.outcome === "Wiedervorlage"
-              ? ("wiedervorlage" as const)
-              : ("angerufen" as const),
-      nextCallAt: payload.nextCallAt,
+      status: resolvedStatus,
+      nextCallAt: resolvedNextCallAt,
     };
   });
 
