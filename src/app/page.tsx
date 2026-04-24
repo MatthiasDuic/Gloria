@@ -130,6 +130,7 @@ export default function HomePage() {
     role: "master" | "user";
     realName: string;
     companyName: string;
+    calendarFeedToken?: string;
   };
 
   type AdminUser = {
@@ -1226,6 +1227,32 @@ export default function HomePage() {
         </CollapsiblePanel>
 
         <CollapsiblePanel title="Kalender" defaultOpen>
+          {currentUser?.calendarFeedToken ? (
+            <div className="mini-panel bottom-gap">
+              <h3>Kalender abonnieren</h3>
+              <p className="subtle">
+                Fuegen Sie diese URL in Outlook/Google/Apple als Internet-Kalender hinzu, um Ihre Gloria-Termine automatisch synchron zu halten.
+              </p>
+              <div className="row top-gap" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                <input
+                  readOnly
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/api/calendar/feed/${currentUser.calendarFeedToken}`}
+                  onFocus={(event) => event.currentTarget.select()}
+                  style={{ flex: 1, minWidth: "20rem" }}
+                />
+                <button
+                  className="btn"
+                  onClick={() => {
+                    const url = `${window.location.origin}/api/calendar/feed/${currentUser.calendarFeedToken}`;
+                    void navigator.clipboard.writeText(url);
+                  }}
+                >
+                  Link kopieren
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="row spread">
             <strong>
               {new Intl.DateTimeFormat("de-DE", {
