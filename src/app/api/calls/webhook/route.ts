@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { sendReportEmail } from "@/lib/mailer";
-import { storeCallReport } from "@/lib/storage";
+import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
+import { getLeadById, storeCallReport } from "@/lib/storage";
+import { findUserById } from "@/lib/report-db";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -93,9 +94,27 @@ export async function POST(request: Request) {
 
   const emailResult = await sendReportEmail(report);
 
+  let inviteResult:
+    | { delivered: boolean; to?: string | string[]; reason?: string; messageId?: string }
+    | undefined;
+
+  if (report.outcome === "Termin" && report.appointmentAt) {
+    const lead = report.leadId
+      ? await getLeadById(report.leadId, report.userId)
+      : undefined;
+    const user = report.userId ? await findUserById(report.userId) : null;
+
+    inviteResult = await sendAppointmentInvite({
+      report,
+      attendeeEmail: lead?.email,
+      organizerName: user?.realName || user?.companyName,
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     report,
     emailResult,
+    inviteResult,
   });
 }

@@ -500,6 +500,12 @@ async function readLeads(userId?: string): Promise<Lead[]> {
   return fileLeads.filter((lead) => lead.userId === userId);
 }
 
+export async function getLeadById(leadId: string, userId?: string): Promise<Lead | undefined> {
+  if (!leadId) return undefined;
+  const leads = await readLeads(userId);
+  return leads.find((lead) => lead.id === leadId);
+}
+
 export async function findLeadForInboundCallbackByPhone(fromNumber: string): Promise<Lead | undefined> {
   const leads = await readLeads();
 
