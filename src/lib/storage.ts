@@ -593,6 +593,22 @@ async function writeCampaignState(state: CampaignStateFile, userId?: string): Pr
   await writeJsonStrict(CAMPAIGN_STATE_FILE, merged);
 }
 
+export async function getRecentConversationEvents(
+  options?: { userId?: string; minutes?: number; limit?: number },
+): Promise<ConversationEvent[]> {
+  const minutes = options?.minutes ?? 30;
+  const limit = options?.limit ?? 200;
+  const events = await readConversationEvents(options?.userId);
+  const cutoff = Date.now() - minutes * 60_000;
+  return events
+    .filter((e) => {
+      const t = e.createdAt ? Date.parse(e.createdAt) : 0;
+      return !Number.isNaN(t) && t >= cutoff;
+    })
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, limit);
+}
+
 export async function appendConversationEvent(
   event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
   options?: { userId?: string },

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, PlaybookConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
@@ -120,6 +120,142 @@ function CollapsiblePanel({
       </summary>
       <div className="panel-content">{children}</div>
     </details>
+  );
+}
+
+interface LiveSessionRow {
+  callSid?: string;
+  company: string;
+  topic: string;
+  startedAt: string;
+  lastEventAt: string;
+  lastStep: string;
+  lastEventType: string;
+  contactRole?: "gatekeeper" | "decision-maker";
+  turns: number;
+  status: "aktiv" | "beendet";
+  events: Array<{
+    eventType: string;
+    step: string;
+    text?: string;
+    createdAt: string;
+    contactRole?: "gatekeeper" | "decision-maker";
+    turn?: number;
+  }>;
+}
+
+function LiveMonitorPanel() {
+  const [sessions, setSessions] = useState<LiveSessionRow[]>([]);
+  const [activeCount, setActiveCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/live?minutes=15", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as {
+          sessions: LiveSessionRow[];
+          activeCount: number;
+          now: string;
+        };
+        if (cancelled) return;
+        setSessions(payload.sessions || []);
+        setActiveCount(payload.activeCount || 0);
+        setLastUpdated(payload.now);
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Fehler beim Laden");
+      }
+    }
+    void load();
+    const interval = setInterval(() => void load(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <CollapsiblePanel title="Live-Monitor" defaultOpen={false}>
+      <div className="row" style={{ gap: 12, marginBottom: 10 }}>
+        <span className="pill" style={{ background: activeCount > 0 ? "rgba(47,143,87,0.18)" : undefined }}>
+          {activeCount} aktive Gespraech{activeCount === 1 ? "" : "e"}
+        </span>
+        <span className="subtle" style={{ fontSize: "0.85rem" }}>
+          Fenster: letzte 15 Min - Auto-Refresh 5 s
+          {lastUpdated ? ` - Stand: ${new Date(lastUpdated).toLocaleTimeString("de-DE")}` : ""}
+        </span>
+        {error && <span className="subtle" style={{ color: "#c24d4d", fontSize: "0.85rem" }}>- {error}</span>}
+      </div>
+      {sessions.length === 0 ? (
+        <p className="subtle">Keine Gespraeche im aktuellen Zeitfenster.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Firma</th>
+                <th>Thema</th>
+                <th>Rolle</th>
+                <th>Schritt</th>
+                <th>Letztes Event</th>
+                <th>Turns</th>
+                <th>Aktualisiert</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => {
+                const key = s.callSid || `${s.company}-${s.startedAt}`;
+                const isOpen = expanded === key;
+                return (
+                  <Fragment key={key}>
+                    <tr>
+                      <td>
+                        <span className={`status ${s.status === "beendet" ? "absage" : ""}`}>{s.status}</span>
+                      </td>
+                      <td><strong>{s.company}</strong></td>
+                      <td>{s.topic}</td>
+                      <td>{s.contactRole || "-"}</td>
+                      <td>{s.lastStep}</td>
+                      <td><code>{s.lastEventType}</code></td>
+                      <td>{s.turns}</td>
+                      <td>{new Date(s.lastEventAt).toLocaleTimeString("de-DE")}</td>
+                      <td>
+                        <button className="btn ghost" onClick={() => setExpanded(isOpen ? null : key)}>
+                          {isOpen ? "Zuklappen" : "Verlauf"}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={9}>
+                          <div style={{ maxHeight: 220, overflowY: "auto", padding: "8px 4px", background: "#f5f8fd", borderRadius: 6 }}>
+                            {s.events.slice().reverse().map((e, idx) => (
+                              <div key={idx} style={{ display: "grid", gridTemplateColumns: "90px 150px 140px 1fr", gap: 8, padding: "3px 0", fontSize: "0.85rem" }}>
+                                <span className="subtle">{new Date(e.createdAt).toLocaleTimeString("de-DE")}</span>
+                                <span><code>{e.eventType}</code></span>
+                                <span>{e.step}</span>
+                                <span>{e.text ? e.text.slice(0, 180) : ""}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </CollapsiblePanel>
   );
 }
 
@@ -756,6 +892,50 @@ export default function HomePage() {
     }
   }
 
+  async function optimizeWithAI(topic: Topic) {
+    setBusy(true);
+    try {
+      const previewRes = await fetch("/api/learning/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
+      const preview = (await previewRes.json()) as {
+        error?: string;
+        optimized?: { opener: string; discovery: string; objectionHandling: string; close: string; rationale: string[]; source: string };
+      };
+      if (!previewRes.ok || !preview.optimized) {
+        throw new Error(preview.error || "Vorschau fehlgeschlagen.");
+      }
+      const opt = preview.optimized;
+      const rationale = opt.rationale.length ? `\n\nBegruendung:\n- ${opt.rationale.join("\n- ")}` : "";
+      const confirmed = confirm(
+        `KI-Optimierung fuer "${topic}" (${opt.source}):\n\n` +
+          `Opener: ${opt.opener.slice(0, 180)}${opt.opener.length > 180 ? "..." : ""}\n\n` +
+          `Close: ${opt.close.slice(0, 180)}${opt.close.length > 180 ? "..." : ""}` +
+          rationale +
+          "\n\nIns Playbook uebernehmen?",
+      );
+      if (!confirmed) {
+        setNotice("Optimierung verworfen.");
+        return;
+      }
+      const applyRes = await fetch("/api/learning/optimize?apply=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
+      const applied = (await applyRes.json()) as { error?: string };
+      if (!applyRes.ok) throw new Error(applied.error || "Uebernahme fehlgeschlagen.");
+      setNotice(`KI-optimiertes Playbook fuer ${topic} gespeichert (${opt.source}).`);
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "KI-Optimierung fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveScript(topic: Topic) {
     const draft = draftScripts[topic];
 
@@ -1092,6 +1272,54 @@ export default function HomePage() {
     }
   }
 
+  async function resetUserPassword(userId: string, username: string) {
+    const next = window.prompt(`Neues Passwort fuer "${username}":`);
+    if (!next || next.trim().length < 6) {
+      if (next !== null) setNotice("Passwort muss mindestens 6 Zeichen haben.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: next }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Passwort-Reset fehlgeschlagen.");
+      setNotice(`Passwort fuer "${username}" gesetzt.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Passwort-Reset fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleUserRole(userId: string, username: string, current: "master" | "user") {
+    if (currentUser?.id === userId) {
+      setNotice("Eigene Rolle kann nicht geaendert werden.");
+      return;
+    }
+    const target: "master" | "user" = current === "master" ? "user" : "master";
+    if (!confirm(`Rolle von "${username}" auf "${target}" setzen?`)) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: target }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Rolle konnte nicht geaendert werden.");
+      setNotice(`Rolle fuer "${username}" ist jetzt "${target}".`);
+      await loadSessionAndAdminData();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Rolle konnte nicht geaendert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="dashboard-page">
       <header className="duic-hero">
@@ -1234,6 +1462,8 @@ export default function HomePage() {
           </div>
         )}
       </CollapsiblePanel>
+
+      <LiveMonitorPanel />
 
       <section className="stack top-section">
         <CollapsiblePanel title="Compliance & Ablauf" defaultOpen>
@@ -1678,6 +1908,7 @@ export default function HomePage() {
                         {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
                       </ul>
                       <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
+                      <button className="btn" onClick={() => void optimizeWithAI(insight.topic)} disabled={busy} style={{ marginLeft: 6 }}>KI-Optimierung (Vorschau)</button>
                     </div>
                   ))}
                 </div>
@@ -1914,13 +2145,31 @@ export default function HomePage() {
                               <td>{entry.realName}</td>
                               <td>{entry.companyName}</td>
                               <td>
-                                <button
-                                  className="btn danger"
-                                  onClick={() => void deleteUserByAdmin(entry.id, entry.username)}
-                                  disabled={busy || currentUser?.id === entry.id}
-                                >
-                                  Löschen
-                                </button>
+                                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                                  <button
+                                    className="btn ghost"
+                                    onClick={() => void resetUserPassword(entry.id, entry.username)}
+                                    disabled={busy}
+                                    title="Passwort neu setzen"
+                                  >
+                                    Passwort
+                                  </button>
+                                  <button
+                                    className="btn ghost"
+                                    onClick={() => void toggleUserRole(entry.id, entry.username, entry.role)}
+                                    disabled={busy || currentUser?.id === entry.id}
+                                    title="Rolle umschalten"
+                                  >
+                                    {entry.role === "master" ? "→ user" : "→ master"}
+                                  </button>
+                                  <button
+                                    className="btn danger"
+                                    onClick={() => void deleteUserByAdmin(entry.id, entry.username)}
+                                    disabled={busy || currentUser?.id === entry.id}
+                                  >
+                                    Löschen
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
