@@ -100,7 +100,7 @@ export function buildAppointmentIcs(options: AppointmentInviteOptions): string |
   const start = new Date(report.appointmentAt);
   if (Number.isNaN(start.getTime())) return null;
 
-  const end = new Date(start.getTime() + (durationMinutes ?? 30) * 60 * 1000);
+  const end = new Date(start.getTime() + (durationMinutes ?? 90) * 60 * 1000);
   const uid = `${report.id || report.callSid || Date.now()}@gloria-ki-assistent`;
   const now = new Date();
 

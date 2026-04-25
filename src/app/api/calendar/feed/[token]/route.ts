@@ -57,7 +57,7 @@ export async function GET(
     const start = new Date(report.appointmentAt);
     if (Number.isNaN(start.getTime())) continue;
 
-    const end = new Date(start.getTime() + 30 * 60 * 1000);
+    const end = new Date(start.getTime() + 90 * 60 * 1000);
     const uid = `${report.id || report.callSid || start.getTime()}@gloria-ki-assistent`;
 
     const description = escapeIcs(
