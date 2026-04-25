@@ -276,7 +276,11 @@ export default function HomePage() {
     role: "master" | "user";
     realName: string;
     companyName: string;
+    address?: string;
+    email?: string;
+    realPhone?: string;
     createdAt?: string;
+    phoneNumbers?: ManagedPhoneNumber[];
   };
 
   type ManagedPhoneNumber = {
@@ -321,10 +325,27 @@ export default function HomePage() {
   const [newPassword, setNewPassword] = useState("");
   const [newRealName, setNewRealName] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [newAddress, setNewAddress] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRealPhone, setNewRealPhone] = useState("");
   const [newRole, setNewRole] = useState<"master" | "user">("user");
   const [newPhoneUserId, setNewPhoneUserId] = useState("");
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [newPhoneLabel, setNewPhoneLabel] = useState("");
+  void newPhoneUserId; void setNewPhoneUserId; void newPhoneNumber; void setNewPhoneNumber; void newPhoneLabel; void setNewPhoneLabel;
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{
+    username: string;
+    realName: string;
+    companyName: string;
+    address: string;
+    email: string;
+    realPhone: string;
+    role: "master" | "user";
+    password: string;
+    assignedPhone: string;
+    assignedLabel: string;
+  } | null>(null);
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1171,7 +1192,7 @@ export default function HomePage() {
 
   async function createUserByAdmin() {
     if (!newUsername || !newPassword || !newRealName || !newCompanyName) {
-      setNotice("Bitte alle Felder für den Benutzer angeben.");
+      setNotice("Bitte alle Pflichtfelder für den Benutzer angeben.");
       return;
     }
 
@@ -1185,6 +1206,9 @@ export default function HomePage() {
           password: newPassword,
           realName: newRealName,
           companyName: newCompanyName,
+          address: newAddress,
+          email: newEmail,
+          realPhone: newRealPhone,
           role: newRole,
         }),
       });
@@ -1198,6 +1222,9 @@ export default function HomePage() {
       setNewPassword("");
       setNewRealName("");
       setNewCompanyName("");
+      setNewAddress("");
+      setNewEmail("");
+      setNewRealPhone("");
       setNewRole("user");
       setNotice("Benutzer erfolgreich erstellt.");
       await loadSessionAndAdminData();
@@ -1318,6 +1345,98 @@ export default function HomePage() {
       await loadSessionAndAdminData();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Rolle konnte nicht geaendert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditUser(user: AdminUser) {
+    const phone = user.phoneNumbers?.[0];
+    setEditingUserId(user.id);
+    setEditDraft({
+      username: user.username,
+      realName: user.realName,
+      companyName: user.companyName,
+      address: user.address || "",
+      email: user.email || "",
+      realPhone: user.realPhone || "",
+      role: user.role,
+      password: "",
+      assignedPhone: phone?.phoneNumber || "",
+      assignedLabel: phone?.label || "",
+    });
+  }
+
+  function cancelEditUser() {
+    setEditingUserId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEditUser(user: AdminUser) {
+    if (!editDraft) return;
+    if (editDraft.password && editDraft.password.length < 6) {
+      setNotice("Passwort muss mindestens 6 Zeichen haben.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const userPayload: Record<string, unknown> = {
+        username: editDraft.username,
+        realName: editDraft.realName,
+        companyName: editDraft.companyName,
+        address: editDraft.address,
+        email: editDraft.email,
+        realPhone: editDraft.realPhone,
+        role: editDraft.role,
+      };
+      if (editDraft.password) userPayload.password = editDraft.password;
+
+      const userRes = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userPayload),
+      });
+      const userJson = (await userRes.json().catch(() => ({}))) as { error?: string };
+      if (!userRes.ok) throw new Error(userJson.error || "Benutzer konnte nicht aktualisiert werden.");
+
+      // Phone number sync (single assigned phone per row)
+      const existing = user.phoneNumbers?.[0];
+      const desiredNumber = editDraft.assignedPhone.trim();
+      const desiredLabel = editDraft.assignedLabel.trim() || "Standard";
+
+      if (!existing && desiredNumber) {
+        const res = await fetch("/api/admin/phone-numbers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, phoneNumber: desiredNumber, label: desiredLabel, active: true }),
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) throw new Error(j.error || "Rufnummer konnte nicht angelegt werden.");
+      } else if (existing && !desiredNumber) {
+        const res = await fetch(`/api/admin/phone-numbers?id=${encodeURIComponent(existing.id)}`, {
+          method: "DELETE",
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) throw new Error(j.error || "Rufnummer konnte nicht entfernt werden.");
+      } else if (existing && desiredNumber) {
+        if (existing.phoneNumber !== desiredNumber || existing.label !== desiredLabel) {
+          const res = await fetch("/api/admin/phone-numbers", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: existing.id, phoneNumber: desiredNumber, label: desiredLabel, active: existing.active }),
+          });
+          const j = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!res.ok) throw new Error(j.error || "Rufnummer konnte nicht aktualisiert werden.");
+        }
+      }
+
+      setNotice(`Benutzer "${editDraft.username}" gespeichert.`);
+      cancelEditUser();
+      await loadSessionAndAdminData();
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Speichern fehlgeschlagen.");
     } finally {
       setBusy(false);
     }
@@ -2197,7 +2316,7 @@ export default function HomePage() {
               <CollapsiblePanel title="Benutzer & Rufnummern" defaultOpen>
                 {currentUser?.role === "master" ? (
                   <>
-                    <p className="subtle">Master-Admin Bereich: Benutzer und Rufnummern verwalten.</p>
+                    <p className="subtle">Master-Admin Bereich: Benutzer vollständig verwalten – inklusive zugewiesener Rufnummer.</p>
 
                     <div className="mini-panel top-gap">
                       <h3>Neuen Benutzer anlegen</h3>
@@ -2211,12 +2330,24 @@ export default function HomePage() {
                           <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
                         </div>
                         <div>
-                          <label>Realer Name</label>
+                          <label>Vollständiger Name</label>
                           <input value={newRealName} onChange={(event) => setNewRealName(event.target.value)} />
                         </div>
                         <div>
-                          <label>Firma</label>
+                          <label>Firmenname</label>
                           <input value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} />
+                        </div>
+                        <div className="full-row">
+                          <label>Adresse</label>
+                          <input value={newAddress} onChange={(event) => setNewAddress(event.target.value)} placeholder="Straße, PLZ Ort" />
+                        </div>
+                        <div>
+                          <label>E-Mail</label>
+                          <input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} />
+                        </div>
+                        <div>
+                          <label>Reale Rufnummer</label>
+                          <input value={newRealPhone} onChange={(event) => setNewRealPhone(event.target.value)} placeholder="+49..." />
                         </div>
                         <div>
                           <label>Rolle</label>
@@ -2229,76 +2360,113 @@ export default function HomePage() {
                       <div className="row top-gap">
                         <button className="btn" onClick={() => void createUserByAdmin()} disabled={busy}>Benutzer anlegen</button>
                       </div>
-                    </div>
-
-                    <div className="mini-panel top-gap">
-                      <h3>Rufnummer zuweisen</h3>
-                      <div className="field-grid top-gap">
-                        <div>
-                          <label>Benutzer</label>
-                          <select value={newPhoneUserId} onChange={(event) => setNewPhoneUserId(event.target.value)}>
-                            <option value="">Bitte wählen</option>
-                            {adminUsers.map((entry) => (
-                              <option key={entry.id} value={entry.id}>{entry.username} ({entry.companyName})</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label>Rufnummer</label>
-                          <input value={newPhoneNumber} onChange={(event) => setNewPhoneNumber(event.target.value)} placeholder="+49..." />
-                        </div>
-                        <div>
-                          <label>Label</label>
-                          <input value={newPhoneLabel} onChange={(event) => setNewPhoneLabel(event.target.value)} placeholder="z. B. Vertrieb" />
-                        </div>
-                      </div>
-                      <div className="row top-gap">
-                        <button className="btn" onClick={() => void createPhoneByAdmin()} disabled={busy}>Rufnummer speichern</button>
-                      </div>
+                      <p className="subtle top-gap" style={{ fontSize: "0.8rem" }}>
+                        Hinweis: Die zugewiesene Rufnummer (Anrufer-ID) kann nach dem Anlegen über „Bearbeiten" gesetzt werden.
+                      </p>
                     </div>
 
                     <div className="mini-panel top-gap">
                       <h3>Benutzerliste</h3>
                       <table className="top-gap">
                         <thead>
-                          <tr><th>Benutzername</th><th>Rolle</th><th>Name</th><th>Firma</th><th>Aktion</th></tr>
+                          <tr>
+                            <th>Benutzername</th>
+                            <th>Name</th>
+                            <th>Firma</th>
+                            <th>Zugew. Rufnummer</th>
+                            <th>Rolle</th>
+                            <th style={{ width: 1 }}>Aktion</th>
+                          </tr>
                         </thead>
                         <tbody>
-                          {adminUsers.map((entry) => (
-                            <tr key={entry.id}>
-                              <td>{entry.username}</td>
-                              <td>{entry.role}</td>
-                              <td>{entry.realName}</td>
-                              <td>{entry.companyName}</td>
-                              <td>
-                                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                                  <button
-                                    className="btn ghost"
-                                    onClick={() => void resetUserPassword(entry.id, entry.username)}
-                                    disabled={busy}
-                                    title="Passwort neu setzen"
-                                  >
-                                    Passwort
-                                  </button>
-                                  <button
-                                    className="btn ghost"
-                                    onClick={() => void toggleUserRole(entry.id, entry.username, entry.role)}
-                                    disabled={busy || currentUser?.id === entry.id}
-                                    title="Rolle umschalten"
-                                  >
-                                    {entry.role === "master" ? "→ user" : "→ master"}
-                                  </button>
-                                  <button
-                                    className="btn danger"
-                                    onClick={() => void deleteUserByAdmin(entry.id, entry.username)}
-                                    disabled={busy || currentUser?.id === entry.id}
-                                  >
-                                    Löschen
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                          {adminUsers.map((entry) => {
+                            const isEditing = editingUserId === entry.id;
+                            const phone = entry.phoneNumbers?.[0];
+                            return (
+                              <Fragment key={entry.id}>
+                                <tr>
+                                  <td>{entry.username}</td>
+                                  <td>{entry.realName}</td>
+                                  <td>{entry.companyName}</td>
+                                  <td>{phone ? `${phone.phoneNumber}${phone.label ? ` (${phone.label})` : ""}` : <span className="subtle">—</span>}</td>
+                                  <td>{entry.role}</td>
+                                  <td>
+                                    <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                                      <button
+                                        className="btn ghost"
+                                        onClick={() => (isEditing ? cancelEditUser() : startEditUser(entry))}
+                                        disabled={busy}
+                                      >
+                                        {isEditing ? "Abbrechen" : "Bearbeiten"}
+                                      </button>
+                                      <button
+                                        className="btn danger"
+                                        onClick={() => void deleteUserByAdmin(entry.id, entry.username)}
+                                        disabled={busy || currentUser?.id === entry.id}
+                                      >
+                                        Löschen
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {isEditing && editDraft ? (
+                                  <tr>
+                                    <td colSpan={6} style={{ background: "var(--surface-soft)" }}>
+                                      <div className="field-grid">
+                                        <div>
+                                          <label>Benutzername</label>
+                                          <input value={editDraft.username} onChange={(e) => setEditDraft({ ...editDraft, username: e.target.value })} />
+                                        </div>
+                                        <div>
+                                          <label>Vollständiger Name</label>
+                                          <input value={editDraft.realName} onChange={(e) => setEditDraft({ ...editDraft, realName: e.target.value })} />
+                                        </div>
+                                        <div>
+                                          <label>Firmenname</label>
+                                          <input value={editDraft.companyName} onChange={(e) => setEditDraft({ ...editDraft, companyName: e.target.value })} />
+                                        </div>
+                                        <div>
+                                          <label>E-Mail</label>
+                                          <input type="email" value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} />
+                                        </div>
+                                        <div className="full-row">
+                                          <label>Adresse</label>
+                                          <input value={editDraft.address} onChange={(e) => setEditDraft({ ...editDraft, address: e.target.value })} placeholder="Straße, PLZ Ort" />
+                                        </div>
+                                        <div>
+                                          <label>Zugewiesene Rufnummer (Anrufer-ID)</label>
+                                          <input value={editDraft.assignedPhone} onChange={(e) => setEditDraft({ ...editDraft, assignedPhone: e.target.value })} placeholder="+49..." />
+                                        </div>
+                                        <div>
+                                          <label>Label</label>
+                                          <input value={editDraft.assignedLabel} onChange={(e) => setEditDraft({ ...editDraft, assignedLabel: e.target.value })} placeholder="z. B. Vertrieb" />
+                                        </div>
+                                        <div>
+                                          <label>Reale Rufnummer</label>
+                                          <input value={editDraft.realPhone} onChange={(e) => setEditDraft({ ...editDraft, realPhone: e.target.value })} placeholder="+49..." />
+                                        </div>
+                                        <div>
+                                          <label>Rolle</label>
+                                          <select value={editDraft.role} onChange={(e) => setEditDraft({ ...editDraft, role: e.target.value as "master" | "user" })} disabled={currentUser?.id === entry.id}>
+                                            <option value="user">user</option>
+                                            <option value="master">master</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <label>Passwort ändern (leer = unverändert)</label>
+                                          <input type="password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Neues Passwort (mind. 6 Zeichen)" />
+                                        </div>
+                                      </div>
+                                      <div className="row top-gap" style={{ gap: 8 }}>
+                                        <button className="btn" onClick={() => void saveEditUser(entry)} disabled={busy}>Speichern</button>
+                                        <button className="btn ghost" onClick={cancelEditUser} disabled={busy}>Abbrechen</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

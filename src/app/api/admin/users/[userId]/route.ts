@@ -23,15 +23,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
 
     const { userId } = await context.params;
     const payload = (await request.json().catch(() => ({}))) as {
+      username?: string;
       realName?: string;
       companyName?: string;
+      address?: string;
+      email?: string;
+      realPhone?: string;
       password?: string;
       role?: "master" | "user";
     };
 
     await updateUser(userId, {
+      username: payload.username,
       realName: payload.realName,
       companyName: payload.companyName,
+      address: payload.address,
+      email: payload.email,
+      realPhone: payload.realPhone,
       password: payload.password,
       role: payload.role,
     });

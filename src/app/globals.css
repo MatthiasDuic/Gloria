@@ -261,6 +261,10 @@ textarea {
   gap: 10px;
 }
 
+.field-grid > .full-row {
+  grid-column: 1 / -1;
+}
+
 textarea,
 input,
 select {

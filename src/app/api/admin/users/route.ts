@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { createUser, ensureMasterAdmin, listUsers } from "@/lib/report-db";
+import { createUser, ensureMasterAdmin, listAllPhoneNumbers, listUsers } from "@/lib/report-db";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,13 @@ export async function GET(request: Request) {
   try {
     await ensureMasterAdmin();
     requireMaster(request);
-    const users = await listUsers();
+    const [users, phones] = await Promise.all([listUsers(), listAllPhoneNumbers()]);
+    const phonesByUser = new Map<string, typeof phones>();
+    for (const phone of phones) {
+      const list = phonesByUser.get(phone.userId) || [];
+      list.push(phone);
+      phonesByUser.set(phone.userId, list);
+    }
 
     return NextResponse.json({
       users: users.map((user) => ({
@@ -31,7 +37,11 @@ export async function GET(request: Request) {
         role: user.role,
         realName: user.realName,
         companyName: user.companyName,
+        address: user.address,
+        email: user.email,
+        realPhone: user.realPhone,
         createdAt: user.createdAt,
+        phoneNumbers: phonesByUser.get(user.id) || [],
       })),
     });
   } catch (error) {
@@ -55,6 +65,9 @@ export async function POST(request: Request) {
       username?: string;
       realName?: string;
       companyName?: string;
+      address?: string;
+      email?: string;
+      realPhone?: string;
       password?: string;
       role?: "master" | "user";
     };
@@ -72,6 +85,9 @@ export async function POST(request: Request) {
       username,
       realName,
       companyName,
+      address: String(payload.address || "").trim(),
+      email: String(payload.email || "").trim(),
+      realPhone: String(payload.realPhone || "").trim(),
       password,
       role: payload.role === "master" ? "master" : "user",
     });
