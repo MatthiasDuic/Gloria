@@ -113,13 +113,14 @@ function CollapsiblePanel({
   children: ReactNode;
   defaultOpen?: boolean;
 }) {
+  void defaultOpen;
   return (
-    <details className="panel collapsible-panel" open={defaultOpen}>
-      <summary className="panel-summary">
+    <section className="panel static-panel">
+      <header className="panel-summary">
         <h2>{title}</h2>
-      </summary>
+      </header>
       <div className="panel-content">{children}</div>
-    </details>
+    </section>
   );
 }
 
@@ -331,7 +332,8 @@ export default function HomePage() {
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeView, setActiveView] = useState<"overview" | "calls" | "calendar" | "live" | "admin">("overview");
+  void settingsOpen; void setSettingsOpen;
+  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "settings" | "compliance">("overview");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -1347,24 +1349,34 @@ export default function HomePage() {
             <span>Anrufe</span>
           </button>
           <button
+            className={`nav-item ${activeView === "leads" ? "active" : ""}`}
+            onClick={() => setActiveView("leads")}
+          >
+            <span className="nav-icon" aria-hidden>≡</span>
+            <span>Offene Firmenliste</span>
+          </button>
+          <button
             className={`nav-item ${activeView === "calendar" ? "active" : ""}`}
             onClick={() => setActiveView("calendar")}
           >
             <span className="nav-icon" aria-hidden>▤</span>
             <span>Kalender & Reports</span>
           </button>
-          <button
-            className={`nav-item ${activeView === "live" ? "active" : ""}`}
-            onClick={() => setActiveView("live")}
-          >
-            <span className="nav-icon" aria-hidden>●</span>
-            <span>Live-Monitor</span>
-          </button>
         </nav>
         <div className="sidebar-footer">
-          <button className="nav-item ghost" onClick={() => setSettingsOpen(true)}>
+          <button
+            className={`nav-item ${activeView === "settings" ? "active" : ""}`}
+            onClick={() => setActiveView("settings")}
+          >
             <span className="nav-icon" aria-hidden>⚙</span>
             <span>Einstellungen</span>
+          </button>
+          <button
+            className={`nav-item ${activeView === "compliance" ? "active" : ""}`}
+            onClick={() => setActiveView("compliance")}
+          >
+            <span className="nav-icon" aria-hidden>§</span>
+            <span>Compliance & Ablauf</span>
           </button>
           <a className="nav-item ghost" href="/logout">
             <span className="nav-icon" aria-hidden>↩</span>
@@ -1379,9 +1391,11 @@ export default function HomePage() {
             <div className="topbar-eyebrow">Agentur Duic Sprockhövel</div>
             <h1 className="topbar-title">
               {activeView === "overview" ? "Übersicht" : null}
-              {activeView === "calls" ? "Anrufe & Aufträge" : null}
+              {activeView === "calls" ? "Anrufe" : null}
+              {activeView === "leads" ? "Offene Firmenliste" : null}
               {activeView === "calendar" ? "Kalender & Reports" : null}
-              {activeView === "live" ? "Live-Monitor" : null}
+              {activeView === "settings" ? "Einstellungen" : null}
+              {activeView === "compliance" ? "Compliance & Ablauf" : null}
             </h1>
             <p className="topbar-note">{loading ? "Lade Daten ..." : notice}</p>
           </div>
@@ -1565,8 +1579,6 @@ export default function HomePage() {
       </>
       ) : null}
 
-      {activeView === "live" ? <LiveMonitorPanel /> : null}
-
       {activeView === "calls" ? (
       <section className="stack top-section">
         <CollapsiblePanel title="Anruf bei Firma starten" defaultOpen>
@@ -1610,6 +1622,109 @@ export default function HomePage() {
             <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
               {busy ? "Anruf startet ..." : "Anruf bei Firma starten"}
             </button>
+          </div>
+        </CollapsiblePanel>
+
+        <LiveMonitorPanel />
+
+        <CollapsiblePanel title="Gesprächsreports & Aufnahmen" defaultOpen>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <span className="subtle">
+              Reports und zugehörige Aufnahmen werden automatisch nach 30 Tagen gelöscht.
+            </span>
+            <button
+              className="btn danger"
+              onClick={() => void deleteAllReports()}
+              disabled={busy || reportRows.length === 0}
+              title="Alle Gesprächsreports & Aufnahmen löschen"
+            >
+              Alle Reports löschen
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
+            </thead>
+            <tbody>
+              {reportRows.map((report) => (
+                <tr key={report.id}>
+                  <td><strong>{report.company}</strong>{report.contactName ? <div className="subtle">{report.contactName}</div> : null}</td>
+                  <td>{report.topic}</td>
+                  <td>
+                    <span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
+                      {report.outcome}
+                    </span>
+                  </td>
+                  <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
+                  <td>
+                    {report.recordingConsent ? (
+                      report.recordingUrl ? (
+                        <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Abspielen</a>
+                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}&download=1`} download>↓</a>
+                          <button
+                            className="btn danger"
+                            style={{ fontSize: "0.78rem", padding: "3px 9px" }}
+                            onClick={() => void deleteRecording(report.id)}
+                            disabled={busy}
+                            title="Aufnahme löschen"
+                          >✕</button>
+                        </div>
+                      ) : "Zugestimmt"
+                    ) : (
+                      "Keine Freigabe"
+                    )}
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                      <button
+                        className="btn ghost"
+                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
+                        onClick={() => setSelectedReport(report)}
+                      >Details</button>
+                      <button
+                        className="btn danger"
+                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
+                        onClick={() => void deleteReport(report.id)}
+                        disabled={busy}
+                        title="Report löschen"
+                      >🗑</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CollapsiblePanel>
+
+      </section>
+      ) : null}
+
+      {activeView === "leads" ? (
+      <section className="stack top-section">
+        <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
+          <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
+          <label>Listenname</label>
+          <input
+            value={importListName}
+            onChange={(event) => setImportListName(event.target.value)}
+            placeholder="z. B. April-Kampagne Industrie"
+          />
+          <label>Datei hochladen (CSV / XLSX / XLS)</label>
+          <input
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            onChange={(event) => setImportFile(event.target.files?.[0] || null)}
+          />
+          <div className="row top-gap">
+            <button className="btn" onClick={() => void handleFileImport()} disabled={busy || !importFile}>Datei importieren</button>
+            {importFile ? <span className="subtle">Ausgewählt: {importFile.name}</span> : null}
+          </div>
+          <p className="subtle top-gap">Optional: CSV-Inhalt manuell einfügen.</p>
+          <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
+          <div className="row top-gap">
+            <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV-Text importieren</button>
+            <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
           </div>
         </CollapsiblePanel>
 
@@ -1794,90 +1909,12 @@ export default function HomePage() {
             </div>
           </div>
         </CollapsiblePanel>
-
-        <CollapsiblePanel title="Gesprächsreports & Aufnahmen" defaultOpen>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            <span className="subtle">
-              Reports und zugehörige Aufnahmen werden automatisch nach 30 Tagen gelöscht.
-            </span>
-            <button
-              className="btn danger"
-              onClick={() => void deleteAllReports()}
-              disabled={busy || reportRows.length === 0}
-              title="Alle Gesprächsreports & Aufnahmen löschen"
-            >
-              Alle Reports löschen
-            </button>
-          </div>
-          <table>
-            <thead>
-              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
-            </thead>
-            <tbody>
-              {reportRows.map((report) => (
-                <tr key={report.id}>
-                  <td><strong>{report.company}</strong>{report.contactName ? <div className="subtle">{report.contactName}</div> : null}</td>
-                  <td>{report.topic}</td>
-                  <td>
-                    <span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
-                      {report.outcome}
-                    </span>
-                  </td>
-                  <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
-                  <td>
-                    {report.recordingConsent ? (
-                      report.recordingUrl ? (
-                        <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Abspielen</a>
-                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}&download=1`} download>↓</a>
-                          <button
-                            className="btn danger"
-                            style={{ fontSize: "0.78rem", padding: "3px 9px" }}
-                            onClick={() => void deleteRecording(report.id)}
-                            disabled={busy}
-                            title="Aufnahme löschen"
-                          >✕</button>
-                        </div>
-                      ) : "Zugestimmt"
-                    ) : (
-                      "Keine Freigabe"
-                    )}
-                  </td>
-                  <td>
-                    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
-                        onClick={() => setSelectedReport(report)}
-                      >Details</button>
-                      <button
-                        className="btn danger"
-                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
-                        onClick={() => void deleteReport(report.id)}
-                        disabled={busy}
-                        title="Report löschen"
-                      >🗑</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CollapsiblePanel>
       </section>
       ) : null}
 
-        </div>
-      </main>
-
-      {settingsOpen ? (
-        <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
-          <div className="modal settings-modal" onClick={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSettingsOpen(false)}>✕</button>
-            <h2>Einstellungen</h2>
-
-            <div className="stack top-gap">
-              <CollapsiblePanel title="Compliance & Ablauf" defaultOpen={false}>
+      {activeView === "compliance" ? (
+      <section className="stack top-section">
+              <CollapsiblePanel title="Compliance & Ablauf" defaultOpen>
                 <p className="subtle">
                   Dieser Bereich dokumentiert die verbindlichen Leitplanken für Gloria im Live-Telefonieprozess.
                 </p>
@@ -1966,33 +2003,11 @@ export default function HomePage() {
                 </ul>
                 <p className="subtle">Alle Dienstleister werden ausschließlich im Rahmen der Auftragsverarbeitung genutzt. Es findet keine Weitergabe zu Werbezwecken statt.</p>
               </CollapsiblePanel>
+      </section>
+      ) : null}
 
-              <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
-                <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
-                <label>Listenname</label>
-                <input
-                  value={importListName}
-                  onChange={(event) => setImportListName(event.target.value)}
-                  placeholder="z. B. April-Kampagne Industrie"
-                />
-                <label>Datei hochladen (CSV / XLSX / XLS)</label>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={(event) => setImportFile(event.target.files?.[0] || null)}
-                />
-                <div className="row top-gap">
-                  <button className="btn" onClick={() => void handleFileImport()} disabled={busy || !importFile}>Datei importieren</button>
-                  {importFile ? <span className="subtle">Ausgewählt: {importFile.name}</span> : null}
-                </div>
-                <p className="subtle top-gap">Optional: CSV-Inhalt manuell einfügen.</p>
-                <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
-                <div className="row top-gap">
-                  <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV-Text importieren</button>
-                  <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
-                </div>
-              </CollapsiblePanel>
-
+      {activeView === "settings" ? (
+      <section className="stack top-section">
               <CollapsiblePanel title="Gloria testen" defaultOpen>
                 <div className="row">
                   <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
@@ -2041,15 +2056,15 @@ export default function HomePage() {
                       Aufzeichnungsfrage und Terminbestätigung sollten fest formuliert sein.
                     </p>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Playbook · Thema & Fachlichkeit</strong> <span className="subtle">(Was Gloria wissen und verstehen muss)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Playbook · Thema & Fachlichkeit</strong> <span className="subtle">(Was Gloria wissen und verstehen muss)</span></h3>
                       <label className="top-gap">Fakten / Hintergrundwissen</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Fachliche Informationen, die Gloria situativ nutzen darf, ohne sie als Werbetext herunterzulesen.</p>
                       <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
-                    </details>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Playbook · Empfang</strong> <span className="subtle">(Zentrale / Sekretariat)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Playbook · Empfang</strong> <span className="subtle">(Zentrale / Sekretariat)</span></h3>
                       <label className="top-gap">Ziel am Empfang</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Was Gloria dort erreichen soll, bevor sie mit dem eigentlichen Ansprechpartner spricht.</p>
                       <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
@@ -2061,10 +2076,10 @@ export default function HomePage() {
                       <label className="top-gap">Kurzer Grund (wenn der Empfang nachfragt)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Ein kurzer Anlasssatz. Das ist ein Leitanker, kein vollständiger Mini-Pitch.</p>
                       <textarea value={activeDraft.receptionTopicReason ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))} />
-                    </details>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Verbindliche Anker · Einstieg & Einwilligung</strong> <span className="subtle">(Pflichtbausteine)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Verbindliche Anker · Einstieg & Einwilligung</strong> <span className="subtle">(Pflichtbausteine)</span></h3>
                       <label className="top-gap">Fester Einstieg beim Entscheider</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Dieser Einstieg darf verbindlich formuliert sein. Ab danach soll Gloria wieder frei und situativ sprechen.</p>
                       <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
@@ -2072,17 +2087,17 @@ export default function HomePage() {
                       <label className="top-gap">Aufzeichnungsfrage (optional, separat)</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Leer lassen, wenn die Einwilligung schon im Einstieg steckt.</p>
                       <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
-                    </details>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Playbook · Kernthema & Relevanz</strong> <span className="subtle">(Warum das Thema gerade zählt)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Playbook · Kernthema & Relevanz</strong> <span className="subtle">(Warum das Thema gerade zählt)</span></h3>
                       <label className="top-gap">Problemrahmen / Relevanz</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria das Thema aufhängt. Das ist eine Gesprächsrichtung, kein Pflichttext.</p>
                       <textarea value={activeDraft.problemBuildup ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
-                    </details>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Playbook · Ziel, Verhalten & Gesprächsführung</strong></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Playbook · Ziel, Verhalten & Gesprächsführung</strong></h3>
                       <label className="top-gap">Kernthema / Perspektive</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Welche Sicht Gloria beim Entscheider klar machen soll.</p>
                       <textarea value={activeDraft.decisionMakerContext ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))} />
@@ -2095,24 +2110,24 @@ export default function HomePage() {
                       <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria auf typische Einwände reagieren soll, ohne in Standardsätze zu kippen.</p>
                       <textarea value={activeDraft.objectionHandling ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
 
-                      <details className="mini-panel top-gap">
-                        <summary className="subtle">Ziel und Tonalität (optional)</summary>
+                      <div className="mini-panel top-gap">
+                        <h3 className="sub-heading subtle">Ziel und Tonalität (optional)</h3>
                         <label className="top-gap">Ziel beim Entscheider</label>
                         <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
                         <label className="top-gap">Verhalten / Tonalität</label>
                         <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
-                      </details>
-                    </details>
+                      </div>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Playbook · Brücke zum Termin</strong> <span className="subtle">(Vom Interesse zur Kalenderfrage)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Playbook · Brücke zum Termin</strong> <span className="subtle">(Vom Interesse zur Kalenderfrage)</span></h3>
                       <label className="top-gap">Terminbrücke</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria vom Thema sauber zur Terminierung überleitet, ohne steif zu klingen.</p>
                       <textarea value={activeDraft.conceptTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))} />
-                    </details>
+                    </div>
 
-                    <details className="mini-panel top-gap" open>
-                      <summary><strong>Verbindliche Anker · Terminierung & Abschluss</strong> <span className="subtle">(Kalender, Bestätigung, Erfolg)</span></summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>Verbindliche Anker · Terminierung & Abschluss</strong> <span className="subtle">(Kalender, Bestätigung, Erfolg)</span></h3>
                       <label className="top-gap">Termin-Einstieg / Anker</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Ein stabiler Start in die Terminierung. Gloria darf danach frei und passend zum Gespräch weiterführen.</p>
                       <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
@@ -2128,21 +2143,21 @@ export default function HomePage() {
                       <label className="top-gap">Erfolgskriterium</label>
                       <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria intern erkennt, dass das Gespräch sein Ziel erreicht hat.</p>
                       <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
-                    </details>
+                    </div>
 
                     {detailTopic === "private Krankenversicherung" ? (
-                      <details className="mini-panel top-gap" open>
-                        <summary><strong>Pflichtblock · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></summary>
+                      <div className="mini-panel top-gap">
+                        <h3 className="sub-heading"><strong>Pflichtblock · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></h3>
                         <label className="top-gap">Einleitung Basisdaten</label>
                         <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
 
                         <label className="top-gap">Fragenkatalog (eine Frage pro Zeile)</label>
                         <textarea value={activeDraft.pkvHealthQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
-                      </details>
+                      </div>
                     ) : null}
 
-                    <details className="mini-panel top-gap">
-                      <summary className="subtle">Feste Systemtexte anzeigen (von Gloria gesprochen, nicht editierbar)</summary>
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading subtle">Feste Systemtexte anzeigen (von Gloria gesprochen, nicht editierbar)</h3>
                       <ul className="subtle top-gap">
                         <li><strong>Verbindungsaufbau:</strong> „Bitte einen kleinen Moment, die Verbindung wird hergestellt."</li>
                         <li><strong>Pause:</strong> „Ich bin noch dran. Nehmen Sie sich ruhig einen Moment."</li>
@@ -2154,7 +2169,7 @@ export default function HomePage() {
                         <li><strong>Eingehender Rückruf (niemand da):</strong> „Aktuell ist kein Ansprechpartner verfügbar. Wir melden uns zeitnah."</li>
                         <li><strong>Technischer Fehler:</strong> „Entschuldigung, es ist ein technischer Fehler aufgetreten."</li>
                       </ul>
-                    </details>
+                    </div>
 
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Playbook speichern</button>
@@ -2308,10 +2323,11 @@ export default function HomePage() {
                   </>
                 )}
               </CollapsiblePanel>
-            </div>
-          </div>
-        </div>
+      </section>
       ) : null}
+
+        </div>
+      </main>
 
       {selectedReport && (() => {
         const conversationLines = buildConversationLines(selectedReport.summary || "");

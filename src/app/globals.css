@@ -181,14 +181,14 @@ textarea {
   gap: 14px;
 }
 
-.collapsible-panel {
+.collapsible-panel,
+.static-panel {
   padding: 0;
   overflow: hidden;
 }
 
 .panel-summary {
   list-style: none;
-  cursor: pointer;
   padding: 16px;
   display: flex;
   align-items: center;
@@ -196,24 +196,16 @@ textarea {
   gap: 10px;
 }
 
-.panel-summary::-webkit-details-marker {
-  display: none;
-}
-
-.panel-summary::after {
-  content: "▾";
-  color: #3f5f8f;
-  font-size: 1rem;
-  transition: transform 160ms ease;
-}
-
-.collapsible-panel:not([open]) .panel-summary::after {
-  transform: rotate(-90deg);
-}
-
 .panel-content {
   padding: 0 16px 16px;
   border-top: 1px solid #e3e9f4;
+}
+
+.sub-heading {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink-800);
 }
 
 .panel,
