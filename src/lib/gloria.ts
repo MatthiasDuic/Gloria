@@ -205,7 +205,7 @@ ANTWORTE AUSSCHLIESSLICH in diesem JSON-Format (kein anderer Text, keine Erklär
   "reply": "deine gesprochene Antwort auf Deutsch",
   "action": "continue" | "end_success" | "end_rejection" | "end_callback",
   "appointmentNote": "Termininfo oder Wiedervorlage-Zeitraum als Text, sonst leerer String",
-  "appointmentAtISO": "ISO-Zeitpunkt des fixierten Termins oder leerer String",
+  "appointmentAtISO": "ISO-8601 Zeitpunkt des fixierten Termins (UTC, Format YYYY-MM-DDTHH:mm:ssZ). MUSS in der Zukunft liegen, max. 6 Monate. Wenn unklar oder nicht fixiert: leerer String. Erfinde NIEMALS ein Datum oder Jahr.",
   "directDial": "erkannte Durchwahl oder Mobilnummer als Text, sonst leerer String",
   "consentGiven": true | false | null
 }`;

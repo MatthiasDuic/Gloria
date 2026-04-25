@@ -1466,96 +1466,6 @@ export default function HomePage() {
       <LiveMonitorPanel />
 
       <section className="stack top-section">
-        <CollapsiblePanel title="Compliance & Ablauf" defaultOpen>
-          <p className="subtle">
-            Dieser Bereich dokumentiert die verbindlichen Leitplanken für Gloria im Live-Telefonieprozess.
-          </p>
-
-          <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
-          <ul>
-            <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
-            <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Playbooks für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
-            <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
-            <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
-            <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>2) Verhaltensregeln und Gesprächsführung</strong></p>
-          <ul>
-            <li>Gloria kommuniziert kurz, klar, höflich, professionell und lösungsorientiert.</li>
-            <li>Gloria verwendet keine erfundenen Fakten und argumentiert ausschließlich auf Basis der hinterlegten Informationen.</li>
-            <li>Gesprächsziele sind Terminvereinbarung, Wiedervorlage (mit dokumentiertem Zeitpunkt) oder eine klare Absage.</li>
-            <li>Während Warteschleifen oder beim Durchstellen befindet sich Gloria im Listen-Only-Modus und startet erst, wenn ein realer Gesprächspartner spricht.</li>
-            <li>Bei Terminierung bietet Gloria konkrete Zeitoptionen an; passen diese nicht, kann der Gesprächspartner eigene Vorschläge machen.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>3) Einwilligung und Aufzeichnung (DSGVO-konform)</strong></p>
-          <ul>
-            <li>Eine Aufzeichnung erfolgt ausschließlich nach ausdrücklicher Einwilligung des Entscheiders.</li>
-            <li>Die Einwilligung wird vor Beginn der Aufzeichnung abgefragt und protokolliert.</li>
-            <li>Ohne Einwilligung wird keine Aufnahme gestartet.</li>
-            <li>Der Einwilligungsstatus wird im Report gespeichert und im Dashboard angezeigt.</li>
-            <li>Bei vorhandener Aufnahme wird nur die URL-Referenz gespeichert; die Datei selbst verbleibt beim Telefonieanbieter.</li>
-            <li>Der Nutzer kann über das Dashboard Aufnahmen löschen, was die gespeicherten Referenzen unmittelbar entfernt.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>4) Technischer Prozessablauf</strong></p>
-          <ul>
-            <li>Start des Gesprächs über die Twilio-Call-APIs.</li>
-            <li>Gesprächssteuerung erfolgt turn-basiert über /api/twilio/voice und /api/twilio/voice/process.</li>
-            <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
-            <li>Playbook-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
-            <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
-            <li>Kalender- und Report-Ansichten beziehen Termine direkt aus den gespeicherten Gesprächsreports.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>5) Datenschutz, Datenspeicherung und Löschung (DSGVO-konform)</strong></p>
-          <p className="subtle top-gap"><strong>5.1 Speicherort</strong></p>
-          <ul>
-            <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
-            <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, playbooks.json, report-database.json, conversation-events.json).</li>
-            <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>5.2 Verarbeitete Daten</strong></p>
-          <p className="subtle">Verarbeitet werden ausschließlich für den Zweck der Gesprächsdurchführung erforderliche Daten, unter anderem:</p>
-          <ul>
-            <li>Firmenname</li>
-            <li>Ansprechpartner</li>
-            <li>Thema des Gesprächs</li>
-            <li>Gesprächsergebnis</li>
-            <li>Termin oder Wiedervorlage</li>
-            <li>Einwilligungsstatus</li>
-            <li>Anzahl der Kontaktversuche</li>
-            <li>Gesprächszusammenfassung</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>5.3 Speicherdauer</strong></p>
-          <ul>
-            <li>Alle Gesprächsdaten werden maximal 30 Tage gespeichert, sofern keine gesetzliche Pflicht zur längeren Aufbewahrung besteht.</li>
-            <li>Nach Ablauf der 30 Tage werden die Daten automatisch gelöscht.</li>
-            <li>Aufnahmen (URL-Referenzen) werden ebenfalls nach 30 Tagen gelöscht oder sofort, wenn der Nutzer dies verlangt.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>5.4 Rechte der Betroffenen</strong></p>
-          <p className="subtle">Betroffene können jederzeit:</p>
-          <ul>
-            <li>Auskunft über gespeicherte Daten verlangen</li>
-            <li>Berichtigung verlangen</li>
-            <li>Löschung verlangen</li>
-            <li>Widerspruch gegen Verarbeitung einlegen</li>
-            <li>Löschfunktionen für Reports und Aufnahmen sind im Dashboard integriert und wirken sofort auf die gespeicherten Datensätze.</li>
-          </ul>
-
-          <p className="subtle top-gap"><strong>6) Externe Dienstleister im Laufzeitpfad</strong></p>
-          <ul>
-            <li>Twilio: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
-            <li>OpenAI: Gesprächslogik in freien Dialogphasen</li>
-            <li>ElevenLabs (optional): Sprachsynthese</li>
-          </ul>
-          <p className="subtle">Alle Dienstleister werden ausschließlich im Rahmen der Auftragsverarbeitung genutzt. Es findet keine Weitergabe zu Werbezwecken statt.</p>
-        </CollapsiblePanel>
-
         <CollapsiblePanel title="Anruf bei Firma starten" defaultOpen>
           <div className="field-grid">
             <div>
@@ -1856,6 +1766,96 @@ export default function HomePage() {
             <h2>Einstellungen</h2>
 
             <div className="stack top-gap">
+              <CollapsiblePanel title="Compliance & Ablauf" defaultOpen={false}>
+                <p className="subtle">
+                  Dieser Bereich dokumentiert die verbindlichen Leitplanken für Gloria im Live-Telefonieprozess.
+                </p>
+
+                <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
+                <ul>
+                  <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
+                  <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Playbooks für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+                  <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
+                  <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
+                  <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>2) Verhaltensregeln und Gesprächsführung</strong></p>
+                <ul>
+                  <li>Gloria kommuniziert kurz, klar, höflich, professionell und lösungsorientiert.</li>
+                  <li>Gloria verwendet keine erfundenen Fakten und argumentiert ausschließlich auf Basis der hinterlegten Informationen.</li>
+                  <li>Gesprächsziele sind Terminvereinbarung, Wiedervorlage (mit dokumentiertem Zeitpunkt) oder eine klare Absage.</li>
+                  <li>Während Warteschleifen oder beim Durchstellen befindet sich Gloria im Listen-Only-Modus und startet erst, wenn ein realer Gesprächspartner spricht.</li>
+                  <li>Bei Terminierung bietet Gloria konkrete Zeitoptionen an; passen diese nicht, kann der Gesprächspartner eigene Vorschläge machen.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>3) Einwilligung und Aufzeichnung (DSGVO-konform)</strong></p>
+                <ul>
+                  <li>Eine Aufzeichnung erfolgt ausschließlich nach ausdrücklicher Einwilligung des Entscheiders.</li>
+                  <li>Die Einwilligung wird vor Beginn der Aufzeichnung abgefragt und protokolliert.</li>
+                  <li>Ohne Einwilligung wird keine Aufnahme gestartet.</li>
+                  <li>Der Einwilligungsstatus wird im Report gespeichert und im Dashboard angezeigt.</li>
+                  <li>Bei vorhandener Aufnahme wird nur die URL-Referenz gespeichert; die Datei selbst verbleibt beim Telefonieanbieter.</li>
+                  <li>Der Nutzer kann über das Dashboard Aufnahmen löschen, was die gespeicherten Referenzen unmittelbar entfernt.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>4) Technischer Prozessablauf</strong></p>
+                <ul>
+                  <li>Start des Gesprächs über die Twilio-Call-APIs.</li>
+                  <li>Gesprächssteuerung erfolgt turn-basiert über /api/twilio/voice und /api/twilio/voice/process.</li>
+                  <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
+                  <li>Playbook-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
+                  <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
+                  <li>Kalender- und Report-Ansichten beziehen Termine direkt aus den gespeicherten Gesprächsreports.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>5) Datenschutz, Datenspeicherung und Löschung (DSGVO-konform)</strong></p>
+                <p className="subtle top-gap"><strong>5.1 Speicherort</strong></p>
+                <ul>
+                  <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
+                  <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, playbooks.json, report-database.json, conversation-events.json).</li>
+                  <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>5.2 Verarbeitete Daten</strong></p>
+                <p className="subtle">Verarbeitet werden ausschließlich für den Zweck der Gesprächsdurchführung erforderliche Daten, unter anderem:</p>
+                <ul>
+                  <li>Firmenname</li>
+                  <li>Ansprechpartner</li>
+                  <li>Thema des Gesprächs</li>
+                  <li>Gesprächsergebnis</li>
+                  <li>Termin oder Wiedervorlage</li>
+                  <li>Einwilligungsstatus</li>
+                  <li>Anzahl der Kontaktversuche</li>
+                  <li>Gesprächszusammenfassung</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>5.3 Speicherdauer</strong></p>
+                <ul>
+                  <li>Alle Gesprächsdaten werden maximal 30 Tage gespeichert, sofern keine gesetzliche Pflicht zur längeren Aufbewahrung besteht.</li>
+                  <li>Nach Ablauf der 30 Tage werden die Daten automatisch gelöscht.</li>
+                  <li>Aufnahmen (URL-Referenzen) werden ebenfalls nach 30 Tagen gelöscht oder sofort, wenn der Nutzer dies verlangt.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>5.4 Rechte der Betroffenen</strong></p>
+                <p className="subtle">Betroffene können jederzeit:</p>
+                <ul>
+                  <li>Auskunft über gespeicherte Daten verlangen</li>
+                  <li>Berichtigung verlangen</li>
+                  <li>Löschung verlangen</li>
+                  <li>Widerspruch gegen Verarbeitung einlegen</li>
+                  <li>Löschfunktionen für Reports und Aufnahmen sind im Dashboard integriert und wirken sofort auf die gespeicherten Datensätze.</li>
+                </ul>
+
+                <p className="subtle top-gap"><strong>6) Externe Dienstleister im Laufzeitpfad</strong></p>
+                <ul>
+                  <li>Twilio: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
+                  <li>OpenAI: Gesprächslogik in freien Dialogphasen</li>
+                  <li>ElevenLabs (optional): Sprachsynthese</li>
+                </ul>
+                <p className="subtle">Alle Dienstleister werden ausschließlich im Rahmen der Auftragsverarbeitung genutzt. Es findet keine Weitergabe zu Werbezwecken statt.</p>
+              </CollapsiblePanel>
+
               <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
                 <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
                 <label>Listenname</label>

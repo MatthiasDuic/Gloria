@@ -264,6 +264,23 @@ function normalizeAppointmentAt(value: string): string | undefined {
     return undefined;
   }
 
+  // LLM-Halluzinationen abfangen: Termine duerfen nicht in der Vergangenheit
+  // liegen und nicht weiter als 180 Tage in der Zukunft. Ohne diese Pruefung
+  // hat das Modell in der Vergangenheit Jahre wie 2023 zurueckgegeben.
+  const now = Date.now();
+  const minFuture = now - 5 * 60_000; // 5 Min Toleranz fuer Skew
+  const maxFuture = now + 180 * 24 * 60 * 60_000;
+  if (parsed < minFuture || parsed > maxFuture) {
+    log.warn("appointment.rejected_out_of_range", {
+      event: "appointment.normalize",
+      value,
+      parsedIso: new Date(parsed).toISOString(),
+      nowIso: new Date(now).toISOString(),
+      reason: parsed < minFuture ? "past" : "too_far_future",
+    });
+    return undefined;
+  }
+
   return new Date(parsed).toISOString();
 }
 
@@ -627,7 +644,9 @@ async function askOpenAI(
       ? "Entscheider (bereits bestätigt)"
       : "Empfang/Gatekeeper (oder noch unbekannt)";
 
+  const nowIso = new Date().toISOString();
   const userContent = [
+    `Aktuelles Datum/Uhrzeit (UTC): ${nowIso}. Verwende dieses Datum als Referenz fuer alle Terminvorschlaege - benutze NIEMALS ein anderes Jahr.`,
     transcript
       ? `Bisheriger Gesprächsverlauf:\n${transcript}`
       : "(Gesprächsbeginn – erste Äußerung der anderen Seite)",
