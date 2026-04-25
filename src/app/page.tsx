@@ -1360,7 +1360,7 @@ export default function HomePage() {
             onClick={() => setActiveView("calendar")}
           >
             <span className="nav-icon" aria-hidden>▤</span>
-            <span>Kalender & Reports</span>
+            <span>Kalender</span>
           </button>
         </nav>
         <div className="sidebar-footer">
@@ -1393,7 +1393,7 @@ export default function HomePage() {
               {activeView === "overview" ? "Übersicht" : null}
               {activeView === "calls" ? "Anrufe" : null}
               {activeView === "leads" ? "Offene Firmenliste" : null}
-              {activeView === "calendar" ? "Kalender & Reports" : null}
+              {activeView === "calendar" ? "Kalender" : null}
               {activeView === "settings" ? "Einstellungen" : null}
               {activeView === "compliance" ? "Compliance & Ablauf" : null}
             </h1>
