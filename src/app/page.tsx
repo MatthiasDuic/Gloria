@@ -331,6 +331,7 @@ export default function HomePage() {
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeView, setActiveView] = useState<"overview" | "calls" | "calendar" | "live" | "admin">("overview");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -1321,30 +1322,129 @@ export default function HomePage() {
   }
 
   return (
-    <main className="dashboard-page">
-      <header className="duic-hero">
-        <div>
-          <p className="eyebrow">Agentur Duic Sprockhövel</p>
-          <h1>Gloria Admin Dashboard</h1>
-          <p className="hero-copy">
-            Vertrieb, Telefonie und Lernlogik in einer Leitstelle: klar, schnell und auf Termine ausgerichtet.
-          </p>
-          <p className="hero-note">{loading ? "Lade Daten ..." : notice}</p>
-          <div className="hero-meta-row">
-            <span className="pill">
-              Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-            </span>
-            <span className="pill">
-              Playbooks: {data.playbooksStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}
-            </span>
-            <span className="pill">Reports an Matthias.duic@agentur-duic-sprockhoevel.de</span>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <span className="brand-mark">G</span>
+          <div>
+            <div className="brand-title">Gloria</div>
+            <div className="brand-sub">Agentur Duic</div>
           </div>
         </div>
-        <div className="hero-actions">
-          <a className="btn ghost" href="/logout">Abmelden</a>
-          <button className="btn ghost" onClick={() => setSettingsOpen(true)}>Einstellungen</button>
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${activeView === "overview" ? "active" : ""}`}
+            onClick={() => setActiveView("overview")}
+          >
+            <span className="nav-icon" aria-hidden>▦</span>
+            <span>Übersicht</span>
+          </button>
+          <button
+            className={`nav-item ${activeView === "calls" ? "active" : ""}`}
+            onClick={() => setActiveView("calls")}
+          >
+            <span className="nav-icon" aria-hidden>☎</span>
+            <span>Anrufe</span>
+          </button>
+          <button
+            className={`nav-item ${activeView === "calendar" ? "active" : ""}`}
+            onClick={() => setActiveView("calendar")}
+          >
+            <span className="nav-icon" aria-hidden>▤</span>
+            <span>Kalender & Reports</span>
+          </button>
+          <button
+            className={`nav-item ${activeView === "live" ? "active" : ""}`}
+            onClick={() => setActiveView("live")}
+          >
+            <span className="nav-icon" aria-hidden>●</span>
+            <span>Live-Monitor</span>
+          </button>
+        </nav>
+        <div className="sidebar-footer">
+          <button className="nav-item ghost" onClick={() => setSettingsOpen(true)}>
+            <span className="nav-icon" aria-hidden>⚙</span>
+            <span>Einstellungen</span>
+          </button>
+          <a className="nav-item ghost" href="/logout">
+            <span className="nav-icon" aria-hidden>↩</span>
+            <span>Abmelden</span>
+          </a>
         </div>
-      </header>
+      </aside>
+
+      <main className="main-area">
+        <header className="topbar">
+          <div>
+            <div className="topbar-eyebrow">Agentur Duic Sprockhövel</div>
+            <h1 className="topbar-title">
+              {activeView === "overview" ? "Übersicht" : null}
+              {activeView === "calls" ? "Anrufe & Aufträge" : null}
+              {activeView === "calendar" ? "Kalender & Reports" : null}
+              {activeView === "live" ? "Live-Monitor" : null}
+            </h1>
+            <p className="topbar-note">{loading ? "Lade Daten ..." : notice}</p>
+          </div>
+          <div className="topbar-meta">
+            <span className="status-pill">
+              <span className={`status-dot ${data.reportStorageMode === "postgres" ? "ok" : "warn"}`} />
+              Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
+            </span>
+            <span className="status-pill">
+              <span className={`status-dot ${data.playbooksStorageMode === "postgres" ? "ok" : "warn"}`} />
+              Playbooks: {data.playbooksStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
+            </span>
+            {currentUser ? (
+              <span className="user-chip">
+                <span className="user-avatar">{(currentUser.username || "?").slice(0, 1).toUpperCase()}</span>
+                <span>
+                  <strong>{currentUser.username}</strong>
+                  <small>{currentUser.role === "master" ? "Master" : "Nutzer"}</small>
+                </span>
+              </span>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="view-content">
+
+      {activeView === "overview" ? (
+      <>
+      <section className="kpi-grid">
+        <article className="kpi-card primary">
+          <div className="kpi-label">Termine heute</div>
+          <div className="kpi-value">{
+            (data.reports || []).filter((r) => {
+              if (r.outcome !== "Termin" || !r.appointmentAt) return false;
+              const d = new Date(r.appointmentAt);
+              const today = new Date();
+              return d.toDateString() === today.toDateString();
+            }).length
+          }</div>
+          <div className="kpi-sub">{data.metrics.appointments} Termine gesamt</div>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-label">Gespräche heute</div>
+          <div className="kpi-value">{
+            (data.reports || []).filter((r) => {
+              const d = new Date(r.conversationDate);
+              const today = new Date();
+              return d.toDateString() === today.toDateString();
+            }).length
+          }</div>
+          <div className="kpi-sub">{data.metrics.conversations} Gespräche gesamt</div>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-label">Offene Wiedervorlagen</div>
+          <div className="kpi-value">{data.metrics.callbacksOpen}</div>
+          <div className="kpi-sub">Werden automatisch zurückgerufen</div>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-label">Conversion-Rate</div>
+          <div className="kpi-value">{reportingInsights.appointmentRate}%</div>
+          <div className="kpi-sub">Termine je Kontakt erreicht</div>
+        </article>
+      </section>
 
       <CollapsiblePanel title="Kennzahlen" defaultOpen>
         <section className="stats-grid">
@@ -1462,9 +1562,12 @@ export default function HomePage() {
           </div>
         )}
       </CollapsiblePanel>
+      </>
+      ) : null}
 
-      <LiveMonitorPanel />
+      {activeView === "live" ? <LiveMonitorPanel /> : null}
 
+      {activeView === "calls" ? (
       <section className="stack top-section">
         <CollapsiblePanel title="Anruf bei Firma starten" defaultOpen>
           <div className="field-grid">
@@ -1575,7 +1678,11 @@ export default function HomePage() {
             </div>
           )}
         </CollapsiblePanel>
+      </section>
+      ) : null}
 
+      {activeView === "calendar" ? (
+      <section className="stack top-section">
         <CollapsiblePanel title="Kalender" defaultOpen>
           {currentUser?.calendarFeedToken ? (
             <div className="mini-panel bottom-gap">
@@ -1758,6 +1865,10 @@ export default function HomePage() {
           </table>
         </CollapsiblePanel>
       </section>
+      ) : null}
+
+        </div>
+      </main>
 
       {settingsOpen ? (
         <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
@@ -2351,6 +2462,6 @@ export default function HomePage() {
           </div>
         );
       })()}
-    </main>
+    </div>
   );
 }
