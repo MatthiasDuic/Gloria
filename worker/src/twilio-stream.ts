@@ -6,6 +6,7 @@ import { openDeepgram, type AsrSession } from "./asr.js";
 import { generateReply } from "./llm.js";
 import { streamElevenLabsToMulaw, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
+import { loadBusySlots, busySlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 
 /** Twilio Media Streams send frames in 20 ms chunks of μ-law 8 kHz (160 bytes per frame). */
@@ -188,6 +189,14 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
             ctx.playbookPrompt = promptBlock;
             log.info("playbook.applied", { topic: pb.topic });
           }
+        });
+
+        // Lade bereits belegte Termin-Slots parallel, damit Gloria keine
+        // Doppelbelegungen vorschlägt.
+        void loadBusySlots({ userId: ctx.userId }).then((slots) => {
+          if (!ctx || !slots) return;
+          ctx.busySlotsPrompt = busySlotsToPrompt(slots);
+          log.info("busy.applied", { count: slots.length });
         });
 
         asr = openDeepgram({

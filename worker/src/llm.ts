@@ -173,5 +173,6 @@ function buildSystemPrompt(ctx: CallContext): string {
     );
   }
   if (ctx.playbookPrompt) parts.push("\n\n" + ctx.playbookPrompt);
+  if (ctx.busySlotsPrompt) parts.push("\n\n" + ctx.busySlotsPrompt);
   return parts.join(" ");
 }
