@@ -42,6 +42,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
   let asr: AsrSession | null = null;
   let pendingTurn = false;
   let currentTts: TtsStreamHandle | null = null;
+  let playbookReady: Promise<void> | null = null;
   let inboundFrameCount = 0;
 
   const sendMedia = (mulaw: Buffer) => {
@@ -112,6 +113,15 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
       log.info("turn.user_said", { callSid: ctx.callSid, text: userText });
 
+      // Vor der ersten LLM-Antwort kurz auf das Playbook warten (max. 6 s),
+      // damit Phase 3+ wirklich mit Playbook-Wissen gefahren wird.
+      if (playbookReady && !ctx.playbookPrompt) {
+        await Promise.race([
+          playbookReady,
+          new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+        ]);
+      }
+
       const reply = await generateReply(ctx, userText);
       await speak(reply.reply);
 
@@ -162,7 +172,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         });
 
         // Lade Playbook (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
-        void loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {
+        playbookReady = loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {
           if (!ctx || !pb) return;
           const promptBlock = playbookToSystemPrompt(pb);
           if (promptBlock) {

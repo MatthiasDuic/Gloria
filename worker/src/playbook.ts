@@ -49,7 +49,7 @@ export async function loadPlaybook(opts: {
   const url = `${baseUrl}/api/twilio/playbooks${params.toString() ? `?${params.toString()}` : ""}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
     const res = await fetch(url, {
       method: "GET",
