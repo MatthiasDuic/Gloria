@@ -5,6 +5,7 @@ import { newContext, type CallContext } from "./state.js";
 import { openDeepgram, type AsrSession } from "./asr.js";
 import { generateReply } from "./llm.js";
 import { streamElevenLabsToMulaw, type TtsStreamHandle } from "./tts.js";
+import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 
 /** Twilio Media Streams send frames in 20 ms chunks of μ-law 8 kHz (160 bytes per frame). */
 const FRAME_BYTES = 160;
@@ -158,6 +159,16 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           streamSid: ctx.streamSid,
           company: ctx.company,
           topic: ctx.topic,
+        });
+
+        // Lade Playbook (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
+        void loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {
+          if (!ctx || !pb) return;
+          const promptBlock = playbookToSystemPrompt(pb);
+          if (promptBlock) {
+            ctx.playbookPrompt = promptBlock;
+            log.info("playbook.applied", { topic: pb.topic });
+          }
         });
 
         asr = openDeepgram({

@@ -10,6 +10,8 @@ export type CallContext = {
   topic?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
+  // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
+  playbookPrompt?: string;
   // Conversation memory.
   transcript: Array<{ role: "user" | "assistant"; text: string; at: number }>;
   // Speaking flag — used for barge-in detection.

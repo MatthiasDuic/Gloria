@@ -104,5 +104,6 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
   if (ctx.contactName) parts.push(`Gewünschter Ansprechpartner: ${ctx.contactName}.`);
   if (ctx.topic) parts.push(`Thema: ${ctx.topic}.`);
+  if (ctx.playbookPrompt) parts.push("\n\n" + ctx.playbookPrompt);
   return parts.join(" ");
 }
