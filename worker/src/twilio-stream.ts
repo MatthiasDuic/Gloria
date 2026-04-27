@@ -6,6 +6,7 @@ import { openDeepgram, type AsrSession } from "./asr.js";
 import { generateReply } from "./llm.js";
 import { streamElevenLabsToMulaw, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
+import { postReport } from "./finalize.js";
 
 /** Twilio Media Streams send frames in 20 ms chunks of μ-law 8 kHz (160 bytes per frame). */
 const FRAME_BYTES = 160;
@@ -252,7 +253,16 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     } catch {
       /* ignore */
     }
-    // TODO: persist final transcript / outcome to APP_BASE_URL.
+    if (ctx) {
+      try {
+        await postReport(ctx);
+      } catch (error) {
+        log.error("finalize.unhandled", {
+          error: error instanceof Error ? error.message : String(error),
+          callSid: ctx.callSid,
+        });
+      }
+    }
   });
 
   ws.on("error", (error) => {

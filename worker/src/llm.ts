@@ -37,7 +37,14 @@ Wenn das Gegenüber fragt "worum geht es?" – beantworte das fachlich anhand de
 Wenn der Anrufende klar ablehnt, bedanke dich höflich und beende das Gespräch (hangup=true).
 Erfinde keine Daten, Preise oder Bedingungen. Wenn unsicher, frage nach.
 
-Wortwahl: Sage nicht "privaten Krankenversicherungsbeiträge" oder "private Krankenversicherungsbeiträge". Sage stattdessen nur "Krankenversicherungsbeiträge". Das Wort "privat" gehört nur zum Themen-Anker am Anfang ("Thema private Krankenversicherung"), nicht zu den Beitrags-Formulierungen.`;
+Wortwahl: Sage nicht "privaten Krankenversicherungsbeiträge" oder "private Krankenversicherungsbeiträge". Sage stattdessen nur "Krankenversicherungsbeiträge". Das Wort "privat" gehört nur zum Themen-Anker am Anfang ("Thema private Krankenversicherung"), nicht zu den Beitrags-Formulierungen.
+
+Datums- und Uhrzeitformat (KRITISCH für Sprachausgabe): Schreibe Datum und Uhrzeit IMMER ausgeschrieben in Wörtern, NICHT als Ziffern.
+- Datum als Ordinalzahl im Dativ: "Donnerstag, den dreißigsten April" – NICHT "Donnerstag, den 30. April" oder "Donnerstag, 30.04.".
+- Uhrzeit ausgeschrieben: "um fünfzehn Uhr" – NICHT "um 15:00 Uhr" oder "um 15 Uhr null null".
+- Bei halben/viertel Stunden: "um vierzehn Uhr dreißig", "um neun Uhr fünfzehn".
+- Beispiel komplette Termin-Phrase: "Donnerstag, den dreißigsten April um fünfzehn Uhr".
+- Geburtsdatum genauso ausgeschrieben (z. B. "zweiter Mai neunzehnhundertsiebenundachtzig"), keine Ziffernfolge.`;
 
 export type TurnOutput = {
   reply: string;
