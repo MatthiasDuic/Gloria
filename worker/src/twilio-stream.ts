@@ -184,9 +184,9 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           },
         });
 
-        // Greet the caller — outbound campaigns expect Gloria to start first.
-        const opener = buildOpener(ctx);
-        if (opener) void speak(opener);
+        // Gloria wartet bewusst, bis der Angerufene sich gemeldet hat
+        // ("Praxis Müller", "Hallo, Schmidt"). Erst danach reagiert das LLM
+        // mit dem passenden Opener (Empfang vs. Entscheider).
         break;
       }
       case "media": {
@@ -239,10 +239,5 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
   });
 }
 
-function buildOpener(ctx: CallContext): string {
-  const owner = ctx.ownerRealName || "Matthias Duic";
-  const company = ctx.ownerCompanyName || "Agentur Duic Sprockhövel";
-  const topic = ctx.topic || "betriebliche Krankenversicherung";
-  const target = ctx.contactName ? ` Ich würde gerne kurz mit ${ctx.contactName} sprechen.` : "";
-  return `Guten Tag, hier spricht Gloria, die digitale Vertriebsassistentin von ${owner} der ${company}. Es geht um ${topic}.${target}`;
-}
+// buildOpener wurde entfernt: Gloria spricht erst, nachdem der
+// Angerufene sich gemeldet hat (vgl. /api/twilio/voice/process).
