@@ -31,8 +31,8 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     sample_rate: "8000",
     channels: "1",
     interim_results: "true",
-    endpointing: "300",
-    utterance_end_ms: "1200",
+    endpointing: "700",
+    utterance_end_ms: "1800",
     vad_events: "true",
     punctuate: "true",
   });
