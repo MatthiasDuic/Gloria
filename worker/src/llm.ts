@@ -34,7 +34,7 @@ Strikte Gesprächsphasen – halte sie ein und springe NICHT vorzeitig zum Termi
 5) Problem-Aufbau: konkrete fachliche Punkte aus dem Playbook anbringen, die zur Antwort des Gegenübers passen. Hier liefere echten Mehrwert.
 6) Übergang zum Konzept / Lösung andeuten.
 7) Termin: Frage ZUERST nach der groben Tageszeit-Präferenz, BEVOR du konkrete Slots nennst. Genau EIN Satz, z. B. "Wann passt es Ihnen grundsätzlich besser – eher am Vormittag oder am Nachmittag?". Warte die Antwort ab. ERST DANACH schlage zwei konkrete Slots vor, die zur genannten Präferenz passen, jeweils mit Wochentag + Datum + Uhrzeit (z. B. "Mittwoch, der 6. Mai um 15:00 Uhr"). GESCHÄFTSZEITEN (HARTE REGEL): Termine ausschließlich Montag bis Freitag. Frühester Beginn 09:00 Uhr, spätester Beginn 19:00 Uhr. Schlage NIEMALS Slots vor 09:00 oder nach 19:00 vor. Schlage NIEMALS Samstag oder Sonntag vor. Vormittag = 09:00–12:00, Nachmittag = 13:00–19:00. Wenn der Anrufende selbst einen Slot außerhalb dieser Zeiten nennt (z. B. "20 Uhr" oder "Samstag"), sage höflich: "In diesem Zeitfenster kann ich leider keinen Termin anbieten – Herr Duic ist Montag bis Freitag zwischen neun und neunzehn Uhr für Sie da. Würde Ihnen [Alternative im erlaubten Fenster] passen?". NIE konkrete Slots nennen, ohne vorher die Vormittag/Nachmittag-Frage gestellt zu haben. NIE nur "Vormittag oder Nachmittag" als finalen Vorschlag \u2013 das ist nur die Präferenz-Frage. Wenn der Anrufende einen Tag/ein Datum bestätigt, MERKE dir GENAU dieses Datum + diese Uhrzeit (Wochentag, Tag, Monat, Uhrzeit). DATUM-LOCK (KRITISCH): Sobald der Anrufende einen Slot zugesagt hat, ist dieser Slot eingefroren. In der Schluss-Zusammenfassung (Phase 10) MUSST du EXAKT denselben Wochentag, dasselbe Datum und dieselbe Uhrzeit nennen, die der Anrufende zugesagt hat. Nimm dazu die LETZTE im Verlauf bestätigte Slot-Aussage (z. B. "Donnerstag, 30. April, 15 Uhr") und wiederhole sie wortwörtlich. Berechne den Wochentag NIE neu (kein Wochentag-Mapping aus dem Datum, keine eigene Kalender-Logik). Erfinde KEINEN abweichenden Tag/Datum. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" gesagt hat, sage am Ende EXAKT "Donnerstag, den 30. April, 15:00 Uhr" \u2013 niemals "Mittwoch, 29. April" oder eine andere Variante.
-8) Basisdaten / Gesundheitsfragen – ABSOLUTE PFLICHT, wenn das Playbook entsprechende Felder enthält (z. B. "PKV-Gesundheitseinleitung", "PKV-Gesundheitsfragen" oder vergleichbare): SOFORT NACH der Termin-Bestätigung in Phase 7 ist deine ALLERNÄCHSTE Antwort die Brücke + erste Gesundheitsfrage – KEINE Schluss-Zusammenfassung, KEINE E-Mail-Frage, KEINE Verabschiedung davor. Brücke: "Damit Herr Duic optimal vorbereitet ist, gehe ich noch kurz ein paar Basisangaben mit Ihnen durch – das dauert nur wenige Minuten. Darf ich beginnen?". Stelle dann ALLE im Playbook genannten Fragen (Geburtsdatum, Größe/Gewicht, aktueller Versicherer, Monatsbeitrag, laufende Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien usw.) in genau dieser Reihenfolge, EINZELN, jeweils Antwort abwarten. ÜBERSPRINGE diese Phase NIEMALS, wenn Felder dafür im Playbook stehen – auch nicht, wenn der Anrufende ungeduldig wirkt (dann sage "Es sind nur noch wenige kurze Fragen, dann ist alles erledigt."). HARTE GATE-REGEL: Du DARFST den Satz "Ich fasse kurz zusammen" oder eine Termin-Wiederholung in Phase 10 NICHT aussprechen, solange auch nur EINE Pflicht-Gesundheitsfrage aus dem Playbook noch nicht beantwortet wurde. Bedanke dich NICHT nach jeder einzelnen Antwort – höchstens am Ende einmal "Vielen Dank für die Angaben."
+8) Basisdaten / Gesundheitsfragen – ABSOLUTE PFLICHT, wenn das Playbook entsprechende Felder enthält (z. B. "PKV-Gesundheitseinleitung", "PKV-Gesundheitsfragen" oder vergleichbare): SOFORT NACH der Termin-Bestätigung in Phase 7 ist deine ALLERNÄCHSTE Antwort die Brücke + erste Gesundheitsfrage – KEINE Schluss-Zusammenfassung, KEINE E-Mail-Frage, KEINE Verabschiedung davor. Brücke: "Damit Herr Duic optimal vorbereitet ist, gehe ich noch kurz ein paar Basisangaben mit Ihnen durch – das dauert nur wenige Minuten. Darf ich beginnen?". Stelle dann die Pflicht-Fragen GENAU in dieser Reihenfolge, EINZELN, jeweils Antwort abwarten: (1) Geburtsdatum, (2) Körpergröße und Gewicht, (3) AKTUELLER VERSICHERER (Name der Krankenkasse/Versicherung – diese Frage NIEMALS überspringen), (4) Monatsbeitrag, (5) laufende Behandlungen oder bekannte Diagnosen, (6) regelmäßig eingenommene Medikamente, (7) stationäre Aufenthalte in den letzten 5 Jahren, (8) psychische Behandlungen in den letzten 10 Jahren, (9) fehlende Zähne / geplanter Zahnersatz, (10) bekannte Allergien. ÜBERSPRINGE NIEMALS einen Punkt – auch nicht, wenn der Anrufende ungeduldig wirkt (dann sage "Es sind nur noch wenige kurze Fragen, dann ist alles erledigt."). HARTE GATE-REGEL: Du DARFST den Satz "Ich fasse kurz zusammen" oder eine Termin-Wiederholung in Phase 10 NICHT aussprechen, solange auch nur EINE der zehn Fragen noch nicht beantwortet wurde. Bedanke dich NICHT nach jeder einzelnen Antwort – höchstens am Ende einmal "Vielen Dank für die Angaben."
 9) Schluss-Übergang: NUR wenn Phase 8 stattgefunden hat – sage nach der letzten Basisdaten-Antwort als Brücke "Damit sind alle Angaben erfasst, vielen Dank Herr {Nachname}." Wenn Phase 8 nicht erforderlich war (kein Playbook-Feld dafür), springe direkt zu Phase 10.
 10) Schluss-Zusammenfassung: gib eine KLARE, vollständige Terminzusammenfassung in EINEM Satz nach diesem Muster: "Ich fasse kurz zusammen: Ihr Termin mit Herrn Duic ist am {SLOT_PHRASE} zum Thema {Thema}. Ansprechpartner ist Herr Duic von der Agentur Duic Sprockhövel."
 DABEI IST {SLOT_PHRASE} STRENG WORTWÖRTLICH die Termin-Bestätigung aus deiner letzten Termin-Bestätigungs-Aussage in Phase 7 (z. B. "Dienstag, den zwölften Mai um fünfzehn Uhr"). Kopiere diese Phrase Wort-für-Wort. ÄNDERE NICHTS:
@@ -134,8 +134,18 @@ export async function generateReply(ctx: CallContext, userText: string): Promise
     const raw = json.choices?.[0]?.message?.content || "{}";
     const parsed = JSON.parse(raw) as { reply?: string; hangup?: boolean };
 
+    let reply = (parsed.reply || "").trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
+
+    // Safety net: wenn die Aufzeichnungs-Einwilligung bereits im Verlauf
+    // gegeben wurde (Gloria hat schon einmal "aufzeichnen" gefragt UND der
+    // Anrufende hat danach geantwortet), entferne eine erneute Aufzeichnungs-Frage
+    // aus der aktuellen Antwort – die LLM neigt dazu, sie nach Phase 7 zu wiederholen.
+    if (consentAlreadyGranted(ctx) && /aufzeichn/i.test(reply)) {
+      reply = stripConsentQuestion(reply);
+    }
+
     return {
-      reply: (parsed.reply || "").trim() || "Entschuldigung, könnten Sie das bitte wiederholen?",
+      reply,
       hangup: Boolean(parsed.hangup),
     };
   } catch (error) {
@@ -147,6 +157,33 @@ export async function generateReply(ctx: CallContext, userText: string): Promise
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function consentAlreadyGranted(ctx: CallContext): boolean {
+  // Suche im Transkript: Gloria hat "aufzeichnen" gefragt UND danach hat der
+  // Anrufende mit JA / okay / einverstanden geantwortet.
+  const turns = ctx.transcript;
+  for (let i = 0; i < turns.length; i++) {
+    const t = turns[i];
+    if (t.role !== "assistant" || !/aufzeichn/i.test(t.text)) continue;
+    for (let j = i + 1; j < turns.length; j++) {
+      if (turns[j].role !== "user") continue;
+      const ans = turns[j].text.toLowerCase().trim();
+      if (/^(ja\b|jawohl|gerne|in ordnung|einverstanden|okay|ok\b|geht klar|kein problem)/i.test(ans)) {
+        return true;
+      }
+      break;
+    }
+  }
+  return false;
+}
+
+function stripConsentQuestion(text: string): string {
+  // Entferne ganze Sätze, die nach Aufzeichnungs-Einwilligung fragen.
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const filtered = sentences.filter((s) => !/aufzeichn/i.test(s) && !/\bja\s+oder\s+nein\b/i.test(s));
+  const result = filtered.join(" ").trim();
+  return result || text;
 }
 
 function buildSystemPrompt(ctx: CallContext): string {
