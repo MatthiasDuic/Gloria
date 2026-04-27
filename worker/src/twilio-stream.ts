@@ -100,6 +100,16 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text, at: Date.now() });
+    // Termin-Slot extrahieren, sobald Gloria die Bestätigung ausspricht
+    // ("wird am ... bei Ihnen sein"). Ab dann ist die Slot-Phrase eingefroren
+    // und wird in jeden weiteren System-Prompt injiziert.
+    if (!ctx.confirmedSlotPhrase) {
+      const slot = extractConfirmedSlot(text);
+      if (slot) {
+        ctx.confirmedSlotPhrase = slot;
+        log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
+      }
+    }
   };
 
   const handleUserUtterance = async (userText: string) => {
@@ -272,3 +282,19 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der
 // Angerufene sich gemeldet hat (vgl. /api/twilio/voice/process).
+
+/**
+ * Extrahiert die bestätigte Termin-Phrase aus Glorias eigener Antwort,
+ * sobald sie einen Termin bestätigt ("wird am … bei Ihnen sein").
+ * Erfasst Wochentag + Datum + Uhrzeit als zusammenhängende Phrase, die
+ * später wortwörtlich in der Schluss-Zusammenfassung wiederholt wird.
+ */
+function extractConfirmedSlot(text: string): string | null {
+  // Beispiele:
+  // "wird am Donnerstag, den siebten Mai um vierzehn Uhr dreißig bei Ihnen sein"
+  // "am Dienstag, den zwölften Mai um fünfzehn Uhr"
+  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+[a-zäöüß]+\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
+  const m = re.exec(text);
+  if (!m) return null;
+  return m[1].trim().replace(/\s+/g, " ");
+}

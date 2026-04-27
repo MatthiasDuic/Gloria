@@ -150,6 +150,13 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
   if (ctx.contactName) parts.push(`Gewünschter Ansprechpartner: ${ctx.contactName}.`);
   if (ctx.topic) parts.push(`Thema: ${ctx.topic}.`);
+  if (ctx.confirmedSlotPhrase) {
+    parts.push(
+      `\n\nBESTÄTIGTER TERMIN (eingefroren – keine Änderung erlaubt): "${ctx.confirmedSlotPhrase}". ` +
+      `In Phase 10 (Schluss-Zusammenfassung) MUSST du in dem Satz "Ihr Termin mit Herrn Duic ist am …" GENAU diese Phrase einsetzen, Wort für Wort. ` +
+      `Erfinde KEINEN anderen Wochentag, KEIN anderes Datum und KEINE andere Uhrzeit.`,
+    );
+  }
   if (ctx.playbookPrompt) parts.push("\n\n" + ctx.playbookPrompt);
   return parts.join(" ");
 }

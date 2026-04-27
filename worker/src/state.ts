@@ -12,6 +12,9 @@ export type CallContext = {
   ownerCompanyName?: string;
   // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
   playbookPrompt?: string;
+  // Vom Anrufenden bestätigte Termin-Phrase (z. B. "Donnerstag, den siebten Mai um vierzehn Uhr dreißig").
+  // Sobald gesetzt, MUSS Phase 10 diese Phrase wortwörtlich übernehmen.
+  confirmedSlotPhrase?: string;
   // Conversation memory.
   transcript: Array<{ role: "user" | "assistant"; text: string; at: number }>;
   // Speaking flag — used for barge-in detection.
