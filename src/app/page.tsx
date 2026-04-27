@@ -2391,7 +2391,11 @@ export default function HomePage() {
                             <th>Benutzername</th>
                             <th>Name</th>
                             <th>Firma</th>
+                            <th>Adresse</th>
+                            <th>E-Mail</th>
+                            <th>Reale Rufnummer</th>
                             <th>Zugew. Rufnummer</th>
+                            <th>Gesellschaft</th>
                             <th>Rolle</th>
                             <th style={{ width: 1 }}>Aktion</th>
                           </tr>
@@ -2406,7 +2410,11 @@ export default function HomePage() {
                                   <td>{entry.username}</td>
                                   <td>{entry.realName}</td>
                                   <td>{entry.companyName}</td>
+                                  <td>{entry.address || <span className="subtle">—</span>}</td>
+                                  <td>{entry.email || <span className="subtle">—</span>}</td>
+                                  <td>{entry.realPhone || <span className="subtle">—</span>}</td>
                                   <td>{phone ? `${phone.phoneNumber}${phone.label ? ` (${phone.label})` : ""}` : <span className="subtle">—</span>}</td>
+                                  <td>{entry.gesellschaft || <span className="subtle">—</span>}</td>
                                   <td>{entry.role}</td>
                                   <td>
                                     <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
@@ -2429,7 +2437,7 @@ export default function HomePage() {
                                 </tr>
                                 {isEditing && editDraft ? (
                                   <tr>
-                                    <td colSpan={6} style={{ background: "var(--surface-soft)" }}>
+                                    <td colSpan={10} style={{ background: "var(--surface-soft)" }}>
                                       <div className="field-grid">
                                         <div>
                                           <label>Benutzername</label>

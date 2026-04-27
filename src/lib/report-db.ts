@@ -489,30 +489,16 @@ export async function ensureMasterAdmin(): Promise<void> {
   const password = process.env.BASIC_AUTH_PASSWORD?.trim() || "ChangeMe123!";
 
   const existing = await db.query(
-    `SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+    `SELECT id, role FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
     [username],
   );
 
   if (existing.rows[0]) {
-    await db.query(
-      `
-      UPDATE users
-      SET
-        username = $2,
-        real_name = $3,
-        company_name = $4,
-        password_hash = $5,
-        role = 'master'
-      WHERE id = $1
-      `,
-      [
-        String(existing.rows[0].id),
-        username,
-        "Matthias Duic",
-        "Agentur Duic Sprockhoevel",
-        hashPassword(password),
-      ],
-    );
+    // Master existiert bereits — KEINE Felder ueberschreiben (sonst werden Admin-Aenderungen zurueckgesetzt).
+    // Lediglich sicherstellen, dass die Rolle 'master' ist.
+    if (existing.rows[0].role !== "master") {
+      await db.query(`UPDATE users SET role = 'master' WHERE id = $1`, [String(existing.rows[0].id)]);
+    }
     return;
   }
 
