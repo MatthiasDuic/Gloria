@@ -10,6 +10,7 @@ export type CallContext = {
   topic?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
+  ownerGesellschaft?: string;
   // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
   playbookPrompt?: string;
   // Vom Anrufenden bestätigte Termin-Phrase (z. B. "Donnerstag, den siebten Mai um vierzehn Uhr dreißig").

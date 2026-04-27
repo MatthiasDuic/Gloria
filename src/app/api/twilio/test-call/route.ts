@@ -98,6 +98,7 @@ export async function POST(request: Request) {
         phoneNumberId: payload.phoneNumberId,
         ownerRealName: sessionUser.realName,
         ownerCompanyName: sessionUser.companyName,
+        ownerGesellschaft: sessionUser.gesellschaft,
         isTestCall: true,
       },
       request,

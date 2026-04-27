@@ -131,6 +131,7 @@ async function handle(request: Request) {
             userId,
             ownerRealName: user?.realName,
             ownerCompanyName: user?.companyName,
+            ownerGesellschaft: user?.gesellschaft,
           },
           request,
         );

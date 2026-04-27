@@ -29,6 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       address?: string;
       email?: string;
       realPhone?: string;
+      gesellschaft?: string;
       password?: string;
       role?: "master" | "user";
     };
@@ -40,6 +41,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       address: payload.address,
       email: payload.email,
       realPhone: payload.realPhone,
+      gesellschaft: payload.gesellschaft,
       password: payload.password,
       role: payload.role,
     });

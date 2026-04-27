@@ -173,6 +173,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           topic: params.topic,
           ownerRealName: params.ownerRealName,
           ownerCompanyName: params.ownerCompanyName,
+          ownerGesellschaft: params.ownerGesellschaft,
         });
         log.info("call.started", {
           callSid: ctx.callSid,

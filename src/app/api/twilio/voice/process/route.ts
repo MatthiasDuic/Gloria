@@ -483,6 +483,7 @@ function buildInitialState(params: {
   leadId?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
+  ownerGesellschaft?: string;
   userId?: string;
   phoneNumberId?: string;
 }): TokenizedCallState {
@@ -493,6 +494,7 @@ function buildInitialState(params: {
     phoneNumberId: params.phoneNumberId,
     ownerRealName: params.ownerRealName,
     ownerCompanyName: params.ownerCompanyName,
+    ownerGesellschaft: params.ownerGesellschaft,
     company: params.company,
     contactName: params.contactName,
     topic: params.topic,
@@ -1005,6 +1007,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         leadId: url.searchParams.get("leadId") || undefined,
         ownerRealName: url.searchParams.get("ownerRealName") || undefined,
         ownerCompanyName: url.searchParams.get("ownerCompanyName") || undefined,
+        ownerGesellschaft: url.searchParams.get("ownerGesellschaft") || undefined,
         userId: url.searchParams.get("userId") || undefined,
         phoneNumberId: url.searchParams.get("phoneNumberId") || undefined,
       });

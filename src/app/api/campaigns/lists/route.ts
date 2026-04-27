@@ -99,6 +99,7 @@ export async function POST(request: Request) {
         userId: sessionUser.id,
         ownerRealName: sessionUser.realName,
         ownerCompanyName: sessionUser.companyName,
+        ownerGesellschaft: sessionUser.gesellschaft,
       },
       request,
     );

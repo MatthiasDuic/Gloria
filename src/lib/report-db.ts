@@ -36,6 +36,7 @@ export interface AppUser {
   address: string;
   email: string;
   realPhone: string;
+  gesellschaft: string;
   passwordHash: string;
   role: UserRole;
   createdAt: string;
@@ -133,6 +134,7 @@ async function ensureSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS real_phone TEXT NOT NULL DEFAULT '';`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gesellschaft TEXT NOT NULL DEFAULT '';`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS phone_numbers (
@@ -538,7 +540,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
     FROM users
     WHERE LOWER(username) = LOWER($1)
     LIMIT 1
@@ -559,6 +561,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
     address: String(row.address || ""),
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
+    gesellschaft: String(row.gesellschaft || ""),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -574,7 +577,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
     FROM users
     WHERE id = $1
     LIMIT 1
@@ -595,6 +598,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
     address: String(row.address || ""),
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
+    gesellschaft: String(row.gesellschaft || ""),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -614,7 +618,7 @@ export async function listUsers(): Promise<AppUser[]> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
     FROM users
     ORDER BY created_at DESC
     `,
@@ -628,6 +632,7 @@ export async function listUsers(): Promise<AppUser[]> {
     address: String(row.address || ""),
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
+    gesellschaft: String(row.gesellschaft || ""),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -643,6 +648,7 @@ export async function createUser(input: {
   address?: string;
   email?: string;
   realPhone?: string;
+  gesellschaft?: string;
 }): Promise<AppUser> {
   await ensureSchema();
   const db = getPool();
@@ -651,8 +657,8 @@ export async function createUser(input: {
 
   await db.query(
     `
-    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, password_hash, role, created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
     `,
     [
       id,
@@ -662,6 +668,7 @@ export async function createUser(input: {
       input.address || "",
       input.email || "",
       input.realPhone || "",
+      input.gesellschaft || "",
       hashPassword(input.password),
       role,
     ],
@@ -689,6 +696,7 @@ export async function updateUser(
     address?: string;
     email?: string;
     realPhone?: string;
+    gesellschaft?: string;
     password?: string;
     role?: UserRole;
   },
@@ -713,6 +721,9 @@ export async function updateUser(
   }
   if (input.realPhone !== undefined) {
     await db.query(`UPDATE users SET real_phone = $2 WHERE id = $1`, [userId, input.realPhone]);
+  }
+  if (input.gesellschaft !== undefined) {
+    await db.query(`UPDATE users SET gesellschaft = $2 WHERE id = $1`, [userId, input.gesellschaft]);
   }
   if (input.password) {
     await db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(input.password)]);

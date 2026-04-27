@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     role: user.role,
     realName: user.realName,
     companyName: user.companyName,
+    gesellschaft: user.gesellschaft,
   });
 
   const response = NextResponse.json({

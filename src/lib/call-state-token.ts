@@ -11,6 +11,7 @@ export interface TokenizedCallState {
   leadId?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
+  ownerGesellschaft?: string;
   company: string;
   contactName?: string;
   directDial?: string;

@@ -8,6 +8,7 @@ export interface SessionUser {
   role: UserRole;
   realName: string;
   companyName: string;
+  gesellschaft: string;
 }
 
 interface SessionTokenPayload {
@@ -16,6 +17,7 @@ interface SessionTokenPayload {
   role: UserRole;
   realName: string;
   companyName: string;
+  gesellschaft: string;
   iat: number;
   exp: number;
 }
@@ -59,6 +61,7 @@ export function createSessionToken(user: SessionUser): string {
     role: user.role,
     realName: user.realName,
     companyName: user.companyName,
+    gesellschaft: user.gesellschaft,
     iat: now,
     exp: now + SESSION_TTL_SECONDS,
   };
@@ -103,6 +106,7 @@ export function verifySessionToken(token: string | undefined): SessionUser | nul
       role: parsed.role,
       realName: parsed.realName || "",
       companyName: parsed.companyName || "",
+      gesellschaft: parsed.gesellschaft || "",
     };
   } catch {
     return null;

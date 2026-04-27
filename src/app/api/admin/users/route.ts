@@ -40,6 +40,7 @@ export async function GET(request: Request) {
         address: user.address,
         email: user.email,
         realPhone: user.realPhone,
+        gesellschaft: user.gesellschaft,
         createdAt: user.createdAt,
         phoneNumbers: phonesByUser.get(user.id) || [],
       })),
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       address?: string;
       email?: string;
       realPhone?: string;
+      gesellschaft?: string;
       password?: string;
       role?: "master" | "user";
     };
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
       address: String(payload.address || "").trim(),
       email: String(payload.email || "").trim(),
       realPhone: String(payload.realPhone || "").trim(),
+      gesellschaft: String(payload.gesellschaft || "").trim(),
       password,
       role: payload.role === "master" ? "master" : "user",
     });

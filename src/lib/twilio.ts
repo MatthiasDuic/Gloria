@@ -11,6 +11,7 @@ export interface TwilioCallRequest {
   phoneNumberId?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
+  ownerGesellschaft?: string;
   isTestCall?: boolean;
   from?: string;
 }
@@ -236,6 +237,7 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
     phoneNumberId: payload.phoneNumberId,
     ownerRealName: payload.ownerRealName,
     ownerCompanyName: payload.ownerCompanyName,
+    ownerGesellschaft: payload.ownerGesellschaft,
     company: payload.company,
     contactName: payload.contactName,
     topic: payload.topic,

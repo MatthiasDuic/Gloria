@@ -286,6 +286,7 @@ export default function HomePage() {
     address?: string;
     email?: string;
     realPhone?: string;
+    gesellschaft?: string;
     createdAt?: string;
     phoneNumbers?: ManagedPhoneNumber[];
   };
@@ -335,6 +336,7 @@ export default function HomePage() {
   const [newAddress, setNewAddress] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRealPhone, setNewRealPhone] = useState("");
+  const [newGesellschaft, setNewGesellschaft] = useState("");
   const [newRole, setNewRole] = useState<"master" | "user">("user");
   const [newPhoneUserId, setNewPhoneUserId] = useState("");
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
@@ -348,6 +350,7 @@ export default function HomePage() {
     address: string;
     email: string;
     realPhone: string;
+    gesellschaft: string;
     role: "master" | "user";
     password: string;
     assignedPhone: string;
@@ -1216,6 +1219,7 @@ export default function HomePage() {
           address: newAddress,
           email: newEmail,
           realPhone: newRealPhone,
+          gesellschaft: newGesellschaft,
           role: newRole,
         }),
       });
@@ -1232,6 +1236,7 @@ export default function HomePage() {
       setNewAddress("");
       setNewEmail("");
       setNewRealPhone("");
+      setNewGesellschaft("");
       setNewRole("user");
       setNotice("Benutzer erfolgreich erstellt.");
       await loadSessionAndAdminData();
@@ -1367,6 +1372,7 @@ export default function HomePage() {
       address: user.address || "",
       email: user.email || "",
       realPhone: user.realPhone || "",
+      gesellschaft: user.gesellschaft || "",
       role: user.role,
       password: "",
       assignedPhone: phone?.phoneNumber || "",
@@ -1395,6 +1401,7 @@ export default function HomePage() {
         address: editDraft.address,
         email: editDraft.email,
         realPhone: editDraft.realPhone,
+        gesellschaft: editDraft.gesellschaft,
         role: editDraft.role,
       };
       if (editDraft.password) userPayload.password = editDraft.password;
@@ -2357,6 +2364,10 @@ export default function HomePage() {
                           <input value={newRealPhone} onChange={(event) => setNewRealPhone(event.target.value)} placeholder="+49..." />
                         </div>
                         <div>
+                          <label>Gesellschaft</label>
+                          <input value={newGesellschaft} onChange={(event) => setNewGesellschaft(event.target.value)} placeholder="z. B. Barmenia, Allianz" />
+                        </div>
+                        <div>
                           <label>Rolle</label>
                           <select value={newRole} onChange={(event) => setNewRole(event.target.value as "master" | "user")}>
                             <option value="user">user</option>
@@ -2451,6 +2462,10 @@ export default function HomePage() {
                                         <div>
                                           <label>Reale Rufnummer</label>
                                           <input value={editDraft.realPhone} onChange={(e) => setEditDraft({ ...editDraft, realPhone: e.target.value })} placeholder="+49..." />
+                                        </div>
+                                        <div>
+                                          <label>Gesellschaft</label>
+                                          <input value={editDraft.gesellschaft} onChange={(e) => setEditDraft({ ...editDraft, gesellschaft: e.target.value })} placeholder="z. B. Barmenia, Allianz" />
                                         </div>
                                         <div>
                                           <label>Rolle</label>
