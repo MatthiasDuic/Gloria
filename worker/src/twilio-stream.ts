@@ -79,12 +79,17 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.userBytesWhileSpeaking = 0;
 
     let buffer = Buffer.alloc(0);
+    let totalAudioBytes = 0;
+    const sendAndCount = (frame: Buffer) => {
+      sendMedia(frame);
+      totalAudioBytes += frame.length;
+    };
     const handle = streamElevenLabsToMulaw(text, (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
       while (buffer.length >= FRAME_BYTES) {
         const frame = buffer.subarray(0, FRAME_BYTES);
         buffer = buffer.subarray(FRAME_BYTES);
-        sendMedia(frame);
+        sendAndCount(frame);
       }
     });
     currentTts = handle;
@@ -94,10 +99,21 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     if (buffer.length > 0) {
       // Pad final frame with silence (μ-law silence = 0xFF) so Twilio plays it.
       const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
-      sendMedia(Buffer.concat([buffer, pad]));
+      sendAndCount(Buffer.concat([buffer, pad]));
     }
 
     sendMark("gloria-end");
+
+    // WICHTIG: Twilio puffert Audio. Wenn wir direkt nach dem letzten Frame
+    // ws.close() rufen, wird das Audio (z. B. "Auf Wiederhören.") nie
+    // ausgespielt. Bei μ-law 8 kHz entspricht 1 Byte 1/8000 Sekunde Audio.
+    // Wir warten daher die geschätzte Restspielzeit ab, bevor wir die
+    // Sprechen-Phase als beendet markieren.
+    if (!handle.aborted) {
+      const playoutMs = Math.ceil(totalAudioBytes / 8) + 250; // ~Bytes/8 = ms; + Safety
+      await new Promise<void>((resolve) => setTimeout(resolve, playoutMs));
+    }
+
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text, at: Date.now() });

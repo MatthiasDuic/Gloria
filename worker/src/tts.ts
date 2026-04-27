@@ -6,6 +6,8 @@ export type TtsStreamHandle = {
   done: Promise<void>;
   /** Stop downloading and discard remaining audio (used for barge-in). */
   abort: () => void;
+  /** True if abort() wurde aufgerufen (Barge-in). */
+  readonly aborted: boolean;
 };
 
 /**
@@ -22,7 +24,7 @@ export function streamElevenLabsToMulaw(
 
   if (!apiKey || !voiceId) {
     log.error("tts.missing_config");
-    return { done: Promise.resolve(), abort: () => undefined };
+    return { done: Promise.resolve(), abort: () => undefined, aborted: false };
   }
 
   const controller = new AbortController();
@@ -102,6 +104,9 @@ export function streamElevenLabsToMulaw(
         /* ignore */
       }
     },
+    get aborted() {
+      return controller.signal.aborted;
+    },
   };
 }
 
@@ -129,7 +134,9 @@ function applyPronunciationFixes(text: string): string {
   out = out.replace(/\bDuic\b/g, "Duitsch");
   // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
   out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
-  // Wortwahl: "privaten/private Krankenversicherungsbeiträge" -> "Krankenversicherungsbeiträge"
-  out = out.replace(/\b(privaten|private)\s+Krankenversicherungsbeiträge/gi, "Krankenversicherungsbeiträge");
+  // Wortwahl: "private/privaten Krankenversicherung(sbeiträge)" -> "Krankenversicherung(sbeiträge)"
+  // Das Wort "privat" soll in der Audio-Ausgabe nie zur Krankenversicherung
+  // dazugesagt werden – auch nicht als Themen-Anker.
+  out = out.replace(/\b(privaten|private|privater|privates|privat)\s+Krankenversicherung/gi, "Krankenversicherung");
   return out;
 }
