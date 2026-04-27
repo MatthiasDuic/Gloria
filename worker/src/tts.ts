@@ -127,5 +127,7 @@ function applyPronunciationFixes(text: string): string {
   out = out.replace(/\bDuic\b/g, "Duitsch");
   // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
   out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
+  // Wortwahl: "privaten/private Krankenversicherungsbeiträge" -> "Krankenversicherungsbeiträge"
+  out = out.replace(/\b(privaten|private)\s+Krankenversicherungsbeiträge/gi, "Krankenversicherungsbeiträge");
   return out;
 }
