@@ -117,13 +117,17 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text, at: Date.now() });
-    // Termin-Slot extrahieren – aber NUR aus echten Bestätigungs-Sätzen
-    // ("wird am … bei Ihnen sein", "bestätige ich für Sie …", "Termin … ist am …").
-    // Bei späterer Änderung wird die Phrase überschrieben.
-    const slot = extractConfirmedSlot(text);
-    if (slot && slot !== ctx.confirmedSlotPhrase) {
-      ctx.confirmedSlotPhrase = slot;
-      log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
+    // Termin-Slot extrahieren – nur aus echten Bestätigungs-Sätzen
+    // ("wird am … bei Ihnen sein", "bestätige ich für Sie …", "Termin … ist am …",
+    // "notiere ich …" / "ich notiere …").
+    // WICHTIG: Sobald ein Slot gelockt ist, NICHT mehr überschreiben – sonst
+    // kann eine spätere halluzinierte Zusammenfassung den korrekten Slot kapern.
+    if (!ctx.confirmedSlotPhrase) {
+      const slot = extractConfirmedSlot(text);
+      if (slot) {
+        ctx.confirmedSlotPhrase = slot;
+        log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
+      }
     }
   };
 
@@ -341,6 +345,7 @@ function extractConfirmedSlot(text: string): string | null {
     /\bdann\s+ist\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
     /\btermin[^.?!]*\bist\s+am\b/.test(lower) ||
     /\bich\s+notiere\b/.test(lower) ||
+    /\bnotiere\s+ich\b/.test(lower) ||
     /\bich\s+trage\s+(?:ihn|den\s+termin)\s+ein\b/.test(lower);
   if (!isConfirmation) return null;
 
