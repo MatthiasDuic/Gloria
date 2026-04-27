@@ -42,7 +42,14 @@ function formatDate(value?: string) {
 }
 
 function toDateKey(value: Date) {
-  return value.toISOString().slice(0, 10);
+  // Lokales Datum (nicht UTC), damit Kalenderzellen und Termine auf demselben
+  // Tag landen. toISOString() würde 2026-05-13T22:00:00 lokal als 2026-05-13
+  // (UTC) speichern, aber die Kalenderzelle für den 14.05 lokal hat als Key
+  // den UTC-13.05 -> Termin würde einen Tag zu spät erscheinen.
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, "0");
+  const d = String(value.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function speakText(text: string) {
