@@ -100,15 +100,13 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text, at: Date.now() });
-    // Termin-Slot extrahieren, sobald Gloria die Bestätigung ausspricht
-    // ("wird am ... bei Ihnen sein"). Ab dann ist die Slot-Phrase eingefroren
-    // und wird in jeden weiteren System-Prompt injiziert.
-    if (!ctx.confirmedSlotPhrase) {
-      const slot = extractConfirmedSlot(text);
-      if (slot) {
-        ctx.confirmedSlotPhrase = slot;
-        log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
-      }
+    // Termin-Slot extrahieren – aber NUR aus echten Bestätigungs-Sätzen
+    // ("wird am … bei Ihnen sein", "bestätige ich für Sie …", "Termin … ist am …").
+    // Bei späterer Änderung wird die Phrase überschrieben.
+    const slot = extractConfirmedSlot(text);
+    if (slot && slot !== ctx.confirmedSlotPhrase) {
+      ctx.confirmedSlotPhrase = slot;
+      log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
     }
   };
 
@@ -285,14 +283,33 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
 /**
  * Extrahiert die bestätigte Termin-Phrase aus Glorias eigener Antwort,
- * sobald sie einen Termin bestätigt ("wird am … bei Ihnen sein").
- * Erfasst Wochentag + Datum + Uhrzeit als zusammenhängende Phrase, die
- * später wortwörtlich in der Schluss-Zusammenfassung wiederholt wird.
+ * sobald sie einen Termin bestätigt (NICHT bei Vorschlägen mit Fragezeichen
+ * oder "oder"-Alternativen). Nur echte Bestätigungs-Sätze:
+ *   - "wird am ... bei Ihnen sein"
+ *   - "bestätige ich für Sie ..."
+ *   - "halte ich ... für Sie frei"
+ *   - "Ihr Termin ... ist am ..."
+ * Erfasst Wochentag + Datum + Uhrzeit als zusammenhängende Phrase.
  */
 function extractConfirmedSlot(text: string): string | null {
-  // Beispiele:
-  // "wird am Donnerstag, den siebten Mai um vierzehn Uhr dreißig bei Ihnen sein"
-  // "am Dienstag, den zwölften Mai um fünfzehn Uhr"
+  // Schließe reine Vorschlagsfragen aus ("oder ... besser passen?", "wäre ... besser?").
+  const lower = text.toLowerCase();
+  const isProposal =
+    /\boder\s+(?:[a-zäöüß]+,\s+)?(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)/.test(
+      lower,
+    ) || /\bw[äa]re\s+ihnen\b/.test(lower) || /\bw[üu]rde\s+ihnen\b/.test(lower) ||
+    /\bpasst\s+ihnen\b/.test(lower);
+  if (isProposal) return null;
+
+  // Bestätigungs-Anker: muss eines dieser Schlüsselwort-Muster enthalten.
+  const isConfirmation =
+    /\bwird\s+am\b/.test(lower) ||
+    /\bbest[äa]tige\s+ich\b/.test(lower) ||
+    /\bhalte\s+ich\b/.test(lower) ||
+    /\b(?:ihr|der)\s+termin[^.?!]*\bist\s+am\b/.test(lower) ||
+    /\btermin[^.?!]*\bist\s+am\b/.test(lower);
+  if (!isConfirmation) return null;
+
   const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+[a-zäöüß]+\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
   const m = re.exec(text);
   if (!m) return null;
