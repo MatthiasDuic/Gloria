@@ -21,7 +21,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const model = process.env.DEEPGRAM_MODEL || "nova-2-phonecall";
+  const model = process.env.DEEPGRAM_MODEL || "nova-2-general";
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   const params = new URLSearchParams({
@@ -31,12 +31,16 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     sample_rate: "8000",
     channels: "1",
     interim_results: "true",
-    smart_format: "true",
     endpointing: "300",
     utterance_end_ms: "1200",
     vad_events: "true",
     punctuate: "true",
   });
+
+  // smart_format is English-only on Deepgram; enable only for en* languages.
+  if (language.toLowerCase().startsWith("en")) {
+    params.set("smart_format", "true");
+  }
 
   const ws = new WebSocket(`${DG_HOST}/v1/listen?${params.toString()}`, {
     headers: { Authorization: `Token ${apiKey}` },
