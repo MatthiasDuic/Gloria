@@ -29,7 +29,13 @@ export function streamElevenLabsToMulaw(
 
   const url =
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?optimize_streaming_latency=3&output_format=ulaw_8000`;
+    `?optimize_streaming_latency=2&output_format=ulaw_8000`;
+
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.55);
+  const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
+  const style = numEnv("ELEVENLABS_STYLE", 0.35);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.92);
+  const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {
     try {
@@ -43,7 +49,13 @@ export function streamElevenLabsToMulaw(
         body: JSON.stringify({
           text,
           model_id: modelId,
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          voice_settings: {
+            stability,
+            similarity_boost: similarity,
+            style,
+            use_speaker_boost: speakerBoost,
+            speed,
+          },
         }),
         signal: controller.signal,
       });
@@ -89,4 +101,17 @@ export function streamElevenLabsToMulaw(
       }
     },
   };
+}
+
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function boolEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  return /^(1|true|yes|on)$/i.test(raw.trim());
 }
