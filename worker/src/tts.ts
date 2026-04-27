@@ -31,10 +31,12 @@ export function streamElevenLabsToMulaw(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
     `?optimize_streaming_latency=1&output_format=ulaw_8000`;
 
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.65);
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.7);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
-  const style = numEnv("ELEVENLABS_STYLE", 0.25);
-  const speed = numEnv("ELEVENLABS_SPEED", 1.0);
+  const style = numEnv("ELEVENLABS_STYLE", 0.2);
+  // 0.9 = ca. 10% langsamer als Standard, klingt deutlich ruhiger und gibt dem
+  // Angerufenen mehr Zeit zum Mitdenken.
+  const speed = numEnv("ELEVENLABS_SPEED", 0.9);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {

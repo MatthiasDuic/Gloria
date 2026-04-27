@@ -31,8 +31,10 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     sample_rate: "8000",
     channels: "1",
     interim_results: "true",
-    endpointing: "700",
-    utterance_end_ms: "1800",
+    // 1100 ms = Pause, nach der Deepgram als "Satzende" interpretiert.
+    // 700 ms war zu kurz: Gloria fiel ins Wort, sobald der Anrufer kurz Luft holte.
+    endpointing: "1100",
+    utterance_end_ms: "2000",
     vad_events: "true",
     punctuate: "true",
   });

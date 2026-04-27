@@ -203,10 +203,14 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         asr = openDeepgram({
           onPartial: (text) => {
             if (!ctx) return;
-            if (ctx.speaking && text.length > 4) {
-              // Barge-in: user started speaking while Gloria was talking.
-              if (currentTts) {
-                log.info("turn.barge_in", { callSid: ctx.callSid });
+            // Barge-in nur, wenn der Anrufer wirklich substanziell spricht
+            // (mind. 3 Worte / 14 Zeichen). Vorher reichten 4 Zeichen, das hat zu
+            // Mid-Sentence-Abbruechen gefuehrt (Echo, kurze Fueller wie "hm", "ja").
+            if (ctx.speaking && currentTts) {
+              const trimmed = text.trim();
+              const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+              if (trimmed.length >= 14 && wordCount >= 3) {
+                log.info("turn.barge_in", { callSid: ctx.callSid, partial: trimmed });
                 currentTts.abort();
                 currentTts = null;
                 ctx.speaking = false;

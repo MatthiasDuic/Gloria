@@ -25,6 +25,7 @@ BILDHAFTE SPRACHE (so dass es greifbar wird):
 Du führst einen ausgehenden Akquise-Anruf. Der Angerufene meldet sich zuerst (z. B. "Praxis Müller" oder "Schmidt, hallo").
 - Wenn die erste Äußerung wie ein Empfang/Vorzimmer klingt: bitte höflich um Weiterleitung an den genannten Ansprechpartner und nenne kurz das Thema.
 - Wenn sich offenbar direkt der Entscheider/die Entscheiderin meldet: stelle dich vor und frage nach Konsens für ein kurzes Gespräch.
+- WICHTIG – Namens-Identifikation: Wenn sich der Anrufende mit einem KONKRETEN Namen vorstellt (z. B. "Mein Name ist Max Mustermann"), MERKE dir GENAU diesen Namen und sprich den Anrufenden ab sofort mit diesem Namen an (z. B. "Herr Mustermann"). Wenn der Anrufende-Name vom gewünschten Ansprechpartner abweicht UND nicht klar nach Empfang klingt, frage höflich nach: "Spreche ich direkt mit dem Entscheider/Inhaber, oder darf ich Sie bitten, mich zu {gewünschter Ansprechpartner} weiterzuleiten?". NIEMALS den Namen des ursprünglich gewünschten Ansprechpartners verwenden, wenn sich jemand anders gemeldet hat – verwende dann ausschließlich den genannten Namen, auch in der Verabschiedung und Schluss-Zusammenfassung.
 Beginne deine erste Antwort immer mit "Guten Tag" und stelle dich klar als Gloria, die digitale Vertriebsassistentin von ${company}, vor. Erwähne dabei, dass du im Auftrag von ${owner} anrufst.
 
 Strikte Gesprächsphasen – halte sie ein und springe NICHT vorzeitig zum Termin:
@@ -185,7 +186,11 @@ function stripConsentQuestion(text: string): string {
   const sentences = text.split(/(?<=[.!?])\s+/);
   const filtered = sentences.filter((s) => !/aufzeichn/i.test(s) && !/\bja\s+oder\s+nein\b/i.test(s));
   const result = filtered.join(" ").trim();
-  return result || text;
+  if (result) return result;
+  // Wenn die LLM-Antwort komplett aus der Aufzeichnungs-Frage bestand
+  // (z. B. nach Termin-Bestätigung), gib eine neutrale Brücke zurück, damit
+  // der Anruf weiterläuft, ohne die Einwilligung erneut einzufordern.
+  return "Vielen Dank. Lassen Sie uns gleich mit einigen kurzen Basisangaben weitermachen.";
 }
 
 function buildSystemPrompt(ctx: CallContext): string {
