@@ -1,0 +1,92 @@
+import { fetch } from "undici";
+import { log } from "./log.js";
+
+export type TtsStreamHandle = {
+  /** Resolves when streaming finished or aborted. */
+  done: Promise<void>;
+  /** Stop downloading and discard remaining audio (used for barge-in). */
+  abort: () => void;
+};
+
+/**
+ * Streams ElevenLabs TTS as μ-law 8000 Hz audio (Twilio-ready) and
+ * invokes `onChunk` with raw μ-law buffers (typically ~160-640 bytes).
+ */
+export function streamElevenLabsToMulaw(
+  text: string,
+  onChunk: (mulaw: Buffer) => void,
+): TtsStreamHandle {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_turbo_v2_5";
+
+  if (!apiKey || !voiceId) {
+    log.error("tts.missing_config");
+    return { done: Promise.resolve(), abort: () => undefined };
+  }
+
+  const controller = new AbortController();
+
+  const url =
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
+    `?optimize_streaming_latency=3&output_format=ulaw_8000`;
+
+  const done = (async () => {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "content-type": "application/json",
+          accept: "audio/basic",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: modelId,
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const body = res.body ? await res.text() : "";
+        log.error("tts.http_error", { status: res.status, body: body.slice(0, 200) });
+        return;
+      }
+
+      const reader = res.body.getReader();
+      while (true) {
+        const { value, done: streamDone } = await reader.read();
+        if (streamDone) break;
+        if (controller.signal.aborted) {
+          try {
+            await reader.cancel();
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+        if (value && value.byteLength > 0) {
+          onChunk(Buffer.from(value));
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        log.error("tts.stream_failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  })();
+
+  return {
+    done,
+    abort: () => {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}

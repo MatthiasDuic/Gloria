@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: gloria-stream-worker
+    runtime: node
+    plan: starter
+    region: frankfurt
+    rootDir: worker
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 8080
+      - key: LOG_LEVEL
+        value: info
+      - key: STREAM_SHARED_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPGRAM_MODEL
+        value: nova-2-phonecall
+      - key: DEEPGRAM_LANGUAGE
+        value: de
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        sync: false
+      - key: ELEVENLABS_MODEL
+        value: eleven_turbo_v2_5
+      - key: APP_BASE_URL
+        value: https://gloria.agentur-duic-sprockhoevel.de
+      - key: APP_INTERNAL_TOKEN
+        sync: false

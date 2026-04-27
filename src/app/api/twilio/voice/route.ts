@@ -7,7 +7,7 @@ import { encodeCallStateToken } from "@/lib/call-state-token";
 import { isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { prepareCall } from "@/lib/telephony-runtime";
 import { TOPICS, type Topic } from "@/lib/types";
-import { buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml } from "@/lib/twiml";
+import { buildDialTwiml, buildGatherTwiml, buildSayHangupTwiml, buildConnectStreamTwiml } from "@/lib/twiml";
 import { buildSignedAudioUrl } from "@/lib/audio-url";
 import { validateTwilioRequest } from "@/lib/twilio-signature";
 import { log } from "@/lib/log";
@@ -267,6 +267,36 @@ async function renderVoiceResponse(request: Request) {
       request,
     });
   }
+
+  // --- Media Streams (Render worker) ---------------------------------------
+  // Wenn USE_MEDIA_STREAMS=1 und MEDIA_STREAM_WSS_URL konfiguriert ist, übergeben
+  // wir den Audio-Pfad an den externen Worker (Deepgram + GPT-4o + ElevenLabs).
+  // Die alte Gather/Play-Pipeline bleibt als Fallback bestehen.
+  const useMediaStreams =
+    (process.env.USE_MEDIA_STREAMS || "").trim() === "1" &&
+    Boolean(process.env.MEDIA_STREAM_WSS_URL?.trim());
+
+  if (useMediaStreams) {
+    const streamUrl = process.env.MEDIA_STREAM_WSS_URL!.trim();
+    const twiml = buildConnectStreamTwiml({
+      streamUrl,
+      parameters: {
+        userId: context.userId,
+        phoneNumberId: context.phoneNumberId,
+        ownerRealName: context.ownerRealName,
+        ownerCompanyName: context.ownerCompanyName,
+        leadId: context.leadId,
+        company: context.company,
+        contactName: context.contactName,
+        topic: context.topic,
+      },
+    });
+
+    return new NextResponse(twiml, {
+      headers: { "Content-Type": "text/xml; charset=utf-8" },
+    });
+  }
+  // --------------------------------------------------------------------------
 
   const processAction = `${baseUrl}/api/twilio/voice/process?step=intro&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
   const fallbackAction = `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
