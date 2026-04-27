@@ -29,12 +29,12 @@ export function streamElevenLabsToMulaw(
 
   const url =
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?optimize_streaming_latency=2&output_format=ulaw_8000`;
+    `?optimize_streaming_latency=1&output_format=ulaw_8000`;
 
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.55);
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.65);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
-  const style = numEnv("ELEVENLABS_STYLE", 0.35);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.92);
+  const style = numEnv("ELEVENLABS_STYLE", 0.25);
+  const speed = numEnv("ELEVENLABS_SPEED", 1.0);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {
