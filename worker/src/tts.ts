@@ -47,7 +47,7 @@ export function streamElevenLabsToMulaw(
           accept: "audio/basic",
         },
         body: JSON.stringify({
-          text,
+          text: applyPronunciationFixes(text),
           model_id: modelId,
           voice_settings: {
             stability,
@@ -114,4 +114,18 @@ function boolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+/**
+ * Ersetzt Eigennamen, die das TTS-Modell falsch ausspricht, durch
+ * eine phonetisch passendere Schreibweise. Die LLM-Logik und das Log
+ * bleiben unverändert – nur die hörbare Ausgabe wird korrigiert.
+ */
+function applyPronunciationFixes(text: string): string {
+  let out = text;
+  // "Duic" -> klingt im Deutschen wie "Duitsch"
+  out = out.replace(/\bDuic\b/g, "Duitsch");
+  // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
+  out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
+  return out;
 }
