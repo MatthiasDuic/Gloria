@@ -113,7 +113,11 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
 
   if (lines.length === 0) return "";
   return [
-    "Nutze ausschließlich folgendes Playbook als Leitfaden. Halte dich an die Reihenfolge und die fachlichen Inhalte. Erfinde keine Daten außerhalb des Playbooks:",
+    "PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:",
+    "Halte dich strikt an die Reihenfolge der Phasen aus dem Systemprompt (Begrüßung → Konsens → Discovery → Problem-Aufbau → Konzept → Termin).",
+    "Nutze die folgenden Inhalte fachlich und sprachlich. Erfinde nichts darüber hinaus:",
     ...lines,
+    "",
+    "Wichtig: Wenn das Gegenüber 'worum geht es?' fragt, gib in 1–2 Sätzen die fachlichen Eckpunkte aus 'Fachliche Eckpunkte (Wissen)' bzw. 'Problem-Aufbau' wieder – KEINE Termin-Frage in diesem Moment.",
   ].join("\n");
 }
