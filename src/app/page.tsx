@@ -547,6 +547,10 @@ export default function HomePage() {
       acc[script.topic] = {
         id: script.id,
         topic: script.topic,
+        // Neues 3-Felder-Modell
+        behavior: pickText(script.behavior, ""),
+        requiredData: pickText(script.requiredData, ""),
+        knowledge: pickText(script.knowledge, ""),
         opener: pickText(script.opener, ""),
         discovery: pickText(script.discovery, ""),
         objectionHandling: pickText(script.objectionHandling, ""),
@@ -611,6 +615,9 @@ export default function HomePage() {
         nextDrafts[topic] = {
           id: `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
           topic,
+          behavior: "",
+          requiredData: "",
+          knowledge: "",
           opener: "",
           discovery: "",
           objectionHandling: "",
@@ -2184,110 +2191,49 @@ export default function HomePage() {
                 {activeDraft ? (
                   <>
                     <p className="subtle">
-                      Playbook für <strong>{detailTopic}</strong>. Änderungen gelten nur für Ihren Account und werden direkt in der
-                      Datenbank gespeichert. Die meisten Felder sind Leitplanken für Ziel, Verhalten, Kernthema und Einwände. Nur Pflichtbausteine wie Einstieg,
-                      Aufzeichnungsfrage und Terminbestätigung sollten fest formuliert sein.
+                      Playbook für <strong>{detailTopic}</strong>. Drei klare Felder, frei formulierbar – keine starren Vorlagen mehr. Gloria nutzt diese Inhalte
+                      direkt im Systemprompt jedes Calls. Änderungen gelten nur für Ihren Account und werden in der Datenbank gespeichert.
                     </p>
 
                     <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Playbook · Thema & Fachlichkeit</strong> <span className="subtle">(Was Gloria wissen und verstehen muss)</span></h3>
-                      <label className="top-gap">Fakten / Hintergrundwissen</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Fachliche Informationen, die Gloria situativ nutzen darf, ohne sie als Werbetext herunterzulesen.</p>
-                      <textarea value={activeDraft.aiKeyInfo ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
+                      <h3 className="sub-heading"><strong>1. Verhalten & Tonalität</strong> <span className="subtle">(WIE Gloria spricht)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Wie Gloria zu diesem Thema agiert: Gesprächsziel, Argumentationslinie, Empathie-Anker, Einwandbehandlung,
+                        Tonalität, was sie tun und was sie lassen soll. Frei formuliert.
+                      </p>
+                      <textarea
+                        value={activeDraft.behavior ?? ""}
+                        rows={10}
+                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], behavior: event.target.value } }))}
+                      />
                     </div>
 
                     <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Playbook · Empfang</strong> <span className="subtle">(Zentrale / Sekretariat)</span></h3>
-                      <label className="top-gap">Ziel am Empfang</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Was Gloria dort erreichen soll, bevor sie mit dem eigentlichen Ansprechpartner spricht.</p>
-                      <textarea value={activeDraft.gatekeeperTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))} />
-
-                      <label className="top-gap">Verhalten am Empfang</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Tonalität und Grenzen am Empfang, zum Beispiel kurz, höflich und ohne langen Pitch.</p>
-                      <textarea value={activeDraft.gatekeeperBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))} />
-
-                      <label className="top-gap">Kurzer Grund (wenn der Empfang nachfragt)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Ein kurzer Anlasssatz. Das ist ein Leitanker, kein vollständiger Mini-Pitch.</p>
-                      <textarea value={activeDraft.receptionTopicReason ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))} />
+                      <h3 className="sub-heading"><strong>2. Basisdaten / Pflichtfragen</strong> <span className="subtle">(WAS Gloria zwingend erfragen muss)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Eine Frage pro Zeile. Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab –
+                        z. B. Geburtsdatum, aktueller Versicherer, Beschwerden, Mitarbeiterzahl, etc.
+                      </p>
+                      <textarea
+                        value={activeDraft.requiredData ?? ""}
+                        rows={10}
+                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredData: event.target.value } }))}
+                      />
                     </div>
 
                     <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Verbindliche Anker · Einstieg & Einwilligung</strong> <span className="subtle">(Pflichtbausteine)</span></h3>
-                      <label className="top-gap">Fester Einstieg beim Entscheider</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Dieser Einstieg darf verbindlich formuliert sein. Ab danach soll Gloria wieder frei und situativ sprechen.</p>
-                      <textarea value={activeDraft.opener ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
-
-                      <label className="top-gap">Aufzeichnungsfrage (optional, separat)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Leer lassen, wenn die Einwilligung schon im Einstieg steckt.</p>
-                      <textarea value={activeDraft.consentPrompt ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
+                      <h3 className="sub-heading"><strong>3. Fachwissen</strong> <span className="subtle">(Konkrete Fakten gegen Floskeln)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Faktenpool, auf den Gloria zurückgreift, BEVOR sie auf Bilder/Metaphern ausweicht: Zahlen, Rahmenbedingungen,
+                        erlaubte und verbotene Aussagen, typische Einwände mit konkreten Antworten. Je präziser, desto seltener fällt
+                        Gloria in leere Phrasen wie „Glaskugel" oder „Landkarte".
+                      </p>
+                      <textarea
+                        value={activeDraft.knowledge ?? ""}
+                        rows={14}
+                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))}
+                      />
                     </div>
-
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Playbook · Kernthema & Relevanz</strong> <span className="subtle">(Warum das Thema gerade zählt)</span></h3>
-                      <label className="top-gap">Problemrahmen / Relevanz</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria das Thema aufhängt. Das ist eine Gesprächsrichtung, kein Pflichttext.</p>
-                      <textarea value={activeDraft.problemBuildup ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
-                    </div>
-
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Playbook · Ziel, Verhalten & Gesprächsführung</strong></h3>
-                      <label className="top-gap">Kernthema / Perspektive</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Welche Sicht Gloria beim Entscheider klar machen soll.</p>
-                      <textarea value={activeDraft.decisionMakerContext ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))} />
-
-                      <label className="top-gap">Frageanker</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Leitfrage als Orientierung. Gloria soll sie natürlich und passend zum Gespräch formulieren.</p>
-                      <textarea value={activeDraft.discovery ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
-
-                      <label className="top-gap">Einwandstrategie</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria auf typische Einwände reagieren soll, ohne in Standardsätze zu kippen.</p>
-                      <textarea value={activeDraft.objectionHandling ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
-
-                      <div className="mini-panel top-gap">
-                        <h3 className="sub-heading subtle">Ziel und Tonalität (optional)</h3>
-                        <label className="top-gap">Ziel beim Entscheider</label>
-                        <textarea value={activeDraft.decisionMakerTask ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))} />
-                        <label className="top-gap">Verhalten / Tonalität</label>
-                        <textarea value={activeDraft.decisionMakerBehavior ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))} />
-                      </div>
-                    </div>
-
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Playbook · Brücke zum Termin</strong> <span className="subtle">(Vom Interesse zur Kalenderfrage)</span></h3>
-                      <label className="top-gap">Terminbrücke</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Wie Gloria vom Thema sauber zur Terminierung überleitet, ohne steif zu klingen.</p>
-                      <textarea value={activeDraft.conceptTransition ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))} />
-                    </div>
-
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>Verbindliche Anker · Terminierung & Abschluss</strong> <span className="subtle">(Kalender, Bestätigung, Erfolg)</span></h3>
-                      <label className="top-gap">Termin-Einstieg / Anker</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Ein stabiler Start in die Terminierung. Gloria darf danach frei und passend zum Gespräch weiterführen.</p>
-                      <textarea value={activeDraft.close ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
-
-                      <label className="top-gap">Verfügbare Terminfenster (nächste Woche)</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Listen Sie hier frei verfügbare Slots – z. B. „Mo 10:00, Di 14:30, Do 11:00". Gloria schlägt AUSSCHLIESSLICH Slots aus dieser Liste vor (keine Doppelbuchungen). Leer lassen für freie Vorschläge.</p>
-                      <textarea value={activeDraft.availableAppointmentSlots ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], availableAppointmentSlots: event.target.value } }))} />
-
-                      <label className="top-gap">Terminbestätigung</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Wiederholung zur Bestätigung. Gloria setzt [Datum] und [Uhrzeit] automatisch ein.</p>
-                      <textarea value={activeDraft.appointmentConfirmation ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
-
-                      <label className="top-gap">Erfolgskriterium</label>
-                      <p className="subtle" style={{ marginTop: 0 }}>Woran Gloria intern erkennt, dass das Gespräch sein Ziel erreicht hat.</p>
-                      <textarea value={activeDraft.appointmentGoal ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))} />
-                    </div>
-
-                    {detailTopic === "private Krankenversicherung" ? (
-                      <div className="mini-panel top-gap">
-                        <h3 className="sub-heading"><strong>Pflichtblock · PKV-Basisdaten</strong> <span className="subtle">(nach der Terminbestätigung)</span></h3>
-                        <label className="top-gap">Einleitung Basisdaten</label>
-                        <textarea value={activeDraft.pkvHealthIntro ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
-
-                        <label className="top-gap">Fragenkatalog (eine Frage pro Zeile)</label>
-                        <textarea value={activeDraft.pkvHealthQuestions ?? ""} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
-                      </div>
-                    ) : null}
 
                     <div className="mini-panel top-gap">
                       <h3 className="sub-heading subtle">Feste Systemtexte anzeigen (von Gloria gesprochen, nicht editierbar)</h3>

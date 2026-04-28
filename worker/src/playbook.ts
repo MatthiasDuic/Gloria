@@ -3,6 +3,11 @@ import { log } from "./log.js";
 
 export type PlaybookFields = {
   topic?: string;
+  // Vereinfachtes 3-Felder-Modell
+  behavior?: string;
+  requiredData?: string;
+  knowledge?: string;
+  // Legacy-Felder bleiben optional vorhanden, werden aber nicht mehr in den Prompt gerendert.
   opener?: string;
   discovery?: string;
   objectionHandling?: string;
@@ -82,42 +87,44 @@ export async function loadPlaybook(opts: {
   }
 }
 
-/** Verdichtet die wichtigsten Playbook-Felder zu einem zusätzlichen Systemprompt-Abschnitt. */
+/** Rendert das vereinfachte 3-Felder-Playbook in einen Systemprompt-Block. */
 export function playbookToSystemPrompt(pb: PlaybookFields): string {
-  const lines: string[] = [];
-  const push = (label: string, value: string | undefined) => {
-    const v = (value || "").trim();
-    if (v) lines.push(`- ${label}: ${v}`);
-  };
+  const topic = (pb.topic || "").trim();
+  const behavior = (pb.behavior || "").trim();
+  const requiredData = (pb.requiredData || "").trim();
+  const knowledge = (pb.knowledge || "").trim();
 
-  push("Thema", pb.topic);
-  push("Eröffnung (Empfang)", pb.opener);
-  push("Grund für Ansprache am Empfang", pb.receptionTopicReason);
-  push("Aufgabe Gatekeeper", pb.gatekeeperTask);
-  push("Verhalten Gatekeeper", pb.gatekeeperBehavior);
-  push("Aufgabe Entscheider:in", pb.decisionMakerTask);
-  push("Verhalten Entscheider:in", pb.decisionMakerBehavior);
-  push("Kontext Entscheider:in", pb.decisionMakerContext);
-  push("Bedarfsanalyse", pb.discovery);
-  push("Problem-Aufbau", pb.problemBuildup);
-  push("Übergang zum Konzept", pb.conceptTransition);
-  push("Einwandbehandlung", pb.objectionHandling);
-  push("Abschluss / Termin", pb.close);
-  push("Terminziel", pb.appointmentGoal);
-  push("Bestätigung Termin", pb.appointmentConfirmation);
-  push("Mögliche Terminfenster", pb.availableAppointmentSlots);
-  push("Einwilligungs-Hinweis", pb.consentPrompt);
-  push("PKV-Gesundheitseinleitung", pb.pkvHealthIntro);
-  push("PKV-Gesundheitsfragen", pb.pkvHealthQuestions);
-  push("Fachliche Eckpunkte (Wissen)", pb.aiKeyInfo);
+  // Wenn keines der drei neuen Felder gefüllt ist, geben wir einen leeren
+  // Block zurück. Legacy-Felder werden bewusst NICHT mehr verwendet, damit
+  // die Anti-Floskel-Strategie greift und Gloria sich nur auf die kuratierten
+  // 3 Blöcke stützt.
+  if (!behavior && !requiredData && !knowledge) {
+    return topic ? `THEMA DIESES CALLS: ${topic}` : "";
+  }
 
-  if (lines.length === 0) return "";
-  return [
-    "PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:",
-    "Halte dich strikt an die Reihenfolge der Phasen aus dem Systemprompt (Begrüßung → Konsens → Discovery → Problem-Aufbau → Konzept → Termin).",
-    "Nutze die folgenden Inhalte fachlich und sprachlich. Erfinde nichts darüber hinaus:",
-    ...lines,
-    "",
-    "Wichtig: Wenn das Gegenüber 'worum geht es?' fragt, gib in 1–2 Sätzen die fachlichen Eckpunkte aus 'Fachliche Eckpunkte (Wissen)' bzw. 'Problem-Aufbau' wieder – KEINE Termin-Frage in diesem Moment.",
-  ].join("\n");
+  const parts: string[] = [];
+  parts.push("PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:");
+  if (topic) parts.push(`THEMA: ${topic}`);
+
+  if (behavior) {
+    parts.push("");
+    parts.push("VERHALTEN & TONALITÄT (themenspezifisch):");
+    parts.push(behavior);
+  }
+
+  if (requiredData) {
+    parts.push("");
+    parts.push("BASISDATEN / PFLICHTFRAGEN (in der Basisdaten-Phase einzeln abfragen):");
+    parts.push(requiredData);
+  }
+
+  if (knowledge) {
+    parts.push("");
+    parts.push(
+      "FACHWISSEN (nutze diese konkreten Fakten, BEVOR du auf Bilder/Metaphern ausweichst):",
+    );
+    parts.push(knowledge);
+  }
+
+  return parts.join("\n");
 }

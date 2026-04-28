@@ -30,6 +30,24 @@ export interface Lead {
 export interface PlaybookConfig {
   id: string;
   topic: Topic;
+  /**
+   * NEU (vereinfachtes Modell – ersetzt die 21 Legacy-Felder):
+   * Wie Gloria zum Thema spricht: Argumentationslinie, Empathie-Anker,
+   * Einwandbehandlung, Tonalität, Ziel des Calls.
+   */
+  behavior?: string;
+  /**
+   * NEU: Pflichtfragen für die Basisdaten-Phase, die im Call abgefragt
+   * werden müssen (z. B. Geburtsdatum, Versicherer, Beschwerden ...).
+   * Eine Frage pro Zeile.
+   */
+  requiredData?: string;
+  /**
+   * NEU: Faktenpool, auf den Gloria zurückgreifen darf (Zahlen,
+   * Rahmenbedingungen, erlaubte Aussagen, verbotene Aussagen).
+   */
+  knowledge?: string;
+  // --- Legacy-Felder (werden nicht mehr im UI editiert) ----------------
   opener: string;
   discovery: string;
   objectionHandling: string;

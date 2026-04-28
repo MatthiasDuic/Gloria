@@ -1662,6 +1662,10 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
       return {
         id: String(data.id || `playbook-${topic}`),
         topic,
+        // Neues vereinfachtes Modell (3 Felder)
+        behavior: typeof data.behavior === "string" ? data.behavior : undefined,
+        requiredData: typeof data.requiredData === "string" ? data.requiredData : undefined,
+        knowledge: typeof data.knowledge === "string" ? data.knowledge : undefined,
         opener: String(data.opener || ""),
         discovery: String(data.discovery || ""),
         objectionHandling: String(data.objectionHandling || ""),
