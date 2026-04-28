@@ -9,6 +9,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/reports/cleanup",
   "/api/campaigns/run-active",
   "/api/calendar/feed",
+  "/api/calendar/busy",
   "/api/health",
   "/api/auth/login",
   "/api/auth/logout",
