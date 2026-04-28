@@ -346,7 +346,10 @@ function extractConfirmedSlot(text: string): string | null {
     /\btermin[^.?!]*\bist\s+am\b/.test(lower) ||
     /\bich\s+notiere\b/.test(lower) ||
     /\bnotiere\s+ich\b/.test(lower) ||
-    /\bich\s+trage\s+(?:ihn|den\s+termin)\s+ein\b/.test(lower);
+    /\bich\s+trage\s+(?:ihn|den\s+termin)\s+ein\b/.test(lower) ||
+    /\bsteht\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
+    /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||
+    /\bperfekt\b[^.?!]*\btermin\b/.test(lower);
   if (!isConfirmation) return null;
 
   const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+[a-zäöüß]+\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
