@@ -14,6 +14,10 @@ export interface TwilioCallRequest {
   ownerGesellschaft?: string;
   isTestCall?: boolean;
   from?: string;
+  // Wiedervorlage: Kurz-Zusammenfassung des vorherigen Gesprächs, an den
+  // Worker als <Parameter> weitergereicht, damit Gloria mit einer Recap eröffnet.
+  previousSummary?: string;
+  isCallback?: boolean;
 }
 
 export interface TwilioCallerIdOption {
@@ -245,6 +249,8 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
     preparedAt: preparation.preparedAt,
     rtProfileKey: preparation.topicProfileKey,
     prepMode: preparedForStream ? "ready" : "degraded",
+    previousSummary: payload.previousSummary,
+    isCallback: payload.isCallback ? "1" : undefined,
   });
 
   const statusCallback = buildUrl(baseUrl, "/api/twilio/status", {

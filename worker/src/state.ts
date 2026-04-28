@@ -13,6 +13,11 @@ export type CallContext = {
   ownerGesellschaft?: string;
   // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
   playbookPrompt?: string;
+  // Wiedervorlage-Anruf: Zusammenfassung des vorherigen Gesprächs (vom Backend
+  // beim auto-Wiederanruf mitgegeben). Wird im System-Prompt verwendet, damit
+  // Gloria mit einer kurzen Recap eröffnet und direkt in Phase 7 (Termin) einsteigt.
+  previousSummary?: string;
+  isCallback?: boolean;
   // Vom Anrufenden bestätigte Termin-Phrase (z. B. "Donnerstag, den siebten Mai um vierzehn Uhr dreißig").
   // Sobald gesetzt, MUSS Phase 10 diese Phrase wortwörtlich übernehmen.
   confirmedSlotPhrase?: string;

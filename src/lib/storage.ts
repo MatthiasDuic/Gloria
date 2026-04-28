@@ -987,6 +987,22 @@ export async function storeCallReport(payload: {
   return report;
 }
 
+export async function getLatestReportSummaryForLead(
+  leadId: string,
+  userId?: string,
+): Promise<string | undefined> {
+  if (!leadId) return undefined;
+  const reportDb = await readReportDatabase(userId);
+  const candidates = reportDb.reports
+    .filter((r) => r.leadId === leadId && (!userId || r.userId === userId))
+    .filter((r) => r.summary && !/^Automatischer Wiedervorlage-Anruf gestartet/i.test(r.summary));
+  if (candidates.length === 0) return undefined;
+  candidates.sort(
+    (a, b) => Date.parse(b.conversationDate || "") - Date.parse(a.conversationDate || ""),
+  );
+  return candidates[0].summary;
+}
+
 export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
   const leads = await readLeads();
   const now = Date.now();

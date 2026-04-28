@@ -1,5 +1,6 @@
 ﻿import { NextResponse } from "next/server";
 import {
+  getLatestReportSummaryForLead,
   listDueCallbackLeads,
   markLeadCallbackScheduled,
   storeCallReport,
@@ -73,8 +74,21 @@ async function handle(request: Request) {
     }
 
     try {
+      const rawSummary = await getLatestReportSummaryForLead(lead.id, lead.userId);
+      const previousSummary = rawSummary
+        ? rawSummary.replace(/\s+/g, " ").trim().slice(0, 800)
+        : undefined;
       const call = await createTwilioCall(
-        { to, company: lead.company, contactName: lead.contactName, topic: lead.topic, leadId: lead.id, userId: lead.userId },
+        {
+          to,
+          company: lead.company,
+          contactName: lead.contactName,
+          topic: lead.topic,
+          leadId: lead.id,
+          userId: lead.userId,
+          previousSummary,
+          isCallback: true,
+        },
         request,
       );
 

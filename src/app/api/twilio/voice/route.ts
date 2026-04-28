@@ -44,6 +44,8 @@ function getContext(request: Request) {
     contactName: url.searchParams.get("contactName") || "",
     topic: url.searchParams.get("topic") || "betriebliche Krankenversicherung",
     rtProfileKey: url.searchParams.get("rtProfileKey") || undefined,
+    previousSummary: url.searchParams.get("previousSummary") || undefined,
+    isCallback: url.searchParams.get("isCallback") === "1",
   };
 }
 
@@ -292,6 +294,8 @@ async function renderVoiceResponse(request: Request) {
         company: context.company,
         contactName: context.contactName,
         topic: context.topic,
+        previousSummary: context.previousSummary,
+        isCallback: context.isCallback ? "1" : undefined,
       },
     });
 

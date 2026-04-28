@@ -110,7 +110,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     // Wir warten daher die geschätzte Restspielzeit ab, bevor wir die
     // Sprechen-Phase als beendet markieren.
     if (!handle.aborted) {
-      const playoutMs = Math.ceil(totalAudioBytes / 8) + 250; // ~Bytes/8 = ms; + Safety
+      const playoutMs = Math.ceil(totalAudioBytes / 8) + 120; // ~Bytes/8 = ms; + Safety
       await new Promise<void>((resolve) => setTimeout(resolve, playoutMs));
     }
 
@@ -194,6 +194,8 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           ownerRealName: params.ownerRealName,
           ownerCompanyName: params.ownerCompanyName,
           ownerGesellschaft: params.ownerGesellschaft,
+          previousSummary: params.previousSummary,
+          isCallback: params.isCallback === "1" || params.isCallback === "true",
         });
         log.info("call.started", {
           callSid: ctx.callSid,

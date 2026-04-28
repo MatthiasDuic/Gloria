@@ -9,6 +9,8 @@ type ExtractedReport = {
   appointmentAt?: string;
   contactEmail?: string;
   summary: string;
+  nextCallAt?: string;
+  directDial?: string;
 };
 
 const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das Transkript unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit folgenden Feldern:
@@ -16,14 +18,17 @@ const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das 
   "outcome": "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt",
   "appointmentAt": "ISO-8601 mit Zeitzone (z. B. 2026-04-30T15:00:00+02:00) oder null",
   "contactEmail": "vom Kunden bestätigte Mailadresse oder null",
+  "nextCallAt": "ISO-8601 mit Zeitzone für den vereinbarten Rückruf-Zeitpunkt (NUR bei Wiedervorlage), sonst null",
+  "directDial": "vom Anrufenden für den Rückruf genannte Direkt-Durchwahl/Mobilnummer als reine E.164- oder Klar-Ziffern-Zeichenkette (NUR bei Wiedervorlage), sonst null",
   "summary": "5–10 Sätze Deutsch, fasse Verlauf, Bedarf, vereinbarten Termin und ggf. erfasste Basisdaten zusammen"
 }
 Regeln:
 - "Termin" nur, wenn ein konkreter Termin (Datum + Uhrzeit) bestätigt wurde.
 - "Absage" wenn der Anrufende ablehnt.
-- "Wiedervorlage" wenn auf später verschoben wurde, ohne festen Termin.
+- "Wiedervorlage" wenn auf später verschoben wurde, ohne festen Termin – insbesondere wenn der Anrufende keinen Kalender-Zugriff hatte und einen Rückruf-Zeitpunkt + (idealerweise) Direktdurchwahl genannt hat.
 - "Kein Kontakt" sonst (kein Entscheider erreicht, abgebrochen).
 - appointmentAt: nutze die LETZTE im Transkript bestätigte Termin-Aussage. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" sagt, nimm das Datum exakt so.
+- nextCallAt + directDial: NUR füllen, wenn outcome="Wiedervorlage" UND der Anrufende explizit Tag/Uhrzeit für den Rückruf bzw. eine Durchwahl/Nummer genannt UND bestätigt hat.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
 
 export async function extractReport(ctx: CallContext): Promise<ExtractedReport | null> {
@@ -79,7 +84,12 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
 
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const raw = json.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(raw) as Partial<ExtractedReport> & { appointmentAt?: string | null; contactEmail?: string | null };
+    const parsed = JSON.parse(raw) as Partial<ExtractedReport> & {
+      appointmentAt?: string | null;
+      contactEmail?: string | null;
+      nextCallAt?: string | null;
+      directDial?: string | null;
+    };
 
     const outcome: Outcome =
       parsed.outcome === "Termin" || parsed.outcome === "Absage" || parsed.outcome === "Wiedervorlage"
@@ -96,9 +106,21 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         ? parsed.contactEmail.trim()
         : undefined;
 
+    const nextCallAt =
+      outcome === "Wiedervorlage" &&
+      typeof parsed.nextCallAt === "string" &&
+      !Number.isNaN(Date.parse(parsed.nextCallAt))
+        ? new Date(parsed.nextCallAt).toISOString()
+        : undefined;
+
+    const directDial =
+      outcome === "Wiedervorlage" && typeof parsed.directDial === "string"
+        ? parsed.directDial.replace(/[^\d+]/g, "").trim() || undefined
+        : undefined;
+
     const summary = (parsed.summary || "").trim() || "Kein Gesprächsinhalt erfasst.";
 
-    return { outcome, appointmentAt, contactEmail, summary };
+    return { outcome, appointmentAt, contactEmail, summary, nextCallAt, directDial };
   } catch (error) {
     log.error("finalize.extract_failed", {
       error: error instanceof Error ? error.message : String(error),
@@ -158,6 +180,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     summary,
     outcome,
     appointmentAt,
+    nextCallAt: extracted?.nextCallAt,
+    directDial: extracted?.directDial,
     recordingConsent: true,
   };
 
