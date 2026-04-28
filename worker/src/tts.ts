@@ -31,7 +31,7 @@ export function streamElevenLabsToMulaw(
 
   const url =
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?optimize_streaming_latency=1&output_format=ulaw_8000`;
+    `?optimize_streaming_latency=3&output_format=ulaw_8000`;
 
   const stability = numEnv("ELEVENLABS_STABILITY", 0.7);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);

@@ -143,12 +143,16 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
       log.info("turn.user_said", { callSid: ctx.callSid, text: userText });
 
-      // Vor der ersten LLM-Antwort kurz auf das Playbook warten (max. 6 s),
-      // damit Phase 3+ wirklich mit Playbook-Wissen gefahren wird.
-      if (playbookReady && !ctx.playbookPrompt) {
+      // Vor der LLM-Antwort kurz auf das Playbook warten (max. 2 s),
+      // damit Phase 3+ wirklich mit Playbook-Wissen gefahren wird. ABER:
+      // beim allerersten Turn (Begrüßung + Aufzeichnungs-Frage) braucht
+      // Gloria das Playbook noch nicht – wir warten dort nicht und sparen
+      // dadurch eine spürbare Anfangs-Latenz nach dem "Hallo Müller".
+      const isFirstTurn = ctx.transcript.length <= 1;
+      if (!isFirstTurn && playbookReady && !ctx.playbookPrompt) {
         await Promise.race([
           playbookReady,
-          new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+          new Promise<void>((resolve) => setTimeout(resolve, 2000)),
         ]);
       }
 
