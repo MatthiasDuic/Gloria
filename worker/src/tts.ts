@@ -130,8 +130,10 @@ function boolEnv(name: string, fallback: boolean): boolean {
  */
 function applyPronunciationFixes(text: string): string {
   let out = text;
-  // "Duic" -> klingt im Deutschen wie "Duitsch"
-  out = out.replace(/\bDuic\b/g, "Duitsch");
+  // "Duic" -> klingt im Deutschen wie "Du-itsch" (Bindestrich erzwingt
+  // bei ElevenLabs eine deutliche Trennung der Silben, sonst wird das
+  // "i" verschluckt und es klingt wie "Duc").
+  out = out.replace(/\bDuic\b/g, "Du-itsch");
   // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
   out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
   // Wortwahl: "private/privaten Krankenversicherung(sbeiträge)" -> "Krankenversicherung(sbeiträge)"
