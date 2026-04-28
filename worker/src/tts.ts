@@ -36,9 +36,9 @@ export function streamElevenLabsToMulaw(
   const stability = numEnv("ELEVENLABS_STABILITY", 0.7);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
   const style = numEnv("ELEVENLABS_STYLE", 0.2);
-  // 0.9 = ca. 10% langsamer als Standard, klingt deutlich ruhiger und gibt dem
+  // 0.88 = ca. 12% langsamer als Standard, klingt deutlich ruhiger und gibt dem
   // Angerufenen mehr Zeit zum Mitdenken.
-  const speed = numEnv("ELEVENLABS_SPEED", 0.9);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.88);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {
