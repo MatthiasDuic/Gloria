@@ -85,6 +85,55 @@ function normalizeTopic(value: string): Topic {
   return topic || TOPICS[0];
 }
 
+/**
+ * Befüllt die drei neuen Felder (`behavior`, `requiredData`, `knowledge`) aus
+ * den Legacy-Feldern, falls sie noch leer sind. So müssen User die alten
+ * Inhalte nicht manuell migrieren – sie sehen die zusammengeführten Texte
+ * direkt im neuen 3-Felder-UI und können sie dort weiter überarbeiten.
+ */
+function synthesizeNewFieldsFromLegacy(script: Partial<ScriptConfig>): Partial<ScriptConfig> {
+  const has = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+  const out: Partial<ScriptConfig> = { ...script };
+
+  if (!has(out.behavior)) {
+    const parts: string[] = [];
+    if (has(script.decisionMakerTask)) parts.push(`ZIEL BEIM ENTSCHEIDER:\n${script.decisionMakerTask!.trim()}`);
+    if (has(script.decisionMakerBehavior)) parts.push(`VERHALTEN / TONALITÄT:\n${script.decisionMakerBehavior!.trim()}`);
+    if (has(script.decisionMakerContext)) parts.push(`KERNTHEMA / PERSPEKTIVE:\n${script.decisionMakerContext!.trim()}`);
+    if (has(script.problemBuildup)) parts.push(`PROBLEM-AUFBAU / RELEVANZ:\n${script.problemBuildup!.trim()}`);
+    if (has(script.conceptTransition)) parts.push(`ÜBERGANG ZUM KONZEPT / TERMINBRÜCKE:\n${script.conceptTransition!.trim()}`);
+    if (has(script.objectionHandling)) parts.push(`EINWANDBEHANDLUNG:\n${script.objectionHandling!.trim()}`);
+    if (has(script.gatekeeperTask) || has(script.gatekeeperBehavior) || has(script.receptionTopicReason)) {
+      const gk: string[] = ["AM EMPFANG:"];
+      if (has(script.gatekeeperTask)) gk.push(`- Ziel: ${script.gatekeeperTask!.trim()}`);
+      if (has(script.gatekeeperBehavior)) gk.push(`- Verhalten: ${script.gatekeeperBehavior!.trim()}`);
+      if (has(script.receptionTopicReason)) gk.push(`- Kurzer Anlass auf Nachfrage: ${script.receptionTopicReason!.trim()}`);
+      parts.push(gk.join("\n"));
+    }
+    if (has(script.opener)) parts.push(`FESTER EINSTIEG (verbindlich formuliert):\n${script.opener!.trim()}`);
+    if (has(script.close)) parts.push(`TERMIN-EINSTIEG / ANKER:\n${script.close!.trim()}`);
+    if (has(script.appointmentConfirmation)) parts.push(`TERMINBESTÄTIGUNG:\n${script.appointmentConfirmation!.trim()}`);
+    if (has(script.appointmentGoal)) parts.push(`ERFOLGSKRITERIUM:\n${script.appointmentGoal!.trim()}`);
+    if (has(script.discovery)) parts.push(`FRAGEANKER (Discovery):\n${script.discovery!.trim()}`);
+    if (has(script.availableAppointmentSlots)) parts.push(`VERFÜGBARE TERMINFENSTER:\n${script.availableAppointmentSlots!.trim()}`);
+    if (has(script.consentPrompt)) parts.push(`AUFZEICHNUNGS-EINWILLIGUNG:\n${script.consentPrompt!.trim()}`);
+    if (parts.length) out.behavior = parts.join("\n\n");
+  }
+
+  if (!has(out.requiredData)) {
+    const parts: string[] = [];
+    if (has(script.pkvHealthIntro)) parts.push(`Einleitung Basisdaten: ${script.pkvHealthIntro!.trim()}`);
+    if (has(script.pkvHealthQuestions)) parts.push(script.pkvHealthQuestions!.trim());
+    if (parts.length) out.requiredData = parts.join("\n\n");
+  }
+
+  if (!has(out.knowledge)) {
+    if (has(script.aiKeyInfo)) out.knowledge = script.aiKeyInfo!.trim();
+  }
+
+  return out;
+}
+
 function normalizeOutcome(value: string): ReportOutcome {
   if (value === "Termin" || value === "Absage" || value === "Wiedervorlage") {
     return value;
@@ -860,7 +909,8 @@ export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> 
     }
 
     return result.rows.map((row) => {
-      const data = (row.data || {}) as Partial<ScriptConfig>;
+      const raw = (row.data || {}) as Partial<ScriptConfig>;
+      const data = synthesizeNewFieldsFromLegacy(raw);
 
       return {
         ...data,
@@ -1656,7 +1706,8 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
     }
 
     return result.rows.map((row) => {
-      const data = JSON.parse(String(row.content || "{}")) as Partial<ScriptConfig>;
+      const raw = JSON.parse(String(row.content || "{}")) as Partial<ScriptConfig>;
+      const data = synthesizeNewFieldsFromLegacy(raw);
       const topic = normalizeTopic(String(row.topic));
 
       return {
