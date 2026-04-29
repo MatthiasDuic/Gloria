@@ -284,6 +284,72 @@ export async function heartbeatOpenAi() {
   }
 }
 
+async function preflightWorkerAndCalendar(baseUrl: string, userId?: string): Promise<void> {
+  const headers = buildInternalHeaders();
+  const tasks: Array<Promise<void>> = [];
+
+  // 1) Render-Worker /healthz (oder konfigurierte URL) warmpingen.
+  const workerUrl = process.env.WORKER_HEALTHCHECK_URL?.trim();
+  if (workerUrl) {
+    tasks.push(
+      (async () => {
+        const start = Date.now();
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 1500);
+        try {
+          await fetch(workerUrl, { method: "GET", signal: ctrl.signal, cache: "no-store" });
+          console.info("[preflight] worker.warm", { ms: Date.now() - start });
+        } catch (e) {
+          console.warn("[preflight] worker.cold_or_unreachable", {
+            ms: Date.now() - start,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        } finally {
+          clearTimeout(t);
+        }
+      })(),
+    );
+  }
+
+  // 2) Kalender-Busy vorab laden (warmt DB-Pool + erkennt Auth-Probleme früh).
+  if (userId) {
+    tasks.push(
+      (async () => {
+        const start = Date.now();
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 1200);
+        try {
+          await fetch(`${baseUrl}/api/calendar/busy?userId=${encodeURIComponent(userId)}`, {
+            method: "GET",
+            headers,
+            cache: "no-store",
+            signal: ctrl.signal,
+          });
+          console.info("[preflight] calendar.warm", { ms: Date.now() - start });
+        } catch (e) {
+          console.warn("[preflight] calendar.failed", {
+            ms: Date.now() - start,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        } finally {
+          clearTimeout(t);
+        }
+      })(),
+    );
+  }
+
+  // 3) ElevenLabs-Voice-Cache (best-effort – ggf. schon initial gewärmt).
+  tasks.push(
+    maybeWarmupElevenLabsVoice(false)
+      .then(() => undefined)
+      .catch(() => undefined),
+  );
+
+  // Wir blockieren prepareCall NICHT auf diese Aufgaben (Twilio toleriert die
+  // erste halbe Sekunde Stille). Sie laufen parallel zur TwiML-Antwort.
+  void Promise.allSettled(tasks);
+}
+
 export async function prepareCall(params: {
   topic: Topic;
   userId?: string;
@@ -306,6 +372,12 @@ export async function prepareCall(params: {
   }
 
   void heartbeatOpenAi();
+
+  // Preflight: Worker (Render) und Kalender warm machen, bevor Twilio den
+  // Outbound-Call startet. Wir warten höchstens ein paar hundert ms – wenn der
+  // Worker gerade kalt ist, soll der Call trotzdem starten (Twilio puffert die
+  // erste Sekunde). Latenzen werden geloggt, damit wir kalte Starts erkennen.
+  void preflightWorkerAndCalendar(baseUrl, params.userId);
 
   const activeScripts = scriptProfilesByUser[cacheKey] || {};
   const topicProfileLoaded = Boolean(activeScripts[params.topic]);

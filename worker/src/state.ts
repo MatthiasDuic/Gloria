@@ -24,6 +24,10 @@ export type CallContext = {
   // Bereits belegte Termin-Slots (für diesen User). In Berlin-Zeit-Strings,
   // werden in den System-Prompt injiziert, damit Gloria keine Doppelbelegung vorschlägt.
   busySlotsPrompt?: string;
+  // Adaptive Slot-Vorschläge: 4–6 freie 30-Min-Slots in den nächsten 5 Geschäftstagen,
+  // berechnet aus der Busy-Liste. Wenn der Anrufende einen Vorschlag ablehnt, kann
+  // Gloria aus dieser Liste alternative Slots ziehen, ohne Doppelbelegung.
+  freeSlotsPrompt?: string;
   // Conversation memory.
   transcript: Array<{ role: "user" | "assistant"; text: string; at: number }>;
   // Speaking flag — used for barge-in detection.

@@ -6,7 +6,7 @@ import { openDeepgram, type AsrSession } from "./asr.js";
 import { generateReply } from "./llm.js";
 import { streamElevenLabsToMulaw, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
-import { loadBusySlots, busySlotsToPrompt } from "./busy.js";
+import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 
 /** Twilio Media Streams send frames in 20 ms chunks of μ-law 8 kHz (160 bytes per frame). */
@@ -223,7 +223,11 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         void loadBusySlots({ userId: ctx.userId }).then((slots) => {
           if (!ctx || !slots) return;
           ctx.busySlotsPrompt = busySlotsToPrompt(slots);
-          log.info("busy.applied", { count: slots.length });
+          const free = computeFreeSlots(slots, { daysAhead: 5, maxCount: 6, bufferMinutes: 90 });
+          if (free.length) {
+            ctx.freeSlotsPrompt = freeSlotsToPrompt(free);
+          }
+          log.info("busy.applied", { count: slots.length, free: free.length });
         });
 
         asr = openDeepgram({
