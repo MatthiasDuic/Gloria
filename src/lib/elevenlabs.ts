@@ -19,10 +19,12 @@ interface ElevenLabsConfig {
 }
 
 // Defaults sind darauf ausgelegt, dass Gloria am Telefon natuerlich klingt
-// und nicht nach "KI-Roboter":
+// und die Antwortlatenz fuer den Anrufer kurz bleibt:
 //   - modelId eleven_multilingual_v2: hoechste Natuerlichkeit fuer Deutsch
-//   - latencyMode 0: keine Qualitaetsreduktion zugunsten Latenz
-//     (Level 2+ macht die Stimme spuerbar blechern/roboterhaft)
+//   - latencyMode 3: deutlich schnelleres First-Byte beim Streaming, ohne
+//     dass die Stimme spuerbar blechern wird (Level 4 reduziert Qualitaet
+//     bemerkbar). Wer die maximale Audioqualitaet bevorzugt, kann via
+//     ELEVENLABS_LATENCY_MODE=0 zurueckschalten.
 //   - stability 0.5: ruhig und konsistent, aber nicht monoton
 //   - style 0.3: natuerliche Betonung ohne ueberdrehten Schauspieler-Ton
 //   - speed 0.95: minimal entschleunigt, wirkt weniger gehetzt
@@ -31,7 +33,7 @@ const ELEVENLABS_CONFIG: ElevenLabsConfig = {
   apiKey: process.env.ELEVENLABS_API_KEY?.trim() || "",
   voiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || "",
   modelId: process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_multilingual_v2",
-  latencyMode: process.env.ELEVENLABS_LATENCY_MODE?.trim() || "0",
+  latencyMode: process.env.ELEVENLABS_LATENCY_MODE?.trim() || "3",
   stability: Number(process.env.ELEVENLABS_STABILITY || 0.5),
   similarityBoost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.85),
   style: Number(process.env.ELEVENLABS_STYLE || 0.3),

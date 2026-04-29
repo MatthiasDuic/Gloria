@@ -271,6 +271,9 @@ async function persistTranscriptChunkEvent(payload: {
   userId?: string;
   callSid?: string;
   summaryChunk?: string;
+  company?: string;
+  topic?: Topic;
+  step?: string;
 }) {
   const callSid = payload.callSid?.trim();
   const chunk = payload.summaryChunk?.trim();
@@ -293,6 +296,19 @@ async function persistTranscriptChunkEvent(payload: {
           speaker: "Gloria",
           text,
         });
+        if (payload.company && payload.topic) {
+          await appendConversationEvent(
+            {
+              callSid,
+              company: payload.company,
+              topic: payload.topic,
+              step: payload.step || "conversation",
+              eventType: "utterance_gloria",
+              text,
+            },
+            { userId: payload.userId },
+          );
+        }
       }
       continue;
     }
@@ -306,6 +322,19 @@ async function persistTranscriptChunkEvent(payload: {
           speaker: "Interessent",
           text,
         });
+        if (payload.company && payload.topic) {
+          await appendConversationEvent(
+            {
+              callSid,
+              company: payload.company,
+              topic: payload.topic,
+              step: payload.step || "conversation",
+              eventType: "utterance_caller",
+              text,
+            },
+            { userId: payload.userId },
+          );
+        }
       }
     }
   }
@@ -834,6 +863,8 @@ export async function storeCallReport(payload: {
     userId: payload.userId,
     callSid: payload.callSid,
     summaryChunk: payload.summaryChunk,
+    company: payload.company,
+    topic: payload.topic,
   });
 
   const [leads, reportDb] = await Promise.all([
@@ -983,6 +1014,32 @@ export async function storeCallReport(payload: {
     writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
     writeLeads(updatedLeads, payload.userId),
   ]);
+
+  // Live-Monitor: Terminal-Event mit dem finalen Outcome anhaengen, damit
+  // der Live-Monitor das Gespraech als beendet markieren kann.
+  if (payload.outcome && payload.callSid && payload.company && payload.topic) {
+    const outcomeToEventType: Record<ReportOutcome, string> = {
+      Termin: "appointment_booked",
+      Absage: "rejection_final",
+      Wiedervorlage: "callback_scheduled",
+      "Kein Kontakt": "call_completed",
+    };
+    await appendConversationEvent(
+      {
+        callSid: payload.callSid,
+        company: payload.company,
+        topic: payload.topic,
+        step: "finished",
+        eventType: outcomeToEventType[payload.outcome] || "call_completed",
+        text: payload.appointmentAt
+          ? `Termin: ${payload.appointmentAt}`
+          : payload.nextCallAt
+            ? `Wiedervorlage: ${payload.nextCallAt}`
+            : undefined,
+      },
+      { userId: payload.userId },
+    );
+  }
 
   return report;
 }
