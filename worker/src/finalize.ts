@@ -158,9 +158,15 @@ export async function postReport(ctx: CallContext): Promise<void> {
 
   if (ctx.confirmedSlotPhrase) {
     outcome = "Termin";
-    if (!appointmentAt) {
-      const parsed = parseSlotPhraseToIso(ctx.confirmedSlotPhrase);
-      if (parsed) appointmentAt = parsed;
+    // Bevorzuge die gelockte Slot-Phrase – das LLM kann in der Schluss-
+    // Zusammenfassung halluzinieren (anderer Tag/Uhrzeit). Die ge-lockte
+    // Phrase stammt aus Glorias eigener Bestätigung in Phase 7 und ist
+    // damit die zuverlaessigere Quelle.
+    const parsed = parseSlotPhraseToIso(ctx.confirmedSlotPhrase);
+    if (parsed) {
+      appointmentAt = parsed;
+    } else if (!appointmentAt) {
+      // kein Parse-Ergebnis und LLM hat auch nichts geliefert -> nichts setzen
     }
     if (!extracted) {
       summary = `Termin vereinbart: ${ctx.confirmedSlotPhrase}.`;

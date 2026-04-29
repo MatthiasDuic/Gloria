@@ -352,7 +352,10 @@ function extractConfirmedSlot(text: string): string | null {
     /\btermin[^.?!]*\bist\s+am\b/.test(lower) ||
     /\bich\s+notiere\b/.test(lower) ||
     /\bnotiere\s+ich\b/.test(lower) ||
-    /\bich\s+trage\s+(?:ihn|den\s+termin)\s+ein\b/.test(lower) ||
+    /\bich\s+(?:merke|merk)\s+(?:mir|ich\s+mir)\b/.test(lower) ||
+    /\b(?:merke|merk)\s+ich\s+mir\b/.test(lower) ||
+    /\bich\s+trage\s+(?:ihn|den\s+termin)?\s*(?:ein|gleich\s+ein)?\b/.test(lower) ||
+    /\bich\s+buche\b/.test(lower) ||
     /\bsteht\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
     /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||
     /\bperfekt\b[^.?!]*\btermin\b/.test(lower);
