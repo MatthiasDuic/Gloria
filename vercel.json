@@ -11,6 +11,10 @@
     {
       "path": "/api/campaigns/run-active",
       "schedule": "*/2 7-16 * * 1-5"
+    },
+    {
+      "path": "/api/learning/optimize/cron",
+      "schedule": "0 4 * * 1"
     }
   ]
 }
