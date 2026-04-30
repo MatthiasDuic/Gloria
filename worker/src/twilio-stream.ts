@@ -492,10 +492,31 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   // Anrede konstruieren: bevorzugt mit Titel ("Herr Neumann" / "Frau Dr. Müller").
   const salutation = /^(Herr|Frau)\b/i.test(expected) ? expected : `Herr/Frau ${expectedLast}`;
 
+  // Themen-Anker: kurze, vertriebsfreundliche Erklärung des Anlasses,
+  // damit der Angerufene NICHT denken muss "warum sollte ich aufzeichnen
+  // lassen, ich weiß ja gar nicht worum es geht". Wir mappen das
+  // (lower-cased) Topic auf einen passenden Halbsatz; Default ist neutral.
+  const topic = (ctx.topic || "").toLowerCase();
+  let topicLine: string;
+  if (/krank|pkv|gkv|beitr/i.test(topic)) {
+    topicLine = `Es geht um die Beitragsentwicklung in Ihrer Krankenversicherung – ein Thema, das viele Unternehmer zunehmend beschäftigt.`;
+  } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
+    topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
+  } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
+    topicLine = `Es geht um Ihre gewerblichen Versicherungen und wie Sie Risiken im Unternehmen sauber absichern.`;
+  } else if (/strom|gas|energie/i.test(topic)) {
+    topicLine = `Es geht um Ihre Energiekosten und wie sich diese mittelfristig planbar machen lassen.`;
+  } else if (ctx.topic && ctx.topic.trim().length > 0) {
+    topicLine = `Es geht um das Thema ${ctx.topic.trim()} – ein Punkt, bei dem ${owner} Ihnen eine kurze Einordnung geben kann.`;
+  } else {
+    topicLine = `Es geht um ein Thema, bei dem ${owner} Ihnen eine kurze, fundierte Einordnung geben möchte.`;
+  }
+
   return [
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an.`,
-    `Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?`,
+    topicLine,
+    `Bevor ich Ihnen mehr dazu sage: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?`,
     `Bitte antworten Sie mit einem klaren JA oder NEIN.`,
   ].join(" ");
 }
