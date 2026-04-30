@@ -1717,6 +1717,9 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
         behavior: typeof data.behavior === "string" ? data.behavior : undefined,
         requiredData: typeof data.requiredData === "string" ? data.requiredData : undefined,
         knowledge: typeof data.knowledge === "string" ? data.knowledge : undefined,
+        objectionResponses:
+          typeof data.objectionResponses === "string" ? data.objectionResponses : undefined,
+        proofPoints: typeof data.proofPoints === "string" ? data.proofPoints : undefined,
         opener: String(data.opener || ""),
         discovery: String(data.discovery || ""),
         objectionHandling: String(data.objectionHandling || ""),

@@ -7,6 +7,9 @@ export type PlaybookFields = {
   behavior?: string;
   requiredData?: string;
   knowledge?: string;
+  // Eigenständige Sales-Felder
+  objectionResponses?: string;
+  proofPoints?: string;
   // Legacy-Felder bleiben optional vorhanden, werden aber nicht mehr in den Prompt gerendert.
   opener?: string;
   discovery?: string;
@@ -93,12 +96,14 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
   const behavior = (pb.behavior || "").trim();
   const requiredData = (pb.requiredData || "").trim();
   const knowledge = (pb.knowledge || "").trim();
+  const objectionResponses = (pb.objectionResponses || "").trim();
+  const proofPoints = (pb.proofPoints || "").trim();
 
-  // Wenn keines der drei neuen Felder gefüllt ist, geben wir einen leeren
+  // Wenn keines der relevanten Felder gefüllt ist, geben wir einen leeren
   // Block zurück. Legacy-Felder werden bewusst NICHT mehr verwendet, damit
   // die Anti-Floskel-Strategie greift und Gloria sich nur auf die kuratierten
-  // 3 Blöcke stützt.
-  if (!behavior && !requiredData && !knowledge) {
+  // Blöcke stützt.
+  if (!behavior && !requiredData && !knowledge && !objectionResponses && !proofPoints) {
     return topic ? `THEMA DIESES CALLS: ${topic}` : "";
   }
 
@@ -116,6 +121,22 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
     parts.push("");
     parts.push("BASISDATEN / PFLICHTFRAGEN (in der Basisdaten-Phase einzeln abfragen):");
     parts.push(requiredData);
+  }
+
+  if (proofPoints) {
+    parts.push("");
+    parts.push(
+      "ZAHLEN & FAKTEN (HARTE PFLICHT — in Phase 5 mind. eine dieser Zahlen aktiv nennen, bevor zu Phase 6 übergeleitet wird):",
+    );
+    parts.push(proofPoints);
+  }
+
+  if (objectionResponses) {
+    parts.push("");
+    parts.push(
+      "EINWAND-BIBLIOTHEK (verbindliche Konter-Linien — Format pro Zeile: \"Einwand: Konter\". Nutze die Konter-Logik in eigenen Worten, max. 1–2 Sätze, OHNE \"Ich verstehe\"/\"Absolut\"-Vorlauf):",
+    );
+    parts.push(objectionResponses);
   }
 
   if (knowledge) {

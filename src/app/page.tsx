@@ -551,6 +551,8 @@ export default function HomePage() {
         behavior: pickText(script.behavior, ""),
         requiredData: pickText(script.requiredData, ""),
         knowledge: pickText(script.knowledge, ""),
+        objectionResponses: pickText(script.objectionResponses, ""),
+        proofPoints: pickText(script.proofPoints, ""),
         opener: pickText(script.opener, ""),
         discovery: pickText(script.discovery, ""),
         objectionHandling: pickText(script.objectionHandling, ""),
@@ -618,6 +620,8 @@ export default function HomePage() {
           behavior: "",
           requiredData: "",
           knowledge: "",
+          objectionResponses: "",
+          proofPoints: "",
           opener: "",
           discovery: "",
           objectionHandling: "",
@@ -2232,6 +2236,33 @@ export default function HomePage() {
                         value={activeDraft.knowledge ?? ""}
                         rows={14}
                         onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))}
+                      />
+                    </div>
+
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>4. Zahlen & Fakten</strong> <span className="subtle">(Pflicht-Anker in Phase 5)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Ein Beleg pro Zeile (z. B. Statistik, Studie, konkrete Marktzahl). Gloria muss in der Problem-Aufbau-Phase
+                        mindestens einen dieser Punkte aktiv nennen, bevor sie zur Terminüberleitung wechselt.
+                        Nur Zahlen verwenden, die Sie hier eintragen – nichts erfinden.
+                      </p>
+                      <textarea
+                        value={activeDraft.proofPoints ?? ""}
+                        rows={8}
+                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], proofPoints: event.target.value } }))}
+                      />
+                    </div>
+
+                    <div className="mini-panel top-gap">
+                      <h3 className="sub-heading"><strong>5. Einwand-Bibliothek</strong> <span className="subtle">(Verbindliche Konter-Linien)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Format pro Zeile: <code>Einwand: Konter-Linie</code>. Beispiel: <em>Kein Interesse: Genau das hören wir oft …</em>.
+                        Gloria nutzt die Konter-Logik in eigenen Worten (max. 1–2 Sätze, ohne „Ich verstehe"-Vorlauf), statt Floskeln zu erfinden.
+                      </p>
+                      <textarea
+                        value={activeDraft.objectionResponses ?? ""}
+                        rows={10}
+                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))}
                       />
                     </div>
 

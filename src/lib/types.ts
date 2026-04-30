@@ -47,6 +47,17 @@ export interface PlaybookConfig {
    * Rahmenbedingungen, erlaubte Aussagen, verbotene Aussagen).
    */
   knowledge?: string;
+  /**
+   * NEU: Einwand-Bibliothek. Eine Zeile pro "Einwand: Konter-Linie". Gloria
+   * nutzt diese Einträge als verbindliche Konter, statt Floskeln zu erfinden.
+   */
+  objectionResponses?: string;
+  /**
+   * NEU: Konkrete Zahlen / Social-Proof-Punkte (eine pro Zeile). Gloria muss in
+   * Phase 5 (Problem-Aufbau) mindestens einen davon nennen, bevor sie in Phase 6
+   * überleitet.
+   */
+  proofPoints?: string;
   // --- Legacy-Felder (werden nicht mehr im UI editiert) ----------------
   opener: string;
   discovery: string;

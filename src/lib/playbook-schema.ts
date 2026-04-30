@@ -14,6 +14,8 @@ export const PlaybookPayloadSchema = z
     behavior: z.string().optional(),
     requiredData: z.string().optional(),
     knowledge: z.string().optional(),
+    objectionResponses: z.string().optional(),
+    proofPoints: z.string().optional(),
     // Legacy-Felder (werden nicht mehr im UI editiert, aber für Rückwärtskompatibilität weiter akzeptiert)
     opener: z.string().optional(),
     discovery: z.string().optional(),
