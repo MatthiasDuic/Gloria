@@ -1,8 +1,41 @@
 import { NextResponse } from "next/server";
 import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
 import { getLeadById, storeCallReport } from "@/lib/storage";
-import { findUserById } from "@/lib/report-db";
+import { appendCallTranscriptEventToPostgres, findUserById } from "@/lib/report-db";
 import type { ReportOutcome, Topic } from "@/lib/types";
+
+type IncomingTranscriptEntry = {
+  role?: "user" | "assistant";
+  speaker?: string;
+  text?: string;
+  at?: number;
+  latencyMs?: number;
+};
+
+async function persistTranscriptArray(
+  entries: IncomingTranscriptEntry[] | undefined,
+  callSid: string | undefined,
+  userId: string | undefined,
+) {
+  if (!Array.isArray(entries) || entries.length === 0 || !callSid) return;
+  for (const entry of entries) {
+    const text = (entry.text || "").trim();
+    if (!text) continue;
+    const speaker: "Gloria" | "Interessent" =
+      entry.speaker === "Gloria" || entry.role === "assistant" ? "Gloria" : "Interessent";
+    await appendCallTranscriptEventToPostgres({
+      callSid,
+      userId,
+      speaker,
+      text,
+      latencyMs:
+        speaker === "Gloria" && typeof entry.latencyMs === "number"
+          ? entry.latencyMs
+          : undefined,
+      spokenAt: typeof entry.at === "number" ? entry.at : undefined,
+    });
+  }
+}
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as {
@@ -22,7 +55,13 @@ export async function POST(request: Request) {
     attempts?: number;
     recordingConsent?: boolean;
     recordingUrl?: string;
+    transcript?: IncomingTranscriptEntry[];
   };
+
+  // Persistiere das vollständige Wort-für-Wort-Protokoll IMMER, sobald es vom
+  // Worker mitkommt – unabhängig davon, ob der Anrufer der Aufnahme zugestimmt
+  // hat. Damit ist das Gespräch im Report-Detail auswertbar, auch ohne Audio.
+  await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
     if (payload.callSid && payload.company && payload.topic && payload.summaryChunk?.trim()) {

@@ -3,8 +3,8 @@ import type { WebSocket } from "ws";
 import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { openDeepgram, type AsrSession } from "./asr.js";
-import { generateReply } from "./llm.js";
-import { streamElevenLabsToMulaw, type TtsStreamHandle } from "./tts.js";
+import { generateReply, prewarmOpenAi } from "./llm.js";
+import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
@@ -69,6 +69,16 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     if (!text.trim()) return;
     log.info("turn.gloria_says", { callSid: ctx.callSid, text });
 
+    // Reaktionszeit = Zeit zwischen letztem user-final und Start des TTS-Streams.
+    const speakStartedAt = Date.now();
+    const latencyMs =
+      ctx.lastUserFinalAt && speakStartedAt > ctx.lastUserFinalAt
+        ? speakStartedAt - ctx.lastUserFinalAt
+        : undefined;
+    if (latencyMs !== undefined) {
+      log.info("turn.reaction_time", { callSid: ctx.callSid, ms: latencyMs });
+    }
+
     // Cancel any in-flight TTS first (barge-in safety).
     if (currentTts) {
       currentTts.abort();
@@ -116,7 +126,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
     ctx.speaking = false;
     currentTts = null;
-    ctx.transcript.push({ role: "assistant", text, at: Date.now() });
+    ctx.transcript.push({ role: "assistant", text, at: Date.now(), latencyMs });
     // Termin-Slot extrahieren – nur aus echten Bestätigungs-Sätzen
     // ("wird am … bei Ihnen sein", "bestätige ich für Sie …", "Termin … ist am …",
     // "notiere ich …" / "ich notiere …").
@@ -141,6 +151,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     pendingTurn = true;
     try {
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      ctx.lastUserFinalAt = Date.now();
       log.info("turn.user_said", { callSid: ctx.callSid, text: userText });
 
       // Vor der LLM-Antwort kurz auf das Playbook warten (max. 2 s),
@@ -207,6 +218,12 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           company: ctx.company,
           topic: ctx.topic,
         });
+
+        // Pre-warm TLS/HTTP-Pools zu OpenAI + ElevenLabs SOFORT, damit die
+        // allererste LLM-/TTS-Anfrage keine 300–600 ms Handshake-Latenz hat.
+        // Der Anrufer braucht ~1–2 s, bis er sich meldet – diese Zeit nutzen wir.
+        prewarmOpenAi();
+        prewarmElevenLabs();
 
         // Lade Playbook (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
         playbookReady = loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {

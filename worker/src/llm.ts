@@ -171,6 +171,28 @@ export type TurnOutput = {
   hangup: boolean;
 };
 
+/**
+ * Pre-warmt den TLS/HTTP-Pool zu OpenAI, damit die ALLERERSTE LLM-Antwort
+ * nicht ~300–600 ms Handshake-Latenz hat. Wird beim "start"-Event eines
+ * Calls aufgerufen, blockiert NICHT den Call. Fehler werden geschluckt.
+ */
+export function prewarmOpenAi(): void {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return;
+  void fetch("https://api.openai.com/v1/models", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+    .then((res) => {
+      // Body draining ist wichtig damit die Connection im Pool bleibt.
+      void res.text().catch(() => undefined);
+      log.info("llm.prewarm_ok", { status: res.status });
+    })
+    .catch(() => {
+      /* ignore – best effort */
+    });
+}
+
 export async function generateReply(ctx: CallContext, userText: string): Promise<TurnOutput> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {

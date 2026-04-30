@@ -361,6 +361,44 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, PlaybookConfig>>({});
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
+  const [transcriptEvents, setTranscriptEvents] = useState<Array<{
+    id: string;
+    speaker: "Gloria" | "Interessent";
+    text: string;
+    latencyMs?: number;
+    spokenAt?: string;
+    createdAt: string;
+  }>>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+
+  useEffect(() => {
+    const callSid = selectedReport?.callSid?.trim();
+    if (!callSid) {
+      setTranscriptEvents([]);
+      return;
+    }
+    let cancelled = false;
+    setTranscriptLoading(true);
+    fetch(`/api/reports/transcript?callSid=${encodeURIComponent(callSid)}`, { credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`http ${res.status}`);
+        return res.json();
+      })
+      .then((data: { events?: typeof transcriptEvents }) => {
+        if (cancelled) return;
+        setTranscriptEvents(Array.isArray(data.events) ? data.events : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTranscriptEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTranscriptLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedReport?.callSid]);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   void settingsOpen; void setSettingsOpen;
@@ -2594,7 +2632,79 @@ export default function HomePage() {
                 )}
 
                 <div className="report-detail-field report-detail-full">
-                  <label>Vollständiges Protokoll (Rohdaten)</label>
+                  <label>Wort-für-Wort-Mitschnitt (Reaktionszeit pro Gloria-Antwort)</label>
+                  <p className="subtle" style={{ marginTop: 0, marginBottom: 8 }}>
+                    Vollständiger Verlauf aus der Live-Transkription. Wird unabhängig von der Aufnahme-Einwilligung gespeichert,
+                    damit du auch ohne Audio-Datei nachvollziehen kannst, was gesprochen wurde.
+                  </p>
+                  {transcriptLoading ? (
+                    <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
+                  ) : transcriptEvents.length === 0 ? (
+                    <p className="subtle" style={{ marginTop: 6 }}>
+                      Kein Live-Mitschnitt vorhanden (z. B. weil dieser Anruf noch über die alte Edge-Pipeline lief
+                      oder kein Sprach-Streaming aktiv war).
+                    </p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                      {transcriptEvents.map((entry) => {
+                        const isGloria = entry.speaker === "Gloria";
+                        const ts = entry.spokenAt || entry.createdAt;
+                        const tsLabel = ts
+                          ? new Date(ts).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                          : "";
+                        return (
+                          <div
+                            key={entry.id}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              background: isGloria ? "rgba(40, 92, 180, 0.06)" : "rgba(190, 130, 30, 0.06)",
+                              borderLeft: `3px solid ${isGloria ? "var(--blue-600)" : "var(--gold-600)"}`,
+                            }}
+                          >
+                            <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                              <span
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: "0.78rem",
+                                  color: isGloria ? "var(--blue-600)" : "var(--gold-600)",
+                                }}
+                              >
+                                {entry.speaker}
+                              </span>
+                              {tsLabel && (
+                                <span className="subtle" style={{ fontSize: "0.72rem", fontFamily: "monospace" }}>
+                                  {tsLabel}
+                                </span>
+                              )}
+                              {isGloria && typeof entry.latencyMs === "number" && (
+                                <span
+                                  style={{
+                                    fontSize: "0.72rem",
+                                    fontFamily: "monospace",
+                                    color:
+                                      entry.latencyMs > 2500
+                                        ? "#b54545"
+                                        : entry.latencyMs > 1500
+                                          ? "#a07020"
+                                          : "#3a8c4a",
+                                  }}
+                                  title="Reaktionszeit: Pause zwischen Ende der Anrufer-Aussage und Glorias Sprechbeginn."
+                                >
+                                  Reaktion: {(entry.latencyMs / 1000).toFixed(2)} s
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ marginTop: 4, fontSize: "0.92rem", lineHeight: 1.45 }}>{entry.text}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="report-detail-field report-detail-full">
+                  <label>Zusammenfassung (Rohdaten)</label>
                   <pre className="code-box" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
                     {selectedReport.summary || "Kein Protokoll vorhanden."}
                   </pre>

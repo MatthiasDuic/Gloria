@@ -25,11 +25,12 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   // Endpointing-Pause, nach der Deepgram als "Satzende" interpretiert.
-  // 1400/2400 ms ist der Kompromiss zwischen "Anrufer ausreden lassen" und
-  // "noch nicht zäh wirken". Werte überschreibbar via env, falls Live-Daten
-  // einen anderen Sweet Spot zeigen.
-  const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "1400";
-  const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "2400";
+  // 900/1500 ms ist der gefundene Sweet Spot zwischen "Anrufer ausreden lassen"
+  // und spürbar schneller Reaktion (vorher 1400/2400 → deutliche Anfangs-
+  // Latenz, weil Gloria nach dem "Praxis Müller" 1.4 s gewartet hat).
+  // Werte überschreibbar via env, falls Live-Daten einen anderen Punkt zeigen.
+  const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "900";
+  const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "1500";
 
   const params = new URLSearchParams({
     model,

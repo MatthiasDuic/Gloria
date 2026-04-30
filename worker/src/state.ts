@@ -29,7 +29,16 @@ export type CallContext = {
   // Gloria aus dieser Liste alternative Slots ziehen, ohne Doppelbelegung.
   freeSlotsPrompt?: string;
   // Conversation memory.
-  transcript: Array<{ role: "user" | "assistant"; text: string; at: number }>;
+  transcript: Array<{
+    role: "user" | "assistant";
+    text: string;
+    /** Wall-clock ms when speech ended (assistant) bzw. wann die ASR final wurde (user). */
+    at: number;
+    /** Reaktionszeit in ms: nur bei assistant-Einträgen befüllt. */
+    latencyMs?: number;
+  }>;
+  /** Wall-clock ms des letzten user-Final – wird zur Latenz-Berechnung genutzt. */
+  lastUserFinalAt?: number;
   // Speaking flag — used for barge-in detection.
   speaking: boolean;
   // Counter for inbound user utterances during a Gloria turn (used to abort TTS).

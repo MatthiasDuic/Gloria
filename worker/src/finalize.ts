@@ -189,6 +189,16 @@ export async function postReport(ctx: CallContext): Promise<void> {
     nextCallAt: extracted?.nextCallAt,
     directDial: extracted?.directDial,
     recordingConsent: true,
+    // Vollständiges Wort-für-Wort-Protokoll inklusive Reaktionszeit pro Gloria-
+    // Antwort. Wird im Backend in call_transcript_events gespeichert und im
+    // Report-Detail angezeigt – auch wenn keine Aufzeichnung vorhanden ist.
+    transcript: ctx.transcript.map((entry) => ({
+      role: entry.role,
+      speaker: entry.role === "assistant" ? "Gloria" : "Interessent",
+      text: entry.text,
+      at: entry.at,
+      latencyMs: entry.latencyMs,
+    })),
   };
 
   log.info("finalize.posting", {

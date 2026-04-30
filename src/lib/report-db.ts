@@ -360,8 +360,20 @@ async function ensureSchema() {
       speaker TEXT NOT NULL,
       text_value TEXT NOT NULL,
       phase TEXT,
+      latency_ms INTEGER,
+      spoken_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  // Migration: füge neue Spalten hinzu, falls die Tabelle bereits existiert.
+  await db.query(`
+    ALTER TABLE call_transcript_events
+    ADD COLUMN IF NOT EXISTS latency_ms INTEGER;
+  `);
+  await db.query(`
+    ALTER TABLE call_transcript_events
+    ADD COLUMN IF NOT EXISTS spoken_at TIMESTAMPTZ;
   `);
 
   await db.query(`
@@ -1893,6 +1905,8 @@ export async function appendCallTranscriptEventToPostgres(payload: {
   speaker: "Gloria" | "Interessent";
   text: string;
   phase?: string;
+  latencyMs?: number;
+  spokenAt?: number;
 }): Promise<boolean> {
   if (!shouldUsePostgres()) {
     return false;
@@ -1903,8 +1917,8 @@ export async function appendCallTranscriptEventToPostgres(payload: {
     const db = getPool();
     await db.query(
       `
-      INSERT INTO call_transcript_events (id, call_sid, user_id, speaker, text_value, phase, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      INSERT INTO call_transcript_events (id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
       ON CONFLICT (id) DO NOTHING;
       `,
       [
@@ -1914,11 +1928,71 @@ export async function appendCallTranscriptEventToPostgres(payload: {
         payload.speaker,
         payload.text,
         payload.phase || null,
+        typeof payload.latencyMs === "number" && Number.isFinite(payload.latencyMs)
+          ? Math.round(payload.latencyMs)
+          : null,
+        typeof payload.spokenAt === "number" && Number.isFinite(payload.spokenAt)
+          ? new Date(payload.spokenAt)
+          : null,
       ],
     );
     return true;
   } catch (error) {
     console.error("Postgres transcript event write failed", error);
     return false;
+  }
+}
+
+export type TranscriptEvent = {
+  id: string;
+  callSid: string;
+  userId?: string;
+  speaker: "Gloria" | "Interessent";
+  text: string;
+  phase?: string;
+  latencyMs?: number;
+  spokenAt?: string;
+  createdAt: string;
+};
+
+/**
+ * Lädt das vollständige Wort-für-Wort-Protokoll eines Anrufs aus Postgres,
+ * sortiert nach gesprochener Zeit (bzw. created_at als Fallback).
+ */
+export async function listCallTranscriptEventsFromPostgres(
+  callSid: string,
+): Promise<TranscriptEvent[]> {
+  if (!shouldUsePostgres()) return [];
+  const sid = (callSid || "").trim();
+  if (!sid) return [];
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const result = await db.query(
+      `
+      SELECT id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at
+      FROM call_transcript_events
+      WHERE call_sid = $1
+      ORDER BY COALESCE(spoken_at, created_at) ASC, created_at ASC
+      `,
+      [sid],
+    );
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      callSid: String(row.call_sid),
+      userId: row.user_id ? String(row.user_id) : undefined,
+      speaker: (row.speaker === "Gloria" ? "Gloria" : "Interessent") as "Gloria" | "Interessent",
+      text: String(row.text_value || ""),
+      phase: row.phase ? String(row.phase) : undefined,
+      latencyMs:
+        row.latency_ms !== null && row.latency_ms !== undefined
+          ? Number(row.latency_ms)
+          : undefined,
+      spokenAt: row.spoken_at ? new Date(row.spoken_at).toISOString() : undefined,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  } catch (error) {
+    console.error("Postgres transcript list failed", error);
+    return [];
   }
 }

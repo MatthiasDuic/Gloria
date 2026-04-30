@@ -11,6 +11,28 @@ export type TtsStreamHandle = {
 };
 
 /**
+ * Pre-warmt die TLS/HTTP-Verbindung zu ElevenLabs, damit die ALLERERSTE TTS-
+ * Anfrage (Glorias Begrüßung) nicht durch einen frischen TLS-Handshake
+ * verzögert wird. Wird beim "start"-Event eines Calls aufgerufen.
+ */
+export function prewarmElevenLabs(): void {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  if (!apiKey || !voiceId) return;
+  void fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`, {
+    method: "GET",
+    headers: { "xi-api-key": apiKey },
+  })
+    .then((res) => {
+      void res.text().catch(() => undefined);
+      log.info("tts.prewarm_ok", { status: res.status });
+    })
+    .catch(() => {
+      /* ignore – best effort */
+    });
+}
+
+/**
  * Streams ElevenLabs TTS as μ-law 8000 Hz audio (Twilio-ready) and
  * invokes `onChunk` with raw μ-law buffers (typically ~160-640 bytes).
  */
