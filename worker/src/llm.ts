@@ -293,6 +293,194 @@ export async function generateReply(ctx: CallContext, userText: string): Promise
   }
 }
 
+/**
+ * Streaming-Variante: nutzt SSE, parst die wachsende JSON-Antwort
+ * inkrementell und ruft `onSentence` jedes Mal, wenn ein vollständiger
+ * Satz aus dem `reply`-Feld extrahiert wurde. Dadurch kann das TTS bereits
+ * den ersten Satz sprechen, während OpenAI noch den zweiten Satz erzeugt.
+ *
+ * Spart pro Turn typisch 0.5–1.0 s First-Audio-Latenz, weil ElevenLabs
+ * NICHT erst auf den vollständigen Reply warten muss.
+ */
+export async function streamReply(
+  ctx: CallContext,
+  userText: string,
+  onSentence: (sentence: string) => void,
+): Promise<TurnOutput> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: "system", content: buildSystemPrompt(ctx) },
+    {
+      role: "system",
+      content:
+        'Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false}. ' +
+        'Setze hangup=true nur, wenn der Anrufende ein klares Nein, Stornieren oder Auflegen signalisiert oder das Gespräch sauber beendet wurde.',
+    },
+  ];
+  for (const turn of ctx.transcript.slice(-12)) {
+    messages.push({ role: turn.role, content: turn.text });
+  }
+  messages.push({ role: "user", content: userText });
+
+  const requestBody = {
+    model,
+    messages,
+    temperature: 0.4,
+    max_tokens: 280,
+    response_format: { type: "json_object" },
+    stream: true,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  // Streaming-State für inkrementelles Reply-Extrahieren.
+  let assembled = "";
+  let phase: "before" | "in" | "after" = "before";
+  let escapeNext = false;
+  let pendingFlush = "";
+  let replyText = "";
+  let scanPos = 0;
+
+  const flushSentence = () => {
+    const out = pendingFlush.trim();
+    pendingFlush = "";
+    if (out.length > 0) {
+      try {
+        onSentence(out);
+      } catch (err) {
+        log.error("llm.onSentence_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
+
+  const consume = (delta: string): void => {
+    assembled += delta;
+    while (scanPos < assembled.length) {
+      const ch = assembled[scanPos++];
+      if (phase === "before") {
+        const m = /"reply"\s*:\s*"/.exec(assembled.slice(0, scanPos));
+        if (m && m.index + m[0].length === scanPos) {
+          phase = "in";
+        }
+      } else if (phase === "in") {
+        if (escapeNext) {
+          if (ch === "n") {
+            replyText += "\n";
+            pendingFlush += "\n";
+          } else if (ch === "t" || ch === "r") {
+            replyText += " ";
+            pendingFlush += " ";
+          } else {
+            replyText += ch;
+            pendingFlush += ch;
+          }
+          escapeNext = false;
+        } else if (ch === "\\") {
+          escapeNext = true;
+        } else if (ch === '"') {
+          phase = "after";
+          flushSentence();
+        } else {
+          replyText += ch;
+          pendingFlush += ch;
+          // Satzgrenze: Satzzeichen + ausreichend Kontext, NICHT bei Abkürzungen.
+          if (/[.!?]/.test(ch) && pendingFlush.length >= 8) {
+            // Schutz gegen Abkürzungen: "z." / "B." / "Hr." / "Fr." / Ordinalia.
+            const tail = replyText.slice(-3).toLowerCase();
+            const isAbbrev =
+              /\b(z|b|hr|fr|dr|st|ca|bzw|usw|inkl|ggf|evtl|nr|tel|app)\.$/i.test(replyText) ||
+              /\b\d+\.$/.test(replyText) || // Ordinalzahlen "30.", "12."
+              tail.endsWith(" z.") ||
+              tail.endsWith(" b.");
+            if (!isAbbrev) flushSentence();
+          }
+        }
+      }
+    }
+  };
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      const body = res.body ? await res.text() : "";
+      throw new Error(`OpenAI ${res.status}: ${body.slice(0, 200)}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split("\n");
+      sseBuffer = lines.pop() || "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const json = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: string } }>;
+          };
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) consume(delta);
+        } catch {
+          /* heartbeat / non-json */
+        }
+      }
+    }
+    // Restpuffer flushen, falls der Reply ohne Satzzeichen endete.
+    if ((phase as string) !== "before") flushSentence();
+
+    let hangup = false;
+    try {
+      const parsed = JSON.parse(assembled) as { hangup?: boolean; reply?: string };
+      hangup = Boolean(parsed.hangup);
+      if (parsed.reply && !replyText) replyText = parsed.reply;
+    } catch {
+      /* fallback: replyText was scanner-extracted, hangup defaults to false */
+    }
+
+    let reply = replyText.trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
+    if (consentAlreadyGranted(ctx) && /aufzeichn/i.test(reply)) {
+      reply = stripConsentQuestion(reply);
+    }
+    return { reply, hangup };
+  } catch (error) {
+    log.error("llm.stream_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      reply: replyText.trim() || "Einen Moment bitte, ich habe Sie kurz nicht verstanden.",
+      hangup: false,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function consentAlreadyGranted(ctx: CallContext): boolean {
   // Suche im Transkript: Gloria hat "aufzeichnen" gefragt UND danach hat der
   // Anrufende mit JA / okay / einverstanden geantwortet.

@@ -3,7 +3,7 @@ import type { WebSocket } from "ws";
 import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { openDeepgram, type AsrSession } from "./asr.js";
-import { generateReply, prewarmOpenAi } from "./llm.js";
+import { streamReply, prewarmOpenAi } from "./llm.js";
 import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
@@ -141,6 +141,112 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     }
   };
 
+  /**
+   * Streamt die LLM-Antwort und pipelined sie satzweise durch ElevenLabs:
+   * sobald der erste Satz aus OpenAI fertig ist, startet das TTS – während
+   * OpenAI noch den zweiten/dritten Satz generiert. Das spart pro Turn
+   * 0.5–1.0 s First-Audio-Latenz gegenüber dem alten "warte bis LLM fertig,
+   * dann spreche". Übernimmt die gleichen Aufgaben wie speak() (Barge-in,
+   * Echo-Suppression, Transcript, Slot-Lock), aber als ein Vorgang über
+   * mehrere Segmente.
+   */
+  const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean }> => {
+    if (!ctx) return { reply: "", hangup: false };
+
+    // Vorherige TTS abbrechen (Barge-in-Sicherheit zwischen Turns).
+    if (currentTts) {
+      currentTts.abort();
+      currentTts = null;
+    }
+    ctx.speaking = true;
+    ctx.userBytesWhileSpeaking = 0;
+
+    let firstAudioAt: number | undefined;
+    let totalAudioBytes = 0;
+    let chainAborted = false;
+    let chain: Promise<void> = Promise.resolve();
+
+    const speakSegment = async (text: string): Promise<void> => {
+      if (chainAborted || !ctx) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      log.info("turn.gloria_segment", { callSid: ctx.callSid, text: trimmed });
+
+      let buffer = Buffer.alloc(0);
+      const sendFrame = (frame: Buffer) => {
+        if (firstAudioAt === undefined) firstAudioAt = Date.now();
+        sendMedia(frame);
+        totalAudioBytes += frame.length;
+      };
+
+      const handle = streamElevenLabsToMulaw(trimmed, (chunk) => {
+        if (chainAborted) return;
+        buffer = Buffer.concat([buffer, chunk]);
+        while (buffer.length >= FRAME_BYTES) {
+          const frame = buffer.subarray(0, FRAME_BYTES);
+          buffer = buffer.subarray(FRAME_BYTES);
+          sendFrame(frame);
+        }
+      });
+      currentTts = handle;
+      await handle.done;
+      if (handle.aborted) {
+        chainAborted = true;
+        return;
+      }
+      if (buffer.length > 0) {
+        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
+        sendFrame(Buffer.concat([buffer, pad]));
+      }
+    };
+
+    const result = await streamReply(ctx, userText, (sentence) => {
+      // Sentences sequentiell in den Chain einreihen – während OpenAI noch
+      // den nächsten Satz erzeugt, wird der vorherige bereits gesprochen.
+      chain = chain.then(() => speakSegment(sentence));
+    });
+
+    await chain;
+
+    // Reaktionszeit = Zeit bis zum ERSTEN Audio-Frame (was der Anrufende
+    // wirklich hört), nicht bis zum Ende des LLM-Streams.
+    const latencyMs =
+      firstAudioAt && ctx.lastUserFinalAt && firstAudioAt > ctx.lastUserFinalAt
+        ? firstAudioAt - ctx.lastUserFinalAt
+        : undefined;
+    if (latencyMs !== undefined) {
+      log.info("turn.reaction_time", { callSid: ctx.callSid, ms: latencyMs });
+    }
+
+    sendMark("gloria-end");
+
+    // Echo-Suppression: warten bis Twilio das gepufferte Audio ausgespielt
+    // hat. Wir ziehen die bereits vergangene Zeit seit dem ersten Audio-Byte
+    // ab, damit wir nicht doppelt warten.
+    if (!chainAborted && totalAudioBytes > 0) {
+      const totalPlayoutMs = Math.ceil(totalAudioBytes / 8) + 120;
+      const elapsed = firstAudioAt ? Date.now() - firstAudioAt : 0;
+      const remaining = Math.max(0, totalPlayoutMs - elapsed);
+      if (remaining > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+      }
+    }
+
+    ctx.speaking = false;
+    currentTts = null;
+    ctx.transcript.push({ role: "assistant", text: result.reply, at: Date.now(), latencyMs });
+
+    if (!ctx.confirmedSlotPhrase) {
+      const slot = extractConfirmedSlot(result.reply);
+      if (slot) {
+        ctx.confirmedSlotPhrase = slot;
+        log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
+      }
+    }
+
+    return result;
+  };
+
   const handleUserUtterance = async (userText: string) => {
     if (!ctx) return;
     if (pendingTurn) {
@@ -182,8 +288,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         }
       }
 
-      const reply = await generateReply(ctx, userText);
-      await speak(reply.reply);
+      const reply = await streamAndSpeak(userText);
 
       if (reply.hangup) {
         log.info("turn.hangup", { callSid: ctx.callSid });
