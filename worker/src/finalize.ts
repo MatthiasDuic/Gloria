@@ -176,6 +176,12 @@ export async function postReport(ctx: CallContext): Promise<void> {
   const token = process.env.APP_INTERNAL_TOKEN || "";
   const url = `${baseUrl}/api/calls/webhook`;
 
+  // Aufzeichnungs-Einwilligung strikt aus dem Transkript ableiten:
+  // Erste klare NEIN-Antwort des Anrufers nach Glorias Aufzeichnungs-Frage
+  // gewinnt – auch wenn später ein "Ja" auf eine andere Frage kommt. DSGVO-
+  // konform: ohne explizites Ja KEINE Aufzeichnung.
+  const recordingConsent = detectRecordingConsent(ctx.transcript);
+
   const body = {
     userId: ctx.userId,
     leadId: ctx.leadId,
@@ -188,7 +194,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     appointmentAt,
     nextCallAt: extracted?.nextCallAt,
     directDial: extracted?.directDial,
-    recordingConsent: true,
+    recordingConsent,
     // Vollständiges Wort-für-Wort-Protokoll inklusive Reaktionszeit pro Gloria-
     // Antwort. Wird im Backend in call_transcript_events gespeichert und im
     // Report-Detail angezeigt – auch wenn keine Aufzeichnung vorhanden ist.
@@ -238,6 +244,51 @@ export async function postReport(ctx: CallContext): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * DSGVO-strikte Erkennung der Aufzeichnungs-Einwilligung.
+ *
+ * Regeln (in dieser Reihenfolge):
+ *  1. Wenn Gloria nie nach Aufzeichnung gefragt hat → false.
+ *  2. Erste klare Nutzerantwort NACH der Aufzeichnungs-Frage entscheidet.
+ *     - "nein", "lieber nicht", "ich möchte nicht" → false (gewinnt definitiv,
+ *        spätere "Ja" auf andere Fragen zählen nicht).
+ *     - "ja", "klar", "in ordnung", "einverstanden" → true.
+ *  3. Wenn vor Glorias nächster Themen-Aussage keine eindeutige Antwort
+ *     kam → false (im Zweifel KEINE Aufzeichnung).
+ */
+function detectRecordingConsent(
+  transcript: Array<{ role: "user" | "assistant"; text: string }>,
+): boolean {
+  const askIdx = transcript.findIndex(
+    (t) => t.role === "assistant" && /(aufzeichn|aufnahme)/i.test(t.text),
+  );
+  if (askIdx === -1) return false;
+
+  for (let i = askIdx + 1; i < transcript.length; i++) {
+    const entry = transcript[i];
+    if (entry.role === "assistant") {
+      if (/(aufzeichn|aufnahme)/i.test(entry.text)) continue;
+      return false;
+    }
+    const text = entry.text.toLowerCase().trim();
+    if (!text) continue;
+    if (
+      /^(nein|nö|n[oe]\b|nicht|lieber nicht|kein\b|keine aufzeichnung|möchte nicht|will nicht|bitte nicht|no\b)/.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    if (
+      /\b(ja|jawohl|in ordnung|einverstanden|von mir aus|ok|okay|klar)\b/.test(text) &&
+      !/\bnein\b/.test(text)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 const ORDINAL_DAY: Record<string, number> = {

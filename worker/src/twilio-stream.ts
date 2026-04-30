@@ -167,6 +167,21 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         ]);
       }
 
+      // FAST-PATH (Turn 1): Wenn der Anrufende sich mit dem erwarteten
+      // Ansprechpartner-Namen gemeldet hat, generieren wir den Opener +
+      // die Aufzeichnungs-Frage aus einem Template – ohne LLM. Das spart
+      // ~2 s am Anfang (sonst muss gpt-4.1-mini ~280 Zeichen produzieren,
+      // bevor TTS startet). Bei abweichendem Namen / Gatekeeper-Vermutung
+      // fallen wir auf den LLM-Pfad zurück, damit Gatekeeper-Logik greift.
+      if (isFirstTurn) {
+        const templated = buildTurn1OpenerLine(ctx, userText);
+        if (templated) {
+          log.info("turn.fast_opener", { callSid: ctx.callSid });
+          await speak(templated);
+          return;
+        }
+      }
+
       const reply = await generateReply(ctx, userText);
       await speak(reply.reply);
 
@@ -341,6 +356,44 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der
 // Angerufene sich gemeldet hat (vgl. /api/twilio/voice/process).
+
+/**
+ * FAST-PATH-Opener für Turn 1: erspart einen LLM-Roundtrip (~2 s) am
+ * Gesprächsanfang. Der Opener ist deterministisch (Begrüßung + Vorstellung
+ * + Aufzeichnungs-Frage), die einzige Variable ist der Nachname des
+ * Ansprechpartners. Wir nutzen das Template NUR, wenn:
+ *   1) Wir einen erwarteten Ansprechpartner-Namen aus den Custom-Params haben.
+ *   2) Der Anrufende diesen Namen in seiner ersten Aussage genannt hat.
+ *      ("Müller, hallo" / "Hier ist Neumann" / "Duic Musterbau, Neumann am Apparat")
+ * Andernfalls geben wir null zurück und der LLM-Pfad übernimmt – damit die
+ * Gatekeeper-Logik (Empfang/Vorzimmer) korrekt greift.
+ */
+function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null {
+  const company = (ctx.ownerCompanyName || "").trim() || "unserer Agentur";
+  const owner = (ctx.ownerRealName || "").trim() || "Herrn Duic";
+  const expected = (ctx.contactName || "").trim();
+  if (!expected) return null;
+
+  // Nachname extrahieren: aus "Herr Neumann" / "Frau Dr. Müller-Schmidt" / "Neumann"
+  const lastNameMatch = /([A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?)\s*$/.exec(expected);
+  const expectedLast = lastNameMatch?.[1];
+  if (!expectedLast || expectedLast.length < 3) return null;
+
+  // Hat der Anrufer den Namen genannt? Word-boundary, case-insensitive.
+  const escapedLast = expectedLast.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${escapedLast}\\b`, "i");
+  if (!re.test(userText)) return null;
+
+  // Anrede konstruieren: bevorzugt mit Titel ("Herr Neumann" / "Frau Dr. Müller").
+  const salutation = /^(Herr|Frau)\b/i.test(expected) ? expected : `Herr/Frau ${expectedLast}`;
+
+  return [
+    `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
+    `Ich rufe im Auftrag von ${owner} an.`,
+    `Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?`,
+    `Bitte antworten Sie mit einem klaren JA oder NEIN.`,
+  ].join(" ");
+}
 
 /**
  * Extrahiert die bestätigte Termin-Phrase aus Glorias eigener Antwort,

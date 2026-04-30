@@ -49,18 +49,18 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   // transkribiert (Marken, Tarif-Begriffe). Pro Eintrag optional ":boost"-Suffix
   // (Standard 1.5). Liste überschreibbar via env DEEPGRAM_KEYWORDS (komma-getrennt).
   const defaultKeywords = [
-    "Barmer:2",
-    "AOK:2",
-    "TK:2",
-    "DAK:2",
-    "IKK:2",
-    "Allianz:2",
-    "Debeka:2",
-    "AXA:2",
-    "HUK:2",
-    "Signal Iduna:2",
-    "PKV:2",
-    "GKV:2",
+    "Barmer:3",
+    "AOK:3",
+    "TK:3",
+    "DAK:3",
+    "IKK:3",
+    "Allianz:3",
+    "Debeka:3",
+    "AXA:3",
+    "HUK:3",
+    "Signal Iduna:3",
+    "PKV:3",
+    "GKV:3",
     "Beitragsrückerstattung:1.5",
     "Zusatzversicherung:1.5",
     "bAV:2",
@@ -77,9 +77,12 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     "Stromtarif:1.5",
     "Gastarif:1.5",
     "Kilowattstunde:1.5",
-    "Gloria:2",
-    "Duic:2",
-    "Sprockhövel:2",
+    "Gloria:3",
+    // "Duic" wird oft falsch erkannt ("Bridge", "Duik", "Duich") → deutlich höherer
+    // Boost. Eigennamen profitieren am stärksten von hohen Werten.
+    "Duic:5",
+    "Matthias Duic:5",
+    "Sprockhövel:3",
   ];
   const envKeywords = process.env.DEEPGRAM_KEYWORDS?.trim();
   const keywords = envKeywords
