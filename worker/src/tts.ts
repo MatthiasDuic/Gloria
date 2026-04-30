@@ -42,7 +42,11 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_turbo_v2_5";
+  // Standard: eleven_multilingual_v2. Klingt im Deutschen deutlich natürlicher
+  // (vor allem Wort-Endungen + Prosodie) als turbo_v2_5 – dafür ~80–150 ms
+  // höhere First-Audio-Latenz, was durch unser LLM->TTS-Pipelining längst
+  // kompensiert ist.
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2";
 
   if (!apiKey || !voiceId) {
     log.error("tts.missing_config");
@@ -51,16 +55,22 @@ export function streamElevenLabsToMulaw(
 
   const controller = new AbortController();
 
+  // optimize_streaming_latency=2 ist der Sweet-Spot zwischen Latenz und
+  // Qualität. Bei =3 werden Wort-Endungen hörbar abgeschnitten, was im
+  // Deutschen besonders auffällt ("-en", "-er", "-ung").
   const url =
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?optimize_streaming_latency=3&output_format=ulaw_8000`;
+    `?optimize_streaming_latency=2&output_format=ulaw_8000`;
 
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.7);
+  // stability=0.5 erlaubt natürlichere Prosodie und Betonung der Wort-
+  // Endungen. Bei 0.7+ klingt Gloria roboterhaft/monoton. similarity=0.85
+  // hält die Stimm-Identität stabil. style=0.35 erlaubt Ausdruck ohne
+  // Drama. speed=0.92 ist minimal langsamer als natürlich, damit
+  // Endsilben sauber ausgesprochen werden.
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.5);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
-  const style = numEnv("ELEVENLABS_STYLE", 0.2);
-  // 0.88 = ca. 12% langsamer als Standard, klingt deutlich ruhiger und gibt dem
-  // Angerufenen mehr Zeit zum Mitdenken.
-  const speed = numEnv("ELEVENLABS_SPEED", 0.88);
+  const style = numEnv("ELEVENLABS_STYLE", 0.35);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.92);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {
@@ -159,8 +169,14 @@ function applyPronunciationFixes(text: string): string {
   // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
   out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
   // Wortwahl: "private/privaten Krankenversicherung(sbeiträge)" -> "Krankenversicherung(sbeiträge)"
-  // Das Wort "privat" soll in der Audio-Ausgabe nie zur Krankenversicherung
-  // dazugesagt werden – auch nicht als Themen-Anker.
   out = out.replace(/\b(privaten|private|privater|privates|privat)\s+Krankenversicherung/gi, "Krankenversicherung");
+  // Saubere Endungen: ein TTS-Segment ohne abschließendes Satzzeichen wird
+  // von ElevenLabs intonatorisch "in der Schwebe" gelassen – der letzte
+  // Vokal klingt dann verschluckt. Wir hängen einen Punkt an, falls keiner
+  // vorhanden ist. Das ist beim satzweisen Pipelining besonders wichtig.
+  const trimmed = out.trim();
+  if (trimmed.length > 0 && !/[.!?;:,…”"')\]]$/.test(trimmed)) {
+    out = `${trimmed}.`;
+  }
   return out;
 }
