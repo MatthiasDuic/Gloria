@@ -362,7 +362,7 @@ export default function HomePage() {
     assignedPhone: string;
     assignedLabel: string;
     selectedVoiceId: string;
-    allowedPlaybookTopics: string;
+    allowedPlaybookTopics: string[];
   } | null>(null);
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
@@ -1445,7 +1445,7 @@ export default function HomePage() {
       assignedPhone: phone?.phoneNumber || "",
       assignedLabel: phone?.label || "",
       selectedVoiceId: user.selectedVoiceId || "",
-      allowedPlaybookTopics: (user.allowedPlaybookTopics || []).join("\n"),
+      allowedPlaybookTopics: user.allowedPlaybookTopics || [],
     });
   }
 
@@ -1473,10 +1473,9 @@ export default function HomePage() {
         gesellschaft: editDraft.gesellschaft,
         role: editDraft.role,
         selectedVoiceId: editDraft.selectedVoiceId,
-        allowedPlaybookTopics: editDraft.allowedPlaybookTopics
-          .split(/[\n,]/)
+        allowedPlaybookTopics: Array.from(new Set(editDraft.allowedPlaybookTopics
           .map((t) => t.trim())
-          .filter(Boolean),
+          .filter(Boolean))),
       };
       if (editDraft.password) userPayload.password = editDraft.password;
 
@@ -2535,13 +2534,37 @@ export default function HomePage() {
                                           </select>
                                         </div>
                                         <div className="full-row">
-                                          <label>Erlaubte Playbook-Themen (eines pro Zeile; leer = alle)</label>
-                                          <textarea
-                                            rows={4}
-                                            value={editDraft.allowedPlaybookTopics}
-                                            onChange={(e) => setEditDraft({ ...editDraft, allowedPlaybookTopics: e.target.value })}
-                                            placeholder="Energie&#10;betriebliche Krankenversicherung&#10;..."
-                                          />
+                                          <label>Erlaubte Playbook-Themen (Checkbox-Auswahl; keine Auswahl = alle)</label>
+                                          <div
+                                            className="top-gap"
+                                            style={{
+                                              display: "grid",
+                                              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            {TOPICS.map((topic) => {
+                                              const checked = editDraft.allowedPlaybookTopics.includes(topic);
+                                              return (
+                                                <label key={topic} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={(e) => {
+                                                      const next = e.target.checked
+                                                        ? [...editDraft.allowedPlaybookTopics, topic]
+                                                        : editDraft.allowedPlaybookTopics.filter((value) => value !== topic);
+                                                      setEditDraft({ ...editDraft, allowedPlaybookTopics: next });
+                                                    }}
+                                                  />
+                                                  <span>{topic}</span>
+                                                </label>
+                                              );
+                                            })}
+                                          </div>
+                                          <p className="subtle" style={{ marginTop: 8 }}>
+                                            Wenn kein Thema markiert ist, darf der Benutzer alle Themen nutzen.
+                                          </p>
                                         </div>
                                         <div>
                                           <label>Passwort ändern (leer = unverändert)</label>
