@@ -12,6 +12,23 @@ export interface ElevenLabsVoiceOption {
   labels?: Record<string, string>;
 }
 
+const CURATED_PROJECT_VOICES: ElevenLabsVoiceOption[] = [
+  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel" },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella" },
+  { id: "MF3mGyEYCl7XYWbV9V6O", name: "Elli" },
+  { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi" },
+  { id: "ThT5KcBeYPX3keUQqHPh", name: "Dorothy" },
+  { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh" },
+  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
+  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam" },
+  { id: "VR6AewLTigWG4xSOukaG", name: "Arnold" },
+  { id: "ErXwobaYiN019PkySvjV", name: "Antoni" },
+];
+
+export function getProjectVoicePresets(): ElevenLabsVoiceOption[] {
+  return CURATED_PROJECT_VOICES.map((voice) => ({ ...voice }));
+}
+
 interface ElevenLabsConfig {
   apiKey: string;
   voiceId: string;

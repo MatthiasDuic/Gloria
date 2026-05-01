@@ -2529,7 +2529,7 @@ export default function HomePage() {
                                         <div>
                                           <label>Stimme (ElevenLabs)</label>
                                           <select value={editDraft.selectedVoiceId} onChange={(e) => setEditDraft({ ...editDraft, selectedVoiceId: e.target.value })}>
-                                            <option value="">Standard-Stimme</option>
+                                            <option value="">Gloria Standard</option>
                                             {availableVoices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                                           </select>
                                         </div>

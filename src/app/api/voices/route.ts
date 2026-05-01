@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import {
   getDefaultElevenLabsVoiceId,
+  getProjectVoicePresets,
   listElevenLabsVoices,
   type ElevenLabsVoiceOption,
 } from "@/lib/elevenlabs";
@@ -22,6 +23,23 @@ function dedupeVoices(voices: ElevenLabsVoiceOption[]): ElevenLabsVoiceOption[] 
   return out;
 }
 
+function mergeCuratedVoices(
+  curated: ElevenLabsVoiceOption[],
+  fromApi: ElevenLabsVoiceOption[],
+): ElevenLabsVoiceOption[] {
+  const apiById = new Map(fromApi.map((voice) => [voice.id, voice] as const));
+  return curated.map((preset) => {
+    const apiVoice = apiById.get(preset.id);
+    if (!apiVoice) {
+      return preset;
+    }
+    return {
+      ...apiVoice,
+      name: preset.name,
+    };
+  });
+}
+
 export async function GET(request: Request) {
   try {
     await ensureMasterAdmin();
@@ -34,20 +52,21 @@ export async function GET(request: Request) {
     const userRecord = await findUserById(sessionUser.id);
     const selectedVoiceId = userRecord?.selectedVoiceId || getDefaultElevenLabsVoiceId();
 
-    const voices = await listElevenLabsVoices();
+    const voicesFromApi = await listElevenLabsVoices();
+    const curatedVoices = mergeCuratedVoices(getProjectVoicePresets(), voicesFromApi);
     const fallback = getDefaultElevenLabsVoiceId();
 
     const merged = dedupeVoices([
-      ...voices,
       ...(fallback
         ? [
             {
               id: fallback,
-              name: "Standard-Stimme",
+              name: "Gloria Standard",
               category: "default",
             },
           ]
         : []),
+      ...curatedVoices,
       ...(selectedVoiceId && selectedVoiceId !== fallback
         ? [
             {
