@@ -18,11 +18,11 @@ const CURATED_PROJECT_VOICES: ElevenLabsVoiceOption[] = [
   { id: "MF3mGyEYCl7XYWbV9V6O", name: "Elli" },
   { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi" },
   { id: "ThT5KcBeYPX3keUQqHPh", name: "Dorothy" },
-  { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh" },
-  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
-  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam" },
-  { id: "VR6AewLTigWG4xSOukaG", name: "Arnold" },
-  { id: "ErXwobaYiN019PkySvjV", name: "Antoni" },
+  { id: "LcfcDJNUP1GQjkzn1xUU", name: "Emily" },
+  { id: "XB0fDUnXU5powFXDhCwa", name: "Charlotte" },
+  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda" },
+  { id: "jsCqWAovK2LkecY7zXl4", name: "Freya" },
+  { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily" },
 ];
 
 export function getProjectVoicePresets(): ElevenLabsVoiceOption[] {
