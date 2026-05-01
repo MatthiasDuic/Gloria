@@ -368,6 +368,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, PlaybookConfig>>({});
+  const [newTopicInput, setNewTopicInput] = useState("");
+  const [showNewTopicForm, setShowNewTopicForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
@@ -1077,6 +1079,30 @@ export default function HomePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleAddNewTopic() {
+    const topic = newTopicInput.trim();
+    if (!topic) return;
+    setDraftScripts((c) => ({
+      ...c,
+      [topic]: {
+        id: `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+        topic,
+        behavior: "",
+        requiredData: "",
+        knowledge: "",
+        proofPoints: "",
+        objectionResponses: "",
+        opener: "",
+        discovery: "",
+        objectionHandling: "",
+        close: "",
+      },
+    }));
+    setDetailTopic(topic);
+    setNewTopicInput("");
+    setShowNewTopicForm(false);
   }
 
   async function testVoice() {
@@ -2254,10 +2280,29 @@ export default function HomePage() {
               <CollapsiblePanel title="Themen-Playbook" defaultOpen>
                 <div className="row spread">
                   <h2>Themen-Playbook</h2>
-                  <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
-                    {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-                  </select>
+                  <div className="row">
+                    <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
+                      {Array.from(new Set([...TOPICS, ...Object.keys(draftScripts)])).map((topic) => (
+                        <option key={topic} value={topic}>{topic}</option>
+                      ))}
+                    </select>
+                    <button className="btn ghost" onClick={() => setShowNewTopicForm((v) => !v)} style={{ marginLeft: 8 }}>+ Neues Thema</button>
+                  </div>
                 </div>
+                {showNewTopicForm ? (
+                  <div className="row top-gap">
+                    <input
+                      type="text"
+                      placeholder="Thema eingeben, z. B. Immobilienfinanzierung"
+                      value={newTopicInput}
+                      onChange={(e) => setNewTopicInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleAddNewTopic(); }}
+                      style={{ flex: 1 }}
+                    />
+                    <button className="btn" onClick={handleAddNewTopic} disabled={!newTopicInput.trim()} style={{ marginLeft: 8 }}>Anlegen</button>
+                    <button className="btn ghost" onClick={() => { setShowNewTopicForm(false); setNewTopicInput(""); }} style={{ marginLeft: 4 }}>Abbrechen</button>
+                  </div>
+                ) : null}
 
                 {activeDraft ? (
                   <>
