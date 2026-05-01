@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   title: "Gloria – KI-Vertriebsassistentin",
   description:
     "Admin-Dashboard für B2B-Neukundenakquise, Skripte, Reports, CSV-Kampagnen und Outlook-Export.",
+  icons: {
+    icon: "/Gloria.png",
+    apple: "/Gloria.png",
+  },
 };
 
 export default function RootLayout({

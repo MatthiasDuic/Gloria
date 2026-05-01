@@ -79,7 +79,8 @@ export function buildDecisionMakerDiscoveryQuestion(topic: Topic): string {
     return "Danke. Wie ist das Thema betriebliche Altersvorsorge bei Ihnen aktuell aufgestellt?";
   }
   if (topic === "private Krankenversicherung") {
-    return "Danke. Wie ist Ihre aktuelle Situation in der privaten Krankenversicherung?";
+    // Zuerst explizit nach Versicherungsart fragen, bevor weitere Fakten folgen dürfen
+    return "Darf ich vorab fragen: Sind Sie aktuell gesetzlich oder privat krankenversichert?";
   }
   return `Danke. Wie ist das Thema ${topic} bei Ihnen aktuell aufgestellt?`;
 }

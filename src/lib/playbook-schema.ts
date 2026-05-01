@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TOPICS } from "@/lib/types";
 
-const TopicSchema = z.enum(TOPICS);
+const TopicSchema = z.string().trim().min(2);
 
 export const PlaybookPayloadSchema = z
   .object({
@@ -48,8 +48,8 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
   properties: {
     topic: {
       type: "string",
-      enum: [...TOPICS],
       description: "Thema, für das das Playbook gilt.",
+      examples: [...TOPICS],
     },
     opener: {
       type: "string",

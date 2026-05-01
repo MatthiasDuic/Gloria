@@ -94,14 +94,18 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
       sendMedia(frame);
       totalAudioBytes += frame.length;
     };
-    const handle = streamElevenLabsToMulaw(text, (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= FRAME_BYTES) {
-        const frame = buffer.subarray(0, FRAME_BYTES);
-        buffer = buffer.subarray(FRAME_BYTES);
-        sendAndCount(frame);
-      }
-    });
+    const handle = streamElevenLabsToMulaw(
+      text,
+      (chunk) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        while (buffer.length >= FRAME_BYTES) {
+          const frame = buffer.subarray(0, FRAME_BYTES);
+          buffer = buffer.subarray(FRAME_BYTES);
+          sendAndCount(frame);
+        }
+      },
+      ctx.voiceId,
+    );
     currentTts = handle;
 
     await handle.done;
@@ -179,15 +183,19 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         totalAudioBytes += frame.length;
       };
 
-      const handle = streamElevenLabsToMulaw(trimmed, (chunk) => {
-        if (chainAborted) return;
-        buffer = Buffer.concat([buffer, chunk]);
-        while (buffer.length >= FRAME_BYTES) {
-          const frame = buffer.subarray(0, FRAME_BYTES);
-          buffer = buffer.subarray(FRAME_BYTES);
-          sendFrame(frame);
-        }
-      });
+      const handle = streamElevenLabsToMulaw(
+        trimmed,
+        (chunk) => {
+          if (chainAborted) return;
+          buffer = Buffer.concat([buffer, chunk]);
+          while (buffer.length >= FRAME_BYTES) {
+            const frame = buffer.subarray(0, FRAME_BYTES);
+            buffer = buffer.subarray(FRAME_BYTES);
+            sendFrame(frame);
+          }
+        },
+        ctx.voiceId,
+      );
       currentTts = handle;
       await handle.done;
       if (handle.aborted) {
@@ -329,6 +337,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
           ownerRealName: params.ownerRealName,
           ownerCompanyName: params.ownerCompanyName,
           ownerGesellschaft: params.ownerGesellschaft,
+          voiceId: params.voiceId,
           previousSummary: params.previousSummary,
           isCallback: params.isCallback === "1" || params.isCallback === "true",
         });

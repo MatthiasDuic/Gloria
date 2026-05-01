@@ -28,6 +28,8 @@ export async function GET(request: Request) {
       role: latestUser.role,
       realName: latestUser.realName,
       companyName: latestUser.companyName,
+      selectedVoiceId: latestUser.selectedVoiceId,
+      allowedPlaybookTopics: latestUser.allowedPlaybookTopics,
       calendarFeedToken,
     },
   });

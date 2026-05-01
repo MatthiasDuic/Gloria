@@ -84,6 +84,7 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
     `Einen konkreten Beratungstermin mit Herrn ${principal} vereinbaren.`,
   );
   const behavior = firstFilled(
+    script.behavior,
     script.decisionMakerBehavior,
     "Ruhig, natürlich, verbindlich und nie abgelesen sprechen.",
   );
@@ -163,6 +164,7 @@ Hintergrundwissen: ${keyInfo}
 Frageanker: ${discoveryAnchor}
 Einwandstrategie: ${objectionGuide}
 Brücke zum Termin: ${transitionAnchor}
+${script.knowledge ? `\n━━━ FACHWISSEN & COMPLIANCE ━━━\n${script.knowledge}` : ""}${script.proofPoints ? `\n\n━━━ ZAHLEN & FAKTEN – PFLICHT-ANKER ━━━\nGloria MUSS in der Problem-Aufbau-Phase mindestens EINE dieser Zahlen aktiv nennen (mit Quellenangabe), bevor sie zur Terminüberleitung wechselt:\n${script.proofPoints}` : ""}${script.objectionResponses ? `\n\n━━━ EINWAND-BIBLIOTHEK ━━━\nVerbindliche Konter-Linien. Gloria nutzt die Logik in eigenen Worten (max. 1–2 Sätze, kein „Ich verstehe"-Vorlauf). Maximal 2 Einwände in Folge entkräften, beim 3. Einwand höflich akzeptieren und verabschieden:\n${script.objectionResponses}` : ""}
 
 ━━━ EMPFANG / GATEKEEPER ━━━
 Ziel am Empfang: ${receptionTask}
@@ -192,7 +194,7 @@ Wenn der Termin fest ist, bestätige ihn einmal klar nach diesem Muster:
 "${appointmentConfirmation}"
 
 ━━━ PFLICHTBLOCK NACH TERMIN ━━━
-${script.topic === "private Krankenversicherung" ? `Nach fixer Terminbestätigung folgt der PKV-Basisdatenblock. Einstieg: ${pkvHealthIntro}${pkvHealthQuestions ? `\nFrage diese Punkte einzeln ab:\n${pkvHealthQuestions}` : ""}` : `Wenn nach Terminbestätigung noch Kontaktdaten für den Termin fehlen, frage kurz nach direkter Durchwahl, Mobilnummer oder E-Mail.`}
+${script.topic === "private Krankenversicherung" ? `Nach fixer Terminbestätigung folgt der PKV-Basisdatenblock. Einstieg: ${pkvHealthIntro}${pkvHealthQuestions ? `\nFrage diese Punkte einzeln ab:\n${pkvHealthQuestions}` : ""}` : script.requiredData ? `Nach Terminbestätigung fragt Gloria diese Punkte einzeln ab (jede Frage separat, kurze Bestätigung vor der nächsten):\n${script.requiredData}` : `Wenn nach Terminbestätigung noch Kontaktdaten für den Termin fehlen, frage kurz nach direkter Durchwahl, Mobilnummer oder E-Mail.`}
 
 ━━━ ROLLENERKENNUNG ━━━
 EMPFANG: meldet sich mit Firmennamen, fragt nach dem Grund, sagt "einen Moment" oder kündigt Weiterleitung an.

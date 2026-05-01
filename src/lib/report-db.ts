@@ -37,6 +37,8 @@ export interface AppUser {
   email: string;
   realPhone: string;
   gesellschaft: string;
+  selectedVoiceId: string;
+  allowedPlaybookTopics: string[];
   passwordHash: string;
   role: UserRole;
   createdAt: string;
@@ -81,8 +83,11 @@ function getPool() {
 }
 
 function normalizeTopic(value: string): Topic {
-  const topic = TOPICS.find((entry) => entry === value);
-  return topic || TOPICS[0];
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return TOPICS[0];
+  }
+  return normalized;
 }
 
 /**
@@ -151,6 +156,15 @@ function toIso(value?: string | Date | null) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+function parseJsonTextArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+}
+
 async function ensureSchema() {
   if (schemaReady || !shouldUsePostgres()) {
     return;
@@ -184,6 +198,8 @@ async function ensureSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS real_phone TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gesellschaft TEXT NOT NULL DEFAULT '';`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_voice_id TEXT NOT NULL DEFAULT '';`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_playbook_topics JSONB NOT NULL DEFAULT '[]'::jsonb;`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS phone_numbers (
@@ -587,7 +603,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
     FROM users
     WHERE LOWER(username) = LOWER($1)
     LIMIT 1
@@ -609,6 +625,8 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
     gesellschaft: String(row.gesellschaft || ""),
+    selectedVoiceId: String(row.selected_voice_id || ""),
+    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -624,7 +642,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
     FROM users
     WHERE id = $1
     LIMIT 1
@@ -646,6 +664,8 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
     gesellschaft: String(row.gesellschaft || ""),
+    selectedVoiceId: String(row.selected_voice_id || ""),
+    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -665,7 +685,7 @@ export async function listUsers(): Promise<AppUser[]> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
     FROM users
     ORDER BY created_at DESC
     `,
@@ -680,6 +700,8 @@ export async function listUsers(): Promise<AppUser[]> {
     email: String(row.email || ""),
     realPhone: String(row.real_phone || ""),
     gesellschaft: String(row.gesellschaft || ""),
+    selectedVoiceId: String(row.selected_voice_id || ""),
+    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -696,6 +718,8 @@ export async function createUser(input: {
   email?: string;
   realPhone?: string;
   gesellschaft?: string;
+  selectedVoiceId?: string;
+  allowedPlaybookTopics?: string[];
 }): Promise<AppUser> {
   await ensureSchema();
   const db = getPool();
@@ -704,8 +728,8 @@ export async function createUser(input: {
 
   await db.query(
     `
-    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, gesellschaft, password_hash, role, created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
     `,
     [
       id,
@@ -716,6 +740,8 @@ export async function createUser(input: {
       input.email || "",
       input.realPhone || "",
       input.gesellschaft || "",
+      input.selectedVoiceId || "",
+      JSON.stringify((input.allowedPlaybookTopics || []).map((t) => t.trim()).filter(Boolean)),
       hashPassword(input.password),
       role,
     ],
@@ -744,6 +770,8 @@ export async function updateUser(
     email?: string;
     realPhone?: string;
     gesellschaft?: string;
+    selectedVoiceId?: string;
+    allowedPlaybookTopics?: string[];
     password?: string;
     role?: UserRole;
   },
@@ -771,6 +799,15 @@ export async function updateUser(
   }
   if (input.gesellschaft !== undefined) {
     await db.query(`UPDATE users SET gesellschaft = $2 WHERE id = $1`, [userId, input.gesellschaft]);
+  }
+  if (input.selectedVoiceId !== undefined) {
+    await db.query(`UPDATE users SET selected_voice_id = $2 WHERE id = $1`, [userId, input.selectedVoiceId]);
+  }
+  if (input.allowedPlaybookTopics !== undefined) {
+    await db.query(`UPDATE users SET allowed_playbook_topics = $2::jsonb WHERE id = $1`, [
+      userId,
+      JSON.stringify(input.allowedPlaybookTopics.map((t) => t.trim()).filter(Boolean)),
+    ]);
   }
   if (input.password) {
     await db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(input.password)]);
@@ -1995,4 +2032,18 @@ export async function listCallTranscriptEventsFromPostgres(
     console.error("Postgres transcript list failed", error);
     return [];
   }
+}
+
+export async function canUserAccessTopic(userId: string, topic: string): Promise<boolean> {
+  const user = await findUserById(userId);
+  if (!user) {
+    return false;
+  }
+
+  const allowList = user.allowedPlaybookTopics || [];
+  if (allowList.length === 0) {
+    return true;
+  }
+
+  return allowList.includes(topic);
 }

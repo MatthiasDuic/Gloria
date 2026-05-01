@@ -3,7 +3,7 @@ import { getTelephonyRuntimeSnapshot } from "@/lib/telephony-runtime";
 import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { findPhoneNumberById } from "@/lib/report-db";
+import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
 
 export const runtime = "nodejs";
 
@@ -42,6 +42,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    const latestUser = await findUserById(sessionUser.id);
+    if (!latestUser) {
+      return NextResponse.json({ error: "Benutzer nicht gefunden." }, { status: 404 });
+    }
+
+    const allowed = await canUserAccessTopic(sessionUser.id, payload.topic);
+    if (!allowed) {
+      return NextResponse.json({ error: "Dieses Thema ist für Ihren Benutzer nicht freigegeben." }, { status: 403 });
+    }
+
     let selectedFrom = payload.from;
     if (payload.phoneNumberId) {
       const assignedPhone = await findPhoneNumberById(payload.phoneNumberId);
@@ -69,6 +79,7 @@ export async function POST(request: Request) {
         ownerRealName: sessionUser.realName,
         ownerCompanyName: sessionUser.companyName,
         ownerGesellschaft: sessionUser.gesellschaft,
+        voiceId: latestUser.selectedVoiceId,
         isTestCall: true,
       },
       request,

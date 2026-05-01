@@ -30,6 +30,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       email?: string;
       realPhone?: string;
       gesellschaft?: string;
+      selectedVoiceId?: string;
+      allowedPlaybookTopics?: string[];
       password?: string;
       role?: "master" | "user";
     };
@@ -42,6 +44,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       email: payload.email,
       realPhone: payload.realPhone,
       gesellschaft: payload.gesellschaft,
+      selectedVoiceId: payload.selectedVoiceId,
+      allowedPlaybookTopics: payload.allowedPlaybookTopics,
       password: payload.password,
       role: payload.role,
     });

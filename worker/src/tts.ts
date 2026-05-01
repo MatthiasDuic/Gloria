@@ -39,9 +39,10 @@ export function prewarmElevenLabs(): void {
 export function streamElevenLabsToMulaw(
   text: string,
   onChunk: (mulaw: Buffer) => void,
+  selectedVoiceId?: string,
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
   // Standard: eleven_multilingual_v2. Klingt im Deutschen deutlich natürlicher
   // (vor allem Wort-Endungen + Prosodie) als turbo_v2_5 – dafür ~80–150 ms
   // höhere First-Audio-Latenz, was durch unser LLM->TTS-Pipelining längst
@@ -65,12 +66,12 @@ export function streamElevenLabsToMulaw(
   // stability=0.5 erlaubt natürlichere Prosodie und Betonung der Wort-
   // Endungen. Bei 0.7+ klingt Gloria roboterhaft/monoton. similarity=0.85
   // hält die Stimm-Identität stabil. style=0.35 erlaubt Ausdruck ohne
-  // Drama. speed=0.92 ist minimal langsamer als natürlich, damit
+  // Drama. speed=0.86 ist bewusst langsamer, damit Gloria am Telefon
   // Endsilben sauber ausgesprochen werden.
   const stability = numEnv("ELEVENLABS_STABILITY", 0.5);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
   const style = numEnv("ELEVENLABS_STYLE", 0.35);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.92);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.86);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {

@@ -6,7 +6,8 @@ export const TOPICS = [
   "Energie",
 ] as const;
 
-export type Topic = (typeof TOPICS)[number];
+// Dynamische Themen sind erlaubt: TOPICS sind nur die Standard-Vorgaben.
+export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
 export type ReportOutcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt";
 

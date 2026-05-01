@@ -275,6 +275,8 @@ export default function HomePage() {
     realName: string;
     companyName: string;
     calendarFeedToken?: string;
+    selectedVoiceId?: string;
+    allowedPlaybookTopics?: string[];
   };
 
   type AdminUser = {
@@ -289,6 +291,8 @@ export default function HomePage() {
     gesellschaft?: string;
     createdAt?: string;
     phoneNumbers?: ManagedPhoneNumber[];
+    selectedVoiceId?: string;
+    allowedPlaybookTopics?: string[];
   };
 
   type ManagedPhoneNumber = {
@@ -319,6 +323,8 @@ export default function HomePage() {
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
   const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
+  const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState("");
   const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
   const [twilioTarget, setTwilioTarget] = useState("");
   const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
@@ -355,6 +361,8 @@ export default function HomePage() {
     password: string;
     assignedPhone: string;
     assignedLabel: string;
+    selectedVoiceId: string;
+    allowedPlaybookTopics: string;
   } | null>(null);
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
@@ -718,6 +726,16 @@ export default function HomePage() {
 
     setCurrentUser(mePayload.user);
 
+    const voicesResponse = await fetch("/api/voices", { cache: "no-store" });
+    const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
+      voices?: Array<{ id: string; name: string }>;
+      selectedVoiceId?: string;
+    };
+    if (voicesResponse.ok) {
+      setAvailableVoices(voicesPayload.voices || []);
+      setSelectedVoiceId(voicesPayload.selectedVoiceId || "");
+    }
+
     const phoneResponse = await fetch("/api/admin/phone-numbers", { cache: "no-store" });
     const phonePayload = (await phoneResponse.json().catch(() => ({}))) as {
       phoneNumbers?: ManagedPhoneNumber[];
@@ -1071,7 +1089,7 @@ export default function HomePage() {
       const response = await fetch("/api/voice-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: voiceTopic }),
+        body: JSON.stringify({ topic: voiceTopic, voiceId: selectedVoiceId || undefined }),
       });
 
       const payload = (await response.json()) as {
@@ -1426,6 +1444,8 @@ export default function HomePage() {
       password: "",
       assignedPhone: phone?.phoneNumber || "",
       assignedLabel: phone?.label || "",
+      selectedVoiceId: user.selectedVoiceId || "",
+      allowedPlaybookTopics: (user.allowedPlaybookTopics || []).join("\n"),
     });
   }
 
@@ -1452,6 +1472,11 @@ export default function HomePage() {
         realPhone: editDraft.realPhone,
         gesellschaft: editDraft.gesellschaft,
         role: editDraft.role,
+        selectedVoiceId: editDraft.selectedVoiceId,
+        allowedPlaybookTopics: editDraft.allowedPlaybookTopics
+          .split(/[\n,]/)
+          .map((t) => t.trim())
+          .filter(Boolean),
       };
       if (editDraft.password) userPayload.password = editDraft.password;
 
@@ -1509,7 +1534,7 @@ export default function HomePage() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="brand-mark">G</span>
+          <img src="/Gloria.png" alt="Gloria" className="brand-logo" />
           <div>
             <div className="brand-title">Gloria</div>
             <div className="brand-sub">Agentur Duic</div>
@@ -2192,8 +2217,13 @@ export default function HomePage() {
       <section className="stack top-section">
               <CollapsiblePanel title="Gloria testen" defaultOpen>
                 <div className="row">
+                  {availableVoices.length > 0 ? (
+                    <select value={selectedVoiceId} onChange={(event) => setSelectedVoiceId(event.target.value)}>
+                      {availableVoices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    </select>
+                  ) : null}
                   <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
-                    {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                    {(currentUser?.allowedPlaybookTopics?.length ? currentUser.allowedPlaybookTopics : [...TOPICS]).map((topic) => <option key={topic} value={topic}>{topic}</option>)}
                   </select>
                   <button className="btn" onClick={() => void testVoice()} disabled={busy}>
                     {busy ? "Vorschau lädt ..." : "Stimme testen"}
@@ -2496,6 +2526,22 @@ export default function HomePage() {
                                             <option value="user">user</option>
                                             <option value="master">master</option>
                                           </select>
+                                        </div>
+                                        <div>
+                                          <label>Stimme (ElevenLabs)</label>
+                                          <select value={editDraft.selectedVoiceId} onChange={(e) => setEditDraft({ ...editDraft, selectedVoiceId: e.target.value })}>
+                                            <option value="">Standard-Stimme</option>
+                                            {availableVoices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                                          </select>
+                                        </div>
+                                        <div className="full-row">
+                                          <label>Erlaubte Playbook-Themen (eines pro Zeile; leer = alle)</label>
+                                          <textarea
+                                            rows={4}
+                                            value={editDraft.allowedPlaybookTopics}
+                                            onChange={(e) => setEditDraft({ ...editDraft, allowedPlaybookTopics: e.target.value })}
+                                            placeholder="Energie&#10;betriebliche Krankenversicherung&#10;..."
+                                          />
                                         </div>
                                         <div>
                                           <label>Passwort ändern (leer = unverändert)</label>

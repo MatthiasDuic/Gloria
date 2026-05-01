@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Ungültiger Terminzeitpunkt." }, { status: 400 });
   }
 
-  if (!topic || !TOPICS.includes(topic)) {
+  if (!topic || !TOPICS.includes(topic as (typeof TOPICS)[number])) {
     return NextResponse.json({ error: "Ungültiges Thema." }, { status: 400 });
   }
 

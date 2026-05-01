@@ -41,6 +41,8 @@ export async function GET(request: Request) {
         email: user.email,
         realPhone: user.realPhone,
         gesellschaft: user.gesellschaft,
+        selectedVoiceId: user.selectedVoiceId,
+        allowedPlaybookTopics: user.allowedPlaybookTopics,
         createdAt: user.createdAt,
         phoneNumbers: phonesByUser.get(user.id) || [],
       })),
@@ -70,6 +72,8 @@ export async function POST(request: Request) {
       email?: string;
       realPhone?: string;
       gesellschaft?: string;
+      selectedVoiceId?: string;
+      allowedPlaybookTopics?: string[];
       password?: string;
       role?: "master" | "user";
     };
@@ -91,6 +95,10 @@ export async function POST(request: Request) {
       email: String(payload.email || "").trim(),
       realPhone: String(payload.realPhone || "").trim(),
       gesellschaft: String(payload.gesellschaft || "").trim(),
+      selectedVoiceId: String(payload.selectedVoiceId || "").trim(),
+      allowedPlaybookTopics: Array.isArray(payload.allowedPlaybookTopics)
+        ? payload.allowedPlaybookTopics.map((topic) => String(topic).trim()).filter(Boolean)
+        : [],
       password,
       role: payload.role === "master" ? "master" : "user",
     });

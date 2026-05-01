@@ -12,6 +12,7 @@ import {
   deleteReportsOlderThanInPostgres,
   readCampaignListsStateFromPostgres,
   readConversationEventsFromPostgres,
+  findUserById,
   readLeadsFromPostgres,
   readReportDatabaseFromPostgres,
   readScriptsFromPostgres,
@@ -264,7 +265,28 @@ function normalizeTopic(input: string): Topic {
   if (value.includes("privat") && value.includes("krankenversicherung")) {
     return "private Krankenversicherung";
   }
-  return "Energie";
+  return input.trim() || "Energie";
+}
+
+async function filterScriptsByUserAccess(
+  scripts: ScriptConfig[],
+  userId?: string,
+): Promise<ScriptConfig[]> {
+  if (!userId) {
+    return scripts;
+  }
+
+  const user = await findUserById(userId);
+  if (!user) {
+    return [];
+  }
+
+  if (!user.allowedPlaybookTopics || user.allowedPlaybookTopics.length === 0) {
+    return scripts;
+  }
+
+  const allowed = new Set(user.allowedPlaybookTopics);
+  return scripts.filter((script) => allowed.has(script.topic));
 }
 
 async function persistTranscriptChunkEvent(payload: {
@@ -479,14 +501,20 @@ async function readScriptsWithMode(userId?: string): Promise<{
     const userScripts = await readUserScriptsFromPostgres(userId);
 
     if (userScripts && userScripts.length > 0) {
-      return { data: normalizeLegacyScriptOpeners(userScripts), mode: "postgres" };
+      return {
+        data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(userScripts), userId),
+        mode: "postgres",
+      };
     }
 
     const bootstrapped = await bootstrapUserScriptsFromDefaults(userId, defaultScripts);
     if (bootstrapped) {
       const afterBootstrap = await readUserScriptsFromPostgres(userId);
       if (afterBootstrap && afterBootstrap.length > 0) {
-        return { data: normalizeLegacyScriptOpeners(afterBootstrap), mode: "postgres" };
+        return {
+          data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(afterBootstrap), userId),
+          mode: "postgres",
+        };
       }
     }
   }
@@ -494,7 +522,10 @@ async function readScriptsWithMode(userId?: string): Promise<{
   const postgresData = await readScriptsFromPostgres();
 
   if (postgresData) {
-    return { data: normalizeLegacyScriptOpeners(postgresData), mode: "postgres" };
+    return {
+      data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(postgresData), userId),
+      mode: "postgres",
+    };
   }
 
   const fallbackScripts = await readJson(SCRIPTS_FILE, await readLegacyPlaybooksFile());
@@ -505,7 +536,7 @@ async function readScriptsWithMode(userId?: string): Promise<{
   }
 
   return {
-    data: normalizeLegacyScriptOpeners(fallbackScripts),
+    data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(fallbackScripts), userId),
     mode: "file",
   };
 }
@@ -783,21 +814,52 @@ export async function importLeadsFromCsv(
 }
 
 export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, options?: { userId?: string }) {
-  const scripts = await readScripts(options?.userId);
-  const updated = scripts.map((script) =>
-    script.topic === topic
-      ? {
-          ...script,
-          ...payload,
-        }
-      : script,
-  );
+  if (options?.userId) {
+    const user = await findUserById(options.userId);
+    if (!user) {
+      throw new Error("Benutzer nicht gefunden.");
+    }
 
-  const updatedScript = updated.find((script) => script.topic === topic);
-
-  if (!updatedScript) {
-    throw new Error(`Skript für Thema ${topic} konnte nicht gefunden werden.`);
+    if (user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(topic)) {
+      throw new Error(`Das Thema "${topic}" ist für diesen Benutzer nicht freigegeben.`);
+    }
   }
+
+  const scripts = await readScripts(options?.userId);
+  const existing = scripts.find((script) => script.topic === topic);
+  const updatedScript: ScriptConfig = {
+    id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+    topic,
+    behavior: existing?.behavior || "",
+    requiredData: existing?.requiredData || "",
+    knowledge: existing?.knowledge || "",
+    objectionResponses: existing?.objectionResponses || "",
+    proofPoints: existing?.proofPoints || "",
+    opener: existing?.opener || "",
+    discovery: existing?.discovery || "",
+    objectionHandling: existing?.objectionHandling || "",
+    close: existing?.close || "",
+    aiKeyInfo: existing?.aiKeyInfo || "",
+    consentPrompt: existing?.consentPrompt || "",
+    pkvHealthIntro: existing?.pkvHealthIntro || "",
+    pkvHealthQuestions: existing?.pkvHealthQuestions || "",
+    gatekeeperTask: existing?.gatekeeperTask || "",
+    gatekeeperBehavior: existing?.gatekeeperBehavior || "",
+    decisionMakerTask: existing?.decisionMakerTask || "",
+    decisionMakerBehavior: existing?.decisionMakerBehavior || "",
+    decisionMakerContext: existing?.decisionMakerContext || "",
+    appointmentGoal: existing?.appointmentGoal || "",
+    receptionTopicReason: existing?.receptionTopicReason || "",
+    problemBuildup: existing?.problemBuildup || "",
+    conceptTransition: existing?.conceptTransition || "",
+    appointmentConfirmation: existing?.appointmentConfirmation || "",
+    availableAppointmentSlots: existing?.availableAppointmentSlots || "",
+    ...payload,
+  };
+
+  const updated = existing
+    ? scripts.map((script) => (script.topic === topic ? updatedScript : script))
+    : [updatedScript, ...scripts];
 
   if (options?.userId) {
     const wroteUserScript = await writeUserScriptToPostgres(options.userId, updatedScript, false);

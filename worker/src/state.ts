@@ -11,6 +11,7 @@ export type CallContext = {
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
+  voiceId?: string;
   // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
   playbookPrompt?: string;
   // Wiedervorlage-Anruf: Zusammenfassung des vorherigen Gesprächs (vom Backend

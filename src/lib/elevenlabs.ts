@@ -5,6 +5,13 @@ interface ElevenLabsResult {
   error?: string;
 }
 
+export interface ElevenLabsVoiceOption {
+  id: string;
+  name: string;
+  category?: string;
+  labels?: Record<string, string>;
+}
+
 interface ElevenLabsConfig {
   apiKey: string;
   voiceId: string;
@@ -27,7 +34,7 @@ interface ElevenLabsConfig {
 //     ELEVENLABS_LATENCY_MODE=0 zurueckschalten.
 //   - stability 0.5: ruhig und konsistent, aber nicht monoton
 //   - style 0.3: natuerliche Betonung ohne ueberdrehten Schauspieler-Ton
-//   - speed 0.95: minimal entschleunigt, wirkt weniger gehetzt
+//   - speed 0.88: klar hoerbar entschleunigt fuer Telefonie
 //   - languageCode "de": saubere deutsche Aussprache
 const ELEVENLABS_CONFIG: ElevenLabsConfig = {
   apiKey: process.env.ELEVENLABS_API_KEY?.trim() || "",
@@ -37,7 +44,7 @@ const ELEVENLABS_CONFIG: ElevenLabsConfig = {
   stability: Number(process.env.ELEVENLABS_STABILITY || 0.5),
   similarityBoost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.85),
   style: Number(process.env.ELEVENLABS_STYLE || 0.3),
-  speed: Number(process.env.ELEVENLABS_SPEED || 0.95),
+  speed: Number(process.env.ELEVENLABS_SPEED || 0.88),
   useSpeakerBoost: (process.env.ELEVENLABS_USE_SPEAKER_BOOST || "true") === "true",
   languageCode: process.env.ELEVENLABS_LANGUAGE_CODE?.trim() || "de",
 };
@@ -96,9 +103,15 @@ async function requestElevenLabsAudio(params: {
   outputFormat: "mp3_44100_128" | "ulaw_8000";
   accept: string;
   stream: boolean;
+  voiceId?: string;
 }): Promise<Response> {
+  const selectedVoiceId = (params.voiceId || ELEVENLABS_CONFIG.voiceId || "").trim();
+  if (!selectedVoiceId) {
+    throw new Error("Keine ElevenLabs-Stimme konfiguriert.");
+  }
+
   const modePath = params.stream ? "stream" : "";
-  const basePath = `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_CONFIG.voiceId}`;
+  const basePath = `https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`;
   const endpoint = modePath ? `${basePath}/${modePath}` : basePath;
   const url = new URL(endpoint);
   url.searchParams.set("optimize_streaming_latency", ELEVENLABS_CONFIG.latencyMode);
@@ -120,6 +133,51 @@ export function isElevenLabsConfigured() {
   return Boolean(ELEVENLABS_CONFIG.apiKey && ELEVENLABS_CONFIG.voiceId);
 }
 
+export function getDefaultElevenLabsVoiceId(): string {
+  return ELEVENLABS_CONFIG.voiceId;
+}
+
+export async function listElevenLabsVoices(): Promise<ElevenLabsVoiceOption[]> {
+  if (!ELEVENLABS_CONFIG.apiKey) {
+    return [];
+  }
+
+  try {
+    const response = await fetch("https://api.elevenlabs.io/v1/voices", {
+      method: "GET",
+      headers: {
+        "xi-api-key": ELEVENLABS_CONFIG.apiKey,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = (await response.json()) as {
+      voices?: Array<{
+        voice_id?: string;
+        name?: string;
+        category?: string;
+        labels?: Record<string, string>;
+      }>;
+    };
+
+    const voices = Array.isArray(payload.voices) ? payload.voices : [];
+    return voices
+      .map((entry) => ({
+        id: String(entry.voice_id || "").trim(),
+        name: String(entry.name || "").trim() || "Unbenannte Stimme",
+        category: entry.category ? String(entry.category) : undefined,
+        labels: entry.labels || undefined,
+      }))
+      .filter((entry) => Boolean(entry.id));
+  } catch {
+    return [];
+  }
+}
+
 export function maybeWarmupElevenLabsVoice(force = false): Promise<void> {
   if (!isElevenLabsConfigured()) {
     return Promise.resolve();
@@ -138,6 +196,7 @@ export function maybeWarmupElevenLabsVoice(force = false): Promise<void> {
           outputFormat: "ulaw_8000",
           accept: "audio/basic",
           stream: true,
+          voiceId: ELEVENLABS_CONFIG.voiceId,
         });
       } catch {
         // Warmup is best-effort and must never block voice handling.
@@ -157,6 +216,7 @@ export async function generateElevenLabsTelephonyStream(text: string): Promise<R
     outputFormat: "ulaw_8000",
     accept: "audio/basic",
     stream: true,
+    voiceId: ELEVENLABS_CONFIG.voiceId,
   });
 
   if (!response.ok || !response.body) {
@@ -167,7 +227,10 @@ export async function generateElevenLabsTelephonyStream(text: string): Promise<R
   return response;
 }
 
-export async function generateElevenLabsPreview(text: string): Promise<ElevenLabsResult> {
+export async function generateElevenLabsPreview(
+  text: string,
+  overrideVoiceId?: string,
+): Promise<ElevenLabsResult> {
   if (!isElevenLabsConfigured()) {
     return {
       provider: "browser",
@@ -181,6 +244,7 @@ export async function generateElevenLabsPreview(text: string): Promise<ElevenLab
       outputFormat: "mp3_44100_128",
       accept: "audio/mpeg",
       stream: false,
+      voiceId: overrideVoiceId,
     });
 
     if (!response.ok) {

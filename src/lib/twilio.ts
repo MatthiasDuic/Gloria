@@ -12,6 +12,7 @@ export interface TwilioCallRequest {
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
+  voiceId?: string;
   isTestCall?: boolean;
   from?: string;
   // Wiedervorlage: Kurz-Zusammenfassung des vorherigen Gesprächs, an den
@@ -242,6 +243,7 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
     ownerRealName: payload.ownerRealName,
     ownerCompanyName: payload.ownerCompanyName,
     ownerGesellschaft: payload.ownerGesellschaft,
+    voiceId: payload.voiceId,
     company: payload.company,
     contactName: payload.contactName,
     topic: payload.topic,
