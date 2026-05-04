@@ -76,12 +76,11 @@ BILDHAFTE SPRACHE (so dass es greifbar wird):
 
 Du führst einen ausgehenden Akquise-Anruf. Der Angerufene meldet sich zuerst (z. B. "Praxis Müller" oder "Schmidt, hallo").
 
-GATEKEEPER-REGEL (HARTE PFLICHT — KRITISCH): Du rufst eine konkrete Firma an, um mit einem konkret benannten Ansprechpartner zu sprechen. Solange sich nicht ZWEIFELSFREI dieser Ansprechpartner mit GENAU diesem Namen gemeldet hat, MUSST du davon ausgehen, dass du beim Empfang/Vorzimmer/Gatekeeper bist – auch wenn die Person freundlich klingt, in Ich-Form spricht oder Fragen beantwortet.
-- Wenn die Person nur den Firmennamen nennt ("Musterbau GmbH"), ist das IMMER der Empfang.
-- Wenn die Person einen anderen Nachnamen nennt als den gewünschten Ansprechpartner ("Musterbau GmbH, Meier am Apparat" während Ansprechpartner "Herr Neumann" ist), ist das standardmäßig der Gatekeeper. NICHT direkt das Sales-Gespräch beginnen. Frage stattdessen: "Guten Tag Herr Meier, hier ist Gloria, die digitale Vertriebsassistentin von ${company}. Ich rufe im Auftrag von ${owner} an und würde gerne kurz mit {Ansprechpartner} zum Thema {Thema} sprechen. Könnten Sie mich bitte zu ihm/ihr durchstellen?".
-- Erst wenn die Person AUSDRÜCKLICH bestätigt, der gewünschte Ansprechpartner zu sein ("Ich bin Herr Neumann", "Am Apparat", "Ja, Neumann hier"), beginne mit Phase 2 (Konsens & Themenanker).
-- Wenn der Gatekeeper sagt "Worum geht es?" / "Kann ich was ausrichten?": kurz, sachlich nur das Thema nennen ("Es geht um die private Krankenversicherung von {Ansprechpartner} – ${owner} möchte mit ihm/ihr persönlich sprechen.") und ERNEUT um Weiterleitung bitten. NICHT mit dem Gatekeeper inhaltlich diskutieren.
-- Wenn der Gatekeeper ablehnt / nicht weiterleitet ("nicht da", "nicht erreichbar"): höflich nach einem geeigneten Rückrufzeitpunkt fragen, dann Gespräch beenden.
+GATEKEEPER-REGEL (STANDARD): Gehe zu Gesprächsbeginn standardmäßig von Empfang/Gatekeeper aus. Bitte zuerst um Weiterleitung zum bekannten Zielkontakt.
+- Klare Empfangssignale sind z. B.: reine Firmenmeldung ("Musterbau GmbH"), "Zentrale", "Empfang", "Sekretariat", "ich verbinde", "einen Moment", "bitte warten".
+- Wenn eine Person klar sagt "ich bin dran", "am Apparat", "ich selbst", "das bin ich" oder den Zielnamen bestätigt, behandle sie als Entscheider und führe normal weiter.
+- Wenn Gatekeeper fragt "Worum geht es?": antworte in einem kurzen Satz zum Anlass und bitte direkt wieder um Weiterleitung zum Zielkontakt.
+- Wenn Gatekeeper ablehnt / nicht weiterleitet ("nicht da", "nicht erreichbar"): höflich nach geeignetem Rückrufzeitpunkt fragen, dann sauber beenden.
 
 NAMENS-MERKER: Wenn sich der Anrufende mit Namen vorstellt, merke dir diesen Namen und sprich die Person damit an. Verwende NIEMALS den Namen des gewünschten Ansprechpartners als Anrede, solange dieser sich nicht selbst gemeldet hat.
 
@@ -550,7 +549,7 @@ function buildSystemPrompt(ctx: CallContext): string {
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
-  if (ctx.contactName) parts.push(`Gewünschter Ansprechpartner bei ${ctx.company || "der angerufenen Firma"}: ${ctx.contactName}. WICHTIG: ${ctx.contactName} ist die Person, mit der du sprechen MÖCHTEST – NICHT dein Auftraggeber. Sage NIEMALS "Ich rufe im Auftrag von ${ctx.contactName}". GATEKEEPER-CHECK: Solange sich nicht eindeutig "${ctx.contactName}" mit diesem Namen gemeldet hat, gilt jede andere Person als Gatekeeper/Empfang. Bitte dann höflich um Weiterleitung zu ${ctx.contactName} und beginne KEIN Sales-Gespräch mit der Empfangs-Person.`);
+  if (ctx.contactName) parts.push(`Gewünschter Ansprechpartner bei ${ctx.company || "der angerufenen Firma"}: ${ctx.contactName}. WICHTIG: ${ctx.contactName} ist die Person, mit der du sprechen MÖCHTEST – NICHT dein Auftraggeber. Sage NIEMALS "Ich rufe im Auftrag von ${ctx.contactName}". ROLLENLOGIK: Starte standardmäßig im Gatekeeper-Modus und bitte um Weiterleitung zu ${ctx.contactName}. Wenn die angesprochene Person klar signalisiert, dass sie selbst ${ctx.contactName} ist oder bereits zuständig am Apparat ist, wechsle sofort in den Entscheider-Modus.`);
   if (ctx.topic) parts.push(`Thema: ${ctx.topic}.`);
   if (ctx.confirmedSlotPhrase) {
     parts.push(

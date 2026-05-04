@@ -229,6 +229,11 @@ function detectRoleState(params: {
     return { contactRole: "gatekeeper", roleState: "transfer" };
   }
 
+  if (isDecisionMakerAlreadyOnLine(params.heardText)) {
+    return { contactRole: "decision-maker", roleState: "decision_maker" };
+  }
+
+  // Standard ist Empfang/Gatekeeper, bis ein klarer Entscheider-Hinweis vorliegt.
   return { contactRole: "gatekeeper", roleState: "reception" };
 }
 
