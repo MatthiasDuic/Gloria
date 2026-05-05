@@ -364,10 +364,17 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Das Interesse ist da. Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann zwei konkrete Slots. Wenn beides nicht passt: direkt nach seinem Wunschtermin fragen, ohne Druck.`,
     );
   } else if (phase === 8) {
+    // Prüfe ob Gloria bereits die Überleitung gemacht hat
+    const hasBasisdatenIntro = ctx.transcript.some(
+      (t) => t.role === "assistant" && /basisangaben|vorbereiten kann/i.test(t.text),
+    );
     lines.push(
-      `Termin bestätigt. Jetzt die Basisangaben — EINE Frage pro Turn, ruhig und freundlich.`,
-      `STRENG: Stelle NIEMALS zwei Fragen in einem Satz. Nicht "Körpergröße und Gewicht?" — immer erst Größe, dann in der nächsten Runde Gewicht.`,
-      `Reihenfolge: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
+      `Termin bestätigt. Jetzt Basisangaben erfassen.`,
+      !hasBasisdatenIntro
+        ? `ERSTER SCHRITT: Mach eine kurze Überleitung und frag nach Erlaubnis: "Damit sich Herr Duic gut auf den Termin vorbereiten kann, würde ich noch kurz ein paar Basisangaben mit Ihnen klären – passt das noch?" NOCH KEINE Fragen stellen.`
+        : `Der Kunde hat zugestimmt. Stelle GENAU EINE Frage pro Turn. STRENG: Niemals zwei Fragen in einem Satz.`,
+      `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
+      `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
     );
   } else if (phase === 10) {
     lines.push(
@@ -434,6 +441,8 @@ function inferConversationPhase(ctx: CallContext): number {
 
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
   const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
+  // Kunde hat Basisangaben abgelehnt: Gloria hat "Terminbestätigungsmail" oder "in Ruhe beantworten" gesagt
+  const hasBasisdatenRefused = /terminbest[äa]tigungsmail|in ruhe beantworten/i.test(all);
   const hasEmailAsked = /\be-?mail\b/i.test(all);
   const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|auf wiederhören|auf wiedersehen|schönen tag noch/.test(all);
 
@@ -441,6 +450,7 @@ function inferConversationPhase(ctx: CallContext): number {
   if (!hasConsentAnswer) return 2;
   if (!hasTermHint) return 4;
   if (hasTermHint && !hasConfirmedSlot) return 7;
+  if (hasConfirmedSlot && hasBasisdatenRefused && !hasEmailAsked) return 10; // Basisangaben übersprungen
   if (hasConfirmedSlot && !hasDataCollection) return 8;
   if (!hasEmailAsked) return 10;  // E-Mail fragen
   if (!hasSummary) return 11;     // Zusammenfassung + Verabschiedung
