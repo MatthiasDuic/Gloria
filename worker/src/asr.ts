@@ -21,7 +21,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const model = process.env.DEEPGRAM_MODEL || "flux-general-multi";
+  const model = process.env.DEEPGRAM_MODEL || "nova-2";
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
   const isFlux = model.startsWith("flux");
 
@@ -31,67 +31,29 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     sample_rate: "8000",
     channels: "1",
     punctuate: "true",
+    language,
   });
 
   if (isFlux) {
-    // Flux uses /v2/listen with semantic turn detection — no silence-based
-    // endpointing needed. language_hint biases flux-general-multi toward a
-    // specific language without restricting detection.
+    // Flux uses /v2/listen with semantic turn detection.
+    // language_hint biases flux-general-multi without restricting detection.
+    params.delete("language");
     if (model === "flux-general-multi") {
       params.set("language_hint", language);
     }
-
-    // Flux supports keyterm prompting (no boost scores — terms only).
-    // Strip ":N" suffixes from DEEPGRAM_KEYWORDS if reused, or use DEEPGRAM_KEYTERMS.
-    const defaultKeyterms = [
-      "Barmer", "AOK", "TK", "DAK", "IKK", "Allianz", "Debeka", "AXA", "HUK",
-      "Signal Iduna", "PKV", "GKV", "Beitragsrückerstattung", "Zusatzversicherung",
-      "bAV", "Direktversicherung", "Pensionskasse", "Krankenversicherung",
-      "Krankentagegeld", "Rentenversicherung", "Riester", "Rürup",
-      "Betriebshaftpflicht", "Cyberversicherung", "Inhaltsversicherung",
-      "Stromtarif", "Gastarif", "Kilowattstunde", "Gloria",
-    ];
-    const envKeyterms = (process.env.DEEPGRAM_KEYTERMS || process.env.DEEPGRAM_KEYWORDS)?.trim();
-    const keyterms = envKeyterms
-      ? envKeyterms.split(",").map((k) => k.trim().replace(/:[\d.]+$/, "")).filter(Boolean)
-      : defaultKeyterms;
-    for (const kt of keyterms) {
-      params.append("keyterm", kt);
-    }
   } else {
-    // nova-3 / nova-2: silence-based endpointing + utterance end + keywords.
+    // nova-2 / nova-3: silence-based endpointing + utterance end.
     const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "700";
     const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "1200";
-    params.set("language", language);
     params.set("interim_results", "true");
     params.set("endpointing", endpointingMs);
     params.set("utterance_end_ms", utteranceEndMs);
-    params.set("vad_events", "true");
-
-    const defaultKeywords = [
-      "Barmer:3", "AOK:3", "TK:3", "DAK:3", "IKK:3", "Allianz:3", "Debeka:3",
-      "AXA:3", "HUK:3", "Signal Iduna:3", "PKV:3", "GKV:3",
-      "Beitragsrückerstattung:1.5", "Zusatzversicherung:1.5", "bAV:2",
-      "Direktversicherung:1.5", "Pensionskasse:1.5", "Krankenversicherung:1.5",
-      "Krankentagegeld:1.5", "Rentenversicherung:1.5", "Riester:1.5", "Rürup:1.5",
-      "Betriebshaftpflicht:1.5", "Cyberversicherung:1.5", "Inhaltsversicherung:1.5",
-      "Stromtarif:1.5", "Gastarif:1.5", "Kilowattstunde:1.5", "Gloria:3",
-    ];
-    const envKeywords = process.env.DEEPGRAM_KEYWORDS?.trim();
-    const keywords = envKeywords
-      ? envKeywords.split(",").map((k) => k.trim()).filter(Boolean)
-      : defaultKeywords;
-    for (const kw of keywords) {
-      params.append("keywords", kw);
-    }
-
-    if (language.toLowerCase().startsWith("en")) {
-      params.set("smart_format", "true");
-    }
   }
 
   const endpoint = isFlux ? "/v2/listen" : "/v1/listen";
-  const ws = new WebSocket(`${DG_HOST}${endpoint}?${params.toString()}`, {
+  const url = `${DG_HOST}${endpoint}?${params.toString()}`;
+  log.info("asr.connecting", { model, url });
+  const ws = new WebSocket(url, {
     headers: { Authorization: `Token ${apiKey}` },
   });
 

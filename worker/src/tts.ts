@@ -17,9 +17,8 @@ export type TtsStreamHandle = {
  */
 export function prewarmElevenLabs(): void {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
-  if (!apiKey || !voiceId) return;
-  void fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`, {
+  if (!apiKey) return;
+  void fetch(`https://api.elevenlabs.io/v1/user`, {
     method: "GET",
     headers: { "xi-api-key": apiKey },
   })
