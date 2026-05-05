@@ -29,8 +29,10 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   // und spürbar schneller Reaktion (vorher 1400/2400 → deutliche Anfangs-
   // Latenz, weil Gloria nach dem "Praxis Müller" 1.4 s gewartet hat).
   // Werte überschreibbar via env, falls Live-Daten einen anderen Punkt zeigen.
-  const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "900";
-  const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "1500";
+  // 700 ms is faster than 900 ms without cutting off short German answers.
+  // utterance_end_ms kept at 1200 ms: sufficient buffer after sentence-final silence.
+  const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "700";
+  const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "1200";
 
   const params = new URLSearchParams({
     model,
