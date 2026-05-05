@@ -3,6 +3,7 @@ import { WebSocketServer } from "ws";
 import { handleTwilioStream } from "./twilio-stream.js";
 import { log } from "./log.js";
 
+// Trigger redeploy with updated env vars
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
 const server = http.createServer((req, res) => {
