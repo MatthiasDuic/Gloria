@@ -471,7 +471,13 @@ function buildHeaderIndex(headerRow: string[]): Record<string, number> {
 
   for (const [canonical, aliases] of Object.entries(CSV_HEADER_ALIASES)) {
     const candidates = aliases.map((entry) => normalizeHeaderKey(entry));
-    const idx = normalizedHeader.findIndex((entry) => candidates.includes(entry));
+    // Prefer alias order over column order (e.g. Ort/Stadt before PLZ for location).
+    const idx = candidates.reduce<number>((found, candidate) => {
+      if (found >= 0) {
+        return found;
+      }
+      return normalizedHeader.indexOf(candidate);
+    }, -1);
     if (idx >= 0) {
       indexMap[canonical] = idx;
     }
