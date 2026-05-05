@@ -628,6 +628,42 @@ td {
   font-size: 0.9rem;
 }
 
+.auftrag-ampel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.auftrag-ampel.ok {
+  color: #1f6f3f;
+  background: rgba(47, 143, 87, 0.15);
+  border-color: rgba(47, 143, 87, 0.38);
+}
+
+.auftrag-ampel.warn {
+  color: #8a6518;
+  background: rgba(183, 135, 34, 0.2);
+  border-color: rgba(183, 135, 34, 0.36);
+}
+
+.auftrag-ampel.danger {
+  color: #9f3232;
+  background: rgba(194, 77, 77, 0.16);
+  border-color: rgba(194, 77, 77, 0.34);
+}
+
+.auftrag-ampel.info {
+  color: #1f4fae;
+  background: rgba(43, 101, 217, 0.12);
+  border-color: rgba(43, 101, 217, 0.34);
+}
+
 .modal-close {
   position: absolute;
   top: 16px;

@@ -90,6 +90,40 @@ function reportMatchesLead(
   return contactMatch || phoneMatch || report.topic === lead.topic;
 }
 
+function getLeadAmpel(
+  lead: DashboardData["leads"][number],
+  leadReports: DashboardData["reports"],
+) {
+  const latestReport = [...leadReports].sort((a, b) => {
+    const aTime = Date.parse(a.conversationDate || "") || 0;
+    const bTime = Date.parse(b.conversationDate || "") || 0;
+    return bTime - aTime;
+  })[0];
+
+  if (lead.status === "termin" || latestReport?.outcome === "Termin") {
+    return { tone: "ok", label: "Gruen", text: "Termin vereinbart" };
+  }
+
+  if (lead.status === "absage" || latestReport?.outcome === "Absage") {
+    return { tone: "danger", label: "Rot", text: "Absage / Auftrag beendet" };
+  }
+
+  if (
+    lead.status === "wiedervorlage"
+    || latestReport?.outcome === "Wiedervorlage"
+    || Boolean(lead.nextCallAt)
+    || Boolean(latestReport?.nextCallAt)
+  ) {
+    return { tone: "warn", label: "Gelb", text: "Wiedervorlage offen" };
+  }
+
+  if (lead.status === "angerufen" || leadReports.length > 0 || lead.attempts > 0) {
+    return { tone: "info", label: "Blau", text: "In Bearbeitung" };
+  }
+
+  return { tone: "info", label: "Blau", text: "Offen / noch kein Kontakt" };
+}
+
 function toDateKey(value: Date) {
   // Lokales Datum (nicht UTC), damit Kalenderzellen und Termine auf demselben
   // Tag landen. toISOString() würde 2026-05-13T22:00:00 lokal als 2026-05-13
@@ -844,6 +878,14 @@ export default function HomePage() {
         return bTime - aTime;
       });
   }, [data.reports, selectedLeadForHistory]);
+  const leadAmpelById = useMemo(() => {
+    const result: Record<string, ReturnType<typeof getLeadAmpel>> = {};
+    for (const lead of data.leads) {
+      const reportsForLead = data.reports.filter((report) => reportMatchesLead(report, lead));
+      result[lead.id] = getLeadAmpel(lead, reportsForLead);
+    }
+    return result;
+  }, [data.leads, data.reports]);
 
   async function loadDashboard() {
     const [dashboardResponse, learningResponse] = await Promise.all([
@@ -2216,7 +2258,7 @@ export default function HomePage() {
 
                     <table className="top-gap">
                       <thead>
-                        <tr><th>Firma</th><th>Ort</th><th>Ansprechpartner</th><th>Telefon</th><th>Email</th><th>Thema</th><th>Status</th></tr>
+                        <tr><th>Firma</th><th>Ort</th><th>Ansprechpartner</th><th>Telefon</th><th>Email</th><th>Thema</th><th>Status</th><th>Ampel</th></tr>
                       </thead>
                       <tbody>
                         {leadsForList.map((lead) => (
@@ -2236,6 +2278,11 @@ export default function HomePage() {
                             <td style={{ fontSize: "0.85rem", wordBreak: "break-word", maxWidth: "200px" }}>{lead.email || "-"}</td>
                             <td>{lead.topic}</td>
                             <td>{lead.status}</td>
+                            <td>
+                              <span className={`auftrag-ampel ${leadAmpelById[lead.id]?.tone || "info"}`} title={leadAmpelById[lead.id]?.text || ""}>
+                                {leadAmpelById[lead.id]?.label || "Blau"}
+                              </span>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
