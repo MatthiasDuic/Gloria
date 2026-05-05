@@ -41,6 +41,7 @@ function getContext(request: Request) {
     ownerGesellschaft: url.searchParams.get("ownerGesellschaft") || undefined,
     voiceId: url.searchParams.get("voiceId") || undefined,
     leadId: url.searchParams.get("leadId") || undefined,
+    crmContext: url.searchParams.get("crmContext") || undefined,
     company: url.searchParams.get("company") || "Ihr Unternehmen",
     contactName: url.searchParams.get("contactName") || "",
     topic: url.searchParams.get("topic") || "betriebliche Krankenversicherung",
@@ -293,6 +294,7 @@ async function renderVoiceResponse(request: Request) {
         ownerGesellschaft: context.ownerGesellschaft,
         voiceId: context.voiceId,
         leadId: context.leadId,
+          crmContext: context.crmContext,
         company: context.company,
         contactName: context.contactName,
         topic: context.topic,
@@ -307,8 +309,8 @@ async function renderVoiceResponse(request: Request) {
   }
   // --------------------------------------------------------------------------
 
-  const processAction = `${baseUrl}/api/twilio/voice/process?step=intro&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
-  const fallbackAction = `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
+  const processAction = `${baseUrl}/api/twilio/voice/process?step=intro&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&crmContext=${encodeURIComponent(context.crmContext || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
+  const fallbackAction = `${baseUrl}/api/twilio/voice/process?step=intro&fallback=1&userId=${encodeURIComponent(context.userId || "")}&phoneNumberId=${encodeURIComponent(context.phoneNumberId || "")}&ownerRealName=${encodeURIComponent(context.ownerRealName || "")}&ownerCompanyName=${encodeURIComponent(context.ownerCompanyName || "")}&leadId=${encodeURIComponent(context.leadId || "")}&crmContext=${encodeURIComponent(context.crmContext || "")}&company=${encodeURIComponent(context.company)}&contactName=${encodeURIComponent(context.contactName)}&topic=${encodeURIComponent(context.topic)}`;
 
   // Gloria bleibt zunächst stumm: Der Angerufene soll sich zuerst melden
   // ("Guten Tag, Praxis Dr. Müller" / "Müller, hallo"). Erst anhand dieser

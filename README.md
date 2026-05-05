@@ -58,6 +58,7 @@ Danach im Browser öffnen:
 | Twilio-Status-Webhook | `/api/twilio/status` |
 | Automatische Wiedervorlagen ausführen | `/api/callbacks/run` |
 | Outlook-Termine exportieren | `/api/export/outlook` |
+| ADS CRM Integration (Lead-Upsert + optional Sofortanruf) | `/api/integrations/ads/leads` |
 
 ## Beispiel: Gesprächsergebnis per Webhook speichern
 
@@ -75,6 +76,98 @@ curl -X POST http://localhost:3000/api/calls/webhook \
     "recordingUrl": "https://example.com/audio/call-123.mp3"
   }'
 ```
+
+## Beispiel: ADS CRM Lead an Gloria senden
+
+```bash
+curl -X POST http://localhost:3000/api/integrations/ads/leads \
+  -H "Authorization: Bearer ${ADS_CRM_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "mduic",
+    "listName": "ADS Import Mai",
+    "triggerCalls": false,
+    "leads": [
+      {
+        "externalId": "ADS-4711",
+        "company": "Musterbau GmbH",
+        "contactName": "Herr Neumann",
+        "phone": "+492011234567",
+        "email": "neumann@musterbau.de",
+        "topic": "private Krankenversicherung",
+        "note": "Kommt aus ADS CRM"
+      }
+    ]
+  }'
+```
+
+Hinweis:
+- Auth läuft über `ADS_CRM_API_KEY`.
+- User-Zuordnung läuft über `userId` oder `username` im Payload.
+- Optional kann ein Default-User über `ADS_CRM_DEFAULT_USER_ID` oder `ADS_CRM_DEFAULT_USERNAME` gesetzt werden.
+- Mit `triggerCalls=true` (oder pro Lead `triggerNow=true`) wird nach dem Upsert direkt ein Twilio-Anruf gestartet.
+
+## ADS CRM Workflow: gespeicherte Suche oder manuelle Firmenauswahl
+
+Die ADS-Integration kann jetzt direkt mit einer gespeicherten Suche oder einer manuell ausgewählten Firmenliste arbeiten.
+
+- `mode: "enqueue"`: Firmen werden als offene Liste in Gloria eingetragen (Standard).
+- `mode: "start"`: Firmen werden eingetragen und die Liste sofort aktiviert.
+- `mode: "call_now"`: Firmen werden eingetragen und sofort angerufen (wenn Twilio aktiv ist).
+
+### Beispiel 1: Gespeicherte ADS-Suche als offene Liste eintragen
+
+```bash
+curl -X POST http://localhost:3000/api/integrations/ads/leads \
+  -H "Authorization: Bearer ${ADS_CRM_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "mduic",
+    "mode": "enqueue",
+    "savedSearch": {
+      "id": "search-2026-05-05-a",
+      "name": "Handwerk NRW > 25 Mitarbeiter",
+      "query": "branche=handwerk AND mitarbeiter>25"
+    },
+    "companies": [
+      {
+        "externalId": "ADS-1001",
+        "firma": "Beispiel Dach GmbH",
+        "ansprechpartner": "Herr Keller",
+        "telefon": "+492019999111",
+        "email": "keller@beispiel-dach.de",
+        "branche": "Handwerk",
+        "ort": "Essen",
+        "mitarbeiterzahl": 48,
+        "thema": "betriebliche Krankenversicherung"
+      }
+    ]
+  }'
+```
+
+### Beispiel 2: Manuell ausgewählte Firmen sofort anrufen
+
+```bash
+curl -X POST http://localhost:3000/api/integrations/ads/leads \
+  -H "Authorization: Bearer ${ADS_CRM_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "usr_xxxxx",
+    "mode": "call_now",
+    "companies": [
+      {
+        "externalId": "ADS-2001",
+        "company": "Musterbau GmbH",
+        "contactName": "Frau Neumann",
+        "phone": "+492011234567",
+        "topic": "private Krankenversicherung",
+        "note": "Vom Vertrieb priorisiert"
+      }
+    ]
+  }'
+```
+
+Die ADS-Kontextdaten (z. B. Branche, Ort, Website, Suchname) werden beim Lead gespeichert, damit Gloria vor dem Call die relevanten Informationen im Datensatz hat.
 
 ## Admin-Zugang schützen
 

@@ -813,6 +813,181 @@ export async function importLeadsFromCsv(
   };
 }
 
+export interface AdsCrmLeadInput {
+  externalId?: string;
+  company: string;
+  contactName?: string;
+  phone?: string;
+  directDial?: string;
+  email?: string;
+  topic?: string;
+  note?: string;
+  nextCallAt?: string;
+  listId?: string;
+  listName?: string;
+}
+
+function buildAdsExternalTag(externalId?: string): string | undefined {
+  const cleaned = (externalId || "").trim();
+  if (!cleaned) {
+    return undefined;
+  }
+
+  return `[ADS_ID:${cleaned}]`;
+}
+
+function mergeLeadNotes(existingNote: string | undefined, incomingNote: string | undefined, externalTag?: string): string | undefined {
+  const chunks: string[] = [];
+
+  if (externalTag) {
+    chunks.push(externalTag);
+  }
+
+  const sanitizedIncoming = (incomingNote || "").trim();
+  if (sanitizedIncoming) {
+    chunks.push(sanitizedIncoming.replace(/\[ADS_ID:[^\]]+\]/gi, "").trim());
+  }
+
+  const sanitizedExisting = (existingNote || "").trim();
+  if (sanitizedExisting) {
+    chunks.push(sanitizedExisting.replace(/\[ADS_ID:[^\]]+\]/gi, "").trim());
+  }
+
+  const merged = chunks.filter(Boolean).join("\n").trim();
+  return merged || undefined;
+}
+
+function findLeadIndexForAdsUpsert(leads: Lead[], input: AdsCrmLeadInput, userId?: string): number {
+  const externalTag = buildAdsExternalTag(input.externalId);
+  if (externalTag) {
+    const indexByExternal = leads.findIndex((lead) => {
+      if (userId && lead.userId !== userId) {
+        return false;
+      }
+      return (lead.note || "").includes(externalTag);
+    });
+
+    if (indexByExternal >= 0) {
+      return indexByExternal;
+    }
+  }
+
+  const normalizedPhone = normalizePhoneForMatch(input.phone || input.directDial || "");
+  const normalizedCompany = (input.company || "").trim().toLowerCase();
+
+  if (!normalizedPhone && !normalizedCompany) {
+    return -1;
+  }
+
+  return leads.findIndex((lead) => {
+    if (userId && lead.userId !== userId) {
+      return false;
+    }
+
+    const phoneMatch = normalizedPhone
+      ? normalizePhoneForMatch(lead.phone || "") === normalizedPhone || normalizePhoneForMatch(lead.directDial || "") === normalizedPhone
+      : false;
+    const companyMatch = normalizedCompany ? (lead.company || "").trim().toLowerCase() === normalizedCompany : false;
+
+    if (normalizedPhone && normalizedCompany) {
+      return phoneMatch && companyMatch;
+    }
+
+    return normalizedPhone ? phoneMatch : companyMatch;
+  });
+}
+
+export async function upsertAdsCrmLeads(
+  incomingLeads: AdsCrmLeadInput[],
+  options?: { userId?: string; listId?: string; listName?: string },
+): Promise<{
+  created: number;
+  updated: number;
+  total: number;
+  leads: Lead[];
+}> {
+  const scopedUserId = options?.userId;
+  const current = await readLeads(scopedUserId);
+  const mutable = [...current];
+  const changedLeads: Lead[] = [];
+  let created = 0;
+  let updated = 0;
+
+  for (const raw of incomingLeads) {
+    const company = (raw.company || "").trim();
+    const phone = (raw.phone || "").trim();
+    const directDial = (raw.directDial || "").trim();
+
+    if (!company || (!phone && !directDial)) {
+      continue;
+    }
+
+    const leadIndex = findLeadIndexForAdsUpsert(mutable, raw, scopedUserId);
+    const nextCallAt = (raw.nextCallAt || "").trim();
+    const parsedNextCallAt = nextCallAt && !Number.isNaN(Date.parse(nextCallAt))
+      ? new Date(nextCallAt).toISOString()
+      : undefined;
+    const externalTag = buildAdsExternalTag(raw.externalId);
+    const resolvedTopic = normalizeTopic(raw.topic || "Energie");
+
+    if (leadIndex >= 0) {
+      const existing = mutable[leadIndex];
+      const nextLead: Lead = {
+        ...existing,
+        userId: scopedUserId || existing.userId,
+        listId: (raw.listId || options?.listId || existing.listId || "").trim() || existing.listId,
+        listName: (raw.listName || options?.listName || existing.listName || "").trim() || existing.listName,
+        company,
+        contactName: (raw.contactName || existing.contactName || "Empfang").trim(),
+        phone: phone || existing.phone,
+        directDial: directDial || existing.directDial,
+        email: (raw.email || existing.email || "").trim() || undefined,
+        topic: resolvedTopic,
+        note: mergeLeadNotes(existing.note, raw.note, externalTag),
+        nextCallAt: parsedNextCallAt || existing.nextCallAt,
+        status: parsedNextCallAt ? "wiedervorlage" : existing.status,
+      };
+
+      mutable[leadIndex] = nextLead;
+      changedLeads.push(nextLead);
+      updated += 1;
+      continue;
+    }
+
+    const createdLead: Lead = {
+      id: createLeadId(created),
+      userId: scopedUserId,
+      listId: (raw.listId || options?.listId || "").trim() || undefined,
+      listName: (raw.listName || options?.listName || "").trim() || undefined,
+      company,
+      contactName: (raw.contactName || "Empfang").trim(),
+      phone: phone || directDial,
+      directDial: directDial || undefined,
+      email: (raw.email || "").trim() || undefined,
+      topic: resolvedTopic,
+      note: mergeLeadNotes(undefined, raw.note, externalTag),
+      nextCallAt: parsedNextCallAt,
+      status: parsedNextCallAt ? "wiedervorlage" : "neu",
+      attempts: 0,
+    };
+
+    mutable.unshift(createdLead);
+    changedLeads.push(createdLead);
+    created += 1;
+  }
+
+  if (created > 0 || updated > 0) {
+    await writeLeads(mutable, scopedUserId);
+  }
+
+  return {
+    created,
+    updated,
+    total: mutable.length,
+    leads: changedLeads,
+  };
+}
+
 export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, options?: { userId?: string }) {
   if (options?.userId) {
     const user = await findUserById(options.userId);
