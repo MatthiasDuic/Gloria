@@ -25,15 +25,11 @@ services:
       - key: DEEPGRAM_API_KEY
         sync: false
       - key: DEEPGRAM_MODEL
-        value: nova-3
+        value: flux-general-multi
       - key: DEEPGRAM_LANGUAGE
         value: de
-      - key: DEEPGRAM_ENDPOINTING_MS
-        value: "700"
-      - key: DEEPGRAM_UTTERANCE_END_MS
-        value: "1200"
-      - key: DEEPGRAM_KEYWORDS
-        value: "Duic:5,Matthias Duic:5,Sprockhoevel:3"
+      - key: DEEPGRAM_KEYTERMS
+        value: "Duic,Matthias Duic,Sprockhövel"
       - key: ELEVENLABS_API_KEY
         sync: false
       - key: ELEVENLABS_VOICE_ID
