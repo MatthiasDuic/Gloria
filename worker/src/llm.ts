@@ -578,6 +578,8 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (memoryBlock) parts.push("\n\n" + memoryBlock);
   const styleBlock = buildStyleGuard(ctx);
   if (styleBlock) parts.push("\n\n" + styleBlock);
+  const turnControlBlock = buildTurnControlBlock(ctx, owner, ownerDative);
+  if (turnControlBlock) parts.push("\n\n" + turnControlBlock);
   return parts.join(" ");
 }
 
@@ -714,6 +716,126 @@ function inferConversationPhase(ctx: CallContext): number {
   if (userTurns <= 3) return 4;
   if (userTurns <= 5) return 5;
   return 6;
+}
+
+function buildTurnControlBlock(ctx: CallContext, owner: string, ownerDative: string): string {
+  const phase = inferConversationPhase(ctx);
+  const lastUser = getLastUserTurn(ctx);
+  const objective = inferTurnObjective(ctx, phase, owner, ownerDative, lastUser);
+  const constraints = inferTurnConstraints(ctx, phase, lastUser);
+
+  return [
+    "TURN-STEUERUNG (ECHTZEIT):",
+    `- Aktuelle Phase: ${phase}`,
+    `- Micro-Ziel in DIESEM Turn: ${objective}`,
+    `- Erfolgsbedingung dieses Turns: ${constraints.success}`,
+    `- Falls Ziel nicht erreicht: ${constraints.fallback}`,
+    "- Regel: Erfülle zuerst das Micro-Ziel, dann optional eine knappe Anschlussfrage.",
+    "- Regel: Bleibe frei in der Formulierung, aber halte das Ziel strikt ein.",
+  ].join("\n");
+}
+
+function getLastUserTurn(ctx: CallContext): string {
+  for (let i = ctx.transcript.length - 1; i >= 0; i -= 1) {
+    const turn = ctx.transcript[i];
+    if (turn.role === "user") return turn.text.trim();
+  }
+  return "";
+}
+
+function inferTurnObjective(
+  ctx: CallContext,
+  phase: number,
+  owner: string,
+  ownerDative: string,
+  lastUser: string,
+): string {
+  const lower = lastUser.toLowerCase();
+  const isQuestion = /\?|\b(wie|warum|wieso|woher|wann|welche|welcher|was)\b/.test(lower);
+
+  if (isQuestion) {
+    return "Die konkrete Frage des Anrufenden zuerst klar beantworten und danach mit genau einer passenden Rückfrage fortsetzen.";
+  }
+
+  if (phase <= 1) {
+    return "Natürlich eröffnen, Auftrag transparent machen und je nach Gegenüber (Gatekeeper/Entscheider) den korrekten Einstieg setzen.";
+  }
+  if (phase === 2) {
+    return "Nach einem knappen Anlasssatz die Aufzeichnungsfrage sauber klären, ohne in den Pitch zu wechseln.";
+  }
+  if (phase === 3) {
+    return "Konsens für ein kurzes Gespräch holen und den Anlass in einem konkreten Satz verankern.";
+  }
+  if (phase === 4) {
+    if (/zeit|eilig|stress/.test(lower)) {
+      return "Mit einer kurzen, relevanten Discovery-Frage den Kernbedarf herausarbeiten, ohne Druck aufzubauen.";
+    }
+    return "Ein relevantes Bedürfnis oder Problem mit genau einer offenen Frage vertiefen und aktiv zuhören.";
+  }
+  if (phase === 5) {
+    return "Einen passenden Fakt oder Zahlenanker aus dem Playbook auf die letzte Kundenaussage beziehen und Wirkung prüfen.";
+  }
+  if (phase === 6) {
+    return `Mit einer kurzen Brücke den Nutzen eines Gesprächs mit ${ownerDative} greifbar machen und Zustimmung testen.`;
+  }
+  if (phase === 7) {
+    if (/passt nicht|kann nicht|andere zeit|anderer termin/.test(lower)) {
+      return "Wunschtermin direkt erfragen und ohne Umwege zur Bestätigung führen.";
+    }
+    if (/kein kalender|muss schauen|nicht festlegen/.test(lower)) {
+      return "Rückrufzeitpunkt und direkte Erreichbarkeit strukturiert vereinbaren.";
+    }
+    return "Terminkonvergenz herstellen: Präferenz klären, zwei passende Slots anbieten oder den genannten Slot bestätigen.";
+  }
+  if (phase === 8) {
+    return "Genau eine Basisfrage stellen, Antwort sauber erfassen und nur bei Ja kurz konkret nachfragen.";
+  }
+  if (phase >= 10) {
+    return `Termin klar zusammenfassen, E-Mail-Bestätigung absichern und höflich abschließen.`;
+  }
+
+  return `Gespräch zielorientiert in die nächste Phase überführen, ohne den natürlichen Fluss zu verlieren.`;
+}
+
+function inferTurnConstraints(
+  ctx: CallContext,
+  phase: number,
+  lastUser: string,
+): { success: string; fallback: string } {
+  const lower = lastUser.toLowerCase();
+
+  if (/\?|\b(wie|warum|wieso|woher|wann|welche|welcher|was)\b/.test(lower)) {
+    return {
+      success: "Die Frage ist inhaltlich beantwortet und das Gegenüber hat einen klaren nächsten Gesprächspunkt.",
+      fallback: "Wenn Information fehlt, ehrlich benennen und den Punkt für den Termin konkret verankern.",
+    };
+  }
+
+  if (phase === 4) {
+    return {
+      success: "Eine neue, konkrete Information zum Bedarf oder Schmerz liegt vor.",
+      fallback: "Frage enger und alltagsnäher formulieren, statt das Thema zu wechseln.",
+    };
+  }
+
+  if (phase === 7) {
+    return {
+      success: "Ein konkreter nächster Termin-Schritt ist erreicht (Slot bestätigt, Präferenz geklärt oder Rückruf fixiert).",
+      fallback: "Bei Unsicherheit eine einfache Alternativfrage stellen, nicht argumentieren.",
+    };
+  }
+
+  if (phase === 8) {
+    return {
+      success: "Genau ein Pflichtdatenpunkt wurde geklärt und dokumentierbar beantwortet.",
+      fallback: "Bei Verweigerung einmal kurz validieren und direkt zur nächsten Pflichtfrage gehen.",
+    };
+  }
+
+  return {
+    success: "Die Antwort bewegt das Gespräch einen klaren Schritt in Richtung nächster Phase.",
+    fallback: "Wenn unklar, eine kurze Klärungsfrage stellen statt zu monologisieren.",
+  };
 }
 
 function buildMemoryBlock(ctx: CallContext): string {
