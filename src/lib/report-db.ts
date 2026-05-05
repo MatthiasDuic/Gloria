@@ -511,6 +511,7 @@ async function ensureSchema() {
       phone TEXT NOT NULL,
       direct_dial TEXT,
       email TEXT,
+      location TEXT,
       topic TEXT NOT NULL,
       note TEXT,
       next_call_at TIMESTAMPTZ,
@@ -523,6 +524,11 @@ async function ensureSchema() {
   await db.query(`
     ALTER TABLE gloria_leads
     ADD COLUMN IF NOT EXISTS user_id TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_leads
+    ADD COLUMN IF NOT EXISTS location TEXT;
   `);
 
   await db.query(`

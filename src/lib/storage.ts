@@ -602,6 +602,13 @@ async function writeLeads(leads: Lead[], userId?: string): Promise<void> {
     return;
   }
 
+  // In production (Vercel), Postgres is required since file system is read-only
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    throw new Error(
+      "DATABASE_URL is not configured. Please set DATABASE_URL environment variable for Postgres storage."
+    );
+  }
+
   if (!userId) {
     await writeJsonStrict(LEADS_FILE, sanitizedLeads);
     return;
