@@ -365,8 +365,18 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   } else if (phase === 8) {
     lines.push(`Termin bestätigt. Jetzt die Basisangaben — eine Frage pro Turn, ruhig und freundlich.`);
-  } else if (phase >= 10) {
-    lines.push(`Termin und Daten vollständig. Sauber zusammenfassen, E-Mail-Adresse holen, herzlich verabschieden.`);
+  } else if (phase === 10) {
+    lines.push(
+      `Alle Basisangaben sind erfasst. Frag JETZT als einzige Aktion nach der E-Mail-Adresse für die Terminbestätigung.`,
+      `Beispiel: "Darf ich noch kurz Ihre E-Mail-Adresse für die Terminbestätigung notieren?"`,
+      `Kein hangup. Kein Zusammenfassen. Nur diese eine Frage.`,
+    );
+  } else if (phase >= 11) {
+    lines.push(
+      `E-Mail ist abgehakt. Jetzt die Zusammenfassung: Termin (Datum/Uhrzeit), Gesprächspartner, Thema — alles in 1–2 Sätzen.`,
+      `Dann herzlich verabschieden ("Auf Wiederhören", "Schönen Tag noch" o.ä.).`,
+      `hangup=true ERST wenn du die Verabschiedung in DIESER Antwort sagst — nicht vorher.`,
+    );
   }
 
   // HARD RULES — nur das wirklich Nicht-Verhandelbare
@@ -383,6 +393,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
     `- Bei klarer Ablehnung: einmal ruhig, respektvoll kontern. Beim zweiten Nein: würdevoll beenden.`,
+    `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
   );
   if (ctx.confirmedSlotPhrase) {
     lines.push(`- EINGEFROREN: "${ctx.confirmedSlotPhrase}" — nur diese Terminphrase verwenden.`);
@@ -414,14 +425,17 @@ function inferConversationPhase(ctx: CallContext): number {
 
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
   const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
-  const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|e-?mail-adresse|h[aä]tte?n? sie sonst noch eine frage/.test(all);
+  const hasEmailAsked = /\be-?mail\b/i.test(all);
+  const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|auf wiederhören|auf wiedersehen|schönen tag noch/.test(all);
 
   if (!hasConsentQuestion) return 2;
   if (!hasConsentAnswer) return 2;
   if (!hasTermHint) return 4;
   if (hasTermHint && !hasConfirmedSlot) return 7;
   if (hasConfirmedSlot && !hasDataCollection) return 8;
-  if (hasSummary) return 10;
+  if (!hasEmailAsked) return 10;  // E-Mail fragen
+  if (!hasSummary) return 11;     // Zusammenfassung + Verabschiedung
+  return 11;
 
   // Zwischen Discovery und Termin-Aufbau: abhängig von Gesprächstiefe.
   const userTurns = turns.filter((t) => t.role === "user").length;

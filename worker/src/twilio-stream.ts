@@ -622,7 +622,9 @@ function extractConfirmedSlot(text: string): string | null {
   if (!isConfirmation) return null;
 
   // Uhrzeiten kommen als Wörter ODER als Ziffern ("10:30 Uhr" / "zehn Uhr dreißig").
-  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
+  // Trailing-Wort nach "Uhr" nur wenn es eine Minutenangabe ist ("dreißig", "fünfzehn" etc.) —
+  // NICHT "für", "das", "mit" o.ä.
+  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+(?:fünf|zehn|fünfzehn|zwanzig|fünfundzwanzig|dreißig|fünfunddreißig|vierzig|fünfundvierzig|fünfzig))?)/i;
   const m = re.exec(text);
   if (!m) return null;
   return m[1].trim().replace(/\s+/g, " ");
