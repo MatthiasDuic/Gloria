@@ -341,11 +341,14 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   } else if (phase === 4) {
     if (isPKV) {
       lines.push(
-        `Aufzeichnung ist geklärt. Jetzt bist du wirklich neugierig auf seine Situation. Kein Checklisten-Feeling, kein Abhaken.`,
-        `Fang mit seiner persönlichen Erfahrung an: Hat er die Beitragsentwicklung selbst gespürt? Was beschäftigt ihn dabei? Wie denkt er über die nächsten Jahre nach?`,
-        `Lass ihn reden. Greif konkret auf, was er sagt. Wenn er "da hab ich mir keine Gedanken gemacht" sagt — das ist dein Moment: kurz innehalten, ehrlich reagieren, dann greifbar machen was auf ihn zukommt. Erst dann kommt die Brücke zum Termin.`,
-        `Reihenfolge: seine Erfahrung → Zahlenanker der zu ihm passt → Zukunftsfrage → Termin. Keine Statistiken vorab.`,
-        `GKV-Versicherte (TK, IKK, AOK etc.): Beitragsentwicklung ist genauso ihr Thema. Kurz validieren, dann auf persönliche Entwicklung fokussieren. Nie nach Mitarbeitern oder Unternehmenskosten fragen.`,
+        `Aufzeichnung ist geklärt. Dein einziges Ziel jetzt: echte Neugier wecken. Kein Pitchen, keine Statistiken.`,
+        `Frag zuerst nach seiner persönlichen Erfahrung — hat er selbst schon Beitragssteigerungen gespürt? Lass ihn antworten.`,
+        `Wenn er seinen aktuellen Beitrag kennt (z.B. 900 €): Nutze GENAU diese Zahl. Rechne laut: "Bei vier Prozent pro Jahr — das sind in zehn Jahren über 1.300 Euro. Pro Monat. Das macht über 50.000 Euro in zehn Jahren, die einfach weg sind — ohne dass sich die Leistung verbessert hat." Dann kurze Pause. Wirklich. Nichts nachschieben.`,
+        `Wenn er sagt "hab ich mir keine Gedanken gemacht": Das ist dein Moment. Nicht weiterpitchen — kurz innehalten: "Genau das ist das Tückische daran. Das merkt man erst, wenn der nächste Bescheid kommt." Dann Pause.`,
+        `NIEMALS "laut PKV-Verband" oder "Studien zeigen" sagen — das klingt wie eine Broschüre. Rechne mit seinen Zahlen, nicht mit Durchschnittswerten.`,
+        `Erst wenn er selbst sagt "das ist viel" oder ähnliches — dann die Brücke: "Genau dafür ist das Gespräch mit Herrn Duic da."`,
+        `GKV-Versicherte: Beitragsentwicklung ist genauso ihr Thema. Nie nach Mitarbeitern oder Unternehmenskosten fragen.`,
+        `WICHTIG: Frag pro Turn GENAU EINE Frage. Kein Doppeln.`,
       );
     } else {
       lines.push(
@@ -361,7 +364,11 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Das Interesse ist da. Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann zwei konkrete Slots. Wenn beides nicht passt: direkt nach seinem Wunschtermin fragen, ohne Druck.`,
     );
   } else if (phase === 8) {
-    lines.push(`Termin bestätigt. Jetzt die Basisangaben — eine Frage pro Turn, ruhig und freundlich.`);
+    lines.push(
+      `Termin bestätigt. Jetzt die Basisangaben — EINE Frage pro Turn, ruhig und freundlich.`,
+      `STRENG: Stelle NIEMALS zwei Fragen in einem Satz. Nicht "Körpergröße und Gewicht?" — immer erst Größe, dann in der nächsten Runde Gewicht.`,
+      `Reihenfolge: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
+    );
   } else if (phase === 10) {
     lines.push(
       `Alle Basisangaben sind erfasst. Frag JETZT als einzige Aktion nach der E-Mail-Adresse für die Terminbestätigung.`,

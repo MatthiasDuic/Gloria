@@ -262,14 +262,14 @@ function detectRecordingConsent(
   transcript: Array<{ role: "user" | "assistant"; text: string }>,
 ): boolean {
   const askIdx = transcript.findIndex(
-    (t) => t.role === "assistant" && /(aufzeichn|aufnahme)/i.test(t.text),
+    (t) => t.role === "assistant" && /(aufzeichn|aufnahme|mitschneid)/i.test(t.text),
   );
   if (askIdx === -1) return false;
 
   for (let i = askIdx + 1; i < transcript.length; i++) {
     const entry = transcript[i];
     if (entry.role === "assistant") {
-      if (/(aufzeichn|aufnahme)/i.test(entry.text)) continue;
+      if (/(aufzeichn|aufnahme|mitschneid)/i.test(entry.text)) continue;
       return false;
     }
     const text = entry.text.toLowerCase().trim();
