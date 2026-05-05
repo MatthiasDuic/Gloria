@@ -17,26 +17,26 @@ services:
       - key: LOG_LEVEL
         value: info
       - key: STREAM_SHARED_SECRET
-        sync: false
+        sync: true
       - key: OPENAI_API_KEY
-        sync: false
+        sync: true
       - key: OPENAI_MODEL
         value: gpt-4.1
       - key: DEEPGRAM_API_KEY
-        sync: false
+        sync: true
       - key: DEEPGRAM_MODEL
-        value: flux-general-multi
+        sync: true
       - key: DEEPGRAM_LANGUAGE
-        value: de
+        sync: true
       - key: DEEPGRAM_KEYTERMS
-        value: "Duic,Matthias Duic,Sprockhövel"
+        sync: true
       - key: ELEVENLABS_API_KEY
-        sync: false
+        sync: true
       - key: ELEVENLABS_VOICE_ID
-        sync: false
+        sync: true
       - key: ELEVENLABS_MODEL
-        value: eleven_v3
+        sync: true
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN
-        sync: false
+        sync: true
