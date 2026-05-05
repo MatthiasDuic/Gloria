@@ -9,7 +9,6 @@ export interface TokenizedCallState {
   phoneNumberId?: string;
   callSid?: string;
   leadId?: string;
-  crmContext?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;

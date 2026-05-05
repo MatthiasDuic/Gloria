@@ -5,7 +5,6 @@ export interface TwilioCallRequest {
   to: string;
   company: string;
   contactName?: string;
-  crmContext?: string;
   topic: Topic;
   leadId?: string;
   userId?: string;
@@ -247,7 +246,6 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
     voiceId: payload.voiceId,
     company: payload.company,
     contactName: payload.contactName,
-    crmContext: payload.crmContext,
     topic: payload.topic,
     prepared: preparedForStream ? "1" : undefined,
     preparedAt: preparation.preparedAt,

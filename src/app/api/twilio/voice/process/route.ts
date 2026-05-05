@@ -486,7 +486,6 @@ function buildInitialState(params: {
   contactName: string;
   topic: Topic;
   leadId?: string;
-  crmContext?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
@@ -501,7 +500,6 @@ function buildInitialState(params: {
     ownerRealName: params.ownerRealName,
     ownerCompanyName: params.ownerCompanyName,
     ownerGesellschaft: params.ownerGesellschaft,
-    crmContext: params.crmContext,
     company: params.company,
     contactName: params.contactName,
     topic: params.topic,
@@ -542,21 +540,6 @@ function buildNameGuidance(contactNameRaw?: string): string {
     "━━━ ZIELANSPRECHPARTNER ━━━",
     `Bekannter Name aus CRM/Testanruf: ${contactName}`,
     "Nutze diesen Namen konsequent und frage beim Empfang aktiv nach diesem Kontakt.",
-  ].join("\n");
-}
-
-function buildCrmContextGuidance(crmContextRaw?: string): string {
-  const crmContext = (crmContextRaw || "").trim();
-  if (!crmContext) {
-    return "";
-  }
-
-  return [
-    "",
-    "━━━ CRM KONTEXT (ADS) ━━━",
-    "Diese Informationen wurden in ADS selektiert und duerfen aktiv im Gespraech genutzt werden:",
-    crmContext,
-    "Keine erfundenen Details verwenden. Nur diese Infos und den echten Gespraechsverlauf nutzen.",
   ].join("\n");
 }
 
@@ -653,7 +636,6 @@ function getScriptOrigin(topic: Topic, userId?: string): string {
 async function askOpenAI(
   systemPrompt: string,
   contactName: string | undefined,
-  crmContext: string | undefined,
   transcript: string,
   latestSpeech: string,
   currentRole: ContactRole,
@@ -695,10 +677,7 @@ async function askOpenAI(
       model: AI_MODEL,
       response_format: { type: "json_object" },
       messages: [
-        {
-          role: "system",
-          content: `${systemPrompt}${buildNameGuidance(contactName)}${buildCrmContextGuidance(crmContext)}`,
-        },
+        { role: "system", content: `${systemPrompt}${buildNameGuidance(contactName)}` },
         { role: "user", content: userContent },
       ],
     };
@@ -786,7 +765,6 @@ async function askOpenAI(
 async function askOpenAIWithRetry(
   systemPrompt: string,
   contactName: string | undefined,
-  crmContext: string | undefined,
   transcript: string,
   latestSpeech: string,
   currentRole: ContactRole,
@@ -800,7 +778,6 @@ async function askOpenAIWithRetry(
       return await askOpenAI(
         systemPrompt,
         contactName,
-        crmContext,
         transcript,
         latestSpeech,
         currentRole,
@@ -1033,7 +1010,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         contactName: url.searchParams.get("contactName") || "",
         topic: (url.searchParams.get("topic") || "betriebliche Krankenversicherung") as Topic,
         leadId: url.searchParams.get("leadId") || undefined,
-        crmContext: url.searchParams.get("crmContext") || undefined,
         ownerRealName: url.searchParams.get("ownerRealName") || undefined,
         ownerCompanyName: url.searchParams.get("ownerCompanyName") || undefined,
         ownerGesellschaft: url.searchParams.get("ownerGesellschaft") || undefined,
@@ -1170,7 +1146,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         transferDecision = await askOpenAIWithRetry(
           systemPrompt,
           state.contactName,
-          state.crmContext,
           state.transcript,
           heardText,
           "decision-maker",
@@ -1320,7 +1295,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       decision = await askOpenAIWithRetry(
         systemPrompt,
         state.contactName,
-        state.crmContext,
         state.transcript,
         heardText,
         state.contactRole,
