@@ -49,49 +49,62 @@ export async function POST(request: Request) {
     const contentType = (request.headers.get("content-type") || "").toLowerCase();
 
     if (contentType.includes("multipart/form-data")) {
-      const form = await request.formData();
-      const file = form.get("file");
-      const requestedListName = String(form.get("listName") || "").trim();
-      const requestedListId = String(form.get("listId") || "").trim();
-      const requestedTopic = String(form.get("topic") || "").trim();
+      try {
+        const form = await request.formData();
+        const file = form.get("file");
+        const requestedListName = String(form.get("listName") || "").trim();
+        const requestedListId = String(form.get("listId") || "").trim();
+        const requestedTopic = String(form.get("topic") || "").trim();
 
-      if (!isUploadFileLike(file)) {
+        if (!isUploadFileLike(file)) {
+          return NextResponse.json(
+            { error: "Bitte eine CSV- oder Excel-Datei hochladen." },
+            { status: 400 },
+          );
+        }
+
+        const lowerName = file.name.toLowerCase();
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let csvText = "";
+
+        if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+          csvText = extractCsvFromWorkbook(bytes);
+        } else if (lowerName.endsWith(".csv")) {
+          csvText = decodeCsvBytes(bytes);
+        } else {
+          return NextResponse.json(
+            { error: "Dateityp nicht unterstützt. Bitte CSV, XLSX oder XLS verwenden." },
+            { status: 400 },
+          );
+        }
+
+        if (!csvText.trim()) {
+          return NextResponse.json(
+            { error: "Die Datei enthält keine importierbaren Daten." },
+            { status: 400 },
+          );
+        }
+
+        const inferredListName = requestedListName || file.name.replace(/\.[^.]+$/, "").trim();
+        const result = await importLeadsFromCsv(csvText, {
+          listId: requestedListId || undefined,
+          listName: inferredListName || undefined,
+          userId: sessionUser.id,
+          overrideTopic: requestedTopic || undefined,
+        });
+        return NextResponse.json(result);
+      } catch (formError) {
+        console.error("Form processing error:", formError);
         return NextResponse.json(
-          { error: "Bitte eine CSV- oder Excel-Datei hochladen." },
+          {
+            error:
+              formError instanceof Error
+                ? `Formularverarbeitung fehlgeschlagen: ${formError.message}`
+                : "Formularverarbeitung fehlgeschlagen.",
+          },
           { status: 400 },
         );
       }
-
-      const lowerName = file.name.toLowerCase();
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      let csvText = "";
-
-      if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-        csvText = extractCsvFromWorkbook(bytes);
-      } else if (lowerName.endsWith(".csv")) {
-        csvText = decodeCsvBytes(bytes);
-      } else {
-        return NextResponse.json(
-          { error: "Dateityp nicht unterstützt. Bitte CSV, XLSX oder XLS verwenden." },
-          { status: 400 },
-        );
-      }
-
-      if (!csvText.trim()) {
-        return NextResponse.json(
-          { error: "Die Datei enthält keine importierbaren Daten." },
-          { status: 400 },
-        );
-      }
-
-      const inferredListName = requestedListName || file.name.replace(/\.[^.]+$/, "").trim();
-      const result = await importLeadsFromCsv(csvText, {
-        listId: requestedListId || undefined,
-        listName: inferredListName || undefined,
-        userId: sessionUser.id,
-        overrideTopic: requestedTopic || undefined,
-      });
-      return NextResponse.json(result);
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
@@ -114,6 +127,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (error) {
+    console.error("Import error:", error);
     return NextResponse.json(
       {
         error:

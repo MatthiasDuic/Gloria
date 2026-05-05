@@ -521,15 +521,23 @@ async function ensureSchema() {
     );
   `);
 
-  await db.query(`
-    ALTER TABLE gloria_leads
-    ADD COLUMN IF NOT EXISTS user_id TEXT;
-  `);
+  try {
+    await db.query(`
+      ALTER TABLE gloria_leads
+      ADD COLUMN IF NOT EXISTS user_id TEXT;
+    `);
+  } catch (err) {
+    console.warn("Failed to add user_id column to gloria_leads:", err instanceof Error ? err.message : String(err));
+  }
 
-  await db.query(`
-    ALTER TABLE gloria_leads
-    ADD COLUMN IF NOT EXISTS location TEXT;
-  `);
+  try {
+    await db.query(`
+      ALTER TABLE gloria_leads
+      ADD COLUMN IF NOT EXISTS location TEXT;
+    `);
+  } catch (err) {
+    console.warn("Failed to add location column to gloria_leads:", err instanceof Error ? err.message : String(err));
+  }
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
