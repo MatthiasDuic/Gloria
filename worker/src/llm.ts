@@ -377,7 +377,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `(1) Termin: Datum, Uhrzeit, Gesprächspartner — mit der eingefrorenen Slot-Phrase, Wort für Wort.`,
       `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, realistische Beitragsprognose, konkrete Stellschrauben — alles auf Basis seiner eigenen Zahlen.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
-      `(4) Herzliche Verabschiedung ("Ich freue mich auf das Gespräch. Auf Wiederhören!" o.ä.).`,
+      `(4) Herzliche Verabschiedung — im Namen des Owners, z.B. "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
       `hangup=true ERST wenn du die Verabschiedung in DIESER Antwort sagst — nicht vorher.`,
     );
   }
