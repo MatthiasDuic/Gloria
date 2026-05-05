@@ -43,12 +43,10 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  // eleven_multilingual_v2: stabile Deutsch-Qualität, bewährt für Echtzeit-TTS.
-  // eleven_v3 (neu, 2025): noch expressiver und menschlicher, 70+ Sprachen,
-  //   aber höhere Latenz — via ELEVENLABS_MODEL=eleven_v3 env testbar.
-  // eleven_flash_v2_5: ~75ms ultra-low-latency für latenz-kritische Use Cases.
-  // Override via ELEVENLABS_MODEL env im Render-Dashboard.
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2";
+  // eleven_v3: expressivste Stimme (2025), 70+ Sprachen, besonders menschlich klingendes Deutsch.
+  // eleven_multilingual_v2: stabil, niedrigere Latenz — Fallback via ELEVENLABS_MODEL env.
+  // eleven_flash_v2_5: ultra-low-latency (~75ms) für latenz-kritische Use Cases.
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_v3";
 
   if (!apiKey || !voiceId) {
     log.error("tts.missing_config");
