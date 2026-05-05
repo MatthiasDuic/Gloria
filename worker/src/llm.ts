@@ -49,7 +49,7 @@ export async function streamReply(
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
   ];
-  for (const turn of ctx.transcript.slice(-8)) {
+  for (const turn of ctx.transcript.slice(-14)) {
     messages.push({ role: turn.role, content: turn.text });
   }
   messages.push({ role: "user", content: userText });
@@ -377,12 +377,14 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   } else if (phase >= 11) {
     lines.push(
-      `E-Mail ist abgehakt. Jetzt die detaillierte Abschluss-Zusammenfassung in 3–4 Sätzen:`,
-      `(1) Termin: Datum, Uhrzeit, Gesprächspartner — mit der eingefrorenen Slot-Phrase, Wort für Wort.`,
-      `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, realistische Beitragsprognose, konkrete Stellschrauben — alles auf Basis seiner eigenen Zahlen.`,
+      `E-Mail ist abgehakt. Jetzt SOFORT die Abschluss-Zusammenfassung und Verabschiedung.`,
+      `ABSOLUT VERBOTEN: Keine weiteren Fragen. Nicht nach Ansprechpartner, nicht nach Basisangaben, nicht nach irgendetwas.`,
+      `Schreibe 3–4 Sätze:`,
+      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag.`,
+      `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
-      `(4) Herzliche Verabschiedung — im Namen des Owners, z.B. "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
-      `hangup=true ERST wenn du die Verabschiedung in DIESER Antwort sagst — nicht vorher.`,
+      `(4) Herzliche Verabschiedung im Namen des Owners: "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
+      `hangup=true in DIESER Antwort setzen.`,
     );
   }
 

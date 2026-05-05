@@ -618,7 +618,9 @@ function extractConfirmedSlot(text: string): string | null {
     /\bich\s+buche\b/.test(lower) ||
     /\bsteht\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
     /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||
-    /\bperfekt\b[^.?!]*\btermin\b/.test(lower);
+    /\bperfekt\b[^.?!]*\btermin\b/.test(lower) ||
+    /\bich\s+reserviere\b/.test(lower) ||
+    /\breserviere\s+ich\b/.test(lower);
   if (!isConfirmation) return null;
 
   // Uhrzeiten kommen als Wörter ODER als Ziffern ("10:30 Uhr" / "zehn Uhr dreißig").
