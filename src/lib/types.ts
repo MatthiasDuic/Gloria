@@ -21,6 +21,7 @@ export interface Lead {
   phone: string;
   directDial?: string;
   email?: string;
+  location?: string;
   topic: Topic;
   note?: string;
   nextCallAt?: string;

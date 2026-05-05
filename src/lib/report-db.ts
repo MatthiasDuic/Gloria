@@ -1529,6 +1529,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         phone,
         direct_dial,
         email,
+        location,
         topic,
         note,
         next_call_at,
@@ -1549,6 +1550,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       phone: String(row.phone || ""),
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
       email: row.email ? String(row.email) : undefined,
+      location: row.location ? String(row.location) : undefined,
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
       nextCallAt: toIso(row.next_call_at),
@@ -1599,6 +1601,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             phone,
             direct_dial,
             email,
+            location,
             topic,
             note,
             next_call_at,
@@ -1606,7 +1609,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()
           );
           `,
           [
@@ -1619,6 +1622,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.phone,
             lead.directDial || null,
             lead.email || null,
+            lead.location || null,
             lead.topic,
             lead.note || null,
             lead.nextCallAt || null,

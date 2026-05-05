@@ -459,6 +459,7 @@ const CSV_HEADER_ALIASES: Record<string, string[]> = {
   phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
   directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
   email: ["email", "mail", "e-mail"],
+  location: ["location", "ort", "stadt", "plz"],
   topic: ["topic", "thema", "bereich"],
   note: ["note", "notiz", "bemerkung", "hinweis"],
   nextCallAt: ["nextcallat", "naechsteranruf", "nachsteranruf", "naechsterrueckruf", "ruckrufzeitpunkt", "callback", "rueckruf"],
@@ -769,6 +770,7 @@ export async function importLeadsFromCsv(
     const directDial = lookup("directDial");
     const company = lookup("company");
     const contactName = lookup("contactName");
+    const location = lookup("location");
     const topic = options?.overrideTopic || lookup("topic");
 
     return {
@@ -781,6 +783,7 @@ export async function importLeadsFromCsv(
       phone: lookup("phone") || "",
       directDial: directDial || undefined,
       email: lookup("email") || undefined,
+      location: location || undefined,
       topic: normalizeTopic(topic || "Energie"),
       note: lookup("note") || undefined,
       nextCallAt: nextCallAt || undefined,

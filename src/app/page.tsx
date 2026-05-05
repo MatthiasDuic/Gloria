@@ -2159,7 +2159,7 @@ export default function HomePage() {
                         {leadsForList.map((lead) => (
                           <tr key={lead.id}>
                             <td><strong>{lead.company}</strong></td>
-                            <td style={{ fontSize: "0.9rem" }}>-</td>
+                            <td style={{ fontSize: "0.9rem" }}>{lead.location || "-"}</td>
                             <td>{lead.contactName || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
                             <td style={{ fontSize: "0.85rem", wordBreak: "break-word", maxWidth: "200px" }}>{lead.email || "-"}</td>
