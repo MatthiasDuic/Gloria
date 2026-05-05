@@ -238,7 +238,7 @@ export async function generateReply(ctx: CallContext, userText: string): Promise
   const requestBody = {
     model,
     messages,
-    temperature: 0.4,
+    temperature: 0.55,
     max_tokens: 280,
     response_format: { type: "json_object" },
   };
@@ -343,7 +343,7 @@ export async function streamReply(
   const requestBody = {
     model,
     messages,
-    temperature: 0.4,
+    temperature: 0.55,
     max_tokens: 280,
     response_format: { type: "json_object" },
     stream: true,
@@ -573,5 +573,66 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (ctx.playbookPrompt) parts.push("\n\n" + ctx.playbookPrompt);
   if (ctx.busySlotsPrompt) parts.push("\n\n" + ctx.busySlotsPrompt);
   if (ctx.freeSlotsPrompt) parts.push("\n\n" + ctx.freeSlotsPrompt);
+  const memoryBlock = buildMemoryBlock(ctx);
+  if (memoryBlock) parts.push("\n\n" + memoryBlock);
+  const styleBlock = buildStyleGuard(ctx);
+  if (styleBlock) parts.push("\n\n" + styleBlock);
   return parts.join(" ");
+}
+
+function buildMemoryBlock(ctx: CallContext): string {
+  const lines: string[] = [];
+  if (ctx.memory.concerns.length > 0) {
+    lines.push(`- Wichtige Bedenken: ${ctx.memory.concerns.slice(-3).join(" | ")}`);
+  }
+  if (ctx.memory.preferences.length > 0) {
+    lines.push(`- Präferenzen: ${ctx.memory.preferences.slice(-3).join(" | ")}`);
+  }
+  if (ctx.memory.facts.length > 0) {
+    lines.push(`- Relevante Aussagen des Anrufenden: ${ctx.memory.facts.slice(-3).join(" | ")}`);
+  }
+  if (!lines.length) return "";
+  return [
+    "GESPRÄCHS-MERKER (aus diesem Call):",
+    ...lines,
+    "Nutze diese Punkte aktiv für Anschlussfragen und Begründungen. Erfinde nichts hinzu.",
+  ].join("\n");
+}
+
+function buildStyleGuard(ctx: CallContext): string {
+  const recentStarters = ctx.transcript
+    .filter((t) => t.role === "assistant")
+    .slice(-4)
+    .map((t) => firstWords(t.text, 3))
+    .filter(Boolean);
+  const uniqueStarters = Array.from(new Set(recentStarters));
+
+  const toneInstruction =
+    ctx.memory.tone === "rushed"
+      ? "Das Gegenüber wirkt in Eile: antworte ultrakurz (1 Satz + 1 Frage), ohne Vorrede."
+      : ctx.memory.tone === "skeptical"
+        ? "Das Gegenüber wirkt skeptisch: valide Bedenken konkret, dann ein belastbarer Fakt, dann eine kurze Rückfrage."
+        : "";
+
+  const lines = [
+    "NATÜRLICHKEITS-GUARDRAIL:",
+    "- Antworte wie im echten Telefonat, nicht wie ein Skript. Variiere Satzanfänge und Rhythmus.",
+    "- Vermeide wiederkehrende Standard-Opener. Nutze nicht zweimal hintereinander denselben Einstieg.",
+  ];
+
+  if (uniqueStarters.length > 0) {
+    lines.push(`- Zuletzt verwendete Einstiege (nicht direkt wiederholen): ${uniqueStarters.join(" | ")}`);
+  }
+  if (toneInstruction) lines.push(`- ${toneInstruction}`);
+
+  return lines.join("\n");
+}
+
+function firstWords(text: string, count: number): string {
+  return text
+    .trim()
+    .split(/\s+/)
+    .slice(0, count)
+    .join(" ")
+    .toLowerCase();
 }

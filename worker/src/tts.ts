@@ -68,10 +68,10 @@ export function streamElevenLabsToMulaw(
   // hält die Stimm-Identität stabil. style=0.35 erlaubt Ausdruck ohne
   // Drama. speed=0.86 ist bewusst langsamer, damit Gloria am Telefon
   // Endsilben sauber ausgesprochen werden.
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.5);
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.35);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
-  const style = numEnv("ELEVENLABS_STYLE", 0.35);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.86);
+  const style = numEnv("ELEVENLABS_STYLE", 0.45);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.93);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {

@@ -30,6 +30,12 @@ export type CallContext = {
   // Gloria aus dieser Liste alternative Slots ziehen, ohne Doppelbelegung.
   freeSlotsPrompt?: string;
   // Conversation memory.
+  memory: {
+    facts: string[];
+    concerns: string[];
+    preferences: string[];
+    tone: "neutral" | "skeptical" | "open" | "rushed";
+  };
   transcript: Array<{
     role: "user" | "assistant";
     text: string;
@@ -48,6 +54,12 @@ export type CallContext = {
 
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {
   return {
+    memory: {
+      facts: [],
+      concerns: [],
+      preferences: [],
+      tone: "neutral",
+    },
     transcript: [],
     speaking: false,
     userBytesWhileSpeaking: 0,

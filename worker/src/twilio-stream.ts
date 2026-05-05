@@ -260,11 +260,13 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     if (pendingTurn) {
       // Still working on the previous turn — append to transcript only.
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      updateConversationMemory(ctx, userText);
       return;
     }
     pendingTurn = true;
     try {
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      updateConversationMemory(ctx, userText);
       ctx.lastUserFinalAt = Date.now();
       log.info("turn.user_said", { callSid: ctx.callSid, text: userText });
 
@@ -466,6 +468,54 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
   ws.on("error", (error) => {
     log.error("ws.error", { error: error.message, callSid: ctx?.callSid });
   });
+}
+
+function updateConversationMemory(ctx: CallContext, userText: string): void {
+  const text = userText.trim();
+  if (!text) return;
+  const lower = text.toLowerCase();
+
+  if (/keine\s+zeit|jetzt\s+schlecht|im\s+termin|unterwegs|sp[aä]ter|später/.test(lower)) {
+    ctx.memory.tone = "rushed";
+    pushUnique(ctx.memory.preferences, "zeitlich knapp, kurz und konkret antworten", 6);
+  } else if (/kein\s+interesse|brauche\s+ich\s+nicht|lassen\s+sie\s+mich\s+in\s+ruhe|rufen\s+sie\s+nicht/.test(lower)) {
+    ctx.memory.tone = "skeptical";
+    pushUnique(ctx.memory.concerns, "grundsätzliche Ablehnung oder Abwehr", 8);
+  } else if (/klingt\s+gut|passt|gerne|interessant|machen\s+wir/.test(lower)) {
+    ctx.memory.tone = "open";
+  }
+
+  if (/beitrag|kosten|teuer|steiger|erh[öo]h/.test(lower)) {
+    pushUnique(ctx.memory.concerns, "Sorge um steigende Beiträge/Kosten", 8);
+  }
+  if (/keine\s+glaskugel|unsicher|unklar|weiß\s+nicht|weiss\s+nicht/.test(lower)) {
+    pushUnique(ctx.memory.concerns, "Unsicherheit über die zukünftige Entwicklung", 8);
+  }
+  if (/vormittag|nachmittag|fr[üu]h|sp[aä]t/.test(lower)) {
+    pushUnique(ctx.memory.preferences, `Terminpräferenz erwähnt: ${text}`, 6);
+  }
+  if (/mail|e-?mail/.test(lower)) {
+    pushUnique(ctx.memory.preferences, "möchte Infos per E-Mail bzw. fragt nach Mail-Bestätigung", 6);
+  }
+
+  if (text.length >= 16 && /(wir|ich|bei uns|unsere|mein|mich|mir)/i.test(text)) {
+    pushUnique(ctx.memory.facts, text.replace(/\s+/g, " "), 10);
+  }
+}
+
+function pushUnique(target: string[], value: string, max: number): void {
+  if (!value) return;
+  const key = normalize(value);
+  const exists = target.some((item) => normalize(item) === key);
+  if (!exists) target.push(value);
+  if (target.length > max) target.splice(0, target.length - max);
+}
+
+function normalize(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der
