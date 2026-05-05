@@ -41,6 +41,55 @@ function formatDate(value?: string) {
   }).format(new Date(value));
 }
 
+function normalizeComparableText(value?: string) {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizePhoneDigits(value?: string) {
+  return (value || "").replace(/\D+/g, "");
+}
+
+function phoneLooksEqual(a?: string, b?: string) {
+  const left = normalizePhoneDigits(a);
+  const right = normalizePhoneDigits(b);
+  if (!left || !right) {
+    return false;
+  }
+  if (left === right) {
+    return true;
+  }
+  const shortLeft = left.length > 8 ? left.slice(-8) : left;
+  const shortRight = right.length > 8 ? right.slice(-8) : right;
+  return shortLeft === shortRight;
+}
+
+function reportMatchesLead(
+  report: DashboardData["reports"][number],
+  lead: DashboardData["leads"][number],
+) {
+  if (report.leadId && report.leadId === lead.id) {
+    return true;
+  }
+
+  const companyMatch =
+    normalizeComparableText(report.company) === normalizeComparableText(lead.company);
+  if (!companyMatch) {
+    return false;
+  }
+
+  const contactMatch =
+    normalizeComparableText(report.contactName) ===
+    normalizeComparableText(lead.contactName);
+  const phoneMatch = phoneLooksEqual(report.directDial, lead.directDial)
+    || phoneLooksEqual(report.directDial, lead.phone);
+
+  return contactMatch || phoneMatch || report.topic === lead.topic;
+}
+
 function toDateKey(value: Date) {
   // Lokales Datum (nicht UTC), damit Kalenderzellen und Termine auf demselben
   // Tag landen. toISOString() würde 2026-05-13T22:00:00 lokal als 2026-05-13
@@ -573,6 +622,7 @@ export default function HomePage() {
   const [newTopicInput, setNewTopicInput] = useState("");
   const [showNewTopicForm, setShowNewTopicForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
+  const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<DashboardData["leads"][number] | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -781,6 +831,19 @@ export default function HomePage() {
     () => appointmentsByDay.get(selectedDayKey) || [],
     [appointmentsByDay, selectedDayKey],
   );
+  const selectedLeadReports = useMemo(() => {
+    if (!selectedLeadForHistory) {
+      return [] as DashboardData["reports"];
+    }
+
+    return [...data.reports]
+      .filter((report) => reportMatchesLead(report, selectedLeadForHistory))
+      .sort((a, b) => {
+        const aTime = Date.parse(a.conversationDate || "") || 0;
+        const bTime = Date.parse(b.conversationDate || "") || 0;
+        return bTime - aTime;
+      });
+  }, [data.reports, selectedLeadForHistory]);
 
   async function loadDashboard() {
     const [dashboardResponse, learningResponse] = await Promise.all([
@@ -2158,7 +2221,15 @@ export default function HomePage() {
                       <tbody>
                         {leadsForList.map((lead) => (
                           <tr key={lead.id}>
-                            <td><strong>{lead.company}</strong></td>
+                            <td>
+                              <button
+                                className="link-button"
+                                onClick={() => setSelectedLeadForHistory(lead)}
+                                title="Auftragshistorie anzeigen"
+                              >
+                                <strong>{lead.company}</strong>
+                              </button>
+                            </td>
                             <td style={{ fontSize: "0.9rem" }}>{lead.location || "-"}</td>
                             <td>{lead.contactName || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
@@ -2904,6 +2975,122 @@ export default function HomePage() {
 
         </div>
       </main>
+
+      {selectedLeadForHistory && (() => {
+        const latestReport = selectedLeadReports[0];
+        const hasAppointment = selectedLeadReports.some((report) => report.outcome === "Termin");
+        const hasRejection = selectedLeadReports.some((report) => report.outcome === "Absage");
+        const hasCallback = selectedLeadReports.some((report) => report.outcome === "Wiedervorlage");
+        const callbackCount = selectedLeadReports.filter((report) => report.outcome === "Wiedervorlage").length;
+        const callCount = selectedLeadReports.length;
+        const upcomingDate = selectedLeadForHistory.nextCallAt || latestReport?.nextCallAt;
+        const statusHeadline = hasAppointment
+          ? "Termin vereinbart"
+          : hasRejection
+            ? "Absage erhalten"
+            : hasCallback
+              ? "Wiedervorlage aktiv"
+              : selectedLeadForHistory.status === "angerufen"
+                ? "In Bearbeitung"
+                : selectedLeadForHistory.status === "wiedervorlage"
+                  ? "Wiedervorlage aktiv"
+                  : selectedLeadForHistory.status === "absage"
+                    ? "Absage"
+                    : selectedLeadForHistory.status === "termin"
+                      ? "Termin"
+                      : "Offen";
+
+        return (
+          <div className="modal-overlay" onClick={() => setSelectedLeadForHistory(null)}>
+            <div className="modal lead-history-modal" onClick={(event) => event.stopPropagation()}>
+              <button className="modal-close" onClick={() => setSelectedLeadForHistory(null)}>✕</button>
+              <h2>Auftragshistorie: {selectedLeadForHistory.company}</h2>
+              <p className="subtle" style={{ marginTop: 6 }}>
+                Ansprechpartner: {selectedLeadForHistory.contactName || "-"} · Thema: {selectedLeadForHistory.topic}
+              </p>
+
+              <div className="lead-status-grid top-gap">
+                <div className="mini-panel">
+                  <label className="lead-kicker">Aktueller Stand</label>
+                  <h3 style={{ marginTop: 4 }}>{statusHeadline}</h3>
+                  <p className="subtle" style={{ marginTop: 6 }}>
+                    Letzter Kontakt: {latestReport ? formatDate(latestReport.conversationDate) : "Noch kein Anruf protokolliert"}
+                  </p>
+                  <p className="subtle" style={{ marginTop: 6 }}>
+                    Nächster geplanter Anruf: {formatDate(upcomingDate)}
+                  </p>
+                </div>
+                <div className="mini-panel">
+                  <label className="lead-kicker">Auftragskennzahlen</label>
+                  <div className="lead-status-pills top-gap">
+                    <span className="status-pill">Anrufversuche: {selectedLeadForHistory.attempts}</span>
+                    <span className="status-pill">Reports: {callCount}</span>
+                    <span className="status-pill">Wiedervorlagen: {callbackCount}</span>
+                    <span className={`status-pill ${hasAppointment ? "ok" : ""}`}>Termin: {hasAppointment ? "Ja" : "Nein"}</span>
+                    <span className={`status-pill ${hasRejection ? "danger" : ""}`}>Absage: {hasRejection ? "Ja" : "Nein"}</span>
+                    <span className={`status-pill ${hasCallback ? "warn" : ""}`}>Wiedervorlage offen: {hasCallback ? "Ja" : "Nein"}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="report-detail-grid top-gap">
+                <div className="report-detail-field">
+                  <label>Lead-Status</label>
+                  <p>{selectedLeadForHistory.status}</p>
+                </div>
+                <div className="report-detail-field">
+                  <label>Telefon</label>
+                  <p>{selectedLeadForHistory.phone || selectedLeadForHistory.directDial || "-"}</p>
+                </div>
+                <div className="report-detail-field">
+                  <label>E-Mail</label>
+                  <p>{selectedLeadForHistory.email || "-"}</p>
+                </div>
+                <div className="report-detail-field">
+                  <label>Ort</label>
+                  <p>{selectedLeadForHistory.location || "-"}</p>
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <label>Notiz</label>
+                  <p>{selectedLeadForHistory.note || "-"}</p>
+                </div>
+              </div>
+
+              <div className="report-detail-field report-detail-full top-gap">
+                <label>Anrufhistorie</label>
+                {selectedLeadReports.length > 0 ? (
+                  <div className="lead-history-list">
+                    {selectedLeadReports.map((report) => (
+                      <div key={report.id} className="lead-history-item">
+                        <div className="row spread" style={{ alignItems: "flex-start" }}>
+                          <div>
+                            <strong>{formatDate(report.conversationDate)}</strong>
+                            <p className="subtle" style={{ margin: "4px 0 0" }}>
+                              Ergebnis: {report.outcome}
+                              {report.appointmentAt ? ` · Termin: ${formatDate(report.appointmentAt)}` : ""}
+                              {report.nextCallAt ? ` · Nächster Anruf: ${formatDate(report.nextCallAt)}` : ""}
+                            </p>
+                          </div>
+                          <button className="btn ghost" onClick={() => setSelectedReport(report)}>
+                            Vollen Report öffnen
+                          </button>
+                        </div>
+                        {report.summary ? (
+                          <p className="lead-history-summary">{report.summary.slice(0, 320)}{report.summary.length > 320 ? " ..." : ""}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="subtle" style={{ marginTop: 8 }}>
+                    Für diese Firma liegen noch keine Gesprächsreports vor. Der Auftrag ist aktuell im Lead-Status sichtbar und wird bei neuen Anrufen hier automatisch ergänzt.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {selectedReport && (() => {
         const conversationLines = buildConversationLines(selectedReport.summary || "");
