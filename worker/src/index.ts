@@ -3,7 +3,13 @@ import { WebSocketServer } from "ws";
 import { handleTwilioStream } from "./twilio-stream.js";
 import { log } from "./log.js";
 
-// Trigger redeploy with updated env vars
+// IMPORTANT: The following env vars MUST be set in Render dashboard:
+// - APP_INTERNAL_TOKEN
+// - STREAM_SHARED_SECRET
+// - DEEPGRAM_MODEL (set to flux-general-multi)
+// - DEEPGRAM_LANGUAGE (set to de)
+// Otherwise, worker will not authenticate with Vercel APIs
+
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
 const server = http.createServer((req, res) => {

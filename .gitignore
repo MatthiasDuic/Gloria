@@ -4,6 +4,7 @@ out
 .venv
 .env
 .env.local
+.env.production
 coverage
 .vercel
 .env*.local
