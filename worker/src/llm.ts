@@ -528,7 +528,8 @@ function buildSystemPrompt(ctx: CallContext): string {
   const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
   const ownerDative = /^Herr(n|n\b|n\s)/i.test(owner) ? owner : `Herrn ${owner}`;
-  const parts = [buildBasePrompt(company, owner, ownerDative)];
+  const parts = [buildLeanCorePrompt(company, owner, ownerDative)];
+  parts.push(buildPhasePrompt(ctx, owner, ownerDative));
   const today = new Date();
   const todayStr = today.toLocaleDateString("de-DE", {
     weekday: "long",
@@ -578,6 +579,141 @@ function buildSystemPrompt(ctx: CallContext): string {
   const styleBlock = buildStyleGuard(ctx);
   if (styleBlock) parts.push("\n\n" + styleBlock);
   return parts.join(" ");
+}
+
+function buildLeanCorePrompt(company: string, owner: string, ownerDative: string): string {
+  return [
+    `Du bist Gloria, die digitale Vertriebsassistentin von ${company}. Du rufst im Auftrag von ${owner} an.`,
+    "Sprich ausschließlich Deutsch, natürlich, freundlich, souverän und auf Augenhöhe.",
+    "Klinge wie ein echter Mensch am Telefon: kurz, klar, ohne Floskelschleifen.",
+    "Antwortformat pro Turn: maximal 2 kurze Sätze und höchstens 1 Frage.",
+    "Niemals Monologe. Ein Gedanke pro Turn.",
+    "Wenn das Gegenüber fachlich fragt: zuerst konkreter Fakt aus dem Playbook, dann optional kurze Veranschaulichung.",
+    "Wenn Fakten fehlen: ehrlich sagen, dass Details im Termin geklärt werden.",
+    "Bei klarer Ablehnung: höflich beenden.",
+    "Gatekeeper-Start: Zu Beginn standardmäßig Empfang/Gatekeeper annehmen und um Weiterleitung zum Zielkontakt bitten.",
+    "Wenn sich die Zielperson klar als zuständig meldet (z. B. ich bin dran/am Apparat/das bin ich): in Entscheider-Dialog wechseln.",
+    "Niemals den Zielkontakt als Auftraggeber nennen.",
+    "Keine Geschlechtsannahmen nur aus Nachnamen.",
+    "DSGVO: Aufzeichnungsfrage nur einmal pro Gespräch; bei Nein normal weiterführen, nur ohne Mitschnitt.",
+    "Termine nur Montag bis Freitag, Startzeiten zwischen 09:00 und 19:00.",
+    "In Schlusszusammenfassung den bestätigten Termin wortgleich wiederholen, ohne Neu-Berechnung.",
+    `Konzeptfrage für den Übergang nutzen: "Wäre es für Sie passend, wenn ${ownerDative} Ihnen das in einem kurzen, unverbindlichen Gespräch zeigt?"`,
+  ].join("\n");
+}
+
+function buildPhasePrompt(ctx: CallContext, owner: string, ownerDative: string): string {
+  const phase = inferConversationPhase(ctx);
+  const topic = (ctx.topic || "").toLowerCase();
+
+  if (phase === 1) {
+    return [
+      "AKTUELLE PHASE 1 (Eröffnung):",
+      "- Stelle dich kurz vor und nenne den Auftraggeber.",
+      "- Halte die Eröffnung knapp und natürlich.",
+      "- Wenn Gatekeeper, bitte direkt um Weiterleitung zur Zielperson.",
+    ].join("\n");
+  }
+
+  if (phase === 2) {
+    return [
+      "AKTUELLE PHASE 2 (Einwilligung):",
+      "- Nach kurzer Anlass-Nennung sofort die Aufzeichnungsfrage stellen.",
+      "- Nur stellen, wenn sie noch nicht beantwortet wurde.",
+      "- Keine inhaltliche Discovery vor der Einwilligungsfrage.",
+    ].join("\n");
+  }
+
+  if (phase === 4) {
+    const pkvHint = /pkv|kranken/.test(topic)
+      ? "- PKV-Discovery: zuerst Entwicklung der Beiträge erkunden, dann Zukunftseinschätzung, dann Relevanz im Ruhestand."
+      : "- Stelle 2 bis 4 aufeinander aufbauende Fragen, bevor du in Lösung oder Termin wechselst.";
+    return [
+      "AKTUELLE PHASE 4 (Discovery):",
+      "- Fokus auf echtes Zuhören und Nachfragen, kein Pitch.",
+      "- Greife ein konkretes Wort aus der letzten Antwort auf.",
+      "- Eine Frage pro Turn.",
+      pkvHint,
+    ].join("\n");
+  }
+
+  if (phase === 5) {
+    return [
+      "AKTUELLE PHASE 5 (Problem-Aufbau):",
+      "- Nenne genau einen passenden Fachpunkt aus dem Playbook.",
+      "- Bei Zahlen-Thema mindestens einen konkreten Zahlenanker nennen.",
+      "- Danach kurze Wirkungsfrage stellen.",
+    ].join("\n");
+  }
+
+  if (phase === 6) {
+    return [
+      "AKTUELLE PHASE 6 (Konzept-Übergang):",
+      "- Keine lange Erklärung, nur kurze Brücke.",
+      `- Termin-Nutzenfrage stellen mit Bezug auf ${ownerDative}.`,
+    ].join("\n");
+  }
+
+  if (phase === 7) {
+    return [
+      "AKTUELLE PHASE 7 (Termin):",
+      "- Zuerst Tageszeitpräferenz erfragen (Vormittag/Nachmittag).",
+      "- Danach genau zwei konkrete Slots anbieten.",
+      "- Wenn Vorschläge nicht passen: direkt nach Wunschtermin fragen.",
+      "- Wenn kein Kalender verfügbar: Rückrufzeitpunkt + Direktnummer klären.",
+    ].join("\n");
+  }
+
+  if (phase === 8) {
+    return [
+      "AKTUELLE PHASE 8 (Basisdaten):",
+      "- Nur starten, wenn Termin eindeutig bestätigt ist.",
+      "- Genau eine Frage pro Turn, ohne Vorfloskel.",
+      "- Bei Ja zu Gesundheitsfragen einmal kurz konkret nachfragen.",
+      "- Bei Zeitnot sofort respektvoll zu Phase 10 überleiten.",
+    ].join("\n");
+  }
+
+  if (phase >= 10) {
+    return [
+      "AKTUELLE PHASE 10/11 (Abschluss):",
+      "- Termin in einem Satz klar zusammenfassen.",
+      "- E-Mail zur Bestätigung erfragen und Adresse verifizieren.",
+      "- Danach offene Fragen klären und sauber verabschieden.",
+    ].join("\n");
+  }
+
+  return [
+    "AKTUELLE PHASE 3 (Themen-Anker):",
+    "- Anlass in einem klaren Satz benennen.",
+    "- Gesprächskonsens für wenige Minuten einholen.",
+  ].join("\n");
+}
+
+function inferConversationPhase(ctx: CallContext): number {
+  const turns = ctx.transcript;
+  if (!turns.length) return 1;
+
+  const all = turns.map((t) => t.text.toLowerCase()).join(" \n ");
+  const hasConsentQuestion = /aufzeichn/.test(all);
+  const hasConsentAnswer = /\b(ja|nein|einverstanden|ok|okay|in ordnung)\b/.test(all);
+  const hasTermHint = /\b(termin|vormittag|nachmittag|uhr|montag|dienstag|mittwoch|donnerstag|freitag)\b/.test(all);
+  const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
+  const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
+  const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|e-?mail-adresse|h[aä]tte?n? sie sonst noch eine frage/.test(all);
+
+  if (!hasConsentQuestion) return 2;
+  if (!hasConsentAnswer) return 2;
+  if (!hasTermHint) return 4;
+  if (hasTermHint && !hasConfirmedSlot) return 7;
+  if (hasConfirmedSlot && !hasDataCollection) return 8;
+  if (hasSummary) return 10;
+
+  // Zwischen Discovery und Termin-Aufbau: abhängig von Gesprächstiefe.
+  const userTurns = turns.filter((t) => t.role === "user").length;
+  if (userTurns <= 3) return 4;
+  if (userTurns <= 5) return 5;
+  return 6;
 }
 
 function buildMemoryBlock(ctx: CallContext): string {
