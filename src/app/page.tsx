@@ -520,6 +520,7 @@ export default function HomePage() {
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importListName, setImportListName] = useState("");
+  const [importTopic, setImportTopic] = useState<Topic | "">(TOPICS[0]);
   const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
@@ -942,6 +943,9 @@ export default function HomePage() {
       const formData = new FormData();
       formData.set("file", importFile);
       formData.set("listName", importListName.trim() || importFile.name.replace(/\.[^.]+$/, ""));
+      if (importTopic && importTopic !== "") {
+        formData.set("topic", importTopic);
+      }
 
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 45_000);
@@ -2083,6 +2087,15 @@ export default function HomePage() {
             onChange={(event) => setImportListName(event.target.value)}
             placeholder="z. B. April-Kampagne Industrie"
           />
+          <label>Thema (optional, überschreibt Wert aus Datei)</label>
+          <select value={importTopic} onChange={(event) => setImportTopic((event.target.value as Topic) || "")}>
+            <option value="">-- Thema aus Datei verwenden --</option>
+            {TOPICS.map((topic) => (
+              <option key={topic} value={topic}>
+                {topic}
+              </option>
+            ))}
+          </select>
           <label>Datei hochladen (CSV / XLSX / XLS)</label>
           <input
             type="file"
@@ -2092,12 +2105,6 @@ export default function HomePage() {
           <div className="row top-gap">
             <button className="btn" onClick={() => void handleFileImport()} disabled={busy || !importFile}>Datei importieren</button>
             {importFile ? <span className="subtle">Ausgewählt: {importFile.name}</span> : null}
-          </div>
-          <p className="subtle top-gap">Optional: CSV-Inhalt manuell einfügen.</p>
-          <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} />
-          <div className="row top-gap">
-            <button className="btn" onClick={() => void handleCsvImport()} disabled={busy}>CSV-Text importieren</button>
-            <button className="btn ghost" onClick={downloadSampleCsv}>Muster-CSV herunterladen</button>
           </div>
         </CollapsiblePanel>
 
@@ -2146,16 +2153,18 @@ export default function HomePage() {
 
                     <table className="top-gap">
                       <thead>
-                        <tr><th>Firma</th><th>Ansprechpartner</th><th>Thema</th><th>Status</th><th>Nächster Anruf</th></tr>
+                        <tr><th>Firma</th><th>Ort</th><th>Ansprechpartner</th><th>Telefon</th><th>Email</th><th>Thema</th><th>Status</th></tr>
                       </thead>
                       <tbody>
                         {leadsForList.map((lead) => (
                           <tr key={lead.id}>
                             <td><strong>{lead.company}</strong></td>
+                            <td style={{ fontSize: "0.9rem" }}>-</td>
                             <td>{lead.contactName || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
+                            <td style={{ fontSize: "0.85rem", wordBreak: "break-word", maxWidth: "200px" }}>{lead.email || "-"}</td>
                             <td>{lead.topic}</td>
                             <td>{lead.status}</td>
-                            <td>{formatDate(lead.nextCallAt)}</td>
                           </tr>
                         ))}
                       </tbody>

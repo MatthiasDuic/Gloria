@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       const file = form.get("file");
       const requestedListName = String(form.get("listName") || "").trim();
       const requestedListId = String(form.get("listId") || "").trim();
+      const requestedTopic = String(form.get("topic") || "").trim();
 
       if (!isUploadFileLike(file)) {
         return NextResponse.json(
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
         listId: requestedListId || undefined,
         listName: inferredListName || undefined,
         userId: sessionUser.id,
+        overrideTopic: requestedTopic || undefined,
       });
       return NextResponse.json(result);
     }

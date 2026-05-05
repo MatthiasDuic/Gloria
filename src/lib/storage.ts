@@ -741,7 +741,7 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
 
 export async function importLeadsFromCsv(
   csvText: string,
-  options?: { listId?: string; listName?: string; userId?: string },
+  options?: { listId?: string; listName?: string; userId?: string; overrideTopic?: string },
 ) {
   const existing = await readLeads(options?.userId);
   const listId = options?.listId || `list-${Date.now()}`;
@@ -769,7 +769,7 @@ export async function importLeadsFromCsv(
     const directDial = lookup("directDial");
     const company = lookup("company");
     const contactName = lookup("contactName");
-    const topic = lookup("topic");
+    const topic = options?.overrideTopic || lookup("topic");
 
     return {
       id: createLeadId(index),
