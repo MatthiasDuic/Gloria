@@ -571,12 +571,13 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
     topicLine = `Es geht um ein Thema, bei dem ${owner} Ihnen eine kurze, fundierte Einordnung geben möchte.`;
   }
 
+  // Kurze, natürliche Begrüßung — NUR Vorstellung + Anlasssatz.
+  // Aufzeichnungsfrage bewusst NICHT im Fast-Path: LLM formuliert sie
+  // im nächsten Turn frei, ohne "bitte antworten Sie mit JA oder NEIN".
   return [
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
-    `Ich rufe im Auftrag von ${owner} an.`,
+    `Ich rufe im Auftrag von ${owner} an —`,
     topicLine,
-    `Bevor ich Ihnen mehr dazu sage: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?`,
-    `Bitte antworten Sie mit einem klaren JA oder NEIN.`,
   ].join(" ");
 }
 
@@ -620,7 +621,8 @@ function extractConfirmedSlot(text: string): string | null {
     /\bperfekt\b[^.?!]*\btermin\b/.test(lower);
   if (!isConfirmation) return null;
 
-  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+[a-zäöüß]+\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
+  // Uhrzeiten kommen als Wörter ODER als Ziffern ("10:30 Uhr" / "zehn Uhr dreißig").
+  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+[a-zäöüß]+)?)/i;
   const m = re.exec(text);
   if (!m) return null;
   return m[1].trim().replace(/\s+/g, " ");
