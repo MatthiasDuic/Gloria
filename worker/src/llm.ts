@@ -8,6 +8,7 @@ import { log } from "./log.js";
 export type TurnOutput = {
   reply: string;
   hangup: boolean;
+  transfer: boolean;
 };
 
 /**
@@ -181,9 +182,11 @@ export async function streamReply(
     if ((phase as string) !== "before") flushSentence();
 
     let hangup = false;
+    let transfer = false;
     try {
-      const parsed = JSON.parse(assembled) as { hangup?: boolean; reply?: string };
+      const parsed = JSON.parse(assembled) as { hangup?: boolean; transfer?: boolean; reply?: string };
       hangup = Boolean(parsed.hangup);
+      transfer = Boolean(parsed.transfer);
       if (parsed.reply && !replyText) replyText = parsed.reply;
     } catch {
       /* fallback: replyText was scanner-extracted, hangup defaults to false */
@@ -193,7 +196,7 @@ export async function streamReply(
     if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(reply)) {
       reply = stripConsentQuestion(reply);
     }
-    return { reply, hangup };
+    return { reply, hangup, transfer };
   } catch (error) {
     log.error("llm.stream_failed", {
       error: error instanceof Error ? error.message : String(error),
@@ -201,6 +204,7 @@ export async function streamReply(
     return {
       reply: replyText.trim() || "Einen Moment bitte, ich habe Sie kurz nicht verstanden.",
       hangup: false,
+      transfer: false,
     };
   } finally {
     clearTimeout(timeout);
@@ -292,8 +296,9 @@ function buildSystemPrompt(ctx: CallContext): string {
   const styleBlock = buildStyleGuard(ctx);
   if (styleBlock) parts.push("\n\n" + styleBlock);
   parts.push(
-    `\n\nANTWORTFORMAT: Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false}. ` +
-    `Setze hangup=true nur wenn der Anrufende ein klares Nein signalisiert oder das Gespräch sauber beendet wurde.`,
+    `\n\nANTWORTFORMAT: Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false, "transfer": false}. ` +
+    `Setze hangup=true nur wenn der Anrufende ein klares Nein signalisiert oder das Gespräch sauber beendet wurde. ` +
+    `Setze transfer=true (und hangup=false) wenn du den Anrufenden an Frau Brost weiterleitest — NUR wenn er das ausdrücklich wünscht.`,
   );
   return parts.join("\n");
 }
@@ -410,6 +415,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
     `- Bei klarer Ablehnung: einmal ruhig, respektvoll kontern. Beim zweiten Nein: würdevoll beenden.`,
     `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
+    `- WEITERLEITUNG ZU FRAU BROST: Wenn der Anrufende ausdrücklich mit einem Menschen sprechen möchte, sagst du: "Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen." Dann transfer=true setzen. Biete die Weiterleitung NICHT ungefragt an — nur wenn der Kunde danach fragt oder explizit ablehnt, mit einer KI zu sprechen.`,
   );
   if (ctx.confirmedSlotPhrase) {
     lines.push(`- EINGEFROREN: "${ctx.confirmedSlotPhrase}" — nur diese Terminphrase verwenden.`);

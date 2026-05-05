@@ -154,8 +154,8 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
    * Echo-Suppression, Transcript, Slot-Lock), aber als ein Vorgang über
    * mehrere Segmente.
    */
-  const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean }> => {
-    if (!ctx) return { reply: "", hangup: false };
+  const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
+    if (!ctx) return { reply: "", hangup: false, transfer: false };
 
     // Vorherige TTS abbrechen (Barge-in-Sicherheit zwischen Turns).
     if (currentTts) {
@@ -300,7 +300,28 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
       const reply = await streamAndSpeak(userText);
 
-      if (reply.hangup) {
+      if (reply.transfer) {
+        log.info("turn.transfer", { callSid: ctx.callSid });
+        // Signal Vercel to redirect the live call to Jutta Brost via Twilio REST API.
+        const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+        const token = process.env.APP_INTERNAL_TOKEN || "";
+        if (baseUrl && token) {
+          try {
+            await fetch(`${baseUrl}/api/twilio/transfer`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ callSid: ctx.callSid }),
+            });
+          } catch (err) {
+            log.error("turn.transfer_notify_failed", { callSid: ctx.callSid, error: String(err) });
+          }
+        }
+        try {
+          ws.close(1000, "transfer");
+        } catch {
+          /* ignore */
+        }
+      } else if (reply.hangup) {
         log.info("turn.hangup", { callSid: ctx.callSid });
         try {
           ws.close(1000, "hangup");

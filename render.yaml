@@ -25,7 +25,7 @@ services:
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: DEEPGRAM_MODEL
-        value: flux-general-multi
+        value: nova-3
       - key: DEEPGRAM_LANGUAGE
         value: de
       - key: DEEPGRAM_KEYTERMS
@@ -40,3 +40,5 @@ services:
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN
         value: b1430199e0c004272791ddb04c35fe2327dab2e663f4c273a9fdadd190e961ae
+      - key: TRANSFER_PHONE
+        value: "+491715358989"

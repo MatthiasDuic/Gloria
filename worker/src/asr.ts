@@ -21,7 +21,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const model = process.env.DEEPGRAM_MODEL || "nova-2";
+  const model = process.env.DEEPGRAM_MODEL || "nova-3";
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
   const isFlux = model.startsWith("flux");
 
