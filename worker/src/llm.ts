@@ -373,8 +373,11 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   } else if (phase >= 11) {
     lines.push(
-      `E-Mail ist abgehakt. Jetzt die Zusammenfassung: Termin (Datum/Uhrzeit), Gesprächspartner, Thema — alles in 1–2 Sätzen.`,
-      `Dann herzlich verabschieden ("Auf Wiederhören", "Schönen Tag noch" o.ä.).`,
+      `E-Mail ist abgehakt. Jetzt die detaillierte Abschluss-Zusammenfassung in 3–4 Sätzen:`,
+      `(1) Termin: Datum, Uhrzeit, Gesprächspartner — mit der eingefrorenen Slot-Phrase, Wort für Wort.`,
+      `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, realistische Beitragsprognose, konkrete Stellschrauben — alles auf Basis seiner eigenen Zahlen.`,
+      `(3) Hinweis auf Terminbestätigung per E-Mail.`,
+      `(4) Herzliche Verabschiedung ("Ich freue mich auf das Gespräch. Auf Wiederhören!" o.ä.).`,
       `hangup=true ERST wenn du die Verabschiedung in DIESER Antwort sagst — nicht vorher.`,
     );
   }
@@ -383,7 +386,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   lines.push(
     ``,
     `WAS IMMER GILT:`,
-    `- Maximal 2 kurze Sätze pro Antwort, höchstens 1 Frage. Kein Monolog.`,
+    `- Maximal 2 kurze Sätze pro Antwort, höchstens 1 Frage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen.`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
