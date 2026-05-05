@@ -348,12 +348,35 @@ function parseSlotPhraseToIso(phrase: string): string | undefined {
 
   const now = new Date();
   let year = now.getFullYear();
+
+  // Berechne den korrekten UTC-Offset für Europe/Berlin dynamisch.
+  // Sommerzeit (MESZ) = UTC+2, Winterzeit (MEZ) = UTC+1 — nie hardcoden.
+  function getBerlinOffsetHours(date: Date): number {
+    // Intl.DateTimeFormat gibt localtime zurück; via Differenz zum UTC-Wert
+    // ermitteln wir den Offset in vollen Stunden.
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Berlin",
+      hour: "numeric",
+      hour12: false,
+    });
+    const localHour = parseInt(formatter.format(date), 10);
+    const utcHour = date.getUTCHours();
+    let offset = localHour - utcHour;
+    // Sprung über Mitternacht ausgleichen
+    if (offset < -12) offset += 24;
+    if (offset > 12) offset -= 24;
+    return offset;
+  }
+
+  // Vorläufiges UTC-Datum ohne Offset-Korrektur, um Sommer-/Winterzeit zu erkennen.
+  const probeDate = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const offsetHours = getBerlinOffsetHours(probeDate);
+
   // Wenn das Datum in der Vergangenheit läge, nimm nächstes Jahr.
-  const candidate = new Date(Date.UTC(year, month - 1, day, hour - 2, minute));
+  const candidate = new Date(Date.UTC(year, month - 1, day, hour - offsetHours, minute));
   if (candidate.getTime() < now.getTime() - 86400000) {
     year += 1;
   }
-  // Berlin-TZ: Sommerzeit MESZ = UTC+2 (April–Oktober). Vereinfacht: subtrahiere 2h.
-  const iso = new Date(Date.UTC(year, month - 1, day, hour - 2, minute)).toISOString();
+  const iso = new Date(Date.UTC(year, month - 1, day, hour - offsetHours, minute)).toISOString();
   return iso;
 }

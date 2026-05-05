@@ -42,7 +42,10 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  // gpt-4.1: deutlich bessere Gesprächsqualität als mini bei ~3x höheren Token-Kosten.
+  // Für Telefonvertrieb ist Qualität wichtiger als Kosten-Optimierung.
+  // Override via OPENAI_MODEL env (z. B. gpt-4.1-mini für Tests).
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
@@ -394,7 +397,21 @@ function inferConversationPhase(ctx: CallContext): number {
   const all = turns.map((t) => t.text.toLowerCase()).join(" \n ");
   const hasConsentQuestion = /aufzeichn/.test(all);
   const hasConsentAnswer = /\b(ja|nein|einverstanden|ok|okay|in ordnung)\b/.test(all);
-  const hasTermHint = /\b(termin|vormittag|nachmittag|uhr|montag|dienstag|mittwoch|donnerstag|freitag)\b/.test(all);
+
+  // Termin-Hinweis: Mehrere Signale nötig, damit ein einzelnes Schlüsselwort
+  // (z. B. "Montag" in einem anderen Kontext) keinen Phase-Sprung auslöst.
+  // Mindestens ZWEI der folgenden Signale müssen zusammen auftreten:
+  //   (a) Tageszeit-Präferenz: "Vormittag" / "Nachmittag"
+  //   (b) konkrete Uhrzeit mit "Uhr"
+  //   (c) Wochentag + "Uhr" in unmittelbarer Nähe (Kontextfenster 5 Wörter)
+  //   (d) direkte Terminanfrage von Gloria ("wann passt", "welcher Tag", "wie wäre")
+  const hasTimePreference = /\b(vormittag|nachmittag)\b/.test(all);
+  const hasClockTime = /\b\d{1,2}\s*uhr|\buhr\s+\w+\b/.test(all);
+  const hasWeekdayWithTime = /\b(montag|dienstag|mittwoch|donnerstag|freitag)\b.{0,40}\buhr\b/.test(all);
+  const hasAppointmentRequest = /\b(wann passt|welcher tag|wie w[äa]re|haben sie [a-z]+ zeit|schreiben sie|kann ich ihnen|soll ich ihnen)\b/.test(all);
+  const termSignals = [hasTimePreference, hasClockTime, hasWeekdayWithTime, hasAppointmentRequest].filter(Boolean).length;
+  const hasTermHint = termSignals >= 2;
+
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
   const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
   const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|e-?mail-adresse|h[aä]tte?n? sie sonst noch eine frage/.test(all);

@@ -21,7 +21,12 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const model = process.env.DEEPGRAM_MODEL || "nova-2-general";
+  // nova-3: neuestes Deepgram-Modell (2024), beste Deutsche Erkennung, 54% weniger
+  // Word-Error-Rate als Vorgänger. Drop-in-Replacement für nova-2-general.
+  // Für Voice-Agent-Anwendungen: nova-3 (bestes Allgemein-Modell für Deutsch).
+  // Deepgram Flux (turn-detection) wäre noch besser für Voice Agents, erfordert
+  // aber Architekturumbau (anderer WebSocket-Protokoll).
+  const model = process.env.DEEPGRAM_MODEL || "nova-3";
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   // Endpointing-Pause, nach der Deepgram als "Satzende" interpretiert.
@@ -80,11 +85,9 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     "Gastarif:1.5",
     "Kilowattstunde:1.5",
     "Gloria:3",
-    // "Duic" wird oft falsch erkannt ("Bridge", "Duik", "Duich") → deutlich höherer
-    // Boost. Eigennamen profitieren am stärksten von hohen Werten.
-    "Duic:5",
-    "Matthias Duic:5",
-    "Sprockhövel:3",
+    // Eigennamen (Duic, Sprockhövel etc.) NICHT mehr hardcoded — sie kommen
+    // über DEEPGRAM_KEYWORDS aus der Deployment-Konfiguration oder dem Playbook.
+    // Nur universelle, domänen-unabhängige Begriffe bleiben in der Default-Liste.
   ];
   const envKeywords = process.env.DEEPGRAM_KEYWORDS?.trim();
   const keywords = envKeywords
