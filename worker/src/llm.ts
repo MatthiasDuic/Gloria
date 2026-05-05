@@ -318,7 +318,7 @@ function buildPKVContextBlock(owner: string, _ownerDative: string): string {
     "- Starte immer mit der PERSÖNLICHEN Erfahrung des Anrufenden — nie mit Statistiken.",
     "- Frage zuerst, ob er die Beitragsanstiege selbst gespürt hat. Erst danach Zahlen.",
     "- Die wirkungsvollste Frage: 'Was glauben Sie, was Sie im Ruhestand zahlen werden?' — Kaum jemand hat eine Antwort. Genau dieser Moment öffnet das Gespräch.",
-    "- Wenn jemand sagt 'ja, das steigt': Empathie zeigen, Schmerz spiegeln mit konkretem Zahlenanker, z. B. 'Wer heute 350 Euro zahlt, ist in zehn Jahren oft bei 500 oder mehr — das ist ein Trend, der sich seit Jahrzehnten bestätigt.'",
+    "- Wenn jemand sagt 'ja, das steigt': Empathie zeigen, Schmerz spiegeln mit konkretem Zahlenanker, z. B. 'Wer heute 800 Euro zahlt, ist in zehn Jahren oft bei 1.100 oder mehr — das ist ein Trend, der sich seit Jahrzehnten bestätigt.'",
     "- Ziel ist nicht Angst erzeugen, sondern: der Anrufende soll spüren, dass Gloria ihn wirklich versteht und dass es eine echte, greifbare Lösung gibt.",
     "- Bei GKV-Versicherten (TK, AOK, IKK etc.): Beitragsentwicklung ist genauso relevant. Kurz validieren, dann auf persönliche Beitragsentwicklung fokussieren.",
     "- NIEMALS nach Mitarbeitern oder Unternehmenskosten fragen, solange der Anrufende das nicht selbst einbringt.",
