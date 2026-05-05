@@ -42,21 +42,14 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // gpt-4.1: deutlich bessere Gesprächsqualität als mini bei ~3x höheren Token-Kosten.
-  // Für Telefonvertrieb ist Qualität wichtiger als Kosten-Optimierung.
+  // gpt-4.1: beste Gesprächsqualität für Telefonvertrieb.
   // Override via OPENAI_MODEL env.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
-    {
-      role: "system",
-      content:
-        'Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false}. ' +
-        'Setze hangup=true nur, wenn der Anrufende ein klares Nein, Stornieren oder Auflegen signalisiert oder das Gespräch sauber beendet wurde.',
-    },
   ];
-  for (const turn of ctx.transcript.slice(-12)) {
+  for (const turn of ctx.transcript.slice(-8)) {
     messages.push({ role: turn.role, content: turn.text });
   }
   messages.push({ role: "user", content: userText });
@@ -65,7 +58,7 @@ export async function streamReply(
     model,
     messages,
     temperature: 0.55,
-    max_tokens: 280,
+    max_tokens: 150,
     response_format: { type: "json_object" },
     stream: true,
   };
@@ -298,6 +291,10 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (memoryBlock) parts.push("\n\n" + memoryBlock);
   const styleBlock = buildStyleGuard(ctx);
   if (styleBlock) parts.push("\n\n" + styleBlock);
+  parts.push(
+    `\n\nANTWORTFORMAT: Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false}. ` +
+    `Setze hangup=true nur wenn der Anrufende ein klares Nein signalisiert oder das Gespräch sauber beendet wurde.`,
+  );
   return parts.join("\n");
 }
 
