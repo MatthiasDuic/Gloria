@@ -406,7 +406,7 @@ function inferConversationPhase(ctx: CallContext): number {
   if (!turns.length) return 1;
 
   const all = turns.map((t) => t.text.toLowerCase()).join(" \n ");
-  const hasConsentQuestion = /aufzeichn/.test(all);
+  const hasConsentQuestion = /aufzeichn|mitschneid/.test(all);
   const hasConsentAnswer = /\b(ja|nein|einverstanden|ok|okay|in ordnung)\b/.test(all);
 
   // Termin-Hinweis: Mehrere Signale nötig, damit ein einzelnes Schlüsselwort
