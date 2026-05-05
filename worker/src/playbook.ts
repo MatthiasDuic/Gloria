@@ -3,13 +3,14 @@ import { log } from "./log.js";
 
 export type PlaybookFields = {
   topic?: string;
-  // Vereinfachtes 3-Felder-Modell
+  callObjective?: string;
   behavior?: string;
+  conversationGuardrails?: string;
   requiredData?: string;
   knowledge?: string;
-  // Eigenständige Sales-Felder
   objectionResponses?: string;
   proofPoints?: string;
+  transferHandling?: string;
   // Legacy-Felder bleiben optional vorhanden, werden aber nicht mehr in den Prompt gerendert.
   opener?: string;
   discovery?: string;
@@ -93,17 +94,29 @@ export async function loadPlaybook(opts: {
 /** Rendert das vereinfachte 3-Felder-Playbook in einen Systemprompt-Block. */
 export function playbookToSystemPrompt(pb: PlaybookFields): string {
   const topic = (pb.topic || "").trim();
+  const callObjective = (pb.callObjective || "").trim();
   const behavior = (pb.behavior || "").trim();
+  const conversationGuardrails = (pb.conversationGuardrails || "").trim();
   const requiredData = (pb.requiredData || "").trim();
   const knowledge = (pb.knowledge || "").trim();
   const objectionResponses = (pb.objectionResponses || "").trim();
   const proofPoints = (pb.proofPoints || "").trim();
+  const transferHandling = (pb.transferHandling || "").trim();
 
   // Wenn keines der relevanten Felder gefüllt ist, geben wir einen leeren
   // Block zurück. Legacy-Felder werden bewusst NICHT mehr verwendet, damit
   // die Anti-Floskel-Strategie greift und Gloria sich nur auf die kuratierten
   // Blöcke stützt.
-  if (!behavior && !requiredData && !knowledge && !objectionResponses && !proofPoints) {
+  if (
+    !callObjective &&
+    !behavior &&
+    !conversationGuardrails &&
+    !requiredData &&
+    !knowledge &&
+    !objectionResponses &&
+    !proofPoints &&
+    !transferHandling
+  ) {
     return topic ? `THEMA DIESES CALLS: ${topic}` : "";
   }
 
@@ -111,10 +124,22 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
   parts.push("PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:");
   if (topic) parts.push(`THEMA: ${topic}`);
 
+  if (callObjective) {
+    parts.push("");
+    parts.push("ZIELBILD / ERFOLG DIESES CALLS:");
+    parts.push(callObjective);
+  }
+
   if (behavior) {
     parts.push("");
     parts.push("VERHALTEN & TONALITÄT (themenspezifisch):");
     parts.push(behavior);
+  }
+
+  if (conversationGuardrails) {
+    parts.push("");
+    parts.push("HARTE REGELN & VERBOTE (themenspezifisch, verbindlich):");
+    parts.push(conversationGuardrails);
   }
 
   if (requiredData) {
@@ -145,6 +170,12 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
       "FACHWISSEN (nutze diese konkreten Fakten, BEVOR du auf Bilder/Metaphern ausweichst):",
     );
     parts.push(knowledge);
+  }
+
+  if (transferHandling) {
+    parts.push("");
+    parts.push("UEBERGABE / MENSCHLICHE WEITERLEITUNG:");
+    parts.push(transferHandling);
   }
 
   return parts.join("\n");

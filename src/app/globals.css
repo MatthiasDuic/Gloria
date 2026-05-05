@@ -265,6 +265,84 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.playbook-overview {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.playbook-overview-card {
+  border-radius: 16px;
+  border: 1px solid rgba(32, 57, 93, 0.14);
+  background: linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%);
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(16, 34, 58, 0.06);
+}
+
+.playbook-overview-card.primary {
+  background: linear-gradient(135deg, rgba(14, 31, 55, 0.98), rgba(34, 61, 104, 0.95));
+  color: #edf3ff;
+  border-color: rgba(212, 185, 106, 0.38);
+}
+
+.playbook-overview-card.primary h3,
+.playbook-overview-card.primary p,
+.playbook-overview-card.primary .playbook-kicker {
+  color: inherit;
+}
+
+.playbook-overview-card.stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.8rem;
+  color: var(--ink-900);
+}
+
+.playbook-overview-card p {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+
+.playbook-kicker {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5e7396;
+}
+
+.playbook-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.playbook-card {
+  height: 100%;
+}
+
+.playbook-card-wide {
+  grid-column: 1 / -1;
+}
+
+.playbook-fixed-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-callout {
+  height: 100%;
+}
+
 textarea,
 input,
 select {
@@ -939,6 +1017,11 @@ td {
 
 @media (max-width: 980px) {
   .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .playbook-grid,
+  .playbook-overview,
+  .settings-overview-grid {
     grid-template-columns: 1fr;
   }
   .sidebar {

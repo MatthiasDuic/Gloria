@@ -111,6 +111,207 @@ function pickText(value: string | undefined, fallback?: string) {
   return fallback ?? "";
 }
 
+const PLAYBOOK_EDITABLE_FIELDS: Array<keyof PlaybookConfig> = [
+  "callObjective",
+  "behavior",
+  "conversationGuardrails",
+  "requiredData",
+  "proofPoints",
+  "objectionResponses",
+  "knowledge",
+  "transferHandling",
+];
+
+function countFilledPlaybookFields(config?: PlaybookConfig) {
+  if (!config) {
+    return 0;
+  }
+
+  return PLAYBOOK_EDITABLE_FIELDS.reduce((count, field) => {
+    const value = config[field];
+    return typeof value === "string" && value.trim().length > 0 ? count + 1 : count;
+  }, 0);
+}
+
+function normalizeLineCount(value?: string) {
+  return (value || "")
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean).length;
+}
+
+function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
+  const normalized = topic.trim().toLowerCase();
+
+  const commonTransfer = [
+    "Nur dann an einen Menschen weiterleiten, wenn der Interessent das ausdruecklich wuenscht oder die KI klar ablehnt.",
+    "Dann sagen: Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen.",
+    "Eine Weiterleitung nie ungefragt als Standardschritt anbieten.",
+  ].join("\n");
+
+  if (normalized === "private krankenversicherung") {
+    return {
+      callObjective: "Einen festen Orientierungstermin mit Herrn Duic vereinbaren und danach die relevanten Basisdaten sauber, einzeln und ohne Doppelfragen aufnehmen.",
+      behavior: [
+        "Warm, direkt und wie eine starke Vertriebsassistentin am Telefon sprechen - nicht wie ein Sprachcomputer.",
+        "Schnell persoenliche Verbindung aufbauen, dann sauber in die Relevanz wechseln.",
+        "Keine Floskeln wie absolut, glaskugel oder landkarte. Lieber konkrete Bilder aus dem echten Alltag des Kunden.",
+        "Wenn der Interessent ein Problem andeutet, kurz aufgreifen und sofort fuehrend weitergehen.",
+      ].join("\n"),
+      conversationGuardrails: [
+        "Kurze Dialogzuege: maximal zwei kurze Saetze und dann eine klare Frage.",
+        "Keine Doppelfragen in der Basisdaten-Phase.",
+        "Vor einer echten Aufnahme immer erst Einwilligung einholen.",
+        "In der Problem-Aufbau-Phase mindestens eine konkrete Zahl aktiv nennen, bevor in den Termin uebergeleitet wird.",
+        "Keine erfundenen Quellen, keine garantierten Einsparungen und keine Aussagen wie immer guenstiger oder garantiert stabil.",
+        "Wenn Basisdaten abgelehnt werden, nicht diskutieren, sondern sauber zur Terminbestaetigungs-Mail uebergehen.",
+      ].join("\n"),
+      knowledge: [
+        "ERLAUBT:",
+        "- Beitragsentwicklung mit konkreten Rechenbeispielen greifbar machen.",
+        "- Tarifstruktur, Selbstbehalt und Entlastungsbausteine als Stellschrauben benennen.",
+        "- Den Termin als Analyse- und Klarheitsgespraech positionieren, nicht als Abschlussdruck.",
+        "",
+        "VERBOTEN:",
+        "- Garantierte Einspar- oder Stabilitaetsversprechen.",
+        "- Medizinische, steuerliche oder rechtliche Einzelfallberatung.",
+        "- Quellen nennen, die nicht im Playbook stehen.",
+      ].join("\n"),
+      proofPoints: [
+        "Wenn heute 600 Euro PKV-Beitrag laufen und der Beitrag nur mit vier Prozent pro Jahr steigt, dann liegen wir in zehn Jahren bei rund 890 Euro und in zwanzig Jahren bei rund 1.315 Euro.",
+        "Wenn heute 850 Euro GKV-Beitrag anfallen und die Entwicklung bei fuenf Prozent pro Jahr liegt, dann sind das in zehn Jahren rund 1.385 Euro und in zwanzig Jahren rund 2.255 Euro.",
+        "Der durchschnittliche Zusatzbeitrag in der GKV ist von 1,1 Prozent in 2020 auf rund 2,5 Prozent in 2025 gestiegen - das ist fuer viele erst sichtbar, wenn die Abbuchung schon hoeher ist.",
+        "Viele Bestandskunden haben seit Jahren keinen sauberen Tarif-Check mehr bekommen. Genau dadurch bleiben schwache Altersrueckstellungen oder unpassende Tariflogiken oft unbemerkt.",
+      ].join("\n"),
+      objectionResponses: [
+        "Kein Interesse: Genau deshalb lohnt sich die Einordnung. Die meisten reagieren erst, wenn der naechste Bescheid kommt und die Zahl ploetzlich wieder hoeher ist.",
+        "Schon versorgt: Gut - dann schauen wir nicht, ob Sie versichert sind, sondern ob Ihr heutiger Tarif auf Dauer sauber kalkuliert ist.",
+        "Zu teuer: Genau darum geht es. Nicht der heutige Beitrag ist der Knackpunkt, sondern was daraus in zehn oder zwanzig Jahren wird.",
+        "Keine Zeit: Verstehe ich. Deshalb sind es auch nur 15 Minuten mit einer klaren Zahl und einem sauberen Blick auf die Entwicklung.",
+        "Nur per Mail: Gern per Mail bestaetigen. Die eigentliche Einordnung macht Herr Duic aber kurz persoenlich, damit Sie direkt Rueckfragen stellen koennen.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  if (normalized === "betriebliche krankenversicherung") {
+    return {
+      callObjective: "Einen kurzen Orientierungstermin vereinbaren, in dem Herr Duic den Nutzen von bKV fuer Arbeitgeberattraktivitaet, Bindung und Umsetzbarkeit einordnet.",
+      conversationGuardrails: [
+        "Nicht in Tarifdetails oder Leistungsversprechen abrutschen.",
+        "Keine Produktshow, sondern Relevanz fuer Recruiting, Bindung und Wahrnehmung als Arbeitgeber herausarbeiten.",
+        "Einwaende kurz, konkret und ohne Callcenter-Floskeln beantworten.",
+        "Immer nur eine Hauptfrage gleichzeitig stellen.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  if (normalized === "betriebliche altersvorsorge") {
+    return {
+      callObjective: "Einen Orientierungstermin sichern, in dem Herr Duic Verstaendlichkeit, Nutzung und Arbeitgebernutzen der bAV einordnet.",
+      conversationGuardrails: [
+        "Keine Steuer- oder Rechtsberatung im Einzelfall.",
+        "Nicht in Fachchinesisch kippen; immer erst Nutzen und Verstaendlichkeit erklaeren.",
+        "Keine Renditeversprechen.",
+        "Kurze, fuehrende Dialogschritte statt langer Erklaerbaeren.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  if (normalized === "gewerbliche versicherungen") {
+    return {
+      callObjective: "Einen strukturierten Risiko- und Deckungs-Check mit Herrn Duic terminieren, ohne Wechselzwang aufzubauen.",
+      conversationGuardrails: [
+        "Keine Angstkommunikation und keine Panikbilder.",
+        "Den Termin als Einordnung und Vergleich positionieren, nicht als Verkaufsabschluss.",
+        "Keine Deckungs- oder Beitragszusagen ohne Vertragsdaten.",
+        "Auch bei Einwaenden ruhig und unternehmerisch bleiben.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  if (normalized === "energie") {
+    return {
+      callObjective: "Einen kurzen Termin vereinbaren, in dem Herr Duic bestehende Energiekonditionen wirtschaftlich einordnet und naechste Schritte ableitet.",
+      conversationGuardrails: [
+        "Keine pauschalen Sparversprechen.",
+        "Nicht spekulieren, wenn Lastprofil, Laufzeit oder Vertragsdetails fehlen.",
+        "Immer wirtschaftlich, sachlich und knapp argumentieren.",
+        "Kein Preisdruck, sondern Transparenz ueber Konditionen und Beschaffungszeitpunkt schaffen.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  return {
+    callObjective: "Einen klaren naechsten Schritt sichern: idealerweise ein Termin, alternativ eine saubere Wiedervorlage mit klarer Zuständigkeit.",
+    conversationGuardrails: "Kurze Dialogzuege, keine Monologe, keine erfundenen Fakten, immer nur eine Hauptfrage zur Zeit.",
+    transferHandling: commonTransfer,
+  };
+}
+
+function buildDraftFromPreset(topic: Topic, existing?: Partial<PlaybookConfig>): PlaybookConfig {
+  const preset = getRecommendedPlaybookPreset(topic);
+
+  return {
+    id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+    topic,
+    callObjective: pickText(existing?.callObjective, preset.callObjective),
+    behavior: pickText(existing?.behavior, preset.behavior),
+    conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
+    requiredData: pickText(existing?.requiredData, preset.requiredData),
+    knowledge: pickText(existing?.knowledge, preset.knowledge),
+    objectionResponses: pickText(existing?.objectionResponses, preset.objectionResponses),
+    proofPoints: pickText(existing?.proofPoints, preset.proofPoints),
+    transferHandling: pickText(existing?.transferHandling, preset.transferHandling),
+    opener: pickText(existing?.opener, ""),
+    discovery: pickText(existing?.discovery, ""),
+    objectionHandling: pickText(existing?.objectionHandling, ""),
+    close: pickText(existing?.close, ""),
+    aiKeyInfo: pickText(existing?.aiKeyInfo, ""),
+    consentPrompt: pickText(
+      existing?.consentPrompt,
+      'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
+    ),
+    pkvHealthIntro: pickText(
+      existing?.pkvHealthIntro,
+      "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
+    ),
+    pkvHealthQuestions: pickText(existing?.pkvHealthQuestions, ""),
+    gatekeeperTask: pickText(existing?.gatekeeperTask, ""),
+    gatekeeperBehavior: pickText(existing?.gatekeeperBehavior, ""),
+    decisionMakerTask: pickText(existing?.decisionMakerTask, ""),
+    decisionMakerBehavior: pickText(existing?.decisionMakerBehavior, ""),
+    decisionMakerContext: pickText(existing?.decisionMakerContext, ""),
+    appointmentGoal: pickText(existing?.appointmentGoal, ""),
+    receptionTopicReason: pickText(existing?.receptionTopicReason, ""),
+    problemBuildup: pickText(existing?.problemBuildup, ""),
+    conceptTransition: pickText(existing?.conceptTransition, ""),
+    appointmentConfirmation: pickText(existing?.appointmentConfirmation, ""),
+    availableAppointmentSlots: pickText(existing?.availableAppointmentSlots, ""),
+  };
+}
+
+function buildRecommendedAccountDraft(topic: Topic, existing?: PlaybookConfig): PlaybookConfig {
+  const baseline = buildDraftFromPreset(topic, existing);
+  const preset = getRecommendedPlaybookPreset(topic);
+
+  return {
+    ...baseline,
+    callObjective: pickText(preset.callObjective, baseline.callObjective),
+    behavior: pickText(preset.behavior, baseline.behavior),
+    conversationGuardrails: pickText(preset.conversationGuardrails, baseline.conversationGuardrails),
+    requiredData: pickText(preset.requiredData, baseline.requiredData),
+    knowledge: pickText(preset.knowledge, baseline.knowledge),
+    objectionResponses: pickText(preset.objectionResponses, baseline.objectionResponses),
+    proofPoints: pickText(preset.proofPoints, baseline.proofPoints),
+    transferHandling: pickText(preset.transferHandling, baseline.transferHandling),
+  };
+}
+
 function CollapsiblePanel({
   title,
   children,
@@ -592,115 +793,14 @@ export default function HomePage() {
     setData(payload);
     setLearning(learningPayload);
     const nextDrafts = payload.playbooks.reduce<Record<string, PlaybookConfig>>((acc, script) => {
-      acc[script.topic] = {
-        id: script.id,
-        topic: script.topic,
-        // Neues 3-Felder-Modell
-        behavior: pickText(script.behavior, ""),
-        requiredData: pickText(script.requiredData, ""),
-        knowledge: pickText(script.knowledge, ""),
-        objectionResponses: pickText(script.objectionResponses, ""),
-        proofPoints: pickText(script.proofPoints, ""),
-        opener: pickText(script.opener, ""),
-        discovery: pickText(script.discovery, ""),
-        objectionHandling: pickText(script.objectionHandling, ""),
-        close: pickText(script.close, ""),
-        aiKeyInfo: pickText(script.aiKeyInfo, ""),
-        consentPrompt: pickText(
-          script.consentPrompt,
-          'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
-        ),
-        pkvHealthIntro: pickText(
-          script.pkvHealthIntro,
-          "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
-        ),
-        pkvHealthQuestions: pickText(
-          script.pkvHealthQuestions,
-          [
-            "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
-            "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
-            "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-            "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
-            "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
-            "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
-            "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
-            "Gab es in den letzten zehn Jahren psychische Behandlungen?",
-            "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
-            "Bestehen bei Ihnen bekannte Allergien?",
-          ].join("\n"),
-        ),
-        gatekeeperTask: pickText(
-          script.gatekeeperTask,
-          "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
-        ),
-        gatekeeperBehavior: pickText(
-          script.gatekeeperBehavior,
-          "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
-        ),
-        receptionTopicReason: pickText(script.receptionTopicReason, ""),
-        decisionMakerTask: pickText(
-          script.decisionMakerTask,
-          "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
-        ),
-        decisionMakerBehavior: pickText(
-          script.decisionMakerBehavior,
-          "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
-        ),
-        decisionMakerContext: pickText(script.decisionMakerContext, ""),
-        problemBuildup: pickText(script.problemBuildup, ""),
-        conceptTransition: pickText(script.conceptTransition, ""),
-        appointmentConfirmation: pickText(script.appointmentConfirmation, ""),
-        availableAppointmentSlots: pickText(script.availableAppointmentSlots, ""),
-        appointmentGoal: pickText(
-          script.appointmentGoal,
-          "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
-        ),
-      };
+      acc[script.topic] = buildDraftFromPreset(script.topic, script);
       return acc;
     }, {});
 
     // Keep the settings area available even if one topic has no persisted script yet.
     for (const topic of TOPICS) {
       if (!nextDrafts[topic]) {
-        nextDrafts[topic] = {
-          id: `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
-          topic,
-          behavior: "",
-          requiredData: "",
-          knowledge: "",
-          objectionResponses: "",
-          proofPoints: "",
-          opener: "",
-          discovery: "",
-          objectionHandling: "",
-          close: "",
-          aiKeyInfo: "",
-          consentPrompt: 'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
-          pkvHealthIntro: "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
-          pkvHealthQuestions: [
-            "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
-            "Könnten Sie mir bitte Ihre Körpergröße und Ihr aktuelles Gewicht nennen?",
-            "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-            "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
-            "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
-            "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
-            "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
-            "Gab es in den letzten zehn Jahren psychische Behandlungen?",
-            "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
-            "Bestehen bei Ihnen bekannte Allergien?",
-          ].join("\n"),
-          gatekeeperTask: "Bitte freundlich um Weiterleitung zur zuständigen Führungskraft für dieses Thema.",
-          gatekeeperBehavior: "Erkläre kurz worum es geht wenn gefragt. Frage nach dem Namen der zuständigen Person. Bleib höflich aber bestimmt.",
-          receptionTopicReason: "",
-          decisionMakerTask: "Vereinbare einen 15-minütigen, unverbindlichen Beratungstermin mit Herrn Matthias Duic.",
-          decisionMakerBehavior: "Nutze den Leitfaden, erkläre den Mehrwert klar und präzise, gehe auf Einwände ein und schlage konkrete Termine vor.",
-          decisionMakerContext: "",
-          problemBuildup: "",
-          conceptTransition: "",
-          appointmentConfirmation: "",
-          availableAppointmentSlots: "",
-          appointmentGoal: "Ein konkreter Beratungstermin mit Herrn Matthias Duic ist vereinbart.",
-        };
+        nextDrafts[topic] = buildDraftFromPreset(topic);
       }
     }
 
@@ -1039,6 +1139,24 @@ export default function HomePage() {
     }
   }
 
+  async function persistPlaybookDraft(draft: PlaybookConfig) {
+    const response = await fetch("/api/playbooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      storageMode?: "postgres" | "file";
+    };
+
+    if (!response.ok) {
+      throw new Error(payload.error || "Playbook konnte nicht gespeichert werden.");
+    }
+
+    return payload;
+  }
+
   async function saveScript(topic: Topic) {
     const draft = draftScripts[topic];
 
@@ -1050,20 +1168,7 @@ export default function HomePage() {
     setSaveStatus(null);
 
     try {
-      const response = await fetch("/api/playbooks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        storageMode?: "postgres" | "file";
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Playbook konnte nicht gespeichert werden.");
-      }
-
+      const payload = await persistPlaybookDraft(draft);
       setNotice(
         `Playbook für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
       );
@@ -1081,24 +1186,60 @@ export default function HomePage() {
     }
   }
 
+  async function applyRecommendedPlaybooksToAccount() {
+    const availableTopics = Array.from(
+      new Set(
+        (currentUser?.allowedPlaybookTopics?.length
+          ? currentUser.allowedPlaybookTopics
+          : [...TOPICS, ...Object.keys(draftScripts)])
+          .map((topic) => topic.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (availableTopics.length === 0) {
+      setNotice("Es wurden keine Playbook-Themen für dieses Konto gefunden.");
+      return;
+    }
+
+    setBusy(true);
+    setSaveStatus(null);
+
+    try {
+      const nextDrafts = { ...draftScripts };
+      let lastStorageMode: "postgres" | "file" = "file";
+
+      for (const topic of availableTopics) {
+        const nextDraft = buildRecommendedAccountDraft(topic, nextDrafts[topic]);
+        nextDrafts[topic] = nextDraft;
+        const payload = await persistPlaybookDraft(nextDraft);
+        lastStorageMode = payload.storageMode || lastStorageMode;
+      }
+
+      setDraftScripts(nextDrafts);
+      setNotice(
+        `Empfohlene Gloria-Standards für ${availableTopics.length} Thema/Themen auf dieses Konto übernommen (${lastStorageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
+      );
+      setSaveStatus({
+        type: "success",
+        message: `Empfohlene Standards fuer ${availableTopics.length} Thema/Themen gespeichert.`,
+      });
+      await loadDashboard();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Empfohlene Standards konnten nicht gespeichert werden.";
+      setNotice(errorMessage);
+      setSaveStatus({ type: "error", message: errorMessage });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleAddNewTopic() {
     const topic = newTopicInput.trim();
     if (!topic) return;
     setDraftScripts((c) => ({
       ...c,
-      [topic]: {
-        id: `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
-        topic,
-        behavior: "",
-        requiredData: "",
-        knowledge: "",
-        proofPoints: "",
-        objectionResponses: "",
-        opener: "",
-        discovery: "",
-        objectionHandling: "",
-        close: "",
-      },
+      [topic]: buildDraftFromPreset(topic),
     }));
     setDetailTopic(topic);
     setNewTopicInput("");
@@ -2240,40 +2381,70 @@ export default function HomePage() {
 
       {activeView === "settings" ? (
       <section className="stack top-section">
-              <CollapsiblePanel title="Gloria testen" defaultOpen>
-                <div className="row">
-                  {availableVoices.length > 0 ? (
-                    <select value={selectedVoiceId} onChange={(event) => setSelectedVoiceId(event.target.value)}>
-                      {availableVoices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                    </select>
-                  ) : null}
-                  <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
-                    {(currentUser?.allowedPlaybookTopics?.length ? currentUser.allowedPlaybookTopics : [...TOPICS]).map((topic) => <option key={topic} value={topic}>{topic}</option>)}
-                  </select>
-                  <button className="btn" onClick={() => void testVoice()} disabled={busy}>
-                    {busy ? "Vorschau lädt ..." : "Stimme testen"}
-                  </button>
-                </div>
-                <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
-                {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
-              </CollapsiblePanel>
-
-              <CollapsiblePanel title="Gloria lernt aus Gesprächen" defaultOpen>
-                <ul>
-                  {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-                <div className="insight-grid">
-                  {learning.insights.map((insight) => (
-                    <div key={insight.topic} className="mini-panel">
-                      <h3>{insight.topic}</h3>
-                      <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
-                      <ul>
-                        {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
-                      </ul>
-                      <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
-                      <button className="btn" onClick={() => void optimizeWithAI(insight.topic)} disabled={busy} style={{ marginLeft: 6 }}>KI-Optimierung (Vorschau)</button>
+              <CollapsiblePanel title="Globale Gloria-Steuerung" defaultOpen>
+                <div className="settings-overview-grid">
+                  <div className="mini-panel settings-callout">
+                    <h3>Accountweite Standards</h3>
+                    <p className="subtle">
+                      Hier definieren Sie, wie Gloria kontoweit auftreten soll: sprachlich fuehrend, faktenbasiert,
+                      kurz im Dialog und sauber in der Eskalation zu einem Menschen.
+                    </p>
+                    <ul className="subtle playbook-fixed-list top-gap">
+                      <li>Global gilt: maximal zwei kurze Saetze und dann eine klare Frage statt Monologe oder Skriptblöcke.</li>
+                      <li>Gloria soll fuehren wie eine starke Vertriebsassistentin: warm, praezise, reaktiv und ohne Callcenter-Ton.</li>
+                      <li>Keine erfundenen Zahlen, keine leeren Metaphern, keine unklaren Versprechen. Relevanz zuerst, danach der naechste Schritt.</li>
+                      <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung, dann mit sauberer Rueckfallzusage zu Jutta Brost.</li>
+                      <li>Die Batch-Uebernahme schreibt diese Standards direkt in die persistenten Playbooks Ihres Kontos.</li>
+                    </ul>
+                    <p className="subtle top-gap">
+                      Diese Ebene ist bewusst haerter formuliert als einzelne Themen-Prompts: Sie setzt die Grundhaltung,
+                      an die sich jedes Thema anschliessen muss.
+                    </p>
+                    <div className="row top-gap">
+                      <button className="btn" onClick={() => void applyRecommendedPlaybooksToAccount()} disabled={busy}>
+                        Empfohlene Standards fuer dieses Konto speichern
+                      </button>
                     </div>
-                  ))}
+                  </div>
+
+                  <div className="mini-panel settings-callout">
+                    <h3>Gloria testen</h3>
+                    <div className="row top-gap">
+                      {availableVoices.length > 0 ? (
+                        <select value={selectedVoiceId} onChange={(event) => setSelectedVoiceId(event.target.value)}>
+                          {availableVoices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      ) : null}
+                      <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
+                        {(currentUser?.allowedPlaybookTopics?.length ? currentUser.allowedPlaybookTopics : [...TOPICS]).map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                      </select>
+                      <button className="btn" onClick={() => void testVoice()} disabled={busy}>
+                        {busy ? "Vorschau lädt ..." : "Stimme testen"}
+                      </button>
+                    </div>
+                    <div className="code-box top-gap">{voicePreview || "Noch keine Vorschau geladen."}</div>
+                    {voiceAudioUrl ? <audio controls src={voiceAudioUrl} className="audio-player" /> : null}
+                  </div>
+                </div>
+
+                <div className="mini-panel top-gap">
+                  <h3>Gloria lernt aus Gesprächen</h3>
+                  <ul>
+                    {learning.globalSummary.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                  <div className="insight-grid">
+                    {learning.insights.map((insight) => (
+                      <div key={insight.topic} className="mini-panel">
+                        <h3>{insight.topic}</h3>
+                        <p className="subtle">{insight.totalConversations} Gespräche · {insight.appointmentRate}% Terminquote</p>
+                        <ul>
+                          {insight.recommendations.slice(0, 2).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+                        </ul>
+                        <button className="btn ghost" onClick={() => void applyLearning(insight.topic)} disabled={busy}>Optimierung übernehmen</button>
+                        <button className="btn" onClick={() => void optimizeWithAI(insight.topic)} disabled={busy} style={{ marginLeft: 6 }}>KI-Optimierung (Vorschau)</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </CollapsiblePanel>
 
@@ -2306,91 +2477,137 @@ export default function HomePage() {
 
                 {activeDraft ? (
                   <>
-                    <p className="subtle">
-                      Playbook für <strong>{detailTopic}</strong>. Drei klare Felder, frei formulierbar – keine starren Vorlagen mehr. Gloria nutzt diese Inhalte
-                      direkt im Systemprompt jedes Calls. Änderungen gelten nur für Ihren Account und werden in der Datenbank gespeichert.
+                    <div className="playbook-overview top-gap">
+                      <div className="playbook-overview-card primary">
+                        <span className="playbook-kicker">Playbook-Cockpit</span>
+                        <h3>{detailTopic}</h3>
+                        <p>
+                          Hier steuern Sie jetzt die Hebel, die im Alltag wirklich zaehlen: Zielbild, harte Regeln,
+                          Pflichtdaten, Beweisanker, Einwandlinien und menschliche Uebergabe.
+                        </p>
+                      </div>
+                      <div className="playbook-overview-card stat">
+                        <span className="playbook-kicker">Konfiguration</span>
+                        <strong>{countFilledPlaybookFields(activeDraft)}/{PLAYBOOK_EDITABLE_FIELDS.length}</strong>
+                        <p>aktive Bereiche fuer dieses Thema</p>
+                      </div>
+                      <div className="playbook-overview-card stat">
+                        <span className="playbook-kicker">Pflichtfragen</span>
+                        <strong>{normalizeLineCount(activeDraft.requiredData)}</strong>
+                        <p>einzeln zu stellende Basisdaten-Fragen</p>
+                      </div>
+                      <div className="playbook-overview-card stat">
+                        <span className="playbook-kicker">Einwaende & Fakten</span>
+                        <strong>{normalizeLineCount(activeDraft.objectionResponses) + normalizeLineCount(activeDraft.proofPoints)}</strong>
+                        <p>verfuegbare Konter- und Beweisanker</p>
+                      </div>
+                    </div>
+
+                    <p className="subtle top-gap">
+                      Aenderungen gelten nur fuer Ihren Account und greifen sofort fuer neue Gespraeche.
+                      Kurze, klare Steuertexte sind hier meist wirksamer als lange Textsammlungen.
                     </p>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>1. Verhalten & Tonalität</strong> <span className="subtle">(WIE Gloria spricht)</span></h3>
-                      <p className="subtle" style={{ marginTop: 0 }}>
-                        Wie Gloria zu diesem Thema agiert: Gesprächsziel, Argumentationslinie, Empathie-Anker, Einwandbehandlung,
-                        Tonalität, was sie tun und was sie lassen soll. Frei formuliert.
-                      </p>
-                      <textarea
-                        value={activeDraft.behavior ?? ""}
-                        rows={10}
-                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], behavior: event.target.value } }))}
-                      />
-                    </div>
+                    <div className="playbook-grid top-gap">
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>1. Zielbild des Calls</strong> <span className="subtle">(worauf Gloria hinarbeitet)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Definieren Sie den sauberen Erfolgszustand fuer dieses Thema: Termin, Wiedervorlage,
+                          Qualifizierung oder ein klarer naechster Schritt.
+                        </p>
+                        <textarea
+                          value={activeDraft.callObjective ?? ""}
+                          rows={5}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], callObjective: event.target.value } }))}
+                        />
+                      </div>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>2. Basisdaten / Pflichtfragen</strong> <span className="subtle">(WAS Gloria zwingend erfragen muss)</span></h3>
-                      <p className="subtle" style={{ marginTop: 0 }}>
-                        Eine Frage pro Zeile. Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab –
-                        z. B. Geburtsdatum, aktueller Versicherer, Beschwerden, Mitarbeiterzahl, etc.
-                      </p>
-                      <textarea
-                        value={activeDraft.requiredData ?? ""}
-                        rows={10}
-                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredData: event.target.value } }))}
-                      />
-                    </div>
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>2. Verhalten & Tonalitaet</strong> <span className="subtle">(wie Gloria fuehrt)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Argumentationslinie, Empathie-Anker, Dramatologie, Sprachstil, Tempo und was sie aktiv betonen soll.
+                        </p>
+                        <textarea
+                          value={activeDraft.behavior ?? ""}
+                          rows={9}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], behavior: event.target.value } }))}
+                        />
+                      </div>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>3. Fachwissen</strong> <span className="subtle">(Konkrete Fakten gegen Floskeln)</span></h3>
-                      <p className="subtle" style={{ marginTop: 0 }}>
-                        Faktenpool, auf den Gloria zurückgreift, BEVOR sie auf Bilder/Metaphern ausweicht: Zahlen, Rahmenbedingungen,
-                        erlaubte und verbotene Aussagen, typische Einwände mit konkreten Antworten. Je präziser, desto seltener fällt
-                        Gloria in leere Phrasen wie „Glaskugel" oder „Landkarte".
-                      </p>
-                      <textarea
-                        value={activeDraft.knowledge ?? ""}
-                        rows={14}
-                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))}
-                      />
-                    </div>
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>3. Harte Regeln & Verbote</strong> <span className="subtle">(was Gloria immer oder nie tun darf)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Hier kommen die wirklich relevanten Guardrails hinein: keine Doppelfragen, keine erfundenen Zahlen,
+                          Reihenfolgen, Pflichtformulierungen und Verbotsmuster.
+                        </p>
+                        <textarea
+                          value={activeDraft.conversationGuardrails ?? ""}
+                          rows={9}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conversationGuardrails: event.target.value } }))}
+                        />
+                      </div>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>4. Zahlen & Fakten</strong> <span className="subtle">(Pflicht-Anker in Phase 5)</span></h3>
-                      <p className="subtle" style={{ marginTop: 0 }}>
-                        Ein Beleg pro Zeile (z. B. Statistik, Studie, konkrete Marktzahl). Gloria muss in der Problem-Aufbau-Phase
-                        mindestens einen dieser Punkte aktiv nennen, bevor sie zur Terminüberleitung wechselt.
-                        Nur Zahlen verwenden, die Sie hier eintragen – nichts erfinden.
-                      </p>
-                      <textarea
-                        value={activeDraft.proofPoints ?? ""}
-                        rows={8}
-                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], proofPoints: event.target.value } }))}
-                      />
-                    </div>
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>4. Basisdaten / Pflichtfragen</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab. Nutzen Sie kurze, klar trennbare Fragen statt Bloecke.
+                        </p>
+                        <textarea
+                          value={activeDraft.requiredData ?? ""}
+                          rows={10}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredData: event.target.value } }))}
+                        />
+                      </div>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading"><strong>5. Einwand-Bibliothek</strong> <span className="subtle">(Verbindliche Konter-Linien)</span></h3>
-                      <p className="subtle" style={{ marginTop: 0 }}>
-                        Format pro Zeile: <code>Einwand: Konter-Linie</code>. Beispiel: <em>Kein Interesse: Genau das hören wir oft …</em>.
-                        Gloria nutzt die Konter-Logik in eigenen Worten (max. 1–2 Sätze, ohne „Ich verstehe"-Vorlauf), statt Floskeln zu erfinden.
-                      </p>
-                      <textarea
-                        value={activeDraft.objectionResponses ?? ""}
-                        rows={10}
-                        onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))}
-                      />
-                    </div>
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>5. Zahlen & Fakten</strong> <span className="subtle">(harte Beweisanker)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Ein Beleg pro Zeile. Gloria soll mindestens einen belastbaren Punkt daraus aktiv nutzen, bevor sie in den Termin geht.
+                        </p>
+                        <textarea
+                          value={activeDraft.proofPoints ?? ""}
+                          rows={8}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], proofPoints: event.target.value } }))}
+                        />
+                      </div>
 
-                    <div className="mini-panel top-gap">
-                      <h3 className="sub-heading subtle">Feste Systemtexte anzeigen (von Gloria gesprochen, nicht editierbar)</h3>
-                      <ul className="subtle top-gap">
-                        <li><strong>Verbindungsaufbau:</strong> „Bitte einen kleinen Moment, die Verbindung wird hergestellt."</li>
-                        <li><strong>Pause:</strong> „Ich bin noch dran. Nehmen Sie sich ruhig einen Moment."</li>
-                        <li><strong>Empfang zustimmt:</strong> „Danke. Könnten Sie mich bitte kurz mit der zuständigen Person verbinden?"</li>
-                        <li><strong>Unklarer Termin:</strong> „Sehr gern. Damit ich den Termin fest eintrage, brauche ich bitte ein genaues Datum mit Uhrzeit."</li>
-                        <li><strong>Rückruf-Wunsch:</strong> „Danke. Damit ich beim Rückruf direkt durchkomme: Wie lautet bitte die direkte Durchwahl oder Mobilnummer?"</li>
-                        <li><strong>PKV-Verabschiedung:</strong> „Vielen Dank für die Angaben. Der Termin ist fest eingeplant. Auf Wiederhören."</li>
-                        <li><strong>Eingehender Rückruf (verbunden):</strong> „Vielen Dank für Ihren Rückruf. Ich verbinde Sie jetzt."</li>
-                        <li><strong>Eingehender Rückruf (niemand da):</strong> „Aktuell ist kein Ansprechpartner verfügbar. Wir melden uns zeitnah."</li>
-                        <li><strong>Technischer Fehler:</strong> „Entschuldigung, es ist ein technischer Fehler aufgetreten."</li>
-                      </ul>
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>6. Einwand-Bibliothek</strong> <span className="subtle">(klare Konter statt Floskeln)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Format pro Zeile: Einwand: Konter-Linie. Kurz, konkret und in echter Vertriebssprache.
+                        </p>
+                        <textarea
+                          value={activeDraft.objectionResponses ?? ""}
+                          rows={9}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))}
+                        />
+                      </div>
+
+                      <div className="mini-panel playbook-card playbook-card-wide">
+                        <h3 className="sub-heading"><strong>7. Fachwissen & Freigaben</strong> <span className="subtle">(welche Aussagen Gloria belastbar nutzen darf)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Hier landen Zahlen-Kontext, erlaubte Aussagen, verbotene Aussagen, Produktlogik und thematische Fakten,
+                          bevor Gloria ins Allgemeine kippt.
+                        </p>
+                        <textarea
+                          value={activeDraft.knowledge ?? ""}
+                          rows={12}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))}
+                        />
+                      </div>
+
+                      <div className="mini-panel playbook-card playbook-card-wide">
+                        <h3 className="sub-heading"><strong>8. Menschliche Uebergabe / Transfer</strong> <span className="subtle">(wann Gloria verbinden oder Rueckruf zusagen soll)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Regeln fuer Eskalation zu einem Menschen: wann angeboten wird, welche Formulierung Gloria nutzt,
+                          und was bei fehlgeschlagener Weiterleitung gesagt wird.
+                        </p>
+                        <textarea
+                          value={activeDraft.transferHandling ?? ""}
+                          rows={7}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], transferHandling: event.target.value } }))}
+                        />
+                      </div>
                     </div>
 
                     <div className="row top-gap">
@@ -2414,6 +2631,29 @@ export default function HomePage() {
                 ) : (
                   <p className="subtle">Für dieses Thema ist noch kein Playbook geladen.</p>
                 )}
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Technische Systemregeln" defaultOpen>
+                <div className="settings-overview-grid">
+                  <div className="mini-panel settings-callout">
+                    <h3>Fest im System verdrahtet</h3>
+                    <ul className="subtle playbook-fixed-list top-gap">
+                      <li>Technische Audio- und Pausenmeldungen waehrend Streaming oder Fehlerfaellen.</li>
+                      <li>Die globale Aufzeichnungslogik inklusive expliziter Einwilligung vor einer echten Aufnahme.</li>
+                      <li>Das eigentliche Twilio-Transferziel und die technische Weiterleitung an Jutta Brost.</li>
+                      <li>Globale Phasenlogik wie Terminbestaetigung, Websocket-Handling und feste Sicherheitsregeln.</li>
+                    </ul>
+                  </div>
+                  <div className="mini-panel settings-callout">
+                    <h3>Technische Hinweise</h3>
+                    <ul className="subtle playbook-fixed-list top-gap">
+                      <li>Playbooks steuern den Gespraechsinhalt, nicht aber Twilio-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
+                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Twilio umgesetzt; das Playbook steuert nur das Wann und Wie der Ansage.</li>
+                      <li>Globale Compliance- und Ablaufregeln bleiben separat dokumentiert und sollten nicht in Themenfelder kopiert werden.</li>
+                    </ul>
+                    <p className="subtle top-gap">Fuer die vollstaendige Dokumentation siehe den Bereich „Compliance & Ablauf“ in der linken Navigation.</p>
+                  </div>
+                </div>
               </CollapsiblePanel>
 
               <CollapsiblePanel title="Benutzer & Rufnummern" defaultOpen>

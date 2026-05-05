@@ -32,11 +32,19 @@ export interface PlaybookConfig {
   id: string;
   topic: Topic;
   /**
+   * NEU: Klarer Zielzustand des Gesprächs für dieses Thema.
+   */
+  callObjective?: string;
+  /**
    * NEU (vereinfachtes Modell – ersetzt die 21 Legacy-Felder):
    * Wie Gloria zum Thema spricht: Argumentationslinie, Empathie-Anker,
    * Einwandbehandlung, Tonalität, Ziel des Calls.
    */
   behavior?: string;
+  /**
+   * NEU: Harte Leitplanken und Verbote für dieses Thema.
+   */
+  conversationGuardrails?: string;
   /**
    * NEU: Pflichtfragen für die Basisdaten-Phase, die im Call abgefragt
    * werden müssen (z. B. Geburtsdatum, Versicherer, Beschwerden ...).
@@ -59,6 +67,10 @@ export interface PlaybookConfig {
    * überleitet.
    */
   proofPoints?: string;
+  /**
+   * NEU: Regeln für menschliche Übergabe / Weiterleitung.
+   */
+  transferHandling?: string;
   // --- Legacy-Felder (werden nicht mehr im UI editiert) ----------------
   opener: string;
   discovery: string;

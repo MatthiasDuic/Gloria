@@ -10,12 +10,15 @@ export const PlaybookPayloadSchema = z
     // .strict() keinen kompletten Save blockiert.
     id: z.string().optional(),
     topic: TopicSchema.optional(),
+    callObjective: z.string().optional(),
     // Vereinfachtes Modell (3 Felder)
     behavior: z.string().optional(),
+    conversationGuardrails: z.string().optional(),
     requiredData: z.string().optional(),
     knowledge: z.string().optional(),
     objectionResponses: z.string().optional(),
     proofPoints: z.string().optional(),
+    transferHandling: z.string().optional(),
     // Legacy-Felder (werden nicht mehr im UI editiert, aber für Rückwärtskompatibilität weiter akzeptiert)
     opener: z.string().optional(),
     discovery: z.string().optional(),
@@ -50,6 +53,38 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
       type: "string",
       description: "Thema, für das das Playbook gilt.",
       examples: [...TOPICS],
+    },
+    callObjective: {
+      type: "string",
+      description: "Welches konkrete Ergebnis Gloria in diesem Thema erreichen soll.",
+    },
+    behavior: {
+      type: "string",
+      description: "Wie Gloria spricht, fuehrt und argumentiert.",
+    },
+    conversationGuardrails: {
+      type: "string",
+      description: "Harte Regeln, Verbote und Muss-Vorgaben fuer das Thema.",
+    },
+    requiredData: {
+      type: "string",
+      description: "Pflichtfragen / Basisdaten, idealerweise eine Frage pro Zeile.",
+    },
+    proofPoints: {
+      type: "string",
+      description: "Konkrete Zahlen und Belege, die Gloria aktiv nennen darf oder muss.",
+    },
+    objectionResponses: {
+      type: "string",
+      description: "Einwand-Bibliothek, eine Zeile pro Einwand mit Konter-Linie.",
+    },
+    knowledge: {
+      type: "string",
+      description: "Faktenwissen, Freigaben, Grenzen und belastbare Argumente.",
+    },
+    transferHandling: {
+      type: "string",
+      description: "Wie Gloria bei Wunsch nach einem Menschen oder einer Uebergabe reagieren soll.",
     },
     opener: {
       type: "string",
