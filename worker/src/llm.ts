@@ -44,8 +44,8 @@ export async function streamReply(
 
   // gpt-4.1: deutlich bessere Gesprächsqualität als mini bei ~3x höheren Token-Kosten.
   // Für Telefonvertrieb ist Qualität wichtiger als Kosten-Optimierung.
-  // Override via OPENAI_MODEL env (z. B. gpt-4.1-mini für Tests).
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  // Override via OPENAI_MODEL env.
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
@@ -197,7 +197,7 @@ export async function streamReply(
     }
 
     let reply = replyText.trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
-    if (consentAlreadyGranted(ctx) && /aufzeichn/i.test(reply)) {
+    if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(reply)) {
       reply = stripConsentQuestion(reply);
     }
     return { reply, hangup };
@@ -220,7 +220,7 @@ function consentAlreadyGranted(ctx: CallContext): boolean {
   const turns = ctx.transcript;
   for (let i = 0; i < turns.length; i++) {
     const t = turns[i];
-    if (t.role !== "assistant" || !/aufzeichn/i.test(t.text)) continue;
+    if (t.role !== "assistant" || !/aufzeichn|mitschneid/i.test(t.text)) continue;
     for (let j = i + 1; j < turns.length; j++) {
       if (turns[j].role !== "user") continue;
       const ans = turns[j].text.toLowerCase().trim();
@@ -236,7 +236,7 @@ function consentAlreadyGranted(ctx: CallContext): boolean {
 function stripConsentQuestion(text: string): string {
   // Entferne ganze Sätze, die nach Aufzeichnungs-Einwilligung fragen.
   const sentences = text.split(/(?<=[.!?])\s+/);
-  const filtered = sentences.filter((s) => !/aufzeichn/i.test(s) && !/\bja\s+oder\s+nein\b/i.test(s));
+  const filtered = sentences.filter((s) => !/aufzeichn|mitschneid/i.test(s) && !/\bja\s+oder\s+nein\b/i.test(s));
   const result = filtered.join(" ").trim();
   if (result) return result;
   // Wenn die LLM-Antwort komplett aus der Aufzeichnungs-Frage bestand
@@ -388,7 +388,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `WAS IMMER GILT:`,
     `- Maximal 2 kurze Sätze pro Antwort, höchstens 1 Frage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
-    `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen.`,
+    `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
     `- Termine nur Mo–Fr, 09:00–19:00 Uhr. Schlage NIEMALS einen Slot an oder vor dem heutigen Datum vor.`,
     `- UHRZEIT-FORMAT (KRITISCH für Sprachausgabe): Schreibe Uhrzeiten IMMER in Worten — "zehn Uhr dreißig", "vierzehn Uhr" — NIEMALS als Ziffern ("10:30", "14:00").`,
