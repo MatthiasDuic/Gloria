@@ -169,78 +169,6 @@ curl -X POST http://localhost:3000/api/integrations/ads/leads \
 
 Die ADS-Kontextdaten (z. B. Branche, Ort, Website, Suchname) werden beim Lead gespeichert, damit Gloria vor dem Call die relevanten Informationen im Datensatz hat.
 
-## Was in A-D-S CRM einzurichten ist (Schritt fuer Schritt)
-
-Damit Firmen aus A-D-S automatisch bei Gloria landen, brauchst du in A-D-S einen HTTP-Export bzw. Webhook auf den Endpoint:
-
-- `POST https://gloria-ki-assistant.vercel.app/api/integrations/ads/leads`
-
-### 1) Authentifizierung in A-D-S setzen
-
-- Header setzen: `Authorization: Bearer <ADS_CRM_API_KEY>`
-- Alternativ: `x-ads-api-key: <ADS_CRM_API_KEY>`
-- Den API-Key in Vercel als `ADS_CRM_API_KEY` hinterlegen.
-
-### 2) Ziel-User fuer die Leads festlegen
-
-Eine der Varianten verwenden:
-
-- im Payload `userId` senden, oder
-- im Payload `username` senden, oder
-- in Vercel Default setzen: `ADS_CRM_DEFAULT_USER_ID` oder `ADS_CRM_DEFAULT_USERNAME`
-
-### 3) Feldmapping von A-D-S auf Gloria
-
-Du kannst deutsche oder englische Feldnamen senden.
-
-| A-D-S Feld | Gloria Feld | Pflicht | Beispiel |
-|---|---|---|---|
-| `firma` oder `company` | `company` | ja | `Musterbau GmbH` |
-| `ansprechpartner` oder `contactName` | `contactName` | nein | `Frau Neumann` |
-| `telefon` oder `phone` | `phone` | ja* | `+492011234567` |
-| `durchwahl` oder `directDial` | `directDial` | nein | `+492011234568` |
-| `email` | `email` | nein | `kontakt@firma.de` |
-| `thema` oder `topic` | `topic` | nein | `private Krankenversicherung` |
-| `notiz` oder `note` | `note` | nein | `Warmkontakt von Messe` |
-| `externalId` | `externalId` | nein | `ADS-2001` |
-| `branche` | in CRM-Kontext | nein | `Handwerk` |
-| `ort` | in CRM-Kontext | nein | `Essen` |
-| `website` | in CRM-Kontext | nein | `https://firma.de` |
-| `mitarbeiterzahl` | in CRM-Kontext | nein | `48` |
-
-`*` Es muss mindestens `phone` oder `directDial` vorhanden sein.
-
-### 4) Modus pro Uebergabe bestimmen
-
-- `mode: "enqueue"` -> Firmen nur als offene Liste eintragen
-- `mode: "start"` -> Liste eintragen und direkt aktivieren
-- `mode: "call_now"` -> sofort anrufen (Twilio muss konfiguriert sein)
-
-### 5) Zwei typische A-D-S Use Cases
-
-- Gespeicherte Suche uebertragen:
-  - `savedSearch.id`, `savedSearch.name`, `savedSearch.query` mitschicken
-  - Ergebnisfirmen als `companies` senden
-- Manuelle Auswahl uebertragen:
-  - nur die selektierten Firmen als `companies` senden
-
-### 6) Rueckmeldung aus Gloria auswerten
-
-Die API liefert dir:
-
-- `created`: neu angelegte Firmen
-- `updated`: aktualisierte Firmen
-- `listId`, `listName`: Ziel-Liste in Gloria
-- `callResults`: Ergebnis je Sofortanruf (bei `call_now`)
-
-### 7) Go-Live Check
-
-1. In A-D-S einen Test mit 1-2 Firmen schicken.
-2. In Gloria pruefen, ob die Liste unter Kampagnen erscheint.
-3. Bei `mode: start` pruefen, ob die Liste aktiv ist.
-4. Bei `mode: call_now` pruefen, ob `callSid` in `callResults` zurueckkommt.
-5. Nach dem Gespraech im Gloria-Dashboard Report pruefen.
-
 ## Admin-Zugang schützen
 
 Die Gloria-Oberfläche ist jetzt per **Session-Login** abgesichert. Für den initialen Master-Benutzer werden diese Variablen verwendet:
@@ -375,7 +303,6 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `TWILIO_AUTH_TOKEN` | Twilio API-Zugang |
 | `TWILIO_PHONE_NUMBER` | Ausgehende Twilio-Rufnummer |
 | `CALL_STATE_SECRET` | Signierung des Gesprächsstatus-Tokens |
-| `ADS_CRM_API_KEY` | API-Key für ADS CRM Push auf `/api/integrations/ads/leads` |
 
 ### 2) Pflicht, wenn Feature genutzt wird
 
@@ -400,8 +327,6 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `TWILIO_CONVERSATION_MODE` | Modus explizit gesetzt werden soll (`live`/`media-stream`) |
 | `TWILIO_MEDIA_STREAM_URL` | `TWILIO_CONVERSATION_MODE=media-stream` genutzt wird |
 | `LIVE_AI_TIMEOUT_MS` | OpenAI-Timeout vom Standard abweichen soll |
-| `ADS_CRM_DEFAULT_USER_ID` | ADS-Imports ohne `userId` einem festen User zugeordnet werden sollen |
-| `ADS_CRM_DEFAULT_USERNAME` | ADS-Imports ohne `username` einem festen User zugeordnet werden sollen |
 
 ### 3) Empfohlene Belegung für Preview
 
