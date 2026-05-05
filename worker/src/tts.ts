@@ -59,7 +59,7 @@ export function streamElevenLabsToMulaw(
   // Deutschen besonders auffällt ("-en", "-er", "-ung").
   const url =
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?optimize_streaming_latency=2&output_format=ulaw_8000`;
+    `?output_format=ulaw_8000`;
 
   // stability=0.5 erlaubt natürlichere Prosodie und Betonung der Wort-
   // Endungen. Bei 0.7+ klingt Gloria roboterhaft/monoton. similarity=0.85
