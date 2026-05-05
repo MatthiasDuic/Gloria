@@ -459,7 +459,7 @@ const CSV_HEADER_ALIASES: Record<string, string[]> = {
   phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
   directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
   email: ["email", "mail", "e-mail"],
-  location: ["location", "ort", "stadt", "plz"],
+  location: ["location", "ort", "stadt"],
   topic: ["topic", "thema", "bereich"],
   note: ["note", "notiz", "bemerkung", "hinweis"],
   nextCallAt: ["nextcallat", "naechsteranruf", "nachsteranruf", "naechsterrueckruf", "ruckrufzeitpunkt", "callback", "rueckruf"],
@@ -471,7 +471,7 @@ function buildHeaderIndex(headerRow: string[]): Record<string, number> {
 
   for (const [canonical, aliases] of Object.entries(CSV_HEADER_ALIASES)) {
     const candidates = aliases.map((entry) => normalizeHeaderKey(entry));
-    // Prefer alias order over column order (e.g. Ort/Stadt before PLZ for location).
+    // Prefer alias order over column order for deterministic header mapping.
     const idx = candidates.reduce<number>((found, candidate) => {
       if (found >= 0) {
         return found;
