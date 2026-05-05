@@ -6,7 +6,10 @@ export function buildInternalHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const username = process.env.BASIC_AUTH_USERNAME?.trim();
   const password = process.env.BASIC_AUTH_PASSWORD?.trim();
-  const token = process.env.CALL_STATE_SECRET?.trim() || process.env.CRON_SECRET?.trim();
+  const token =
+    process.env.APP_INTERNAL_TOKEN?.trim() ||
+    process.env.CALL_STATE_SECRET?.trim() ||
+    process.env.CRON_SECRET?.trim();
 
   if (username && password) {
     headers.authorization = `Basic ${btoa(`${username}:${password}`)}`;

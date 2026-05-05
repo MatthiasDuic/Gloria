@@ -6,7 +6,10 @@ export const dynamic = "force-dynamic";
 
 function isInternalTokenAuthorized(request: Request): boolean {
   const token = request.headers.get("x-gloria-internal-token")?.trim();
-  const expected = process.env.CALL_STATE_SECRET?.trim() || process.env.CRON_SECRET?.trim();
+  const expected =
+    process.env.APP_INTERNAL_TOKEN?.trim() ||
+    process.env.CALL_STATE_SECRET?.trim() ||
+    process.env.CRON_SECRET?.trim();
   if (!token || !expected) return false;
   return token === expected;
 }
