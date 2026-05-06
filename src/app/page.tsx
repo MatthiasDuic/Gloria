@@ -124,6 +124,39 @@ function getLeadAmpel(
   return { tone: "info", label: "Blau", text: "Offen / noch kein Kontakt" };
 }
 
+type CampaignRunPayload = {
+  ok?: boolean;
+  action?: "start" | "stop" | "run" | "delete";
+  listId?: string;
+  dialed?: boolean;
+  skipped?: boolean;
+  completed?: boolean;
+  reason?: string;
+  error?: string;
+  call?: {
+    sid?: string;
+    to?: string;
+    company?: string;
+  };
+};
+
+function describeRunReason(reason?: string) {
+  switch ((reason || "").toLowerCase()) {
+    case "missing_phone":
+      return "Lead ohne Telefonnummer";
+    case "list_not_active":
+      return "Liste ist nicht aktiv";
+    case "cooldown":
+      return "Cooldown zwischen zwei Anrufen aktiv";
+    case "outside_business_hours":
+      return "Außerhalb der Anrufzeiten";
+    case "no_active_lists":
+      return "Keine aktive Liste vorhanden";
+    default:
+      return reason || "Unbekannter Grund";
+  }
+}
+
 function toDateKey(value: Date) {
   // Lokales Datum (nicht UTC), damit Kalenderzellen und Termine auf demselben
   // Tag landen. toISOString() würde 2026-05-13T22:00:00 lokal als 2026-05-13
@@ -1135,7 +1168,34 @@ export default function HomePage() {
 
       setCampaignLists(payload.lists || []);
       if (action === "start") {
-        setNotice("Liste wurde gestartet.");
+        setNotice("Liste wurde gestartet. Erster Anrufversuch wird ausgelöst ...");
+
+        const runResponse = await fetch("/api/campaigns/lists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "run", listId }),
+        });
+        const runPayload = (await runResponse.json().catch(() => ({}))) as CampaignRunPayload & {
+          lists?: CampaignListSummary[];
+        };
+
+        if (!runResponse.ok) {
+          throw new Error(runPayload.error || "Erster Anrufversuch konnte nicht gestartet werden.");
+        }
+
+        if (Array.isArray(runPayload.lists)) {
+          setCampaignLists(runPayload.lists);
+        }
+
+        if (runPayload.dialed && runPayload.call?.sid) {
+          setNotice(
+            `Anruf gestartet (${runPayload.call.company || "Firma"}, ${runPayload.call.to || "-"}, SID: ${runPayload.call.sid}).`,
+          );
+        } else if (runPayload.completed) {
+          setNotice("Liste ist abgearbeitet und wurde automatisch gestoppt.");
+        } else if (runPayload.skipped) {
+          setNotice(`Anruf übersprungen: ${describeRunReason(runPayload.reason)}.`);
+        }
       } else if (action === "stop") {
         setNotice("Liste wurde gestoppt.");
       } else {
@@ -1158,11 +1218,34 @@ export default function HomePage() {
     const timer = setInterval(() => {
       void (async () => {
         for (const list of activeLists) {
-          await fetch("/api/campaigns/lists", {
+          const response = await fetch("/api/campaigns/lists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "run", listId: list.listId }),
           }).catch(() => undefined);
+
+          if (!response) {
+            continue;
+          }
+
+          const payload = (await response.json().catch(() => ({}))) as CampaignRunPayload;
+
+          if (!response.ok) {
+            setNotice(
+              payload.error
+                ? `Anruffehler in Liste "${list.listName}": ${payload.error}`
+                : `Anruffehler in Liste "${list.listName}".`,
+            );
+            continue;
+          }
+
+          if (payload.dialed && payload.call?.sid) {
+            setNotice(
+              `Anruf läuft: ${payload.call.company || list.listName} (${payload.call.to || "-"}) · SID ${payload.call.sid}`,
+            );
+          } else if (payload.skipped && payload.reason && payload.reason !== "list_not_active") {
+            setNotice(`Liste "${list.listName}": ${describeRunReason(payload.reason)}.`);
+          }
         }
         await loadCampaignLists();
         await loadDashboard();
