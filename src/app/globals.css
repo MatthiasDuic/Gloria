@@ -131,6 +131,56 @@ textarea {
   border: 1px solid rgba(202, 162, 88, 0.42);
 }
 
+.campaign-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.campaign-status::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #7d8ea8;
+  box-shadow: 0 0 0 0 rgba(125, 142, 168, 0.35);
+}
+
+.campaign-status.running {
+  background: rgba(47, 143, 87, 0.14);
+  border-color: rgba(47, 143, 87, 0.36);
+  color: #1f6f3f;
+}
+
+.campaign-status.running::before {
+  background: #2f8f57;
+  box-shadow: 0 0 0 0 rgba(47, 143, 87, 0.42);
+  animation: campaignPulse 1.4s ease-out infinite;
+}
+
+.campaign-status.stopped {
+  background: rgba(100, 120, 160, 0.12);
+  border-color: rgba(100, 120, 160, 0.33);
+  color: #445a7c;
+}
+
+.campaign-status.stopped::before {
+  background: #7d8ea8;
+}
+
+@keyframes campaignPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(47, 143, 87, 0.42);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(47, 143, 87, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 143, 87, 0);
+  }
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

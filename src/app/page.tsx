@@ -2336,7 +2336,7 @@ export default function HomePage() {
                         <span className="pill">Gesamt: {list.total}</span>
                         <span className="pill">Offen: {list.pending}</span>
                         <span className="pill">Termine: {list.appointments}</span>
-                        {isRunning ? <span className="pill">Status: läuft</span> : <span className="pill">Status: gestoppt</span>}
+                        {isRunning ? <span className="pill campaign-status running">Status: läuft</span> : <span className="pill campaign-status stopped">Status: gestoppt</span>}
                         <button
                           className="btn"
                           onClick={() => void controlCampaignList(list.listId, "start")}
