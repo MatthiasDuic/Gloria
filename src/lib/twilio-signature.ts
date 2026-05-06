@@ -7,6 +7,19 @@
 
 import { getAppBaseUrl } from "@/lib/twilio";
 
+function buildRequestHostBase(request: Request): string {
+  const url = new URL(request.url);
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    url.host;
+  const proto =
+    request.headers.get("x-forwarded-proto") ||
+    url.protocol.replace(":", "");
+
+  return `${proto}://${host}`.replace(/\/$/, "");
+}
+
 function base64Encode(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) {
@@ -73,10 +86,16 @@ export async function validateTwilioRequest(
   }
 
   const requestUrl = new URL(request.url);
-  const publicBase = getAppBaseUrl(request);
-  const publicUrl = `${publicBase}${requestUrl.pathname}${requestUrl.search}`;
+  const requestHostBase = buildRequestHostBase(request);
+  const configuredBase = getAppBaseUrl(request);
+  const candidateUrls = Array.from(
+    new Set([
+      `${configuredBase}${requestUrl.pathname}${requestUrl.search}`,
+      `${requestHostBase}${requestUrl.pathname}${requestUrl.search}`,
+      requestUrl.toString(),
+    ]),
+  );
 
-  let message = publicUrl;
   let form: FormData | undefined;
 
   if (request.method === "POST") {
@@ -92,33 +111,66 @@ export async function validateTwilioRequest(
         entries.push([key, typeof value === "string" ? value : ""]);
       });
       entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      for (const [k, v] of entries) {
-        message += k + v;
+      const suffix = entries.map(([k, v]) => `${k}${v}`).join("");
+      const expectedByUrl = await Promise.all(
+        candidateUrls.map(async (urlValue) => ({
+          urlValue,
+          signature: await hmacSha1Base64(authToken, `${urlValue}${suffix}`),
+        })),
+      );
+
+      const matched = expectedByUrl.find((entry) => timingSafeEqual(entry.signature, header));
+
+      if (!matched) {
+        if ((process.env.TWILIO_SIGNATURE_DEBUG || "").toLowerCase() === "true") {
+          console.log(
+            JSON.stringify({
+              level: "warn",
+              message: "twilio.signature_debug",
+              candidateUrls,
+              receivedHeader: header,
+              expectedSignatures: expectedByUrl.map((entry) => ({
+                url: entry.urlValue,
+                signature: entry.signature,
+              })),
+              method: request.method,
+              paramKeys: form ? Array.from(form.keys()).sort() : undefined,
+            }),
+          );
+        }
+        return { reason: "mismatch", ok: false, publicUrl: candidateUrls[0], form };
       }
+
+      return { ok: true, publicUrl: matched.urlValue, form };
     }
   }
 
-  const expected = await hmacSha1Base64(authToken, message);
+  const expectedByUrl = await Promise.all(
+    candidateUrls.map(async (urlValue) => ({
+      urlValue,
+      signature: await hmacSha1Base64(authToken, urlValue),
+    })),
+  );
+  const matched = expectedByUrl.find((entry) => timingSafeEqual(entry.signature, header));
 
-  if (!timingSafeEqual(expected, header)) {
-    // Debug-Ausgabe hilft, die Ursache für Mismatches zu finden (anderer
-    // Host zwischen TwiML-Generator und Twilio-Webhook, nicht-kanonische
-    // Form-Parameter, Proxy-Rewrites, etc.). Enthält keine Secrets.
+  if (!matched) {
     if ((process.env.TWILIO_SIGNATURE_DEBUG || "").toLowerCase() === "true") {
       console.log(
         JSON.stringify({
           level: "warn",
           message: "twilio.signature_debug",
-          publicUrl,
+          candidateUrls,
           receivedHeader: header,
-          expectedSignature: expected,
+          expectedSignatures: expectedByUrl.map((entry) => ({
+            url: entry.urlValue,
+            signature: entry.signature,
+          })),
           method: request.method,
-          paramKeys: form ? Array.from(form.keys()).sort() : undefined,
         }),
       );
     }
-    return { ok: false, reason: "mismatch", publicUrl, form };
+    return { ok: false, reason: "mismatch", publicUrl: candidateUrls[0], form };
   }
 
-  return { ok: true, publicUrl, form };
+  return { ok: true, publicUrl: matched.urlValue, form };
 }
