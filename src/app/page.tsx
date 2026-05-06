@@ -738,6 +738,7 @@ export default function HomePage() {
   });
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
   const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
+  const [runningListIds, setRunningListIds] = useState<string[]>([]);
 
   const activeDraft = draftScripts[detailTopic];
   const reportRows = useMemo(() => data.reports, [data.reports]);
@@ -898,6 +899,7 @@ export default function HomePage() {
     () => appointmentsByDay.get(selectedDayKey) || [],
     [appointmentsByDay, selectedDayKey],
   );
+  const runningListSet = useMemo(() => new Set(runningListIds), [runningListIds]);
   const selectedLeadReports = useMemo(() => {
     if (!selectedLeadForHistory) {
       return [] as DashboardData["reports"];
@@ -954,7 +956,22 @@ export default function HomePage() {
     const response = await fetch("/api/campaigns/lists", { cache: "no-store" });
     const payload = (await response.json()) as { lists?: CampaignListSummary[] };
     if (response.ok) {
-      setCampaignLists(payload.lists || []);
+      const lists = payload.lists || [];
+      setCampaignLists(lists);
+      setRunningListIds((current) => {
+        const next = new Set(current);
+        for (const list of lists) {
+          if (list.active) {
+            next.add(list.listId);
+          }
+        }
+        for (const listId of [...next]) {
+          if (!lists.some((entry) => entry.listId === listId)) {
+            next.delete(listId);
+          }
+        }
+        return [...next];
+      });
     }
   }
 
@@ -1168,6 +1185,7 @@ export default function HomePage() {
 
       setCampaignLists(payload.lists || []);
       if (action === "start") {
+        setRunningListIds((current) => (current.includes(listId) ? current : [...current, listId]));
         setNotice("Liste wurde gestartet. Erster Anrufversuch wird ausgelöst ...");
 
         const runResponse = await fetch("/api/campaigns/lists", {
@@ -1197,8 +1215,10 @@ export default function HomePage() {
           setNotice(`Anruf übersprungen: ${describeRunReason(runPayload.reason)}.`);
         }
       } else if (action === "stop") {
+        setRunningListIds((current) => current.filter((id) => id !== listId));
         setNotice("Liste wurde gestoppt.");
       } else {
+        setRunningListIds((current) => current.filter((id) => id !== listId));
         setNotice("Liste wurde geloescht.");
       }
     } catch (error) {
@@ -2306,6 +2326,7 @@ export default function HomePage() {
               </p>
               {campaignLists.map((list) => {
                 const leadsForList = data.leads.filter((lead) => (lead.listId || "legacy") === list.listId);
+                const isRunning = list.active || runningListSet.has(list.listId);
 
                 return (
                   <div key={list.listId} className="mini-panel">
@@ -2315,17 +2336,18 @@ export default function HomePage() {
                         <span className="pill">Gesamt: {list.total}</span>
                         <span className="pill">Offen: {list.pending}</span>
                         <span className="pill">Termine: {list.appointments}</span>
+                        {isRunning ? <span className="pill">Status: läuft</span> : <span className="pill">Status: gestoppt</span>}
                         <button
                           className="btn"
                           onClick={() => void controlCampaignList(list.listId, "start")}
-                          disabled={busy || list.active || list.pending === 0}
+                          disabled={busy || isRunning || list.pending === 0}
                         >
                           Starten
                         </button>
                         <button
                           className="btn ghost"
                           onClick={() => void controlCampaignList(list.listId, "stop")}
-                          disabled={busy || !list.active}
+                          disabled={busy || !isRunning}
                         >
                           Stoppen
                         </button>
