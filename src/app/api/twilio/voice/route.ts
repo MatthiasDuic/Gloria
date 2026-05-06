@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   getAppBaseUrl,
+  getTwilioConversationMode,
   getTwilioCallerIds,
 } from "@/lib/twilio";
 import { encodeCallStateToken } from "@/lib/call-state-token";
@@ -29,6 +30,36 @@ const INBOUND_FORWARD_TIMEOUT_SECONDS = Math.min(
 const TWILIO_SPEECH_MODEL = process.env.TWILIO_SPEECH_MODEL?.trim() || "phone_call";
 const TWILIO_PROFANITY_FILTER =
   (process.env.TWILIO_PROFANITY_FILTER?.trim() || "false").toLowerCase() === "true";
+const MEDIA_STREAM_HEALTHCHECK_TIMEOUT_MS = Math.min(
+  4000,
+  Math.max(500, Number.parseInt(process.env.MEDIA_STREAM_HEALTHCHECK_TIMEOUT_MS || "1500", 10)),
+);
+
+async function isMediaStreamWorkerHealthy() {
+  const healthUrl = process.env.WORKER_HEALTHCHECK_URL?.trim();
+  if (!healthUrl) {
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MEDIA_STREAM_HEALTHCHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch(healthUrl, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    return response.ok;
+  } catch (error) {
+    log.warn("twilio.media_stream_healthcheck_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function getContext(request: Request) {
   const url = new URL(request.url);
@@ -277,32 +308,41 @@ async function renderVoiceResponse(request: Request) {
   // Wenn USE_MEDIA_STREAMS=1 und MEDIA_STREAM_WSS_URL konfiguriert ist, übergeben
   // wir den Audio-Pfad an den externen Worker (Deepgram + GPT-4o + ElevenLabs).
   // Die alte Gather/Play-Pipeline bleibt als Fallback bestehen.
-  const useMediaStreams =
-    (process.env.USE_MEDIA_STREAMS || "").trim() === "1" &&
-    Boolean(process.env.MEDIA_STREAM_WSS_URL?.trim());
+  const mediaStreamMode = getTwilioConversationMode() === "media-stream";
+  const mediaStreamUrl = process.env.MEDIA_STREAM_WSS_URL?.trim();
+  const mediaStreamFlag = (process.env.USE_MEDIA_STREAMS || "").trim().toLowerCase();
+  const mediaStreamEnabled = mediaStreamFlag === "" || mediaStreamFlag === "1" || mediaStreamFlag === "true";
+  const useMediaStreams = mediaStreamMode && mediaStreamEnabled && Boolean(mediaStreamUrl);
 
   if (useMediaStreams) {
-    const streamUrl = process.env.MEDIA_STREAM_WSS_URL!.trim();
-    const twiml = buildConnectStreamTwiml({
-      streamUrl,
-      parameters: {
-        userId: context.userId,
-        phoneNumberId: context.phoneNumberId,
-        ownerRealName: context.ownerRealName,
-        ownerCompanyName: context.ownerCompanyName,
-        ownerGesellschaft: context.ownerGesellschaft,
-        voiceId: context.voiceId,
-        leadId: context.leadId,
-        company: context.company,
-        contactName: context.contactName,
-        topic: context.topic,
-        previousSummary: context.previousSummary,
-        isCallback: context.isCallback ? "1" : undefined,
-      },
-    });
+    const workerHealthy = await isMediaStreamWorkerHealthy();
+    if (workerHealthy) {
+      const twiml = buildConnectStreamTwiml({
+        streamUrl: mediaStreamUrl!,
+        parameters: {
+          userId: context.userId,
+          phoneNumberId: context.phoneNumberId,
+          ownerRealName: context.ownerRealName,
+          ownerCompanyName: context.ownerCompanyName,
+          ownerGesellschaft: context.ownerGesellschaft,
+          voiceId: context.voiceId,
+          leadId: context.leadId,
+          company: context.company,
+          contactName: context.contactName,
+          topic: context.topic,
+          previousSummary: context.previousSummary,
+          isCallback: context.isCallback ? "1" : undefined,
+        },
+      });
 
-    return new NextResponse(twiml, {
-      headers: { "Content-Type": "text/xml; charset=utf-8" },
+      return new NextResponse(twiml, {
+        headers: { "Content-Type": "text/xml; charset=utf-8" },
+      });
+    }
+
+    log.warn("twilio.media_stream_unavailable_fallback", {
+      healthcheckUrl: process.env.WORKER_HEALTHCHECK_URL || null,
+      streamUrl: mediaStreamUrl,
     });
   }
   // --------------------------------------------------------------------------
