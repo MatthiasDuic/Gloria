@@ -260,7 +260,7 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
   const normalized = topic.trim().toLowerCase();
 
   const commonTransfer = [
-    "Nur dann an einen Menschen weiterleiten, wenn der Interessent das ausdruecklich wuenscht oder die KI klar ablehnt.",
+    "Nur dann an einen Menschen weiterleiten, wenn der Interessent das ausdrücklich wünscht oder die KI klar ablehnt.",
     "Dann sagen: Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen.",
     "Eine Weiterleitung nie ungefragt als Standardschritt anbieten.",
   ].join("\n");
@@ -270,41 +270,41 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
       callObjective: "Einen festen Orientierungstermin mit Herrn Duic vereinbaren und danach die relevanten Basisdaten sauber, einzeln und ohne Doppelfragen aufnehmen.",
       behavior: [
         "Warm, direkt und wie eine starke Vertriebsassistentin am Telefon sprechen - nicht wie ein Sprachcomputer.",
-        "Schnell persoenliche Verbindung aufbauen, dann sauber in die Relevanz wechseln.",
+        "Schnell persönliche Verbindung aufbauen, dann sauber in die Relevanz wechseln.",
         "Keine Floskeln wie absolut, glaskugel oder landkarte. Lieber konkrete Bilder aus dem echten Alltag des Kunden.",
-        "Wenn der Interessent ein Problem andeutet, kurz aufgreifen und sofort fuehrend weitergehen.",
+        "Wenn der Interessent ein Problem andeutet, kurz aufgreifen und sofort führend weitergehen.",
       ].join("\n"),
       conversationGuardrails: [
-        "Kurze Dialogzuege: maximal zwei kurze Saetze und dann eine klare Frage.",
+        "Kurze Dialogzüge: maximal zwei kurze Sätze und dann eine klare Frage.",
         "Keine Doppelfragen in der Basisdaten-Phase.",
         "Vor einer echten Aufnahme immer erst Einwilligung einholen.",
-        "In der Problem-Aufbau-Phase mindestens eine konkrete Zahl aktiv nennen, bevor in den Termin uebergeleitet wird.",
-        "Keine erfundenen Quellen, keine garantierten Einsparungen und keine Aussagen wie immer guenstiger oder garantiert stabil.",
-        "Wenn Basisdaten abgelehnt werden, nicht diskutieren, sondern sauber zur Terminbestaetigungs-Mail uebergehen.",
+        "In der Problem-Aufbau-Phase mindestens eine konkrete Zahl aktiv nennen, bevor in den Termin übergeleitet wird.",
+        "Keine erfundenen Quellen, keine garantierten Einsparungen und keine Aussagen wie immer günstiger oder garantiert stabil.",
+        "Wenn Basisdaten abgelehnt werden, nicht diskutieren, sondern sauber zur Terminbestätigungs-Mail übergehen.",
       ].join("\n"),
       knowledge: [
         "ERLAUBT:",
         "- Beitragsentwicklung mit konkreten Rechenbeispielen greifbar machen.",
         "- Tarifstruktur, Selbstbehalt und Entlastungsbausteine als Stellschrauben benennen.",
-        "- Den Termin als Analyse- und Klarheitsgespraech positionieren, nicht als Abschlussdruck.",
+        "- Den Termin als Analyse- und Klarheitsgespräch positionieren, nicht als Abschlussdruck.",
         "",
         "VERBOTEN:",
-        "- Garantierte Einspar- oder Stabilitaetsversprechen.",
+        "- Garantierte Einspar- oder Stabilitätsversprechen.",
         "- Medizinische, steuerliche oder rechtliche Einzelfallberatung.",
         "- Quellen nennen, die nicht im Playbook stehen.",
       ].join("\n"),
       proofPoints: [
         "Wenn heute 600 Euro PKV-Beitrag laufen und der Beitrag nur mit vier Prozent pro Jahr steigt, dann liegen wir in zehn Jahren bei rund 890 Euro und in zwanzig Jahren bei rund 1.315 Euro.",
-        "Wenn heute 850 Euro GKV-Beitrag anfallen und die Entwicklung bei fuenf Prozent pro Jahr liegt, dann sind das in zehn Jahren rund 1.385 Euro und in zwanzig Jahren rund 2.255 Euro.",
-        "Der durchschnittliche Zusatzbeitrag in der GKV ist von 1,1 Prozent in 2020 auf rund 2,5 Prozent in 2025 gestiegen - das ist fuer viele erst sichtbar, wenn die Abbuchung schon hoeher ist.",
-        "Viele Bestandskunden haben seit Jahren keinen sauberen Tarif-Check mehr bekommen. Genau dadurch bleiben schwache Altersrueckstellungen oder unpassende Tariflogiken oft unbemerkt.",
+        "Wenn heute 850 Euro GKV-Beitrag anfallen und die Entwicklung bei fünf Prozent pro Jahr liegt, dann sind das in zehn Jahren rund 1.385 Euro und in zwanzig Jahren rund 2.255 Euro.",
+        "Der durchschnittliche Zusatzbeitrag in der GKV ist von 1,1 Prozent in 2020 auf rund 2,5 Prozent in 2025 gestiegen - das ist für viele erst sichtbar, wenn die Abbuchung schon höher ist.",
+        "Viele Bestandskunden haben seit Jahren keinen sauberen Tarif-Check mehr bekommen. Genau dadurch bleiben schwache Altersrückstellungen oder unpassende Tariflogiken oft unbemerkt.",
       ].join("\n"),
       objectionResponses: [
-        "Kein Interesse: Genau deshalb lohnt sich die Einordnung. Die meisten reagieren erst, wenn der naechste Bescheid kommt und die Zahl ploetzlich wieder hoeher ist.",
+        "Kein Interesse: Genau deshalb lohnt sich die Einordnung. Die meisten reagieren erst, wenn der nächste Bescheid kommt und die Zahl plötzlich wieder höher ist.",
         "Schon versorgt: Gut - dann schauen wir nicht, ob Sie versichert sind, sondern ob Ihr heutiger Tarif auf Dauer sauber kalkuliert ist.",
         "Zu teuer: Genau darum geht es. Nicht der heutige Beitrag ist der Knackpunkt, sondern was daraus in zehn oder zwanzig Jahren wird.",
         "Keine Zeit: Verstehe ich. Deshalb sind es auch nur 15 Minuten mit einer klaren Zahl und einem sauberen Blick auf die Entwicklung.",
-        "Nur per Mail: Gern per Mail bestaetigen. Die eigentliche Einordnung macht Herr Duic aber kurz persoenlich, damit Sie direkt Rueckfragen stellen koennen.",
+        "Nur per Mail: Gern per Mail bestätigen. Die eigentliche Einordnung macht Herr Duic aber kurz persönlich, damit Sie direkt Rückfragen stellen können.",
       ].join("\n"),
       transferHandling: commonTransfer,
     };
@@ -312,11 +312,11 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
 
   if (normalized === "betriebliche krankenversicherung") {
     return {
-      callObjective: "Einen kurzen Orientierungstermin vereinbaren, in dem Herr Duic den Nutzen von bKV fuer Arbeitgeberattraktivitaet, Bindung und Umsetzbarkeit einordnet.",
+      callObjective: "Einen kurzen Orientierungstermin vereinbaren, in dem Herr Duic den Nutzen von bKV für Arbeitgeberattraktivität, Bindung und Umsetzbarkeit einordnet.",
       conversationGuardrails: [
         "Nicht in Tarifdetails oder Leistungsversprechen abrutschen.",
-        "Keine Produktshow, sondern Relevanz fuer Recruiting, Bindung und Wahrnehmung als Arbeitgeber herausarbeiten.",
-        "Einwaende kurz, konkret und ohne Callcenter-Floskeln beantworten.",
+        "Keine Produktshow, sondern Relevanz für Recruiting, Bindung und Wahrnehmung als Arbeitgeber herausarbeiten.",
+        "Einwände kurz, konkret und ohne Callcenter-Floskeln beantworten.",
         "Immer nur eine Hauptfrage gleichzeitig stellen.",
       ].join("\n"),
       transferHandling: commonTransfer,
@@ -325,12 +325,12 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
 
   if (normalized === "betriebliche altersvorsorge") {
     return {
-      callObjective: "Einen Orientierungstermin sichern, in dem Herr Duic Verstaendlichkeit, Nutzung und Arbeitgebernutzen der bAV einordnet.",
+      callObjective: "Einen Orientierungstermin sichern, in dem Herr Duic Verständlichkeit, Nutzung und Arbeitgebernutzen der bAV einordnet.",
       conversationGuardrails: [
         "Keine Steuer- oder Rechtsberatung im Einzelfall.",
-        "Nicht in Fachchinesisch kippen; immer erst Nutzen und Verstaendlichkeit erklaeren.",
+        "Nicht in Fachchinesisch kippen; immer erst Nutzen und Verständlichkeit erklären.",
         "Keine Renditeversprechen.",
-        "Kurze, fuehrende Dialogschritte statt langer Erklaerbaeren.",
+        "Kurze, führende Dialogschritte statt langer Erklärbären.",
       ].join("\n"),
       transferHandling: commonTransfer,
     };
@@ -343,7 +343,7 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
         "Keine Angstkommunikation und keine Panikbilder.",
         "Den Termin als Einordnung und Vergleich positionieren, nicht als Verkaufsabschluss.",
         "Keine Deckungs- oder Beitragszusagen ohne Vertragsdaten.",
-        "Auch bei Einwaenden ruhig und unternehmerisch bleiben.",
+        "Auch bei Einwänden ruhig und unternehmerisch bleiben.",
       ].join("\n"),
       transferHandling: commonTransfer,
     };
@@ -351,20 +351,20 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
 
   if (normalized === "energie") {
     return {
-      callObjective: "Einen kurzen Termin vereinbaren, in dem Herr Duic bestehende Energiekonditionen wirtschaftlich einordnet und naechste Schritte ableitet.",
+      callObjective: "Einen kurzen Termin vereinbaren, in dem Herr Duic bestehende Energiekonditionen wirtschaftlich einordnet und nächste Schritte ableitet.",
       conversationGuardrails: [
         "Keine pauschalen Sparversprechen.",
         "Nicht spekulieren, wenn Lastprofil, Laufzeit oder Vertragsdetails fehlen.",
         "Immer wirtschaftlich, sachlich und knapp argumentieren.",
-        "Kein Preisdruck, sondern Transparenz ueber Konditionen und Beschaffungszeitpunkt schaffen.",
+        "Kein Preisdruck, sondern Transparenz über Konditionen und Beschaffungszeitpunkt schaffen.",
       ].join("\n"),
       transferHandling: commonTransfer,
     };
   }
 
   return {
-    callObjective: "Einen klaren naechsten Schritt sichern: idealerweise ein Termin, alternativ eine saubere Wiedervorlage mit klarer Zuständigkeit.",
-    conversationGuardrails: "Kurze Dialogzuege, keine Monologe, keine erfundenen Fakten, immer nur eine Hauptfrage zur Zeit.",
+    callObjective: "Einen klaren nächsten Schritt sichern: idealerweise ein Termin, alternativ eine saubere Wiedervorlage mit klarer Zuständigkeit.",
+    conversationGuardrails: "Kurze Dialogzüge, keine Monologe, keine erfundenen Fakten, immer nur eine Hauptfrage zur Zeit.",
     transferHandling: commonTransfer,
   };
 }
@@ -2596,23 +2596,23 @@ export default function HomePage() {
                   <div className="mini-panel settings-callout">
                     <h3>Accountweite Standards</h3>
                     <p className="subtle">
-                      Hier definieren Sie, wie Gloria kontoweit auftreten soll: sprachlich fuehrend, faktenbasiert,
+                      Hier definieren Sie, wie Gloria kontoweit auftreten soll: sprachlich führend, faktenbasiert,
                       kurz im Dialog und sauber in der Eskalation zu einem Menschen.
                     </p>
                     <ul className="subtle playbook-fixed-list top-gap">
-                      <li>Global gilt: maximal zwei kurze Saetze und dann eine klare Frage statt Monologe oder Skriptblöcke.</li>
-                      <li>Gloria soll fuehren wie eine starke Vertriebsassistentin: warm, praezise, reaktiv und ohne Callcenter-Ton.</li>
-                      <li>Keine erfundenen Zahlen, keine leeren Metaphern, keine unklaren Versprechen. Relevanz zuerst, danach der naechste Schritt.</li>
-                      <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung, dann mit sauberer Rueckfallzusage zu Jutta Brost.</li>
-                      <li>Die Batch-Uebernahme schreibt diese Standards direkt in die persistenten Playbooks Ihres Kontos.</li>
+                      <li>Global gilt: maximal zwei kurze Sätze und dann eine klare Frage statt Monologe oder Skriptblöcke.</li>
+                      <li>Gloria soll führen wie eine starke Vertriebsassistentin: warm, präzise, reaktiv und ohne Callcenter-Ton.</li>
+                      <li>Keine erfundenen Zahlen, keine leeren Metaphern, keine unklaren Versprechen. Relevanz zuerst, danach der nächste Schritt.</li>
+                      <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung, dann mit sauberer Rückfallzusage zu Jutta Brost.</li>
+                      <li>Die Batch-Übernahme schreibt diese Standards direkt in die persistenten Playbooks Ihres Kontos.</li>
                     </ul>
                     <p className="subtle top-gap">
-                      Diese Ebene ist bewusst haerter formuliert als einzelne Themen-Prompts: Sie setzt die Grundhaltung,
-                      an die sich jedes Thema anschliessen muss.
+                      Diese Ebene ist bewusst härter formuliert als einzelne Themen-Prompts: Sie setzt die Grundhaltung,
+                      an die sich jedes Thema anschließen muss.
                     </p>
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void applyRecommendedPlaybooksToAccount()} disabled={busy}>
-                        Empfohlene Standards fuer dieses Konto speichern
+                        Empfohlene Standards für dieses Konto speichern
                       </button>
                     </div>
                   </div>
@@ -2692,14 +2692,14 @@ export default function HomePage() {
                         <span className="playbook-kicker">Playbook-Cockpit</span>
                         <h3>{detailTopic}</h3>
                         <p>
-                          Hier steuern Sie jetzt die Hebel, die im Alltag wirklich zaehlen: Zielbild, harte Regeln,
-                          Pflichtdaten, Beweisanker, Einwandlinien und menschliche Uebergabe.
+                          Hier steuern Sie jetzt die Hebel, die im Alltag wirklich zählen: Zielbild, harte Regeln,
+                          Pflichtdaten, Beweisanker, Einwandlinien und menschliche Übergabe.
                         </p>
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Konfiguration</span>
                         <strong>{countFilledPlaybookFields(activeDraft)}/{PLAYBOOK_EDITABLE_FIELDS.length}</strong>
-                        <p>aktive Bereiche fuer dieses Thema</p>
+                        <p>aktive Bereiche für dieses Thema</p>
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Pflichtfragen</span>
@@ -2709,12 +2709,12 @@ export default function HomePage() {
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Einwaende & Fakten</span>
                         <strong>{normalizeLineCount(activeDraft.objectionResponses) + normalizeLineCount(activeDraft.proofPoints)}</strong>
-                        <p>verfuegbare Konter- und Beweisanker</p>
+                        <p>verfügbare Konter- und Beweisanker</p>
                       </div>
                     </div>
 
                     <p className="subtle top-gap">
-                      Aenderungen gelten nur fuer Ihren Account und greifen sofort fuer neue Gespraeche.
+                      Änderungen gelten nur für Ihren Account und greifen sofort für neue Gespräche.
                       Kurze, klare Steuertexte sind hier meist wirksamer als lange Textsammlungen.
                     </p>
 
@@ -2722,8 +2722,8 @@ export default function HomePage() {
                       <div className="mini-panel playbook-card">
                         <h3 className="sub-heading"><strong>1. Zielbild des Calls</strong> <span className="subtle">(worauf Gloria hinarbeitet)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Definieren Sie den sauberen Erfolgszustand fuer dieses Thema: Termin, Wiedervorlage,
-                          Qualifizierung oder ein klarer naechster Schritt.
+                          Definieren Sie den sauberen Erfolgszustand für dieses Thema: Termin, Wiedervorlage,
+                          Qualifizierung oder ein klarer nächster Schritt.
                         </p>
                         <textarea
                           value={activeDraft.callObjective ?? ""}
@@ -2733,7 +2733,7 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>2. Verhalten & Tonalitaet</strong> <span className="subtle">(wie Gloria fuehrt)</span></h3>
+                        <h3 className="sub-heading"><strong>2. Verhalten & Tonalität</strong> <span className="subtle">(wie Gloria führt)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
                           Argumentationslinie, Empathie-Anker, Dramatologie, Sprachstil, Tempo und was sie aktiv betonen soll.
                         </p>
@@ -2760,7 +2760,7 @@ export default function HomePage() {
                       <div className="mini-panel playbook-card">
                         <h3 className="sub-heading"><strong>4. Basisdaten / Pflichtfragen</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab. Nutzen Sie kurze, klar trennbare Fragen statt Bloecke.
+                          Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab. Nutzen Sie kurze, klar trennbare Fragen statt Blöcke.
                         </p>
                         <textarea
                           value={activeDraft.requiredData ?? ""}
@@ -2807,9 +2807,9 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card playbook-card-wide">
-                        <h3 className="sub-heading"><strong>8. Menschliche Uebergabe / Transfer</strong> <span className="subtle">(wann Gloria verbinden oder Rueckruf zusagen soll)</span></h3>
+                        <h3 className="sub-heading"><strong>8. Menschliche Übergabe / Transfer</strong> <span className="subtle">(wann Gloria verbinden oder Rückruf zusagen soll)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Regeln fuer Eskalation zu einem Menschen: wann angeboten wird, welche Formulierung Gloria nutzt,
+                          Regeln für Eskalation zu einem Menschen: wann angeboten wird, welche Formulierung Gloria nutzt,
                           und was bei fehlgeschlagener Weiterleitung gesagt wird.
                         </p>
                         <textarea
