@@ -1,6 +1,6 @@
 import { AI_CONFIG } from "./ai-config";
 import { isElevenLabsConfigured } from "./elevenlabs";
-import { isTwilioConfigured } from "./twilio";
+import { getTwilioCompatibleApiBaseUrl, isTwilioConfigured } from "./twilio";
 
 export interface PreflightCheck {
   service: "openai" | "elevenlabs" | "twilio";
@@ -174,9 +174,10 @@ async function checkTwilio(timeoutMs: number): Promise<PreflightCheck> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID!.trim();
   const authToken = process.env.TWILIO_AUTH_TOKEN!.trim();
   const authHeader = btoa(`${accountSid}:${authToken}`);
+  const telephonyApiBaseUrl = getTwilioCompatibleApiBaseUrl();
 
   const { response, error, latencyMs } = await timedFetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`,
+    `${telephonyApiBaseUrl}/2010-04-01/Accounts/${accountSid}.json`,
     {
       method: "GET",
       headers: { Authorization: `Basic ${authHeader}` },

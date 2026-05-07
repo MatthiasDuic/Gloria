@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { getDashboardData } from "@/lib/storage";
+import { getTwilioCompatibleApiBaseUrl } from "@/lib/twilio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,8 +27,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Ungültige URL." }, { status: 400 });
   }
 
-  if (parsedUrl.hostname !== "api.twilio.com") {
-    return NextResponse.json({ error: "Nur Twilio-Aufnahmen können abgerufen werden." }, { status: 403 });
+  const telephonyApiHost = new URL(getTwilioCompatibleApiBaseUrl()).hostname;
+  const allowedHosts = new Set(["api.twilio.com", telephonyApiHost]);
+
+  if (!allowedHosts.has(parsedUrl.hostname)) {
+    return NextResponse.json(
+      { error: "Nur Aufnahmen vom konfigurierten Telephony-Provider können abgerufen werden." },
+      { status: 403 },
+    );
   }
 
   if (sessionUser.role !== "master") {
