@@ -627,16 +627,20 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Load playbook / script
   const script = await loadScript(baseUrl, state.topic, state.userId);
-  const systemPrompt = buildCallSystemPrompt({
-    company: state.company,
-    contactName: state.contactName,
-    topic: state.topic,
-    ownerRealName: state.ownerRealName,
-    ownerCompanyName: state.ownerCompanyName,
-    ownerGesellschaft: state.ownerGesellschaft,
-    script: script || undefined,
-    previousSummary: undefined,
-  });
+    const effectiveScript: ScriptConfig = script || {
+      id: `sipgate-fallback-${state.topic}`,
+      topic: state.topic,
+      opener: `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn ${state.ownerRealName || "Matthias Duic"} an.`,
+      discovery: `Wie ist das Thema ${state.topic} bei Ihnen aktuell aufgestellt?`,
+      objectionHandling: "Kurz, souverän und ohne Druck auf Einwände reagieren.",
+      close: "Natürlich in die Terminierung mit Herrn Duic überleiten.",
+      gatekeeperTask: state.contactName
+        ? `Freundlich um Weiterleitung zu ${state.contactName} bitten.`
+        : "Freundlich um Weiterleitung zur zuständigen Person bitten.",
+      decisionMakerContext: `Gespräch mit ${state.company} zum Thema ${state.topic}.`,
+      receptionTopicReason: `Eine kurze fachliche Frage zum Thema ${state.topic}.`,
+    };
+    const systemPrompt = buildCallSystemPrompt(effectiveScript);
 
   // Ask LLM
   let decision: GloriaDecision;
@@ -719,7 +723,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (decision.action === "end_success") {
     void finalizeCall({
       state: { ...nextState, issuedAt: 0, expiresAt: 0 },
-      outcome: "Termin vereinbart",
+        outcome: "Termin",
       note: decision.appointmentNote,
       appointmentAt,
       directDial: directDial || state.directDial,
@@ -731,7 +735,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (decision.action === "end_rejection") {
     void finalizeCall({
       state: { ...nextState, issuedAt: 0, expiresAt: 0 },
-      outcome: "Kein Interesse",
+        outcome: "Absage",
       note: decision.appointmentNote || "Interessent hat abgelehnt.",
       directDial: directDial || state.directDial,
       baseUrl,
