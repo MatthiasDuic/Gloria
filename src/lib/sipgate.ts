@@ -16,7 +16,7 @@
 import type { TwilioCallRequest } from "./twilio";
 import { prepareCall } from "./telephony-runtime";
 import { getAppBaseUrl } from "./twilio";
-import log from "./log";
+import { log } from "./log";
 
 // ---------------------------------------------------------------------------
 // Config helpers
