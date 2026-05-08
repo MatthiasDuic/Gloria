@@ -1,9 +1,9 @@
 import { AI_CONFIG } from "./ai-config";
 import { isElevenLabsConfigured } from "./elevenlabs";
-import { isTwilioConfigured } from "./twilio";
+import { getTelnyxApiBaseUrl, isTelnyxConfigured } from "./telnyx";
 
 export interface PreflightCheck {
-  service: "openai" | "elevenlabs" | "twilio";
+  service: "openai" | "elevenlabs" | "telnyx";
   ok: boolean;
   latencyMs: number;
   status?: number;
@@ -161,32 +161,31 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
   };
 }
 
-async function checkTwilio(timeoutMs: number): Promise<PreflightCheck> {
-  if (!isTwilioConfigured()) {
+async function checkTelnyx(timeoutMs: number): Promise<PreflightCheck> {
+  if (!isTelnyxConfigured()) {
     return {
-      service: "twilio",
+      service: "telnyx",
       ok: false,
       latencyMs: 0,
-      reason: "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN oder TWILIO_PHONE_NUMBER fehlt.",
+      reason: "TELNYX_API_KEY, TELNYX_CONNECTION_ID oder TELNYX_PHONE_NUMBER fehlt.",
     };
   }
 
-  const accountSid = process.env.TWILIO_ACCOUNT_SID!.trim();
-  const authToken = process.env.TWILIO_AUTH_TOKEN!.trim();
-  const authHeader = btoa(`${accountSid}:${authToken}`);
+  const apiKey = process.env.TELNYX_API_KEY!.trim();
+  const apiBaseUrl = getTelnyxApiBaseUrl();
 
   const { response, error, latencyMs } = await timedFetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`,
+    `${apiBaseUrl}/account`,
     {
       method: "GET",
-      headers: { Authorization: `Basic ${authHeader}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
     },
     timeoutMs,
   );
 
   if (error) {
     return {
-      service: "twilio",
+      service: "telnyx",
       ok: false,
       latencyMs,
       reason: error instanceof Error ? error.message : String(error),
@@ -196,32 +195,16 @@ async function checkTwilio(timeoutMs: number): Promise<PreflightCheck> {
   if (!response || !response.ok) {
     const detail = response ? await response.text().catch(() => "") : "";
     return {
-      service: "twilio",
+      service: "telnyx",
       ok: false,
       status: response?.status,
       latencyMs,
-      reason: `Twilio Account-Lookup antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+      reason: `Telnyx Account-Lookup antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
     };
   }
 
-  // Konto-Status zusätzlich prüfen (muss "active" sein).
-  try {
-    const data = (await response.clone().json()) as { status?: string };
-    if (data.status && data.status !== "active") {
-      return {
-        service: "twilio",
-        ok: false,
-        status: response.status,
-        latencyMs,
-        reason: `Twilio-Konto-Status = ${data.status}.`,
-      };
-    }
-  } catch {
-    // JSON-Parsing-Fehler sind kein Abbruchgrund, der 200er reicht.
-  }
-
   return {
-    service: "twilio",
+    service: "telnyx",
     ok: true,
     status: response.status,
     latencyMs,
@@ -233,13 +216,13 @@ export async function runPreflight(options?: {
   services?: ReadonlyArray<PreflightCheck["service"]>;
 }): Promise<PreflightResult> {
   const timeoutMs = Math.max(500, Math.min(8000, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
-  const wanted = options?.services ?? (["openai", "elevenlabs", "twilio"] as const);
+  const wanted = options?.services ?? (["openai", "elevenlabs", "telnyx"] as const);
   const started = Date.now();
 
   const tasks: Array<Promise<PreflightCheck>> = [];
   if (wanted.includes("openai")) tasks.push(checkOpenAI(timeoutMs));
   if (wanted.includes("elevenlabs")) tasks.push(checkElevenLabs(timeoutMs));
-  if (wanted.includes("twilio")) tasks.push(checkTwilio(timeoutMs));
+  if (wanted.includes("telnyx")) tasks.push(checkTelnyx(timeoutMs));
 
   const checks = await Promise.all(tasks);
   return {

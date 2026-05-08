@@ -5,7 +5,7 @@ import {
   setCampaignListActive,
   storeCallReport,
 } from "@/lib/storage";
-import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
+import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import {
   describeCampaignSchedule,
   isWithinCampaignHours,
@@ -51,9 +51,9 @@ async function handle(request: Request) {
     });
   }
 
-  if (!isTwilioConfigured()) {
+  if (!isTelnyxConfigured()) {
     return NextResponse.json(
-      { error: "Twilio is not configured." },
+      { error: "Telnyx is not configured." },
       { status: 400 },
     );
   }
@@ -121,7 +121,7 @@ async function handle(request: Request) {
       }
 
       try {
-        const call = await createTwilioCall(
+        const call = await createTelnyxCall(
           {
             to,
             company: lead.company,

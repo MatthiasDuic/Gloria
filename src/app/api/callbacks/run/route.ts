@@ -5,7 +5,7 @@ import {
   markLeadCallbackScheduled,
   storeCallReport,
 } from "@/lib/storage";
-import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
+import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { isWithinCampaignHours } from "@/lib/campaign-schedule";
 import { sendOperationalEmail } from "@/lib/mailer";
 
@@ -52,9 +52,9 @@ async function handle(request: Request) {
     return NextResponse.json({ ok: true, skipped: true, reason: "outside_business_hours" });
   }
 
-  if (!isTwilioConfigured()) {
-    logLine({ event: "skipped", reason: "twilio_not_configured" });
-    return NextResponse.json({ error: "Twilio is not configured.", processed: 0, triggered: 0 }, { status: 400 });
+  if (!isTelnyxConfigured()) {
+    logLine({ event: "skipped", reason: "telnyx_not_configured" });
+    return NextResponse.json({ error: "Telnyx is not configured.", processed: 0, triggered: 0 }, { status: 400 });
   }
 
   const dueLeads = await listDueCallbackLeads(MAX_PER_RUN);
@@ -78,7 +78,7 @@ async function handle(request: Request) {
       const previousSummary = rawSummary
         ? rawSummary.replace(/\s+/g, " ").trim().slice(0, 800)
         : undefined;
-      const call = await createTwilioCall(
+      const call = await createTelnyxCall(
         {
           to,
           company: lead.company,

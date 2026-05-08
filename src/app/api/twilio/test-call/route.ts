@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
-import { createSipgateCall, isSipgateConfigured } from "@/lib/sipgate";
+import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
@@ -29,31 +28,25 @@ export async function POST(request: Request) {
 
   if (!payload.to || !payload.company || !payload.topic) {
     return NextResponse.json(
-      { error: "to, company und topic sind für den Twilio-Testanruf erforderlich." },
+      { error: "to, company und topic sind fuer den Testanruf erforderlich." },
       { status: 400 },
     );
   }
 
-  const useSipgate = isSipgateConfigured();
-  if (!useSipgate && !isTwilioConfigured()) {
+  if (!isTelnyxConfigured()) {
     return NextResponse.json(
       {
-        error:
-          "Kein Telefonie-Anbieter konfiguriert. Bitte sipgate oder Twilio vollständig konfigurieren.",
+        error: "Telnyx ist nicht vollstaendig konfiguriert. Bitte TELNYX_API_KEY, TELNYX_CONNECTION_ID und TELNYX_PHONE_NUMBER setzen.",
       },
       { status: 400 },
     );
   }
 
-  // Preflight: OpenAI + ElevenLabs immer prüfen; Twilio nur dann,
-  // wenn der Anruf auch tatsächlich über Twilio aufgebaut wird.
+  // Preflight fuer Telnyx-only Betrieb.
   if (!payload.skipPreflight) {
-    const preflightServices = useSipgate
-      ? (["openai", "elevenlabs"] as const)
-      : (["openai", "elevenlabs", "twilio"] as const);
-    const preflight = await runPreflight({ timeoutMs: 3000, services: preflightServices });
+    const preflight = await runPreflight({ timeoutMs: 3000, services: ["openai", "elevenlabs", "telnyx"] });
     log.info("testcall.preflight", {
-      provider: useSipgate ? "sipgate" : "twilio",
+      provider: "telnyx",
       ok: preflight.ok,
       durationMs: preflight.durationMs,
       checks: preflight.checks.map((c) => ({
@@ -117,12 +110,7 @@ export async function POST(request: Request) {
       isTestCall: true,
     };
 
-    const call = useSipgate
-      ? await createSipgateCall(callPayload, request)
-      : await createTwilioCall(
-        callPayload,
-        request,
-      );
+    const call = await createTelnyxCall(callPayload, request);
 
     return NextResponse.json({
       ok: true,
@@ -130,8 +118,8 @@ export async function POST(request: Request) {
       status: "status" in call ? call.status : "queued",
       to: "to" in call ? call.to : callPayload.to,
       from: "from" in call ? call.from : callPayload.from,
-      provider: useSipgate ? "sipgate" : "twilio",
-      message: `${useSipgate ? "sipgate" : "Twilio"}-Testanruf wurde gestartet.`,
+      provider: "telnyx",
+      message: "Telnyx-Testanruf wurde gestartet.",
     });
 
   } catch (error) {

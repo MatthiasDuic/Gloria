@@ -7,7 +7,7 @@ import {
   setCampaignListActive,
   storeCallReport,
 } from "@/lib/storage";
-import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
+import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 export const runtime = "nodejs";
@@ -60,9 +60,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, action, listId, removedLeads: result.removedLeads, lists });
   }
 
-  if (!isTwilioConfigured()) {
+  if (!isTelnyxConfigured()) {
     return NextResponse.json(
-      { error: "Twilio ist nicht vollständig konfiguriert." },
+      { error: "Telnyx ist nicht vollstaendig konfiguriert." },
       { status: 400 },
     );
   }
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const call = await createTwilioCall(
+    const call = await createTelnyxCall(
       {
         to,
         company: lead.company,

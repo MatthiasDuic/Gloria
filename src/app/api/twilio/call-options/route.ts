@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTwilioCallerIdOptions } from "@/lib/twilio";
+import { getTelnyxCallerIdOptions } from "@/lib/telnyx";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { listPhoneNumbersByUser } from "@/lib/report-db";
 
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
         label: entry.label,
         id: entry.id,
       }))
-    : getTwilioCallerIdOptions().map((entry) => ({ ...entry, id: undefined }));
+    : getTelnyxCallerIdOptions().map((entry) => ({ ...entry, id: undefined }));
 
   return NextResponse.json(
     {

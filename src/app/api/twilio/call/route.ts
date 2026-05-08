@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTelephonyRuntimeSnapshot } from "@/lib/telephony-runtime";
-import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
-import { createSipgateCall, isSipgateConfigured } from "@/lib/sipgate";
+import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
@@ -32,12 +31,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const useSipgate = isSipgateConfigured();
-  if (!useSipgate && !isTwilioConfigured()) {
+  if (!isTelnyxConfigured()) {
     return NextResponse.json(
       {
-        error:
-          "Kein Telefonie-Anbieter konfiguriert. Bitte sipgate (SIPGATE_TOKEN_ID, SIPGATE_TOKEN, SIPGATE_DEVICE_ID, SIPGATE_CALLER_ID) oder Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER) konfigurieren.",
+        error: "Telnyx ist nicht vollstaendig konfiguriert. Bitte TELNYX_API_KEY, TELNYX_CONNECTION_ID und TELNYX_PHONE_NUMBER setzen.",
       },
       { status: 400 },
     );
@@ -84,9 +81,7 @@ export async function POST(request: Request) {
       isTestCall: true,
     };
 
-    const call = useSipgate
-      ? await createSipgateCall(callPayload, request)
-      : await createTwilioCall(callPayload, request);
+    const call = await createTelnyxCall(callPayload, request);
 
     const runtimeSnapshot = getTelephonyRuntimeSnapshot();
 
