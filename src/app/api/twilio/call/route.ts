@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getTelephonyRuntimeSnapshot } from "@/lib/telephony-runtime";
 import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
+import { createSipgateCall, isSipgateConfigured } from "@/lib/sipgate";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
@@ -31,11 +32,12 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isTwilioConfigured()) {
+  const useSipgate = isSipgateConfigured();
+  if (!useSipgate && !isTwilioConfigured()) {
     return NextResponse.json(
       {
         error:
-          "Twilio ist noch nicht vollständig konfiguriert. Bitte setze TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN und TWILIO_PHONE_NUMBER in .env.local.",
+          "Kein Telefonie-Anbieter konfiguriert. Bitte sipgate (SIPGATE_TOKEN_ID, SIPGATE_TOKEN, SIPGATE_DEVICE_ID, SIPGATE_CALLER_ID) oder Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER) konfigurieren.",
       },
       { status: 400 },
     );
@@ -66,33 +68,34 @@ export async function POST(request: Request) {
       selectedFrom = assignedPhone.phoneNumber;
     }
 
-    const call = await createTwilioCall(
-      {
-        to: payload.to,
-        company: payload.company,
-        contactName: payload.contactName,
-        topic: payload.topic,
-        leadId: payload.leadId,
-        from: selectedFrom,
-        userId: sessionUser.id,
-        phoneNumberId: payload.phoneNumberId,
-        ownerRealName: sessionUser.realName,
-        ownerCompanyName: sessionUser.companyName,
-        ownerGesellschaft: sessionUser.gesellschaft,
-        voiceId: latestUser.selectedVoiceId,
-        isTestCall: true,
-      },
-      request,
-    );
+    const callPayload = {
+      to: payload.to,
+      company: payload.company,
+      contactName: payload.contactName,
+      topic: payload.topic,
+      leadId: payload.leadId,
+      from: selectedFrom,
+      userId: sessionUser.id,
+      phoneNumberId: payload.phoneNumberId,
+      ownerRealName: sessionUser.realName,
+      ownerCompanyName: sessionUser.companyName,
+      ownerGesellschaft: sessionUser.gesellschaft,
+      voiceId: latestUser.selectedVoiceId,
+      isTestCall: true,
+    };
+
+    const call = useSipgate
+      ? await createSipgateCall(callPayload, request)
+      : await createTwilioCall(callPayload, request);
 
     const runtimeSnapshot = getTelephonyRuntimeSnapshot();
 
     return NextResponse.json({
       ok: true,
       sid: call.sid,
-      status: call.status,
-      to: call.to,
-      from: call.from,
+      status: "status" in call ? call.status : "queued",
+      to: "to" in call ? call.to : callPayload.to,
+      from: "from" in call ? call.from : callPayload.from,
       message: "Anruf wurde gestartet.",
       preinit: {
         openAiReady: runtimeSnapshot.openAiReady,

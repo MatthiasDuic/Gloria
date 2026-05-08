@@ -46,27 +46,6 @@ function readEnv(name: string): string {
   return value;
 }
 
-export function getTwilioCompatibleApiBaseUrl(): string {
-  const explicit = process.env.TELEPHONY_API_BASE_URL?.trim();
-  if (explicit) {
-    try {
-      return new URL(explicit).toString().replace(/\/$/, "");
-    } catch {
-      throw new Error("TELEPHONY_API_BASE_URL ist ungültig. Bitte eine vollständige https:// URL setzen.");
-    }
-  }
-
-  const signalWireSpace = process.env.SIGNALWIRE_SPACE_URL?.trim();
-  if (signalWireSpace) {
-    const normalized = signalWireSpace
-      .replace(/^https?:\/\//i, "")
-      .replace(/\/$/, "");
-    return `https://${normalized}`;
-  }
-
-  return "https://api.twilio.com";
-}
-
 export function isTwilioConfigured() {
   return Boolean(
     process.env.TWILIO_ACCOUNT_SID?.trim() &&
@@ -303,7 +282,6 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
   body.set("RecordingStatusCallbackMethod", "POST");
 
   const authHeader = btoa(`${accountSid}:${authToken}`);
-  const telephonyApiBaseUrl = getTwilioCompatibleApiBaseUrl();
   const twilioApiTimeoutMs = Math.max(
     3_000,
     Math.min(30_000, Number.parseInt(process.env.TWILIO_API_TIMEOUT_MS || "10000", 10)),
@@ -313,7 +291,7 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
   let response: Response;
   try {
     response = await fetch(
-      `${telephonyApiBaseUrl}/2010-04-01/Accounts/${accountSid}/Calls.json`,
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
       {
         method: "POST",
         headers: {
@@ -338,7 +316,7 @@ export async function createTwilioCall(payload: TwilioCallRequest, request?: Req
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Telephony API Fehler (${response.status}): ${details}`);
+    throw new Error(`Twilio API Fehler (${response.status}): ${details}`);
   }
 
   const created = (await response.json()) as {

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
-import { getTwilioCompatibleApiBaseUrl } from "@/lib/twilio";
 
 export const runtime = "nodejs";
 
@@ -35,7 +34,6 @@ export async function POST(request: Request) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const transferPhone = process.env.TRANSFER_PHONE?.trim() || "+491715358989";
-  const telephonyApiBaseUrl = getTwilioCompatibleApiBaseUrl();
 
   if (!accountSid || !authToken) {
     log.error("twilio.transfer.missing_credentials", { callSid });
@@ -49,7 +47,7 @@ export async function POST(request: Request) {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial timeout="30" callerId="${escapeXml(process.env.TWILIO_PHONE_NUMBER?.trim() || "")}">${escapeXml(transferPhone)}</Dial><Say voice="alice" language="de-DE">Die Verbindung konnte leider nicht hergestellt werden. Jutta Brost meldet sich kurzfristig bei Ihnen. Auf Wiederhören.</Say></Response>`;
 
   try {
-    const twilioUrl = `${telephonyApiBaseUrl}/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`;
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`;
     const formBody = new URLSearchParams();
     formBody.set("Twiml", twiml);
 
