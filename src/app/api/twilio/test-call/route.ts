@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTwilioCall, isTwilioConfigured } from "@/lib/twilio";
+import { createSipgateCall, isSipgateConfigured } from "@/lib/sipgate";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
@@ -33,22 +34,26 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isTwilioConfigured()) {
+  const useSipgate = isSipgateConfigured();
+  if (!useSipgate && !isTwilioConfigured()) {
     return NextResponse.json(
       {
         error:
-          "Twilio ist noch nicht vollständig konfiguriert. Bitte setze TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN und TWILIO_PHONE_NUMBER in .env.local.",
+          "Kein Telefonie-Anbieter konfiguriert. Bitte sipgate oder Twilio vollständig konfigurieren.",
       },
       { status: 400 },
     );
   }
 
-  // Preflight: OpenAI + ElevenLabs + Twilio müssen alle erreichbar sein,
-  // bevor der Call ausgelöst wird. Spart Wählgebühren und verhindert,
-  // dass Gloria mitten im Gespräch verstummt, weil ein Dienst offline ist.
+  // Preflight: OpenAI + ElevenLabs immer prüfen; Twilio nur dann,
+  // wenn der Anruf auch tatsächlich über Twilio aufgebaut wird.
   if (!payload.skipPreflight) {
-    const preflight = await runPreflight({ timeoutMs: 3000 });
+    const preflightServices = useSipgate
+      ? (["openai", "elevenlabs"] as const)
+      : (["openai", "elevenlabs", "twilio"] as const);
+    const preflight = await runPreflight({ timeoutMs: 3000, services: preflightServices });
     log.info("testcall.preflight", {
+      provider: useSipgate ? "sipgate" : "twilio",
       ok: preflight.ok,
       durationMs: preflight.durationMs,
       checks: preflight.checks.map((c) => ({
@@ -96,38 +101,44 @@ export async function POST(request: Request) {
       selectedFrom = assignedPhone.phoneNumber;
     }
 
-    const call = await createTwilioCall(
-      {
-        to: payload.to,
-        company: payload.company,
-        contactName: payload.contactName,
-        topic: payload.topic,
-        leadId: payload.leadId,
-        from: selectedFrom,
-        userId: sessionUser.id,
-        phoneNumberId: payload.phoneNumberId,
-        ownerRealName: sessionUser.realName,
-        ownerCompanyName: sessionUser.companyName,
-        ownerGesellschaft: sessionUser.gesellschaft,
-        voiceId: latestUser.selectedVoiceId,
-        isTestCall: true,
-      },
-      request,
-    );
+    const callPayload = {
+      to: payload.to,
+      company: payload.company,
+      contactName: payload.contactName,
+      topic: payload.topic,
+      leadId: payload.leadId,
+      from: selectedFrom,
+      userId: sessionUser.id,
+      phoneNumberId: payload.phoneNumberId,
+      ownerRealName: sessionUser.realName,
+      ownerCompanyName: sessionUser.companyName,
+      ownerGesellschaft: sessionUser.gesellschaft,
+      voiceId: latestUser.selectedVoiceId,
+      isTestCall: true,
+    };
+
+    const call = useSipgate
+      ? await createSipgateCall(callPayload, request)
+      : await createTwilioCall(
+        callPayload,
+        request,
+      );
 
     return NextResponse.json({
       ok: true,
       sid: call.sid,
-      status: call.status,
-      to: call.to,
-      from: call.from,
-      message: "Twilio-Testanruf wurde gestartet.",
+      status: "status" in call ? call.status : "queued",
+      to: "to" in call ? call.to : callPayload.to,
+      from: "from" in call ? call.from : callPayload.from,
+      provider: useSipgate ? "sipgate" : "twilio",
+      message: `${useSipgate ? "sipgate" : "Twilio"}-Testanruf wurde gestartet.`,
     });
+
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
-        : "Twilio-Testanruf konnte nicht gestartet werden.";
+        : "Testanruf konnte nicht gestartet werden.";
     const status = message.startsWith("RUNTIME_NOT_READY:") ? 503 : 500;
 
     return NextResponse.json(
