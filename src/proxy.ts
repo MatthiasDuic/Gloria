@@ -4,6 +4,7 @@ import { verifySessionTokenEdge } from "@/lib/session-edge";
 const PUBLIC_PATH_PREFIXES = [
   "/_next",
   "/api/twilio",
+  "/api/sipgate",
   "/api/calls/webhook",
   "/api/callbacks/run",
   "/api/reports/cleanup",
