@@ -175,7 +175,7 @@ async function checkTelnyx(timeoutMs: number): Promise<PreflightCheck> {
   const apiBaseUrl = getTelnyxApiBaseUrl();
 
   const { response, error, latencyMs } = await timedFetch(
-    `${apiBaseUrl}/account`,
+    `${apiBaseUrl}/phone_numbers?page[size]=1`,
     {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -199,7 +199,7 @@ async function checkTelnyx(timeoutMs: number): Promise<PreflightCheck> {
       ok: false,
       status: response?.status,
       latencyMs,
-      reason: `Telnyx Account-Lookup antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+      reason: `Telnyx Phone-Number-Lookup antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
     };
   }
 
