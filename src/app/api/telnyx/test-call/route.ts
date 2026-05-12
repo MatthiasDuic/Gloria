@@ -42,7 +42,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Preflight fuer Telnyx-only Betrieb.
   if (!payload.skipPreflight) {
     const preflight = await runPreflight({ timeoutMs: 3000, services: ["openai", "elevenlabs", "telnyx"] });
     log.info("testcall.preflight", {
@@ -121,7 +120,6 @@ export async function POST(request: Request) {
       provider: "telnyx",
       message: "Telnyx-Testanruf wurde gestartet.",
     });
-
   } catch (error) {
     const message =
       error instanceof Error

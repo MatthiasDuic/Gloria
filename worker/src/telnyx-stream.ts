@@ -9,43 +9,104 @@ import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 
-/** Twilio Media Streams send frames in 20 ms chunks of μ-law 8 kHz (160 bytes per frame). */
-const FRAME_BYTES = 160;
+/** Telnyx wideband RTP uses 20 ms chunks of 16 kHz 16-bit PCM (640 bytes per frame). */
+const FRAME_BYTES = 640;
 
-type TwilioInbound =
-  | { event: "connected"; protocol?: string; version?: string }
+type TelnyxInbound =
+  | { event: "connected"; version?: string }
   | {
       event: "start";
       start: {
-        streamSid: string;
-        callSid: string;
-        accountSid: string;
-        tracks: string[];
-        mediaFormat: { encoding: string; sampleRate: number; channels: number };
-        customParameters?: Record<string, string>;
+        call_control_id: string;
+        call_session_id?: string;
+        from?: string;
+        to?: string;
+        client_state?: string;
+        media_format?: { encoding?: string; sample_rate?: number; channels?: number };
       };
-      streamSid: string;
+      stream_id: string;
+      sequence_number?: string;
     }
   | {
       event: "media";
-      streamSid: string;
+      stream_id: string;
+      sequence_number?: string;
       media: {
-        track: "inbound" | "outbound";
+        track: "inbound" | "outbound" | "inbound_track" | "outbound_track";
         chunk: string;
         timestamp: string;
         payload: string;
       };
     }
-  | { event: "mark"; streamSid: string; mark: { name: string } }
-  | { event: "stop"; streamSid: string };
+  | { event: "mark"; stream_id: string; mark: { name: string } }
+  | { event: "stop"; stream_id: string }
+  | { event: "dtmf"; stream_id: string; dtmf: { digit: string } }
+  | { event: "error"; stream_id?: string; payload?: { code?: number; title?: string; detail?: string } };
 
-export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
+type DecodedClientState = {
+  company?: string;
+  contactName?: string;
+  topic?: string;
+  leadId?: string;
+  userId?: string;
+  phoneNumberId?: string;
+  ownerRealName?: string;
+  ownerCompanyName?: string;
+  ownerGesellschaft?: string;
+  voiceId?: string;
+  previousSummary?: string;
+  isCallback?: number;
+};
+
+function decodeClientState(raw?: string): DecodedClientState {
+  if (!raw) return {};
+  try {
+    const json = Buffer.from(raw, "base64url").toString("utf8");
+    return JSON.parse(json) as DecodedClientState;
+  } catch {
+    return {};
+  }
+}
+
+function mulaw8kToPcm16k(mulaw: Buffer): Buffer {
+  const output = Buffer.alloc(mulaw.length * 4);
+  let offset = 0;
+  for (const byte of mulaw) {
+    const sample = decodeMulawSample(byte);
+    output.writeInt16LE(sample, offset);
+    output.writeInt16LE(sample, offset + 2);
+    offset += 4;
+  }
+  return output;
+}
+
+function decodeMulawSample(byte: number): number {
+  let value = ~byte & 0xff;
+  let magnitude = ((value & 0x0f) << 3) + 0x84;
+  magnitude <<= (value & 0x70) >> 4;
+  return (value & 0x80) !== 0 ? 0x84 - magnitude : magnitude - 0x84;
+}
+
+function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: number): Buffer {
+  const normalizedEncoding = encoding?.toUpperCase();
+  if (normalizedEncoding === "L16" || normalizedEncoding === "LINEAR16") {
+    return audio;
+  }
+  if (normalizedEncoding === "PCMU" || normalizedEncoding === "MULAW") {
+    return sampleRate === 16000 ? audio : mulaw8kToPcm16k(audio);
+  }
+  return audio;
+}
+
+export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
   let ctx: CallContext | null = null;
   let asr: AsrSession | null = null;
   let pendingTurn = false;
   let currentTts: TtsStreamHandle | null = null;
   let playbookReady: Promise<void> | null = null;
   let inboundFrameCount = 0;
+  let inboundEncoding = "PCMU";
+  let inboundSampleRate = 8000;
 
   const sendMedia = (mulaw: Buffer) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
@@ -53,7 +114,6 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     ws.send(
       JSON.stringify({
         event: "media",
-        streamSid: ctx.streamSid,
         media: { payload },
       }),
     );
@@ -61,7 +121,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
   const sendMark = (name: string) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ event: "mark", streamSid: ctx.streamSid, mark: { name } }));
+    ws.send(JSON.stringify({ event: "mark", mark: { name } }));
   };
 
   const speak = async (text: string) => {
@@ -97,7 +157,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     const handle = streamElevenLabsToMulaw(
       text,
       (chunk) => {
-        buffer = Buffer.concat([buffer, chunk]);
+        buffer = Buffer.concat([buffer, mulaw8kToPcm16k(chunk)]);
         while (buffer.length >= FRAME_BYTES) {
           const frame = buffer.subarray(0, FRAME_BYTES);
           buffer = buffer.subarray(FRAME_BYTES);
@@ -111,20 +171,20 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
     await handle.done;
 
     if (buffer.length > 0) {
-      // Pad final frame with silence (μ-law silence = 0xFF) so Twilio plays it.
-      const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
+      // Pad final frame with PCM silence so Telnyx can play the trailing fragment cleanly.
+      const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0x00);
       sendAndCount(Buffer.concat([buffer, pad]));
     }
 
     sendMark("gloria-end");
 
-    // WICHTIG: Twilio puffert Audio. Wenn wir direkt nach dem letzten Frame
+    // WICHTIG: Telnyx puffert Audio. Wenn wir direkt nach dem letzten Frame
     // ws.close() rufen, wird das Audio (z. B. "Auf Wiederhören.") nie
-    // ausgespielt. Bei μ-law 8 kHz entspricht 1 Byte 1/8000 Sekunde Audio.
+    // ausgespielt. Bei 16 kHz PCM entspricht 1 Byte 1/32000 Sekunde Audio.
     // Wir warten daher die geschätzte Restspielzeit ab, bevor wir die
     // Sprechen-Phase als beendet markieren.
     if (!handle.aborted) {
-      const playoutMs = Math.ceil(totalAudioBytes / 8) + 120; // ~Bytes/8 = ms; + Safety
+      const playoutMs = Math.ceil(totalAudioBytes / 32) + 120;
       await new Promise<void>((resolve) => setTimeout(resolve, playoutMs));
     }
 
@@ -187,7 +247,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         trimmed,
         (chunk) => {
           if (chainAborted) return;
-          buffer = Buffer.concat([buffer, chunk]);
+          buffer = Buffer.concat([buffer, mulaw8kToPcm16k(chunk)]);
           while (buffer.length >= FRAME_BYTES) {
             const frame = buffer.subarray(0, FRAME_BYTES);
             buffer = buffer.subarray(FRAME_BYTES);
@@ -203,7 +263,7 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
         return;
       }
       if (buffer.length > 0) {
-        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
+        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0x00);
         sendFrame(Buffer.concat([buffer, pad]));
       }
     };
@@ -228,11 +288,11 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
     sendMark("gloria-end");
 
-    // Echo-Suppression: warten bis Twilio das gepufferte Audio ausgespielt
+    // Echo-Suppression: warten bis Telnyx das gepufferte Audio ausgespielt
     // hat. Wir ziehen die bereits vergangene Zeit seit dem ersten Audio-Byte
     // ab, damit wir nicht doppelt warten.
     if (!chainAborted && totalAudioBytes > 0) {
-      const totalPlayoutMs = Math.ceil(totalAudioBytes / 8) + 120;
+      const totalPlayoutMs = Math.ceil(totalAudioBytes / 32) + 120;
       const elapsed = firstAudioAt ? Date.now() - firstAudioAt : 0;
       const remaining = Math.max(0, totalPlayoutMs - elapsed);
       if (remaining > 0) {
@@ -302,15 +362,15 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
 
       if (reply.transfer) {
         log.info("turn.transfer", { callSid: ctx.callSid });
-        // Signal Vercel to redirect the live call to Jutta Brost via Twilio REST API.
+        // Signal app backend to transfer the live call via Telnyx Call Control.
         const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
         const token = process.env.APP_INTERNAL_TOKEN || "";
         if (baseUrl && token) {
           try {
-            await fetch(`${baseUrl}/api/twilio/transfer`, {
+            await fetch(`${baseUrl}/api/telnyx/transfer`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ callSid: ctx.callSid }),
+              body: JSON.stringify({ callControlId: ctx.callSid }),
             });
           } catch (err) {
             log.error("turn.transfer_notify_failed", { callSid: ctx.callSid, error: String(err) });
@@ -335,34 +395,36 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
   };
 
   ws.on("message", async (raw) => {
-    let frame: TwilioInbound;
+    let frame: TelnyxInbound;
     try {
-      frame = JSON.parse(typeof raw === "string" ? raw : raw.toString()) as TwilioInbound;
+      frame = JSON.parse(typeof raw === "string" ? raw : raw.toString()) as TelnyxInbound;
     } catch {
       return;
     }
 
     switch (frame.event) {
       case "connected": {
-        log.info("ws.connected", { protocol: frame.protocol });
+        log.info("ws.connected", { version: frame.version });
         break;
       }
       case "start": {
-        const params = frame.start.customParameters || {};
+        const state = decodeClientState(frame.start.client_state);
+        inboundEncoding = frame.start.media_format?.encoding || inboundEncoding;
+        inboundSampleRate = frame.start.media_format?.sample_rate || inboundSampleRate;
         ctx = newContext({
-          callSid: frame.start.callSid,
-          streamSid: frame.streamSid,
-          userId: params.userId,
-          leadId: params.leadId,
-          company: params.company,
-          contactName: params.contactName,
-          topic: params.topic,
-          ownerRealName: params.ownerRealName,
-          ownerCompanyName: params.ownerCompanyName,
-          ownerGesellschaft: params.ownerGesellschaft,
-          voiceId: params.voiceId,
-          previousSummary: params.previousSummary,
-          isCallback: params.isCallback === "1" || params.isCallback === "true",
+          callSid: frame.start.call_control_id,
+          streamSid: frame.stream_id,
+          userId: state.userId,
+          leadId: state.leadId,
+          company: state.company,
+          contactName: state.contactName,
+          topic: state.topic,
+          ownerRealName: state.ownerRealName,
+          ownerCompanyName: state.ownerCompanyName,
+          ownerGesellschaft: state.ownerGesellschaft,
+          voiceId: state.voiceId,
+          previousSummary: state.previousSummary,
+          isCallback: state.isCallback === 1,
         });
         log.info("call.started", {
           callSid: ctx.callSid,
@@ -434,12 +496,13 @@ export async function handleTwilioStream(ws: WebSocket, _req: IncomingMessage): 
       }
       case "media": {
         if (!ctx || !asr) return;
-        if (frame.media.track !== "inbound") return;
+        if (frame.media.track !== "inbound" && frame.media.track !== "inbound_track") return;
         inboundFrameCount += 1;
         const buf = Buffer.from(frame.media.payload, "base64");
-        asr.send(buf);
+        const audio = normalizeInboundAudio(buf, inboundEncoding, inboundSampleRate);
+        asr.send(audio);
         if (ctx.speaking) {
-          ctx.userBytesWhileSpeaking += buf.length;
+          ctx.userBytesWhileSpeaking += audio.length;
         }
         break;
       }
@@ -540,7 +603,7 @@ function normalize(input: string): string {
 }
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der
-// Angerufene sich gemeldet hat (vgl. /api/twilio/voice/process).
+// Angerufene sich gemeldet hat (vgl. Telnyx media stream start event).
 
 /**
  * FAST-PATH-Opener für Turn 1: erspart einen LLM-Roundtrip (~2 s) am

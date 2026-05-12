@@ -32,8 +32,8 @@ export function prewarmElevenLabs(): void {
 }
 
 /**
- * Streams ElevenLabs TTS as μ-law 8000 Hz audio (Twilio-ready) and
- * invokes `onChunk` with raw μ-law buffers (typically ~160-640 bytes).
+ * Streams ElevenLabs TTS as μ-law 8000 Hz audio and invokes `onChunk`
+ * with raw μ-law buffers (typically ~160-640 bytes).
  */
 export function streamElevenLabsToMulaw(
   text: string,

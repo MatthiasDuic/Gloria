@@ -26,8 +26,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Ungültige URL." }, { status: 400 });
   }
 
-  if (parsedUrl.hostname !== "api.twilio.com") {
-    return NextResponse.json({ error: "Nur Twilio-Aufnahmen können abgerufen werden." }, { status: 403 });
+  const telephonyApiHost = new URL(process.env.TELNYX_API_BASE_URL?.trim() || "https://api.telnyx.com/v2").hostname;
+  const allowedHosts = new Set(["api.twilio.com", telephonyApiHost]);
+
+  if (!allowedHosts.has(parsedUrl.hostname)) {
+    return NextResponse.json(
+      { error: "Nur Aufnahmen vom konfigurierten Telephony-Provider können abgerufen werden." },
+      { status: 403 },
+    );
   }
 
   if (sessionUser.role !== "master") {

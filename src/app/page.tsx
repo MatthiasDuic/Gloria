@@ -644,12 +644,12 @@ export default function HomePage() {
   const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedVoiceId, setSelectedVoiceId] = useState("");
   const [learning, setLearning] = useState<LearningResponse>(EMPTY_LEARNING);
-  const [twilioTarget, setTwilioTarget] = useState("");
-  const [twilioCompany, setTwilioCompany] = useState("Musterbau GmbH");
-  const [twilioContactName, setTwilioContactName] = useState("Herr Neumann");
-  const [twilioTopic, setTwilioTopic] = useState<Topic>(TOPICS[0]);
-  const [twilioFromOptions, setTwilioFromOptions] = useState<Array<{ id?: string; number: string; label: string }>>([]);
-  const [twilioFrom, setTwilioFrom] = useState("");
+  const [anrufEinzelfirmaTarget, setAnrufEinzelfirmaTarget] = useState("");
+  const [anrufEinzelfirmaCompany, setAnrufEinzelfirmaCompany] = useState("Musterbau GmbH");
+  const [anrufEinzelfirmaContactName, setAnrufEinzelfirmaContactName] = useState("Herr Neumann");
+  const [anrufEinzelfirmaTopic, setAnrufEinzelfirmaTopic] = useState<Topic>(TOPICS[0]);
+  const [anrufEinzelfirmaFromOptions, setAnrufEinzelfirmaFromOptions] = useState<Array<{ id?: string; number: string; label: string }>>([]);
+  const [anrufEinzelfirmaFrom, setAnrufEinzelfirmaFrom] = useState("");
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [managedPhoneNumbers, setManagedPhoneNumbers] = useState<ManagedPhoneNumber[]>([]);
@@ -1020,7 +1020,7 @@ export default function HomePage() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/twilio/call-options", { cache: "no-store" });
+        const response = await fetch("/api/telnyx/call-options", { cache: "no-store" });
         const payload = (await response.json()) as {
           fromOptions?: Array<{ id?: string; number: string; label: string }>;
           defaultFrom?: string;
@@ -1031,8 +1031,8 @@ export default function HomePage() {
         }
 
         const fromOptions = payload.fromOptions || [];
-        setTwilioFromOptions(fromOptions);
-        setTwilioFrom(payload.defaultFrom || fromOptions[0]?.number || "");
+        setAnrufEinzelfirmaFromOptions(fromOptions);
+        setAnrufEinzelfirmaFrom(payload.defaultFrom || fromOptions[0]?.number || "");
       } catch {
         // Optional UI data; keep call form usable even if this fetch fails.
       }
@@ -1507,8 +1507,8 @@ export default function HomePage() {
     }
   }
 
-  async function startTwilioTestCall() {
-    if (!twilioTarget.trim()) {
+  async function startAnrufEinzelfirma() {
+    if (!anrufEinzelfirmaTarget.trim()) {
       setNotice("Bitte zuerst eine Zielnummer im internationalen Format eingeben, z. B. +492339123456.");
       return;
     }
@@ -1516,16 +1516,16 @@ export default function HomePage() {
     setBusy(true);
 
     try {
-      const selectedFrom = twilioFromOptions.find((option) => option.number === twilioFrom);
-      const response = await fetch("/api/twilio/test-call", {
+      const selectedFrom = anrufEinzelfirmaFromOptions.find((option) => option.number === anrufEinzelfirmaFrom);
+      const response = await fetch("/api/telnyx/test-call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: twilioTarget,
-          company: twilioCompany,
-          contactName: twilioContactName,
-          topic: twilioTopic,
-          from: twilioFrom || undefined,
+          to: anrufEinzelfirmaTarget,
+          company: anrufEinzelfirmaCompany,
+          contactName: anrufEinzelfirmaContactName,
+          topic: anrufEinzelfirmaTopic,
+          from: anrufEinzelfirmaFrom || undefined,
           phoneNumberId: selectedFrom?.id,
         }),
       });
@@ -1537,7 +1537,7 @@ export default function HomePage() {
       };
 
       if (!response.ok) {
-        throw new Error(payload.error || "Twilio-Testanruf konnte nicht gestartet werden.");
+        throw new Error(payload.error || "Anruf Einzelfirma konnte nicht gestartet werden.");
       }
 
       setNotice(`${payload.message || "Anruf gestartet."} SID: ${payload.sid || "-"}`);
@@ -2166,19 +2166,19 @@ export default function HomePage() {
 
       {activeView === "calls" ? (
       <section className="stack top-section">
-        <CollapsiblePanel title="Anruf bei Firma starten" defaultOpen>
+        <CollapsiblePanel title="Anruf Einzelfirma" defaultOpen>
           <div className="field-grid">
             <div>
               <label>Ausgangsnummer</label>
               <select
-                value={twilioFrom}
-                onChange={(event) => setTwilioFrom(event.target.value)}
-                disabled={twilioFromOptions.length === 0}
+                value={anrufEinzelfirmaFrom}
+                onChange={(event) => setAnrufEinzelfirmaFrom(event.target.value)}
+                disabled={anrufEinzelfirmaFromOptions.length === 0}
               >
-                {twilioFromOptions.length === 0 ? (
+                {anrufEinzelfirmaFromOptions.length === 0 ? (
                   <option value="">Keine Nummer konfiguriert</option>
                 ) : (
-                  twilioFromOptions.map((option) => (
+                  anrufEinzelfirmaFromOptions.map((option) => (
                     <option key={option.number} value={option.number}>{option.label} ({option.number})</option>
                   ))
                 )}
@@ -2186,26 +2186,26 @@ export default function HomePage() {
             </div>
             <div>
               <label>Zielnummer</label>
-              <input value={twilioTarget} onChange={(event) => setTwilioTarget(event.target.value)} placeholder="+492339123456" />
+              <input value={anrufEinzelfirmaTarget} onChange={(event) => setAnrufEinzelfirmaTarget(event.target.value)} placeholder="+492339123456" />
             </div>
             <div>
               <label>Firma</label>
-              <input value={twilioCompany} onChange={(event) => setTwilioCompany(event.target.value)} />
+              <input value={anrufEinzelfirmaCompany} onChange={(event) => setAnrufEinzelfirmaCompany(event.target.value)} />
             </div>
             <div>
               <label>Ansprechpartner</label>
-              <input value={twilioContactName} onChange={(event) => setTwilioContactName(event.target.value)} />
+              <input value={anrufEinzelfirmaContactName} onChange={(event) => setAnrufEinzelfirmaContactName(event.target.value)} />
             </div>
             <div>
               <label>Thema</label>
-              <select value={twilioTopic} onChange={(event) => setTwilioTopic(event.target.value as Topic)}>
+              <select value={anrufEinzelfirmaTopic} onChange={(event) => setAnrufEinzelfirmaTopic(event.target.value as Topic)}>
                 {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
               </select>
             </div>
           </div>
           <div className="row top-gap">
-            <button className="btn" onClick={() => void startTwilioTestCall()} disabled={busy || !twilioTarget.trim()}>
-              {busy ? "Anruf startet ..." : "Anruf bei Firma starten"}
+            <button className="btn" onClick={() => void startAnrufEinzelfirma()} disabled={busy || !anrufEinzelfirmaTarget.trim()}>
+              {busy ? "Anruf startet ..." : "Anruf Einzelfirma"}
             </button>
           </div>
         </CollapsiblePanel>
@@ -2554,8 +2554,8 @@ export default function HomePage() {
 
                 <p className="subtle top-gap"><strong>4) Technischer Prozessablauf</strong></p>
                 <ul>
-                  <li>Start des Gesprächs über die Twilio-Call-APIs.</li>
-                  <li>Gesprächssteuerung erfolgt turn-basiert über /api/twilio/voice und /api/twilio/voice/process.</li>
+                  <li>Start des Gesprächs über die Telnyx-Call-APIs.</li>
+                  <li>Telnyx media streaming: inbound + outbound audio über WebSocket nach /telnyx-stream auf Worker.</li>
                   <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
                   <li>Playbook-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
                   <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
@@ -2602,7 +2602,7 @@ export default function HomePage() {
 
                 <p className="subtle top-gap"><strong>6) Externe Dienstleister im Laufzeitpfad</strong></p>
                 <ul>
-                  <li>Twilio: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
+                  <li>Telnyx: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
                   <li>OpenAI: Gesprächslogik in freien Dialogphasen</li>
                   <li>ElevenLabs (optional): Sprachsynthese</li>
                 </ul>
@@ -2872,15 +2872,15 @@ export default function HomePage() {
                     <ul className="subtle playbook-fixed-list top-gap">
                       <li>Technische Audio- und Pausenmeldungen waehrend Streaming oder Fehlerfaellen.</li>
                       <li>Die globale Aufzeichnungslogik inklusive expliziter Einwilligung vor einer echten Aufnahme.</li>
-                      <li>Das eigentliche Twilio-Transferziel und die technische Weiterleitung an Jutta Brost.</li>
+                      <li>Das eigentliche Telnyx-Transferziel und die technische Weiterleitung an Jutta Brost.</li>
                       <li>Globale Phasenlogik wie Terminbestaetigung, Websocket-Handling und feste Sicherheitsregeln.</li>
                     </ul>
                   </div>
                   <div className="mini-panel settings-callout">
                     <h3>Technische Hinweise</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
-                      <li>Playbooks steuern den Gespraechsinhalt, nicht aber Twilio-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
-                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Twilio umgesetzt; das Playbook steuert nur das Wann und Wie der Ansage.</li>
+                      <li>Playbooks steuern den Gespraechsinhalt, nicht aber Telnyx-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
+                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Telnyx umgesetzt; das Playbook steuert nur das Wann und Wie der Ansage.</li>
                       <li>Globale Compliance- und Ablaufregeln bleiben separat dokumentiert und sollten nicht in Themenfelder kopiert werden.</li>
                     </ul>
                     <p className="subtle top-gap">Fuer die vollstaendige Dokumentation siehe den Bereich „Compliance & Ablauf“ in der linken Navigation.</p>

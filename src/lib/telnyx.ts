@@ -1,10 +1,27 @@
-import type { TwilioCallRequest } from "./twilio";
+import type { Topic } from "./types";
 import { prepareCall } from "./telephony-runtime";
-import { getAppBaseUrl } from "./twilio";
 
 export interface TelnyxCallerIdOption {
   number: string;
   label: string;
+}
+
+export interface TelnyxCallRequest {
+  to: string;
+  company: string;
+  contactName?: string;
+  topic: Topic;
+  leadId?: string;
+  userId?: string;
+  phoneNumberId?: string;
+  ownerRealName?: string;
+  ownerCompanyName?: string;
+  ownerGesellschaft?: string;
+  voiceId?: string;
+  isTestCall?: boolean;
+  from?: string;
+  previousSummary?: string;
+  isCallback?: boolean;
 }
 
 const MAX_PREPARE_CALL_TIMEOUT_MS = 12_000;
@@ -16,6 +33,69 @@ const PREPARE_CALL_RETRY_MS = Math.max(
   150,
   Number.parseInt(process.env.PREPARE_CALL_RETRY_MS || "350", 10),
 );
+
+function getAppBaseUrl(request?: Request): string {
+  const configured = process.env.APP_BASE_URL?.trim();
+
+  if (configured) {
+    try {
+      return new URL(configured).toString().replace(/\/$/, "");
+    } catch {
+      if (!request) {
+        throw new Error(
+          "APP_BASE_URL ist ungueltig. Bitte den vollstaendigen Wert inklusive https:// setzen, z. B. https://gloria.agentur-duic-sprockhoevel.de",
+        );
+      }
+    }
+  }
+
+  if (request) {
+    const url = new URL(request.url);
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
+    const proto = request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
+
+    return `${proto}://${host}`.replace(/\/$/, "");
+  }
+
+  throw new Error(
+    "APP_BASE_URL fehlt. Bitte eine oeffentliche URL setzen, z. B. ueber Cloudflare Tunnel oder ngrok.",
+  );
+}
+
+function getTelnyxMediaStreamUrl(): string {
+  const explicit = process.env.TELNYX_MEDIA_STREAM_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const fallback = process.env.MEDIA_STREAM_WSS_URL?.trim();
+  if (fallback) {
+    return fallback.replace("/twilio-stream", "/telnyx-stream");
+  }
+
+  throw new Error("TELNYX_MEDIA_STREAM_URL fehlt. Bitte eine ws:// oder wss:// URL setzen.");
+}
+
+function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
+  const data = {
+    v: 1,
+    company: payload.company,
+    contactName: payload.contactName,
+    topic: payload.topic,
+    leadId: payload.leadId,
+    userId: payload.userId,
+    phoneNumberId: payload.phoneNumberId,
+    ownerRealName: payload.ownerRealName,
+    ownerCompanyName: payload.ownerCompanyName,
+    ownerGesellschaft: payload.ownerGesellschaft,
+    voiceId: payload.voiceId,
+    isCallback: payload.isCallback ? 1 : 0,
+    previousSummary: (payload.previousSummary || "").slice(0, 320),
+  };
+
+  const json = JSON.stringify(data);
+  return Buffer.from(json, "utf8").toString("base64url");
+}
 
 function readEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -93,7 +173,7 @@ export function getTelnyxCallerIdOptions(): TelnyxCallerIdOption[] {
   });
 }
 
-export async function createTelnyxCall(payload: TwilioCallRequest, request?: Request) {
+export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
   const apiKey = readEnv("TELNYX_API_KEY");
   const connectionId = readEnv("TELNYX_CONNECTION_ID");
   const defaultFrom = readEnv("TELNYX_PHONE_NUMBER");
@@ -152,6 +232,12 @@ export async function createTelnyxCall(payload: TwilioCallRequest, request?: Req
     connection_id: connectionId,
     to: payload.to,
     from,
+    client_state: encodeTelnyxClientState(payload),
+    stream_url: getTelnyxMediaStreamUrl(),
+    stream_track: "both_tracks",
+    stream_bidirectional_mode: "rtp",
+    stream_bidirectional_codec: "L16",
+    stream_bidirectional_sampling_rate: 16000,
   };
 
   let response: Response;

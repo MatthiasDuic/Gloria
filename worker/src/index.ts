@@ -1,6 +1,6 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
-import { handleTwilioStream } from "./twilio-stream.js";
+import { handleTelnyxStream } from "./telnyx-stream.js";
 import { log } from "./log.js";
 
 // IMPORTANT: The following env vars MUST be set in Render dashboard:
@@ -26,13 +26,13 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
   const url = req.url || "";
-  if (!url.startsWith("/twilio-stream")) {
+  if (!url.startsWith("/telnyx-stream")) {
     socket.destroy();
     return;
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleTwilioStream(ws, req).catch((error) => {
+    handleTelnyxStream(ws, req).catch((error) => {
       log.error("ws.handler_failed", { error: error instanceof Error ? error.message : String(error) });
       try {
         ws.close(1011, "internal_error");

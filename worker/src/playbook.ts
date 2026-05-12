@@ -35,7 +35,7 @@ export type PlaybookFields = {
 
 /**
  * Lädt das Playbook für (userId, topic) vom Vercel-Backend über den
- * internen Token-Endpoint /api/twilio/playbooks.
+ * internen Token-Endpoint /api/telnyx/playbooks.
  */
 export async function loadPlaybook(opts: {
   userId?: string;
@@ -55,7 +55,7 @@ export async function loadPlaybook(opts: {
   const params = new URLSearchParams();
   if (opts.userId) params.set("userId", opts.userId);
 
-  const url = `${baseUrl}/api/twilio/playbooks${params.toString() ? `?${params.toString()}` : ""}`;
+  const url = `${baseUrl}/api/telnyx/playbooks${params.toString() ? `?${params.toString()}` : ""}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);

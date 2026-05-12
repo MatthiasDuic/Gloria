@@ -146,7 +146,7 @@ function buildTopicProfileKey(script: ScriptConfig): string {
 
 // Stub kept for compatibility with older call sites. Gloria never uses the
 // OpenAI Realtime audio API — the voice output is always produced by the
-// ElevenLabs TTS service through /api/twilio/audio.
+// ElevenLabs TTS service through /api/telnyx/audio.
 async function ensureOpenAiRealtimeSessions(
   _baseUrl: string,
   _topics: readonly Topic[] = TOPICS,
@@ -159,7 +159,7 @@ async function syncScripts(baseUrl: string, userId?: string) {
   const cacheKey = getRuntimeCacheKey(userId);
   const internalHeaders = buildInternalHeaders();
 
-  const scriptsUrl = new URL(`${baseUrl}/api/twilio/playbooks`);
+  const scriptsUrl = new URL(`${baseUrl}/api/telnyx/playbooks`);
   if (userId) {
     scriptsUrl.searchParams.set("userId", userId);
   }

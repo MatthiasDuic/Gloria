@@ -9,7 +9,7 @@ export type AsrEvents = {
 };
 
 export type AsrSession = {
-  send: (mulawChunk: Buffer) => void;
+  send: (audioChunk: Buffer) => void;
   finish: () => Promise<void>;
 };
 
@@ -27,8 +27,8 @@ export function openDeepgram(events: AsrEvents): AsrSession {
 
   const params = new URLSearchParams({
     model,
-    encoding: "mulaw",
-    sample_rate: "8000",
+    encoding: "linear16",
+    sample_rate: "16000",
     channels: "1",
     punctuate: "true",
     language,
@@ -127,13 +127,13 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   });
 
   return {
-    send(mulawChunk) {
+    send(audioChunk) {
       if (!opened) {
-        queue.push(mulawChunk);
+        queue.push(audioChunk);
         return;
       }
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(mulawChunk);
+        ws.send(audioChunk);
       }
     },
     async finish() {
