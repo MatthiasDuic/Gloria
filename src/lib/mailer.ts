@@ -89,6 +89,7 @@ export interface AppointmentInviteOptions {
   organizerEmail?: string;
   organizerName?: string;
   durationMinutes?: number;
+  missingBasisQuestions?: string[];
 }
 
 export function buildAppointmentIcs(options: AppointmentInviteOptions): string | null {
@@ -208,6 +209,18 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     timeZone: "Europe/Berlin",
   }).format(start);
 
+  const missingQuestions = (options.missingBasisQuestions || []).filter(
+    (entry) => typeof entry === "string" && entry.trim().length > 0,
+  );
+  const needsQuestionBlock = missingQuestions.length > 0;
+  const questionBlock = needsQuestionBlock
+    ? [
+        "",
+        "Bitte beantworten Sie diese Punkte noch kurz per E-Mail:",
+        ...missingQuestions.map((q, idx) => `${idx + 1}. ${q}`),
+      ]
+    : [];
+
   const body = [
     `Hallo ${report.contactName || ""},`,
     "",
@@ -216,6 +229,7 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     `Thema: ${report.topic}`,
     `Firma: ${report.company}`,
     `Zeitpunkt: ${when}`,
+    ...questionBlock,
     "",
     "Die Kalendereinladung ist als .ics-Datei angehaengt.",
     "",

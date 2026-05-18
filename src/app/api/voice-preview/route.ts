@@ -1,4 +1,3 @@
-import { fetch } from "undici";
 import { NextResponse } from "next/server";
 import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { buildSystemPrompt, buildVoicePreview } from "@/lib/gloria";

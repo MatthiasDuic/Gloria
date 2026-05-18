@@ -24,6 +24,16 @@ export interface TelnyxCallRequest {
   isCallback?: boolean;
 }
 
+export class TelnyxApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "TelnyxApiError";
+    this.status = status;
+  }
+}
+
 const MAX_PREPARE_CALL_TIMEOUT_MS = 12_000;
 const PREPARE_CALL_TIMEOUT_MS = Math.min(
   MAX_PREPARE_CALL_TIMEOUT_MS,
@@ -94,7 +104,7 @@ function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
   };
 
   const json = JSON.stringify(data);
-  return Buffer.from(json, "utf8").toString("base64url");
+  return Buffer.from(json, "utf8").toString("base64");
 }
 
 function readEnv(name: string): string {
@@ -103,6 +113,29 @@ function readEnv(name: string): string {
     throw new Error(`Um Telnyx zu nutzen, fehlt die Umgebungsvariable ${name}.`);
   }
   return value;
+}
+
+function formatTelnyxCallError(status: number, details: string): string {
+  const payload = details ? (JSON.parse(details) as {
+    errors?: Array<{ detail?: string }>;
+    telnyx_error?: { error_code?: string };
+  }) : undefined;
+
+  const telnyxCode = payload?.telnyx_error?.error_code?.trim();
+  const detailText = payload?.errors?.[0]?.detail?.trim();
+
+  if (status === 403 && telnyxCode === "D13") {
+    return [
+      "Telnyx blockiert den Zielanruf (D13): Die Zielnummer liegt in einem Land, das im Outbound Voice Profile nicht freigeschaltet ist.",
+      "Bitte in Telnyx unter Outbound Voice Profile die Ziel-Laender-Whitelist erweitern und das Profil der genutzten Connection zuweisen.",
+      detailText || "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  const fallback = `Telnyx call failed: ${status}${details ? ` ${details}` : ""}`;
+  return detailText ? `${fallback} (${detailText})` : fallback;
 }
 
 export function isTelnyxConfigured(): boolean {
@@ -173,6 +206,36 @@ export function getTelnyxCallerIdOptions(): TelnyxCallerIdOption[] {
   });
 }
 
+async function listOwnedTelnyxNumbers(): Promise<string[]> {
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (!apiKey) {
+    return [];
+  }
+
+  const apiBaseUrl = getTelnyxApiBaseUrl();
+  const response = await fetch(`${apiBaseUrl}/phone_numbers?page[size]=250`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  }).catch(() => null);
+
+  if (!response || !response.ok) {
+    return [];
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    data?: Array<{ phone_number?: string }>;
+  };
+
+  const rows = Array.isArray(payload.data) ? payload.data : [];
+  return rows
+    .map((entry) => String(entry.phone_number || "").trim())
+    .filter(Boolean);
+}
+
 export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
   const apiKey = readEnv("TELNYX_API_KEY");
   const connectionId = readEnv("TELNYX_CONNECTION_ID");
@@ -180,7 +243,10 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
   const allowedCallerIds = getTelnyxCallerIds();
   const from = payload.from?.trim() || defaultFrom;
 
-  if (!allowedCallerIds.includes(from)) {
+  const ownedCallerIds = await listOwnedTelnyxNumbers();
+  const allowedSet = new Set([...allowedCallerIds, ...ownedCallerIds]);
+
+  if (!allowedSet.has(from)) {
     throw new Error("Ausgangsnummer ist nicht freigegeben. Bitte waehlen Sie eine konfigurierte Telnyx-Nummer.");
   }
 
@@ -266,7 +332,15 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
 
   const details = await response.text();
   if (!response.ok) {
-    throw new Error(`Telnyx call failed: ${response.status}${details ? ` ${details}` : ""}`);
+    let message: string;
+
+    try {
+      message = formatTelnyxCallError(response.status, details);
+    } catch {
+      message = `Telnyx call failed: ${response.status}${details ? ` ${details}` : ""}`;
+    }
+
+    throw new TelnyxApiError(message, response.status);
   }
 
   let data:

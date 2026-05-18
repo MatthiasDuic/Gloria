@@ -1,8 +1,170 @@
 import { NextResponse } from "next/server";
 import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
 import { getLeadById, storeCallReport } from "@/lib/storage";
-import { appendCallTranscriptEventToPostgres, findUserById } from "@/lib/report-db";
+import {
+  appendCallTranscriptEventToPostgres,
+  findUserById,
+  listCallTranscriptEventsFromPostgres,
+  type TranscriptEvent,
+} from "@/lib/report-db";
 import type { ReportOutcome, Topic } from "@/lib/types";
+
+const BASIS_FIELD_RULES: Array<{
+  key:
+    | "birthDate"
+    | "height"
+    | "weight"
+    | "insurer"
+    | "monthlyPremium"
+    | "diagnoses"
+    | "medication"
+    | "hospitalStays"
+    | "psychTreatment"
+    | "teeth"
+    | "allergies";
+  question: string;
+  promptPatterns: RegExp[];
+  answerPatterns?: RegExp[];
+}> = [
+  {
+    key: "birthDate",
+    question: "Geburtsdatum",
+    promptPatterns: [/geburtsdatum|geboren/i],
+    answerPatterns: [/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b/i],
+  },
+  {
+    key: "height",
+    question: "Koerpergroesse (cm)",
+    promptPatterns: [/k[oö]rpergr[oö][sß]e|groesse|gr[oö][sß]e/i],
+    answerPatterns: [/\b(1\d{2}|2\d{2})\s*(cm|zentimeter)\b/i],
+  },
+  {
+    key: "weight",
+    question: "Gewicht (kg)",
+    promptPatterns: [/\bgewicht\b/i],
+    answerPatterns: [/\b\d{2,3}\s*(kg|kilo)\b/i],
+  },
+  {
+    key: "insurer",
+    question: "Aktueller Krankenversicherer",
+    promptPatterns: [/versicherer|krankenkasse|krankenversicherung/i],
+    answerPatterns: [
+      /\b(aok|tk|techniker|barmer|dak|ikk|hkk|bkk|debeka|allianz|signal\s*iduna|huk|axa|generali|ottonova|uniqa|hansemerkur|deutsche\s*krankenversicherung)\b/i,
+      /\bbei\s+(der|dem)\s+[a-zA-ZäöüÄÖÜß\-]+/i,
+    ],
+  },
+  {
+    key: "monthlyPremium",
+    question: "Monatsbeitrag",
+    promptPatterns: [/monatsbeitrag|beitrag/i],
+    answerPatterns: [/\b\d{2,5}\s*(euro|eur)\b|\b\d{2,5}\b/i],
+  },
+  {
+    key: "diagnoses",
+    question: "Laufende Diagnosen/Behandlungen",
+    promptPatterns: [/diagnosen|behandlungen|erkrankungen/i],
+  },
+  {
+    key: "medication",
+    question: "Regelmaessige Medikamente",
+    promptPatterns: [/medikamente|medikation/i],
+  },
+  {
+    key: "hospitalStays",
+    question: "Stationaere Aufenthalte (letzte 5 Jahre)",
+    promptPatterns: [/station[aä]r|krankenhausaufenthalt|aufenthalte/i],
+  },
+  {
+    key: "psychTreatment",
+    question: "Psychische Behandlungen (letzte 10 Jahre)",
+    promptPatterns: [/psychisch|psychotherapie|psycholog/i],
+  },
+  {
+    key: "teeth",
+    question: "Zaehne/Zahnersatz",
+    promptPatterns: [/z[aä]hne|zahnersatz/i],
+  },
+  {
+    key: "allergies",
+    question: "Allergien",
+    promptPatterns: [/allergien?|allergisch/i],
+  },
+];
+
+function normalizeText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
+}
+
+function isRefusalAnswer(rawText: string): boolean {
+  const text = normalizeText(rawText);
+  return /weiss\s*nicht|keine\s*angabe|moechte\s*ich\s*nicht|will\s*ich\s*nicht|sp[aä]ter|u[eu]berspring|keine\s*zeit/.test(text);
+}
+
+function hasMeaningfulAnswer(rawText: string, answerPatterns?: RegExp[]): boolean {
+  const text = rawText.trim();
+  if (!text || isRefusalAnswer(text)) {
+    return false;
+  }
+  if (answerPatterns && answerPatterns.length > 0) {
+    return answerPatterns.some((pattern) => pattern.test(text));
+  }
+  return text.length >= 2;
+}
+
+function collectMissingBasisQuestions(events: TranscriptEvent[]): string[] {
+  if (!events.length) {
+    return BASIS_FIELD_RULES.map((rule) => rule.question);
+  }
+
+  const asked = new Set<string>();
+  const answered = new Set<string>();
+
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (event.speaker !== "Gloria") continue;
+    const gloriaText = event.text || "";
+
+    for (const rule of BASIS_FIELD_RULES) {
+      if (!rule.promptPatterns.some((pattern) => pattern.test(gloriaText))) {
+        continue;
+      }
+
+      asked.add(rule.key);
+      let nextUserReply = "";
+      for (let lookahead = index + 1; lookahead < events.length; lookahead += 1) {
+        const candidate = events[lookahead];
+        if (candidate.speaker === "Gloria") {
+          break;
+        }
+        if (candidate.speaker === "Interessent" && candidate.text?.trim()) {
+          nextUserReply = candidate.text.trim();
+          break;
+        }
+      }
+
+      if (hasMeaningfulAnswer(nextUserReply, rule.answerPatterns)) {
+        answered.add(rule.key);
+      }
+    }
+  }
+
+  const missing = BASIS_FIELD_RULES.filter((rule) => asked.has(rule.key) && !answered.has(rule.key)).map(
+    (rule) => rule.question,
+  );
+
+  // Falls gar keine Basisfrage gestellt wurde (z. B. frueh beendet), trotzdem
+  // komplette Fragenliste in die Mail aufnehmen.
+  if (asked.size === 0) {
+    return BASIS_FIELD_RULES.map((rule) => rule.question);
+  }
+
+  return missing;
+}
 
 type IncomingTranscriptEntry = {
   role?: "user" | "assistant";
@@ -142,11 +304,16 @@ export async function POST(request: Request) {
       ? await getLeadById(report.leadId, report.userId)
       : undefined;
     const user = report.userId ? await findUserById(report.userId) : null;
+    const transcriptEvents = report.callSid
+      ? await listCallTranscriptEventsFromPostgres(report.callSid)
+      : [];
+    const missingBasisQuestions = collectMissingBasisQuestions(transcriptEvents);
 
     inviteResult = await sendAppointmentInvite({
       report,
       attendeeEmail: lead?.email,
       organizerName: user?.realName || user?.companyName,
+      missingBasisQuestions,
     });
   }
 

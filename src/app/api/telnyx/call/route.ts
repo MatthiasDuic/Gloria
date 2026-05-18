@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTelephonyRuntimeSnapshot } from "@/lib/telephony-runtime";
-import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
+import { createTelnyxCall, isTelnyxConfigured, TelnyxApiError } from "@/lib/telnyx";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
@@ -103,7 +103,12 @@ export async function POST(request: Request) {
       error instanceof Error
         ? error.message
         : "Anruf konnte nicht gestartet werden.";
-    const status = message.startsWith("RUNTIME_NOT_READY:") ? 503 : 500;
+    const status =
+      message.startsWith("RUNTIME_NOT_READY:")
+        ? 503
+        : error instanceof TelnyxApiError
+          ? error.status
+          : 500;
 
     return NextResponse.json(
       {

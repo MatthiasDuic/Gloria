@@ -4,6 +4,9 @@ export const TOPICS = [
   "gewerbliche Versicherungen",
   "private Krankenversicherung",
   "Energie",
+  "Outbound Service (Kundenzufriedenheit)",
+  "Outbound Bestandskunden (Jahresgespraech)",
+  "Inbound Service (Anliegen und Tasks)",
 ] as const;
 
 // Dynamische Themen sind erlaubt: TOPICS sind nur die Standard-Vorgaben.

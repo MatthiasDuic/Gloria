@@ -97,11 +97,12 @@ export function busySlotsToPrompt(slots: BusySlot[]): string {
  */
 export function computeFreeSlots(
   busy: BusySlot[],
-  opts: { daysAhead?: number; maxCount?: number; bufferMinutes?: number } = {},
+  opts: { daysAhead?: number; maxCount?: number; bufferMinutes?: number; minLeadDays?: number } = {},
 ): Array<{ startUtc: string; phrase: string }> {
-  const daysAhead = opts.daysAhead ?? 5;
-  const maxCount = opts.maxCount ?? 6;
+  const daysAhead = opts.daysAhead ?? 14;
+  const maxCount = opts.maxCount ?? 8;
   const bufferMs = (opts.bufferMinutes ?? 90) * 60 * 1000;
+  const minLeadMs = (opts.minLeadDays ?? 7) * 24 * 60 * 60 * 1000;
 
   const busyRanges = busy
     .map((s) => ({ start: new Date(s.start).getTime(), end: new Date(s.end).getTime() }))
@@ -135,8 +136,9 @@ export function computeFreeSlots(
 
   const out: Array<{ startUtc: string; phrase: string }> = [];
   const now = Date.now();
-  // Starte beim nächsten halben/vollen Stundenraster, mindestens +60min ab jetzt.
-  let cursor = now + 60 * 60 * 1000;
+  // Starte standardmäßig frühestens in der nächsten Woche, um keine
+  // kurzfristigen Folgetag-Termine als Erstvorschlag zu erzeugen.
+  let cursor = now + minLeadMs;
   cursor -= cursor % (30 * 60 * 1000);
 
   const endHorizon = now + daysAhead * 24 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000;
@@ -174,10 +176,10 @@ export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: strin
   if (slots.length === 0) return "";
   const lines = slots.map((s) => `- ${s.phrase}`);
   return [
-    "FREIE TERMIN-VORSCHLÄGE (sofort verfügbar, ohne Doppelbelegung – nutze diese Liste, falls dein erster Vorschlag abgelehnt wird):",
+    "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab naechster Woche – nutze diese Liste, falls dein erster Vorschlag abgelehnt wird):",
     ...lines,
-    "Frage immer ZUERST nach Vormittag/Nachmittag-Präferenz. Schlage dann zwei dieser Slots vor, die zur Präferenz passen.",
-    "Wenn der Anrufende beide ablehnt, nimm die nächsten passenden aus dieser Liste – KEINE freien Erfindungen außerhalb dieser Liste.",
+    "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei dieser Slots vor, die zur Praeferenz passen.",
+    "Wenn der Anrufende beide ablehnt, nimm zwei weitere passende aus dieser Liste - KEINE freien Erfindungen außerhalb dieser Liste.",
     "",
   ].join("\n");
 }

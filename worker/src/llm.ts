@@ -43,14 +43,14 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // gpt-4.1: beste Gesprächsqualität für Telefonvertrieb.
+  // gpt-4.1-mini als Default für deutlich niedrigere Antwortlatenz.
   // Override via OPENAI_MODEL env.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
   ];
-  for (const turn of ctx.transcript.slice(-14)) {
+  for (const turn of ctx.transcript.slice(-20)) {
     messages.push({ role: turn.role, content: turn.text });
   }
   messages.push({ role: "user", content: userText });
@@ -59,7 +59,7 @@ export async function streamReply(
     model,
     messages,
     temperature: 0.55,
-    max_tokens: 150,
+    max_tokens: 120,
     response_format: { type: "json_object" },
     stream: true,
   };
@@ -336,7 +336,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   if (phase <= 1) {
     lines.push(
       `Erstkontakt. Stell dich vollständig vor: "Mein Name ist Gloria, die digitale Vertriebsassistentin von ${company}." Kurz, warm, klar.`,
-      `Wenn Gatekeeper: direkt und freundlich um Weiterleitung bitten. Wenn du direkt beim Entscheider bist: Anlasssatz in einem Satz, dann Aufzeichnungsfrage.`,
+      `Wenn Gatekeeper: direkt und freundlich um Weiterleitung bitten. Wenn du direkt beim Entscheider bist: Anlasssatz in einem Satz, dann IMMER mit einer offenen Frage enden (z. B. "Wie ist das bei Ihnen aktuell?" oder "Passt es kurz?").`,
     );
   } else if (phase === 2) {
     lines.push(
@@ -346,11 +346,13 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   } else if (phase === 4) {
     if (isPKV) {
       lines.push(
-        `Aufzeichnung ist geklärt. Dein einziges Ziel jetzt: echte Neugier wecken. Kein Pitchen, keine Statistiken.`,
-        `Frag zuerst nach seiner persönlichen Erfahrung — hat er selbst schon Beitragssteigerungen gespürt? Lass ihn antworten.`,
-        `Wenn er seinen aktuellen Beitrag kennt (z.B. 900 €): Nutze GENAU diese Zahl. Rechne laut: "Bei vier Prozent pro Jahr — das sind in zehn Jahren über 1.300 Euro. Pro Monat. Das macht über 50.000 Euro in zehn Jahren, die einfach weg sind — ohne dass sich die Leistung verbessert hat." Dann kurze Pause. Wirklich. Nichts nachschieben.`,
+        `Aufzeichnung ist geklärt. Ziel jetzt: Relevanz aufbauen, noch KEINE Terminfrage.`,
+        `Frag zuerst nach persönlicher Wahrnehmung: Hat er Beitragssteigerungen gespürt? Lass ihn antworten.`,
+        `Dann kurz den allgemeinen Rahmen: Reformdruck und steigende Gesundheitskosten landen häufig bei den Beitragszahlern.`,
+        `Erst DANACH auf die persönliche Ebene wechseln und den aktuellen Beitrag erfragen.`,
+        `Wenn er seinen Beitrag nennt (z.B. 900 €): mit genau dieser Zahl rechnen und danach eine Denkfrage stellen, z.B. "Hat sich das schon einmal jemand mit Ihnen bis zum Rentenalter sauber durchgerechnet?"`,
         `Wenn er sagt "hab ich mir keine Gedanken gemacht": Das ist dein Moment. Nicht weiterpitchen — kurz innehalten: "Genau das ist das Tückische daran. Das merkt man erst, wenn der nächste Bescheid kommt." Dann Pause.`,
-        `NIEMALS "laut PKV-Verband" oder "Studien zeigen" sagen — das klingt wie eine Broschüre. Rechne mit seinen Zahlen, nicht mit Durchschnittswerten.`,
+        `NIEMALS "laut PKV-Verband", "Studien zeigen" oder ähnliche Quellen-Claims sagen — das klingt wie eine Broschüre. Rechne mit seinen Zahlen, nicht mit Durchschnittswerten.`,
         `Erst wenn er selbst sagt "das ist viel" oder ähnliches — dann die Brücke: "Genau dafür ist das Gespräch mit Herrn Duic da."`,
         `GKV-Versicherte: Beitragsentwicklung ist genauso ihr Thema. Nie nach Mitarbeitern oder Unternehmenskosten fragen.`,
         `WICHTIG: Frag pro Turn GENAU EINE Frage. Kein Doppeln.`,
@@ -360,13 +362,22 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         `Aufzeichnung ist geklärt. Jetzt echtes Interesse zeigen — frag nach, hör zu, bau eine menschliche Verbindung auf. Kein Pitch.`,
       );
     }
-  } else if (phase === 5 || phase === 6) {
+  } else if (phase === 5) {
     lines.push(
-      `Der Schmerz ist benannt. Einen konkreten Fakt bringen, der das greifbar macht. Dann die Brücke: würde ein kurzes Gespräch mit ${ownerDative} helfen, das mit seinen eigenen Zahlen durchzugehen?`,
+      `SENSIBILISIERUNGSPHASE (Pflicht vor Termin): Bereite den Kunden aktiv auf das Thema vor, bevor du einen Termin platzierst.`,
+      `Stelle gezielte Fragen in Reihenfolge: (1) eigene Wahrnehmung von Beitragserhöhungen, (2) aktueller Beitrag, (3) Ausblick in 10+ Jahren.`,
+      `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz.`,
+      `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
+    );
+  } else if (phase === 6) {
+    lines.push(
+      `KONZEPT-BRIDGE (Pflicht vor Termin): Erklaere in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
+      `Erst danach in die Terminfrage übergehen. Wenn der Kunde fragt "Worüber genau?", beantworte genau diese Brücke und gehe dann erst zu Phase 7.`,
     );
   } else if (phase === 7) {
     lines.push(
-      `Das Interesse ist da. Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann zwei konkrete Slots. Wenn beides nicht passt: direkt nach seinem Wunschtermin fragen, ohne Druck.`,
+      `Das Interesse ist da. Vor der Terminfrage den Nutzen in einem Satz klar machen: Vertragsanalyse + realistische Beitragsprognose + konkrete Stellschrauben ohne Verkaufsdruck.`,
+      `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
     );
   } else if (phase === 8) {
     // Prüfe ob Gloria bereits die Überleitung gemacht hat
@@ -407,12 +418,16 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- Maximal 2 kurze Sätze pro Antwort, höchstens 1 Frage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
+    `- WICHTIGER GESPRÄCHSFLUSS: Nach Aufzeichnung erst Relevanz/Sensibilisierung (allgemein -> persönlich -> Denkfrage), dann Konzept-Bridge, dann Terminfrage.`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
     `- Termine nur Mo–Fr, 09:00–19:00 Uhr. Schlage NIEMALS einen Slot an oder vor dem heutigen Datum vor.`,
+    `- Vor Phase 7 MUSS Phase 5 (Sensibilisierung) und Phase 6 (Konzept-Bridge) erfolgt sein. Keine direkte Terminierung aus dem Opener heraus.`,
+    `- Biete in der Terminphase immer genau zwei Optionen aus der NÄCHSTEN WOCHE an. Kein Folgetag-Termin als Erstvorschlag.`,
     `- UHRZEIT-FORMAT (KRITISCH für Sprachausgabe): Schreibe Uhrzeiten IMMER in Worten — "zehn Uhr dreißig", "vierzehn Uhr" — NIEMALS als Ziffern ("10:30", "14:00").`,
     `- DATUM-FORMAT (KRITISCH): Schreibe Datum immer ausgeschrieben — "Dienstag, den elften Mai" — NIEMALS "11. Mai" oder "11.05.".`,
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
+    `- VERBOTEN: Formulierungen wie "laut PKV-Verband" oder pauschale Quellen-Claims.`,
     `- Bei klarer Ablehnung: einmal ruhig, respektvoll kontern. Beim zweiten Nein: würdevoll beenden.`,
     `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
     `- WEITERLEITUNG ZU FRAU BROST: Wenn der Anrufende ausdrücklich mit einem Menschen sprechen möchte, sagst du: "Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen." Dann transfer=true setzen. Biete die Weiterleitung NICHT ungefragt an — nur wenn der Kunde danach fragt oder explizit ablehnt, mit einer KI zu sprechen.`,
@@ -445,6 +460,14 @@ function inferConversationPhase(ctx: CallContext): number {
   const termSignals = [hasTimePreference, hasClockTime, hasWeekdayWithTime, hasAppointmentRequest].filter(Boolean).length;
   const hasTermHint = termSignals >= 2;
 
+  // Sensibilisierung + Konzept-Bridge vor der Terminphase erzwingen.
+  const hasSensitization =
+    /beitragssteiger|anpassung|wie hoch.*beitrag|monatsbeitrag|bemerkt.*beitrag/.test(all);
+  const hasNumericProof =
+    /vier prozent|hochrechnen|zehn jahre|f[üu]nfzigtausend|1300|1\.300/.test(all);
+  const hasConceptBridge =
+    /vertragsanalyse|prognose|stellschrauben|ohne verkaufsdruck|gespr[aä]ch mit herrn duic|herr duic schaut/.test(all);
+
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
   const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
   // Kunde hat Basisangaben abgelehnt: Gloria hat "Terminbestätigungsmail" oder "in Ruhe beantworten" gesagt
@@ -454,19 +477,20 @@ function inferConversationPhase(ctx: CallContext): number {
 
   if (!hasConsentQuestion) return 2;
   if (!hasConsentAnswer) return 2;
-  if (!hasTermHint) return 4;
-  if (hasTermHint && !hasConfirmedSlot) return 7;
-  if (hasConfirmedSlot && hasBasisdatenRefused && !hasEmailAsked) return 10; // Basisangaben übersprungen
-  if (hasConfirmedSlot && !hasDataCollection) return 8;
+
+  // Vor Terminbestätigung: erst Sensibilisierung, dann Konzept-Bridge, dann Terminierung.
+  if (!hasSensitization) return 4;
+  if (!hasNumericProof) return 5;
+  if (!hasConceptBridge) return 6;
+  if (!hasTermHint) return 6;
+  if (!hasConfirmedSlot) return 7;
+
+  // Termin ist bestätigt: dann Basisdaten -> E-Mail -> Abschluss.
+  if (hasBasisdatenRefused && !hasEmailAsked) return 10; // Basisangaben übersprungen
+  if (!hasDataCollection) return 8;
   if (!hasEmailAsked) return 10;  // E-Mail fragen
   if (!hasSummary) return 11;     // Zusammenfassung + Verabschiedung
   return 11;
-
-  // Zwischen Discovery und Termin-Aufbau: abhängig von Gesprächstiefe.
-  const userTurns = turns.filter((t) => t.role === "user").length;
-  if (userTurns <= 3) return 4;
-  if (userTurns <= 5) return 5;
-  return 6;
 }
 
 function buildMemoryBlock(ctx: CallContext): string {

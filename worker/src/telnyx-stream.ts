@@ -454,7 +454,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         void loadBusySlots({ userId: ctx.userId }).then((slots) => {
           if (!ctx || !slots) return;
           ctx.busySlotsPrompt = busySlotsToPrompt(slots);
-          const free = computeFreeSlots(slots, { daysAhead: 5, maxCount: 6, bufferMinutes: 90 });
+          const free = computeFreeSlots(slots, { daysAhead: 14, maxCount: 8, bufferMinutes: 90, minLeadDays: 7 });
           if (free.length) {
             ctx.freeSlotsPrompt = freeSlotsToPrompt(free);
           }
@@ -655,13 +655,14 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
     topicLine = `Es geht um ein Thema, bei dem ${owner} Ihnen eine kurze, fundierte Einordnung geben möchte.`;
   }
 
-  // Kurze, natürliche Begrüßung — NUR Vorstellung + Anlasssatz.
+  // Kurze, natürliche Begrüßung mit offener Abschlussfrage.
   // Aufzeichnungsfrage bewusst NICHT im Fast-Path: LLM formuliert sie
   // im nächsten Turn frei, ohne "bitte antworten Sie mit JA oder NEIN".
   return [
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an —`,
     topicLine,
+    `Passt es kurz für eine Frage?`,
   ].join(" ");
 }
 
@@ -698,7 +699,7 @@ function extractConfirmedSlot(text: string): string | null {
     /\bnotiere\s+ich\b/.test(lower) ||
     /\bich\s+(?:merke|merk)\s+(?:mir|ich\s+mir)\b/.test(lower) ||
     /\b(?:merke|merk)\s+ich\s+mir\b/.test(lower) ||
-    /\bich\s+trage\s+(?:ihn|den\s+termin)?\s*(?:ein|gleich\s+ein)?\b/.test(lower) ||
+    /\bich\s+trage\s+(?:(?:sie|dich|ihn)\s+f[üu]r\s+|(?:ihn|den\s+termin)\s*)?(?:.*?\s+)?(?:ein|gleich\s+ein)\b/.test(lower) ||
     /\bich\s+buche\b/.test(lower) ||
     /\bsteht\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
     /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||

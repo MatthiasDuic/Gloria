@@ -362,6 +362,91 @@ textarea {
   color: #5e7396;
 }
 
+.playbook-topic-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.playbook-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 233, 166, 0.44);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff4d8;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+}
+
+.playbook-category-tabs {
+  display: block;
+}
+
+.playbook-category-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.playbook-category-sidebar {
+  display: grid;
+  gap: 8px;
+}
+
+.playbook-topic-strip {
+  border: 1px solid #d4dfef;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f4f8ff 100%);
+  padding: 10px;
+}
+
+.playbook-topic-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.playbook-category-tab {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+  font-size: 0.84rem;
+  padding: 7px 11px;
+}
+
+.playbook-category-tab small {
+  color: #6b7f9f;
+  font-weight: 700;
+  margin-left: 10px;
+}
+
+.playbook-category-tab.active {
+  color: #10233f;
+  border-color: #8aa6cc;
+  background: linear-gradient(180deg, #f3f7ff 0%, #e9f1fe 100%);
+  box-shadow: inset 0 0 0 1px rgba(133, 160, 199, 0.25);
+}
+
+.playbook-topic-pill {
+  width: auto;
+  font-size: 0.82rem;
+  padding: 6px 10px;
+}
+
+.playbook-topic-pill.active {
+  color: #10233f;
+  border-color: #8aa6cc;
+  background: linear-gradient(180deg, #f3f7ff 0%, #e9f1fe 100%);
+  box-shadow: inset 0 0 0 1px rgba(133, 160, 199, 0.25);
+}
+
 .playbook-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1173,6 +1258,12 @@ td {
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+  .playbook-category-layout {
+    grid-template-columns: 1fr;
+  }
+  .playbook-category-sidebar {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
   .playbook-grid,
   .playbook-overview,

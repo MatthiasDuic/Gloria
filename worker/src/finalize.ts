@@ -97,8 +97,8 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         : "Kein Kontakt";
 
     const appointmentAt =
-      typeof parsed.appointmentAt === "string" && !Number.isNaN(Date.parse(parsed.appointmentAt))
-        ? new Date(parsed.appointmentAt).toISOString()
+      typeof parsed.appointmentAt === "string"
+        ? parsePossiblyZonelessDateTime(parsed.appointmentAt)
         : undefined;
 
     const contactEmail =
@@ -107,10 +107,8 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         : undefined;
 
     const nextCallAt =
-      outcome === "Wiedervorlage" &&
-      typeof parsed.nextCallAt === "string" &&
-      !Number.isNaN(Date.parse(parsed.nextCallAt))
-        ? new Date(parsed.nextCallAt).toISOString()
+      outcome === "Wiedervorlage" && typeof parsed.nextCallAt === "string"
+        ? parsePossiblyZonelessDateTime(parsed.nextCallAt)
         : undefined;
 
     const directDial =
@@ -323,6 +321,13 @@ const NUMBER_WORD: Record<string, number> = {
 function parseSlotPhraseToIso(phrase: string): string | undefined {
   const lower = phrase.toLowerCase();
   let day: number | undefined;
+  const dayNumeric = /\b(?:den\s+)?(\d{1,2})\.?\b/.exec(lower);
+  if (dayNumeric) {
+    const parsed = Number.parseInt(dayNumeric[1], 10);
+    if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 31) {
+      day = parsed;
+    }
+  }
   for (const [word, value] of Object.entries(ORDINAL_DAY)) {
     if (lower.includes(word)) {
       day = value;
@@ -337,46 +342,100 @@ function parseSlotPhraseToIso(phrase: string): string | undefined {
     }
   }
   // Uhrzeit: "um <hour> Uhr [<minute>]"
-  const hourMatch = /\bum\s+([a-zäöüß]+)\s+uhr(?:\s+([a-zäöüß]+))?/.exec(lower);
+  const numericTime = /\bum\s+(\d{1,2})(?::(\d{2}))?\s*uhr\b/.exec(lower);
   let hour = 0;
   let minute = 0;
-  if (hourMatch) {
+  if (numericTime) {
+    hour = Number.parseInt(numericTime[1], 10);
+    minute = numericTime[2] ? Number.parseInt(numericTime[2], 10) : 0;
+  }
+  const hourMatch = /\bum\s+([a-zäöüß]+)\s+uhr(?:\s+([a-zäöüß]+))?/.exec(lower);
+  if (!numericTime && hourMatch) {
     hour = NUMBER_WORD[hourMatch[1]] ?? 0;
     if (hourMatch[2]) minute = NUMBER_WORD[hourMatch[2]] ?? 0;
   }
-  if (!day || !month) return undefined;
+  if (!day || !month || hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
 
   const now = new Date();
   let year = now.getFullYear();
 
-  // Berechne den korrekten UTC-Offset für Europe/Berlin dynamisch.
-  // Sommerzeit (MESZ) = UTC+2, Winterzeit (MEZ) = UTC+1 — nie hardcoden.
-  function getBerlinOffsetHours(date: Date): number {
-    // Intl.DateTimeFormat gibt localtime zurück; via Differenz zum UTC-Wert
-    // ermitteln wir den Offset in vollen Stunden.
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Europe/Berlin",
-      hour: "numeric",
-      hour12: false,
-    });
-    const localHour = parseInt(formatter.format(date), 10);
-    const utcHour = date.getUTCHours();
-    let offset = localHour - utcHour;
-    // Sprung über Mitternacht ausgleichen
-    if (offset < -12) offset += 24;
-    if (offset > 12) offset -= 24;
-    return offset;
-  }
-
-  // Vorläufiges UTC-Datum ohne Offset-Korrektur, um Sommer-/Winterzeit zu erkennen.
-  const probeDate = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  const offsetHours = getBerlinOffsetHours(probeDate);
-
   // Wenn das Datum in der Vergangenheit läge, nimm nächstes Jahr.
-  const candidate = new Date(Date.UTC(year, month - 1, day, hour - offsetHours, minute));
+  const candidateIso = berlinLocalDateTimeToIso(year, month, day, hour, minute);
+  if (!candidateIso) return undefined;
+  const candidate = new Date(candidateIso);
   if (candidate.getTime() < now.getTime() - 86400000) {
     year += 1;
   }
-  const iso = new Date(Date.UTC(year, month - 1, day, hour - offsetHours, minute)).toISOString();
-  return iso;
+  return berlinLocalDateTimeToIso(year, month, day, hour, minute);
+}
+
+function parsePossiblyZonelessDateTime(value: string): string | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+
+  // Mit expliziter Zeitzone: normal über Date parser.
+  if (/([zZ]|[+\-]\d{2}:?\d{2})$/.test(raw)) {
+    const withZone = new Date(raw);
+    return Number.isNaN(withZone.getTime()) ? undefined : withZone.toISOString();
+  }
+
+  // Ohne Zeitzone: als Europe/Berlin interpretieren.
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(raw);
+  if (!m) {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+
+  const year = Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10);
+  const day = Number.parseInt(m[3], 10);
+  const hour = Number.parseInt(m[4] || "0", 10);
+  const minute = Number.parseInt(m[5] || "0", 10);
+  const second = Number.parseInt(m[6] || "0", 10);
+
+  if (
+    month < 1 || month > 12 ||
+    day < 1 || day > 31 ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59 ||
+    second < 0 || second > 59
+  ) {
+    return undefined;
+  }
+
+  return berlinLocalDateTimeToIso(year, month, day, hour, minute, second);
+}
+
+function berlinLocalDateTimeToIso(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second = 0,
+): string | undefined {
+  const toUtcMillis = (guessUtcMillis: number) => {
+    const dtf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Berlin",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const parts = dtf.formatToParts(new Date(guessUtcMillis));
+    const get = (type: string) => Number.parseInt(parts.find((p) => p.type === type)?.value || "0", 10);
+    const asIfUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+    const desiredAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    return guessUtcMillis + (desiredAsUtc - asIfUtc);
+  };
+
+  let utcMillis = Date.UTC(year, month - 1, day, hour, minute, second);
+  utcMillis = toUtcMillis(utcMillis);
+  utcMillis = toUtcMillis(utcMillis);
+
+  const result = new Date(utcMillis);
+  return Number.isNaN(result.getTime()) ? undefined : result.toISOString();
 }

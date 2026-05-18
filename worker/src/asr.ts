@@ -43,8 +43,8 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     }
   } else {
     // nova-2 / nova-3: silence-based endpointing + utterance end.
-    const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "700";
-    const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "1200";
+    const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "450";
+    const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "700";
     params.set("interim_results", "true");
     params.set("endpointing", endpointingMs);
     params.set("utterance_end_ms", utteranceEndMs);

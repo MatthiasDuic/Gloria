@@ -30,6 +30,82 @@ const EMPTY_LEARNING: LearningResponse = {
   globalSummary: [],
 };
 
+type TopicCategoryDefinition = {
+  label: string;
+  topics: string[];
+};
+
+type TopicGroup = {
+  label: string;
+  topics: string[];
+};
+
+const TOPIC_CATEGORY_DEFINITIONS: TopicCategoryDefinition[] = [
+  {
+    label: "Outbound Telefonie - Neukundenakquise",
+    topics: [
+      "betriebliche Krankenversicherung",
+      "betriebliche Altersvorsorge",
+      "private Krankenversicherung",
+      "gewerbliche Versicherungen",
+      "Energie",
+    ],
+  },
+  {
+    label: "Outbound Telefonie - Service",
+    topics: ["Outbound Service (Kundenzufriedenheit)"],
+  },
+  {
+    label: "Outbound Telefonie - Bestandskunden",
+    topics: ["Outbound Bestandskunden (Jahresgespraech)"],
+  },
+  {
+    label: "Inbound Telefonie",
+    topics: ["Inbound Service (Anliegen und Tasks)"],
+  },
+];
+
+const PLAYBOOK_CATEGORY_ALL = "Alle Kategorien";
+
+function normalizeTopicKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function findTopicCategoryLabel(topic: string) {
+  const key = normalizeTopicKey(topic);
+
+  for (const category of TOPIC_CATEGORY_DEFINITIONS) {
+    if (category.topics.some((entry) => normalizeTopicKey(entry) === key)) {
+      return category.label;
+    }
+  }
+
+  return "Eigene Themen";
+}
+
+function buildTopicGroups(topicList: string[]): TopicGroup[] {
+  const uniqueTopics = Array.from(new Set(topicList.map((topic) => topic.trim()).filter(Boolean)));
+  const remaining = new Set(uniqueTopics);
+  const grouped: TopicGroup[] = [];
+
+  for (const category of TOPIC_CATEGORY_DEFINITIONS) {
+    const topicsInCategory = category.topics.filter((topic) => remaining.has(topic));
+    if (topicsInCategory.length > 0) {
+      grouped.push({ label: category.label, topics: topicsInCategory });
+      for (const topic of topicsInCategory) {
+        remaining.delete(topic);
+      }
+    }
+  }
+
+  const customTopics = Array.from(remaining).sort((a, b) => a.localeCompare(b, "de"));
+  if (customTopics.length > 0) {
+    grouped.push({ label: "Eigene Themen", topics: customTopics });
+  }
+
+  return grouped;
+}
+
 function formatDate(value?: string) {
   if (!value) {
     return "-";
@@ -362,6 +438,130 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
     };
   }
 
+  if (normalized === "outbound service (kundenzufriedenheit)") {
+    return {
+      callObjective: "Kundenzufriedenheit nach dem Werkstattbesuch verlässlich messen, positives Feedback sichern und bei Problemen sofort eine interne Aufgabe auslösen.",
+      behavior: [
+        "Freundlich, neutral und serviceorientiert sprechen - ohne Verkaufsdruck.",
+        "Kurz führen: Begruessung, Zufriedenheitsfrage, Ergebnis sichern, sauber abschliessen.",
+        "Bei Kritik empathisch reagieren und gezielt nach dem Kernproblem fragen.",
+      ].join("\n"),
+      conversationGuardrails: [
+        "Kein Verkauf, kein Upselling, keine Tarifdiskussion.",
+        "Bewertung immer explizit als Zahl von 1 bis 5 erfassen.",
+        "Bei 1-3 nicht relativieren, sondern Problem konkret aufnehmen.",
+        "Immer dokumentieren, ob Rueckruf oder Eskalation gewuenscht ist.",
+      ].join("\n"),
+      requiredData: [
+        "Darf ich kurz Ihren Namen zur Zuordnung abgleichen?",
+        "Wie zufrieden waren Sie insgesamt mit Ihrem Werkstattbesuch auf einer Skala von 1 bis 5?",
+        "Was lief gut, was duerfen wir verbessern?",
+        "Wuenschen Sie einen Rueckruf vom Autohaus?",
+        "Unter welcher Nummer und zu welcher Zeit sind Sie am besten erreichbar?",
+      ].join("\n"),
+      proofPoints: [
+        "Jede Rueckmeldung innerhalb von 48 Stunden reduziert Reklamationseskalationen deutlich.",
+        "Kunden mit aktiv aufgenommener Beschwerde bleiben signifikant loyaler als bei rein passiver Nachverfolgung.",
+      ].join("\n"),
+      objectionResponses: [
+        "Keine Zeit: Verstehe ich gut, es dauert wirklich nur eine Minute - Ihre kurze Bewertung hilft dem Service-Team direkt.",
+        "Alles okay: Perfekt, danke fuer die Rueckmeldung. Duerfte ich trotzdem kurz die 1-bis-5-Bewertung notieren?",
+        "War schlecht: Danke fuer Ihre Offenheit. Was genau war der wichtigste Punkt, den wir sofort pruefen sollen?",
+      ].join("\n"),
+      knowledge: [
+        "ERLAUBT:",
+        "- Servicequalitaet abfragen und dokumentieren.",
+        "- Bei Kritik aktiv Rueckruf/Task anbieten.",
+        "",
+        "VERBOTEN:",
+        "- Verkaufsgespraeche starten.",
+        "- Schuldzuweisungen oder technische Zusagen ohne Werkstattfreigabe.",
+      ].join("\n"),
+      transferHandling: "Bei Bewertung 1-3 oder expliziter Beschwerde immer einen Rueckruf-Task erstellen und Prioritaet mitgeben. Bei akuter Verunsicherung aktiv menschliche Uebergabe anbieten.",
+    };
+  }
+
+  if (normalized === "outbound bestandskunden (jahresgespraech)") {
+    return {
+      callObjective: "Einen Termin fuer ein kurzes Jahresgespraech oder einen Vertragscheck vereinbaren; falls nicht moeglich eine verbindliche Wiedervorlage setzen.",
+      behavior: [
+        "Persoenlich, wertschätzend und auf Augenhoehe sprechen.",
+        "Bestehende Beziehung anerkennen und den Nutzen eines kurzen Checks klar machen.",
+        "Mit Auswahlfragen terminieren statt offenem Druck.",
+      ].join("\n"),
+      conversationGuardrails: [
+        "Kein harter Verkaufston, Fokus auf Betreuung und Aktualitaet.",
+        "Bei Zeitmangel aktiv Mini-Termin (10-15 Minuten) anbieten.",
+        "Wenn aktuell kein Bedarf genannt wird, trotzdem Mehrwert des Jahreschecks kurz begruenden.",
+      ].join("\n"),
+      requiredData: [
+        "Passt Ihnen eher Anfang oder Ende naechster Woche?",
+        "Bevorzugen Sie Telefon, Video oder persoenlich?",
+        "Welche E-Mail-Adresse sollen wir fuer die Bestaetigung nutzen?",
+        "Gibt es ein Thema, das Herr Duic im Termin besonders vorbereiten soll?",
+      ].join("\n"),
+      proofPoints: [
+        "Bei vielen Kunden aendern sich innerhalb eines Jahres Lebenssituation, Einkommen oder Leistungswuensche spuerbar.",
+        "Ein 10-15-Minuten-Check verhindert haeufig, dass veraltete Vertragsstaende unbemerkt bleiben.",
+      ].join("\n"),
+      objectionResponses: [
+        "Ich habe keine Zeit: Verstehe ich gut. Wir halten es bewusst kurz - 10 Minuten reichen fuer einen klaren Abgleich.",
+        "Kein Bedarf: Kann gut sein. Genau deshalb machen wir den Jahrescheck: einmal bestaetigen, dass alles weiterhin passt.",
+        "Bitte spaeter: Gerne. Welcher Tag passt Ihnen fuer eine verbindliche Wiedervorlage am besten?",
+      ].join("\n"),
+      knowledge: [
+        "ERLAUBT:",
+        "- Jahrescheck als Serviceleistung und Qualitaetssicherung positionieren.",
+        "- Nutzen ueber Aktualitaet, Absicherung und Planbarkeit kommunizieren.",
+        "",
+        "VERBOTEN:",
+        "- Abschlussdruck oder Angstkommunikation.",
+      ].join("\n"),
+      transferHandling: commonTransfer,
+    };
+  }
+
+  if (normalized === "inbound service (anliegen und tasks)") {
+    return {
+      callObjective: "Anliegen im Erstkontakt loesen, andernfalls einen vollstaendigen Task mit Prioritaet, Rueckrufdaten und Zusammenfassung anlegen.",
+      behavior: [
+        "Hilfsbereit, strukturiert und ruhig sprechen.",
+        "Anliegen zuerst klar klassifizieren: Schaden, Vertrag, Termin, Dokumente, Leistung, Sonstiges.",
+        "Wenn keine Sofortloesung moeglich ist, aktiv Verantwortung uebernehmen und naechsten Schritt fixieren.",
+      ].join("\n"),
+      conversationGuardrails: [
+        "Keine rechtlich verbindlichen Leistungszusagen am Telefon.",
+        "Nur Informationen verwenden, die in der Wissensbasis oder den Playbooks freigegeben sind.",
+        "Bei sensiblen Faellen Rueckruf-Task mit Prioritaet setzen statt zu spekulieren.",
+      ].join("\n"),
+      requiredData: [
+        "Worum geht es genau?",
+        "Wie dringend ist das Anliegen fuer Sie (heute, diese Woche, normal)?",
+        "Unter welcher Nummer koennen wir Sie am besten erreichen?",
+        "Was waere fuer Sie das gewuenschte Ergebnis?",
+      ].join("\n"),
+      proofPoints: [
+        "Klare Ticketzusammenfassungen mit Rueckrufzeit senken Nachfragen und Doppelkontakte deutlich.",
+        "Die sofortige Erfassung von Dringlichkeit verbessert Reaktionszeiten in der Kundenbetreuung messbar.",
+      ].join("\n"),
+      objectionResponses: [
+        "Ich brauche sofort jemanden: Ich nehme das direkt priorisiert auf und lasse schnellstmoeglich zurueckrufen.",
+        "Nur per E-Mail: Gern, ich dokumentiere Ihr Anliegen jetzt und wir senden die Zusammenfassung zusaetzlich per Mail.",
+        "Das ist kompliziert: Kein Problem, ich strukturiere das kurz mit Ihnen und uebergebe es dann passend weiter.",
+      ].join("\n"),
+      knowledge: [
+        "ERLAUBT:",
+        "- Oeffnungszeiten, Kontaktwege, Terminlogik und allgemeine Produktinfos aus den freigegebenen Quellen nennen.",
+        "- Links fuer Schadenmeldung oder Dokumentanforderung anbieten.",
+        "",
+        "VERBOTEN:",
+        "- Verbindliche Leistungszusagen ohne Pruefung.",
+        "- Aussagen ausserhalb der freigegebenen Wissensbasis.",
+      ].join("\n"),
+      transferHandling: "Wenn Sofortloesung nicht moeglich ist, immer Task mit Anliegen, Prioritaet, Rueckrufnummer und kurzer Zusammenfassung erstellen. Bei eskalierten Faellen sofort menschliche Rueckmeldung priorisieren.",
+    };
+  }
+
   return {
     callObjective: "Einen klaren nächsten Schritt sichern: idealerweise ein Termin, alternativ eine saubere Wiedervorlage mit klarer Zuständigkeit.",
     conversationGuardrails: "Kurze Dialogzüge, keine Monologe, keine erfundenen Fakten, immer nur eine Hauptfrage zur Zeit.",
@@ -638,6 +838,7 @@ export default function HomePage() {
   const [importListName, setImportListName] = useState("");
   const [importTopic, setImportTopic] = useState<Topic | "">(TOPICS[0]);
   const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
+  const [playbookCategoryFilter, setPlaybookCategoryFilter] = useState<string>(PLAYBOOK_CATEGORY_ALL);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
   const [voiceAudioUrl, setVoiceAudioUrl] = useState("");
@@ -741,6 +942,71 @@ export default function HomePage() {
   const [runningListIds, setRunningListIds] = useState<string[]>([]);
 
   const activeDraft = draftScripts[detailTopic];
+  const playbookTopicOptions = useMemo(
+    () => Array.from(new Set([...TOPICS, ...Object.keys(draftScripts)])),
+    [draftScripts],
+  );
+  const playbookTopicGroups = useMemo(
+    () => buildTopicGroups(playbookTopicOptions),
+    [playbookTopicOptions],
+  );
+  const playbookCategoryTabs = useMemo(
+    () => [PLAYBOOK_CATEGORY_ALL, ...playbookTopicGroups.map((group) => group.label)],
+    [playbookTopicGroups],
+  );
+  const playbookCategoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    counts.set(PLAYBOOK_CATEGORY_ALL, playbookTopicOptions.length);
+    for (const group of playbookTopicGroups) {
+      counts.set(group.label, group.topics.length);
+    }
+    return counts;
+  }, [playbookTopicGroups, playbookTopicOptions.length]);
+  const visiblePlaybookTopicGroups = useMemo(
+    () =>
+      playbookCategoryFilter === PLAYBOOK_CATEGORY_ALL
+        ? playbookTopicGroups
+        : playbookTopicGroups.filter((group) => group.label === playbookCategoryFilter),
+    [playbookCategoryFilter, playbookTopicGroups],
+  );
+  const visiblePlaybookTopics = useMemo(
+    () => visiblePlaybookTopicGroups.flatMap((group) => group.topics),
+    [visiblePlaybookTopicGroups],
+  );
+  const detailTopicCategory = useMemo(
+    () => findTopicCategoryLabel(detailTopic),
+    [detailTopic],
+  );
+  const voiceTopicOptions = useMemo(
+    () => Array.from(
+      new Set(
+        (currentUser?.allowedPlaybookTopics?.length
+          ? currentUser.allowedPlaybookTopics
+          : [...TOPICS])
+          .map((topic) => String(topic).trim())
+          .filter(Boolean),
+      ),
+    ),
+    [currentUser?.allowedPlaybookTopics],
+  );
+  const voiceTopicGroups = useMemo(
+    () => buildTopicGroups(voiceTopicOptions),
+    [voiceTopicOptions],
+  );
+
+  useEffect(() => {
+    if (playbookCategoryFilter === PLAYBOOK_CATEGORY_ALL) {
+      return;
+    }
+
+    if (visiblePlaybookTopics.includes(detailTopic)) {
+      return;
+    }
+
+    if (visiblePlaybookTopics.length > 0) {
+      setDetailTopic(visiblePlaybookTopics[0]);
+    }
+  }, [playbookCategoryFilter, visiblePlaybookTopics, detailTopic]);
   const reportRows = useMemo(() => data.reports, [data.reports]);
   const appointmentReports = useMemo(
     () =>
@@ -921,6 +1187,30 @@ export default function HomePage() {
     }
     return result;
   }, [data.leads, data.reports]);
+
+  const assignedPhoneOptions = useMemo(() => {
+    const byNumber = new Map<string, { number: string; label: string }>();
+
+    for (const entry of managedPhoneNumbers) {
+      if (!entry.phoneNumber) continue;
+      byNumber.set(entry.phoneNumber, {
+        number: entry.phoneNumber,
+        label: entry.label || entry.phoneNumber,
+      });
+    }
+
+    for (const entry of anrufEinzelfirmaFromOptions) {
+      if (!entry.number) continue;
+      if (!byNumber.has(entry.number)) {
+        byNumber.set(entry.number, {
+          number: entry.number,
+          label: entry.label || entry.number,
+        });
+      }
+    }
+
+    return Array.from(byNumber.values());
+  }, [managedPhoneNumbers, anrufEinzelfirmaFromOptions]);
 
   async function loadDashboard() {
     const [dashboardResponse, learningResponse] = await Promise.all([
@@ -2648,7 +2938,11 @@ export default function HomePage() {
                         </select>
                       ) : null}
                       <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
-                        {(currentUser?.allowedPlaybookTopics?.length ? currentUser.allowedPlaybookTopics : [...TOPICS]).map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                        {voiceTopicGroups.map((group) => (
+                          <optgroup key={group.label} label={group.label}>
+                            {group.topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                          </optgroup>
+                        ))}
                       </select>
                       <button className="btn" onClick={() => void testVoice()} disabled={busy}>
                         {busy ? "Vorschau lädt ..." : "Stimme testen"}
@@ -2685,13 +2979,55 @@ export default function HomePage() {
                   <h2>Themen-Playbook</h2>
                   <div className="row">
                     <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
-                      {Array.from(new Set([...TOPICS, ...Object.keys(draftScripts)])).map((topic) => (
-                        <option key={topic} value={topic}>{topic}</option>
+                      {visiblePlaybookTopicGroups.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.topics.map((topic) => (
+                            <option key={topic} value={topic}>{topic}</option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <button className="btn ghost" onClick={() => setShowNewTopicForm((v) => !v)} style={{ marginLeft: 8 }}>+ Neues Thema</button>
                   </div>
                 </div>
+                <div className="playbook-category-tabs top-gap">
+                  <div className="playbook-category-layout">
+                    <aside className="playbook-category-sidebar">
+                      {playbookCategoryTabs.map((category) => {
+                        const count = playbookCategoryCounts.get(category) || 0;
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            className={`btn ghost playbook-category-tab ${playbookCategoryFilter === category ? "active" : ""}`}
+                            onClick={() => setPlaybookCategoryFilter(category)}
+                          >
+                            <span>{category}</span>
+                            <small>{count}</small>
+                          </button>
+                        );
+                      })}
+                    </aside>
+                    <div className="playbook-topic-strip">
+                      <span className="playbook-kicker">Schnellauswahl Themen</span>
+                      <div className="playbook-topic-pill-list">
+                        {visiblePlaybookTopics.map((topic) => (
+                          <button
+                            key={topic}
+                            type="button"
+                            className={`btn ghost playbook-topic-pill ${detailTopic === topic ? "active" : ""}`}
+                            onClick={() => setDetailTopic(topic as Topic)}
+                          >
+                            {topic}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p className="subtle top-gap">
+                  Kategorie-Filter aktiv: <strong>{playbookCategoryFilter}</strong>
+                </p>
                 {showNewTopicForm ? (
                   <div className="row top-gap">
                     <input
@@ -2713,6 +3049,9 @@ export default function HomePage() {
                       <div className="playbook-overview-card primary">
                         <span className="playbook-kicker">Playbook-Cockpit</span>
                         <h3>{detailTopic}</h3>
+                        <div className="playbook-topic-meta">
+                          <span className="playbook-topic-chip">{detailTopicCategory}</span>
+                        </div>
                         <p>
                           Hier steuern Sie jetzt die Hebel, die im Alltag wirklich zählen: Zielbild, harte Regeln,
                           Pflichtdaten, Beweisanker, Einwandlinien und menschliche Übergabe.
@@ -3022,7 +3361,25 @@ export default function HomePage() {
                                         </div>
                                         <div>
                                           <label>Zugewiesene Rufnummer (Anrufer-ID)</label>
-                                          <input value={editDraft.assignedPhone} onChange={(e) => setEditDraft({ ...editDraft, assignedPhone: e.target.value })} placeholder="+49..." />
+                                          <select
+                                            value={editDraft.assignedPhone}
+                                            onChange={(e) => {
+                                              const nextNumber = e.target.value;
+                                              const selected = assignedPhoneOptions.find((entry) => entry.number === nextNumber);
+                                              setEditDraft({
+                                                ...editDraft,
+                                                assignedPhone: nextNumber,
+                                                assignedLabel: selected?.label || (nextNumber ? editDraft.assignedLabel : ""),
+                                              });
+                                            }}
+                                          >
+                                            <option value="">Keine Zuweisung</option>
+                                            {assignedPhoneOptions.map((entry) => (
+                                              <option key={entry.number} value={entry.number}>
+                                                {entry.number} ({entry.label})
+                                              </option>
+                                            ))}
+                                          </select>
                                         </div>
                                         <div>
                                           <label>Label</label>
