@@ -73,17 +73,39 @@ function getAppBaseUrl(request?: Request): string {
 }
 
 function getTelnyxMediaStreamUrl(): string {
-  const explicit = process.env.TELNYX_MEDIA_STREAM_URL?.trim();
-  if (explicit) {
+  const normalize = (raw?: string): string | undefined => {
+    const value = raw?.trim();
+    if (!value) return undefined;
+    return value.replace("/twilio-stream", "/telnyx-stream");
+  };
+
+  const derivedFromHealthcheck = (() => {
+    const health = process.env.WORKER_HEALTHCHECK_URL?.trim();
+    if (!health) return undefined;
+    try {
+      const url = new URL(health);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.pathname = "/telnyx-stream";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return undefined;
+    }
+  })();
+
+  const explicit = normalize(process.env.TELNYX_MEDIA_STREAM_URL);
+  const legacyHostPattern = /gloria-stream-worker\.onrender\.com/i;
+  if (explicit && !legacyHostPattern.test(explicit)) {
     return explicit;
   }
 
-  const fallback = process.env.MEDIA_STREAM_WSS_URL?.trim();
-  if (fallback) {
-    return fallback.replace("/twilio-stream", "/telnyx-stream");
-  }
+  const fallback =
+    derivedFromHealthcheck ||
+    normalize(process.env.MEDIA_STREAM_WSS_URL) ||
+    "wss://gloria-tebr.onrender.com/telnyx-stream";
 
-  throw new Error("TELNYX_MEDIA_STREAM_URL fehlt. Bitte eine ws:// oder wss:// URL setzen.");
+  return fallback;
 }
 
 function encodeTelnyxClientState(payload: TelnyxCallRequest): string {

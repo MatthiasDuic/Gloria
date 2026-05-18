@@ -36,16 +36,40 @@ function readApiKey(): string {
 }
 
 function getTelnyxMediaStreamUrl(): string {
-  const value =
-    process.env.TELNYX_MEDIA_STREAM_URL?.trim() ||
-    process.env.TWILIO_MEDIA_STREAM_URL?.trim()?.replace("/twilio-stream", "/telnyx-stream") ||
-    process.env.MEDIA_STREAM_WSS_URL?.trim()?.replace("/twilio-stream", "/telnyx-stream");
+  const normalize = (raw?: string): string | undefined => {
+    const value = raw?.trim();
+    if (!value) return undefined;
+    return value.replace("/twilio-stream", "/telnyx-stream");
+  };
 
-  if (!value) {
-    throw new Error("TELNYX_MEDIA_STREAM_URL fehlt.");
+  const derivedFromHealthcheck = (() => {
+    const health = process.env.WORKER_HEALTHCHECK_URL?.trim();
+    if (!health) return undefined;
+    try {
+      const url = new URL(health);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.pathname = "/telnyx-stream";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return undefined;
+    }
+  })();
+
+  const explicit = normalize(process.env.TELNYX_MEDIA_STREAM_URL);
+  const legacyHostPattern = /gloria-stream-worker\.onrender\.com/i;
+  if (explicit && !legacyHostPattern.test(explicit)) {
+    return explicit;
   }
 
-  return value;
+  const fallback =
+    derivedFromHealthcheck ||
+    normalize(process.env.TWILIO_MEDIA_STREAM_URL) ||
+    normalize(process.env.MEDIA_STREAM_WSS_URL) ||
+    "wss://gloria-tebr.onrender.com/telnyx-stream";
+
+  return fallback;
 }
 
 async function sendTelnyxCommand(
