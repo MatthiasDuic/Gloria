@@ -76,7 +76,20 @@ function getTelnyxMediaStreamUrl(): string {
   const normalize = (raw?: string): string | undefined => {
     const value = raw?.trim();
     if (!value) return undefined;
-    return value.replace("/twilio-stream", "/telnyx-stream");
+    const rewritten = value.replace("/twilio-stream", "/telnyx-stream");
+    try {
+      const url = new URL(rewritten);
+      if (url.protocol === "https:") url.protocol = "wss:";
+      if (url.protocol === "http:") url.protocol = "ws:";
+      if (!url.pathname || url.pathname === "/") {
+        url.pathname = "/telnyx-stream";
+      } else if (url.pathname === "/twilio-stream") {
+        url.pathname = "/telnyx-stream";
+      }
+      return url.toString();
+    } catch {
+      return rewritten;
+    }
   };
 
   const derivedFromHealthcheck = (() => {
