@@ -173,29 +173,43 @@ export function openDeepgram(events: AsrEvents): AsrSession {
       }
     });
 
-    ws.on("error", (error) => {
-      const message = error.message || "";
-      const looksLikeHandshake400 = !opened && /400/.test(message);
+    ws.on("unexpected-response", (_req, res) => {
+      const status = res.statusCode ?? 0;
+      const chunks: Buffer[] = [];
+      res.on("data", (d: Buffer) => chunks.push(d));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8").slice(0, 500);
+        log.warn("asr.handshake_rejected", { status, body, label: variant.label });
+      });
 
-      if (looksLikeHandshake400) {
+      if (!opened) {
         const nextIndex = activeVariantIndex + 1;
         if (nextIndex < connectPlan.length) {
           const next = connectPlan[nextIndex];
           log.warn("asr.fallback_connect", {
-            reason: message,
+            reason: `HTTP ${status}`,
             from: variant.label,
             to: next.label,
             fromModel: variant.model,
             toModel: next.model,
           });
-          try {
-            ws.close();
-          } catch {
-            /* ignore */
-          }
           connectByIndex(nextIndex);
           return;
         }
+      }
+
+      const err = new Error(`Deepgram handshake failed: HTTP ${status}`);
+      log.error("asr.session_error", { error: err.message });
+      events.onError?.(err);
+    });
+
+    ws.on("error", (error) => {
+      const message = error.message || "";
+      const looksLikeHandshake = !opened && /40[01]/.test(message);
+
+      if (looksLikeHandshake) {
+        // unexpected-response handler will manage the fallback
+        return;
       }
 
       log.error("asr.error", { error: error.message, model: activeModel, label: variant.label });
