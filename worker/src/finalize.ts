@@ -65,7 +65,7 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+        model: process.env.OPENAI_MODEL || "gpt-4.1",
         temperature: 0.1,
         response_format: { type: "json_object" },
         messages: [

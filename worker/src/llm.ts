@@ -11,6 +11,13 @@ export type TurnOutput = {
   transfer: boolean;
 };
 
+function parseEnvInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 /**
  * Pre-warmt den TLS/HTTP-Pool zu OpenAI, damit die ALLERERSTE LLM-Antwort
  * nicht ~300–600 ms Handshake-Latenz hat. Wird beim "start"-Event eines
@@ -43,14 +50,19 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // gpt-4.1-mini als Default für deutlich niedrigere Antwortlatenz.
+  // gpt-4.1 als Default fuer bessere Gespraechsqualitaet.
   // Override via OPENAI_MODEL env.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  // Kleinere Kontextfenster + kuerzere Antworten reduzieren die Time-to-first-audio.
+  const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 12, 6, 24);
+  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 90, 40, 180);
+  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 9000, 4000, 20000);
+  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 42, 24, 120);
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
   ];
-  for (const turn of ctx.transcript.slice(-20)) {
+  for (const turn of ctx.transcript.slice(-transcriptTurns)) {
     messages.push({ role: turn.role, content: turn.text });
   }
   messages.push({ role: "user", content: userText });
@@ -59,13 +71,13 @@ export async function streamReply(
     model,
     messages,
     temperature: 0.55,
-    max_tokens: 120,
+    max_tokens: maxTokens,
     response_format: { type: "json_object" },
     stream: true,
   };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   // Streaming-State für inkrementelles Reply-Extrahieren.
   let assembled = "";
@@ -129,6 +141,10 @@ export async function streamReply(
               tail.endsWith(" z.") ||
               tail.endsWith(" b.");
             if (!isAbbrev) flushSentence();
+          }
+          // Frueh ausgeben, damit die Stimme meist unter 2s startet.
+          if ((/[,;:)]/.test(ch) && pendingFlush.length >= earlyFlushChars) || (pendingFlush.length >= earlyFlushChars * 2 && /\s/.test(ch))) {
+            flushSentence();
           }
         }
       }
