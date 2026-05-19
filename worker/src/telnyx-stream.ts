@@ -217,7 +217,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const userFinalCoalesceMs = Math.max(
     250,
-    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "700", 10),
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "900", 10),
+  );
+  const utteranceEndGraceMs = Math.max(
+    120,
+    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "320", 10),
   );
 
   const clearSilenceOpenerTimer = () => {
@@ -251,6 +255,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     pendingUserFinals.push(trimmed);
     clearUserFinalCoalesceTimer();
     userFinalCoalesceTimer = setTimeout(flushUserFinals, userFinalCoalesceMs);
+  };
+
+  const nudgeUserFinalFlush = () => {
+    if (pendingUserFinals.length === 0) return;
+    clearUserFinalCoalesceTimer();
+    userFinalCoalesceTimer = setTimeout(flushUserFinals, utteranceEndGraceMs);
   };
 
   const sendMedia = (audio: Buffer) => {
@@ -376,12 +386,14 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     let totalAudioBytes = 0;
     let chainAborted = false;
     let chain: Promise<void> = Promise.resolve();
+    const spokenSegments: string[] = [];
 
     const speakSegment = async (text: string): Promise<void> => {
       if (chainAborted || !ctx) return;
       const trimmed = text.trim();
       if (!trimmed) return;
       log.info("turn.gloria_segment", { callSid: ctx.callSid, text: trimmed });
+      spokenSegments.push(trimmed);
 
       let buffer = Buffer.alloc(0);
       const sendFrame = (frame: Buffer) => {
@@ -449,10 +461,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     ctx.speaking = false;
     currentTts = null;
-    ctx.transcript.push({ role: "assistant", text: result.reply, at: Date.now(), latencyMs });
+    const spokenText = spokenSegments.join(" ").replace(/\s+/g, " ").trim();
+    ctx.transcript.push({ role: "assistant", text: spokenText || result.reply, at: Date.now(), latencyMs });
 
     if (!ctx.confirmedSlotPhrase) {
-      const slot = extractConfirmedSlot(result.reply);
+      const slot = extractConfirmedSlot(spokenText || result.reply);
       if (slot) {
         ctx.confirmedSlotPhrase = slot;
         log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
@@ -635,7 +648,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
             queueUserFinal(text);
           },
           onUtteranceEnd: () => {
-            flushUserFinals();
+            nudgeUserFinalFlush();
           },
           onError: (error) => {
             log.error("asr.session_error", { error: error.message });

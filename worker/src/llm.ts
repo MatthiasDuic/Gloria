@@ -55,7 +55,7 @@ export async function streamReply(
   const model = process.env.OPENAI_MODEL || "gpt-4.1";
   // Kleinere Kontextfenster + kuerzere Antworten reduzieren die Time-to-first-audio.
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 12, 6, 24);
-  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 90, 40, 180);
+  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 130, 60, 220);
   const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 9000, 4000, 20000);
   const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 42, 24, 120);
 
@@ -417,6 +417,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
       `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
       `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Uebergaenge und gehe direkt zur naechsten Frage.`,
+      `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz.`,
     );
   } else if (phase === 10) {
     lines.push(
