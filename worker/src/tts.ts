@@ -82,7 +82,7 @@ export function streamElevenLabsToMulaw(
   const stability = numEnv("ELEVENLABS_STABILITY", 0.35);
   const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
   const style = numEnv("ELEVENLABS_STYLE", 0.45);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.93);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.88);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {
@@ -195,6 +195,10 @@ function applyPronunciationFixes(text: string): string {
   out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
   // Wortwahl: "private/privaten Krankenversicherung(sbeiträge)" -> "Krankenversicherung(sbeiträge)"
   out = out.replace(/\b(privaten|private|privater|privates|privat)\s+Krankenversicherung/gi, "Krankenversicherung");
+  // Dezimalzahlen fuer TTS robuster machen: "2,5" -> "2 komma 5"
+  out = out.replace(/(\d)\s*,\s*(\d)/g, "$1 komma $2");
+  // Tausenderpunkte vermeiden, damit TTS keine "Punkt"-Pause spricht.
+  out = out.replace(/\b(\d)\.(\d{3})\b/g, "$1$2");
   // Saubere Endungen: ein TTS-Segment ohne abschließendes Satzzeichen wird
   // von ElevenLabs intonatorisch "in der Schwebe" gelassen – der letzte
   // Vokal klingt dann verschluckt. Wir hängen einen Punkt an, falls keiner

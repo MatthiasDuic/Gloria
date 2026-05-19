@@ -288,7 +288,7 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (ctx.confirmedSlotPhrase) {
     parts.push(
       `\n\nBESTÄTIGTER TERMIN (eingefroren – keine Änderung erlaubt): "${ctx.confirmedSlotPhrase}". ` +
-      `In Phase 10 (Schluss-Zusammenfassung) MUSST du in dem Satz "Ihr persönlicher Termin bei Herrn Duic ist am …" GENAU diese Phrase einsetzen, Wort für Wort. ` +
+      `In Phase 10 (Schluss-Zusammenfassung) MUSST du in dem Satz "Ihr persönlicher Termin mit Herrn Duic ist am …" GENAU diese Phrase einsetzen, Wort für Wort. ` +
       `Erfinde KEINEN anderen Wochentag, KEIN anderes Datum und KEINE andere Uhrzeit.`,
     );
   }
@@ -392,6 +392,8 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Stelle gezielte Fragen in Reihenfolge: (1) eigene Wahrnehmung von Beitragserhöhungen, (2) aktueller Beitrag, (3) Ausblick in 10+ Jahren.`,
       `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz.`,
       `DER Reformdruck und die Kostenentwicklung gehoeren genau hier hin - nicht in den Abschluss.`,
+      `Emotionalisieren ohne Drama: Zeige kurz, was steigende Beitraege fuer Lebensplanung im Alter bedeuten (Planbarkeit, Sicherheit, finanzielle Ruhe).`,
+      `Wenn der Kunde einen konkreten Beitrag nennt, arbeite mit GENAU dieser Zahl. Keine Runterrechnung und keine frei erfundenen Korrekturen.`,
       `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
     );
   } else if (phase === 6) {
@@ -404,6 +406,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Das Interesse ist da. Vor der Terminfrage den Nutzen in einem Satz klar machen: Vertragsanalyse + realistische Beitragsprognose + konkrete Stellschrauben ohne Verkaufsdruck.`,
       `Benenne vor der Terminfrage einmal kurz den reformbedingten Kostendruck im Gesundheitswesen (ohne Panik, ohne Quellen-Show).`,
       `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
+      `Rahme den Termin als persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic, nicht als Telefontermin.`,
     );
   } else if (phase === 8) {
     // Prüfe ob Gloria bereits die Überleitung gemacht hat
@@ -418,7 +421,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
       `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
       `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Uebergaenge und gehe direkt zur naechsten Frage.`,
-      `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz.`,
+      `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz. Das ist verpflichtend.`,
     );
   } else if (phase === 10) {
     lines.push(
@@ -432,7 +435,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `ABSOLUT VERBOTEN: Keine weiteren Fragen. Nicht nach Ansprechpartner, nicht nach Basisangaben, nicht nach irgendetwas.`,
       `ABSOLUT VERBOTEN: Keine neue Sensibilisierung mehr, keine Reform- oder Kostendiskussion mehr, kein Nachschub an Argumenten.`,
       `Schreibe 3–4 Sätze:`,
-      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persönlichen Termin bei Herrn Duic vor Ort bzw. im Termin mit Herrn Duic - niemals als Telefontermin.`,
+      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic - niemals als Telefontermin.`,
       `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
       `(4) Herzliche Verabschiedung im Namen des Owners: "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
@@ -453,12 +456,13 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
     `- WICHTIGER GESPRÄCHSFLUSS: Nach Aufzeichnung erst Relevanz/Sensibilisierung (allgemein -> persönlich -> Denkfrage), dann Konzept-Bridge, dann Terminfrage.`,
-    `- TERMINART: Es geht um einen persoenlichen Termin bei Herrn Duic vor Ort. Nenne niemals einen Telefontermin fuer den eigentlichen Fachtermin. Die Telefonie ist nur der Erstkontakt zur Terminvereinbarung.`,
+    `- TERMINART: Es geht um einen persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic. Nenne niemals einen Telefontermin fuer den eigentlichen Fachtermin. Die Telefonie ist nur der Erstkontakt zur Terminvereinbarung.`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
     `- Termine nur Mo–Fr, 09:00–19:00 Uhr. Schlage NIEMALS einen Slot an oder vor dem heutigen Datum vor.`,
     `- Vor Phase 7 MUSS Phase 5 (Sensibilisierung) und Phase 6 (Konzept-Bridge) erfolgt sein. Keine direkte Terminierung aus dem Opener heraus.`,
     `- Biete in der Terminphase immer genau zwei Optionen aus der NÄCHSTEN WOCHE an. Kein Folgetag-Termin als Erstvorschlag.`,
     `- UHRZEIT-FORMAT (KRITISCH für Sprachausgabe): Schreibe Uhrzeiten IMMER in Worten — "zehn Uhr dreißig", "vierzehn Uhr" — NIEMALS als Ziffern ("10:30", "14:00").`,
+    `- ZAHLEN-SPRACHE: Vermeide Dezimalschreibweisen wie "2,5" im gesprochenen Satz. Nutze natuerliche Formen wie "zweieinhalb Prozent" oder "zwei Komma fuenf Prozent".`,
     `- DATUM-FORMAT (KRITISCH): Schreibe Datum immer ausgeschrieben — "Dienstag, den elften Mai" — NIEMALS "11. Mai" oder "11.05.".`,
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
