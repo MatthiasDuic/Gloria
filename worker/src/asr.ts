@@ -17,7 +17,6 @@ const DG_HOST = "wss://api.deepgram.com";
 
 type ConnectVariant = {
   model: string;
-  authInQuery: boolean;
   minimalParams: boolean;
   label: string;
 };
@@ -33,16 +32,14 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   const connectPlan: ConnectVariant[] = [
-    { model: configuredModel, authInQuery: false, minimalParams: false, label: "primary/header/full" },
-    { model: configuredModel, authInQuery: true, minimalParams: false, label: "primary/query/full" },
-    { model: configuredModel, authInQuery: true, minimalParams: true, label: "primary/query/minimal" },
+    { model: configuredModel, minimalParams: false, label: "primary/header/full" },
+    { model: configuredModel, minimalParams: true, label: "primary/header/minimal" },
   ];
 
   if (fallbackModel !== configuredModel) {
     connectPlan.push(
-      { model: fallbackModel, authInQuery: false, minimalParams: false, label: "fallback/header/full" },
-      { model: fallbackModel, authInQuery: true, minimalParams: false, label: "fallback/query/full" },
-      { model: fallbackModel, authInQuery: true, minimalParams: true, label: "fallback/query/minimal" },
+      { model: fallbackModel, minimalParams: false, label: "fallback/header/full" },
+      { model: fallbackModel, minimalParams: true, label: "fallback/header/minimal" },
     );
   }
 
@@ -70,10 +67,6 @@ export function openDeepgram(events: AsrEvents): AsrSession {
         params.set("endpointing", endpointingMs);
         params.set("utterance_end_ms", utteranceEndMs);
       }
-    }
-
-    if (variant.authInQuery) {
-      params.set("token", apiKey);
     }
 
     const endpoint = flux ? "/v2/listen" : "/v1/listen";
@@ -104,7 +97,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     });
 
     ws = new WebSocket(endpoint.url, {
-      ...(variant.authInQuery ? {} : { headers: { Authorization: `Token ${apiKey}` } }),
+      headers: { Authorization: `Token ${apiKey}` },
     });
 
     ws.on("open", () => {
