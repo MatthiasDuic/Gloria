@@ -28,8 +28,8 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const configuredModel = process.env.DEEPGRAM_MODEL || "flux-general-multi";
-  const fallbackModel = process.env.DEEPGRAM_FALLBACK_MODEL || "nova-3";
+  const configuredModel = process.env.DEEPGRAM_MODEL || "nova-3";
+  const fallbackModel = process.env.DEEPGRAM_FALLBACK_MODEL || "nova-2-general";
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   const connectPlan: ConnectVariant[] = [
