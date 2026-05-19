@@ -32,14 +32,14 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   const connectPlan: ConnectVariant[] = [
-    { model: configuredModel, minimalParams: false, label: "primary/header/full" },
     { model: configuredModel, minimalParams: true, label: "primary/header/minimal" },
+    { model: configuredModel, minimalParams: false, label: "primary/header/full" },
   ];
 
   if (fallbackModel !== configuredModel) {
     connectPlan.push(
-      { model: fallbackModel, minimalParams: false, label: "fallback/header/full" },
       { model: fallbackModel, minimalParams: true, label: "fallback/header/minimal" },
+      { model: fallbackModel, minimalParams: false, label: "fallback/header/full" },
     );
   }
 
