@@ -25,7 +25,7 @@ services:
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: DEEPGRAM_MODEL
-        value: nova-3
+        value: flux-general-multi
       - key: DEEPGRAM_LANGUAGE
         value: de
       - key: DEEPGRAM_KEYTERMS
