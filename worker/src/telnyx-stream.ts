@@ -549,11 +549,6 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         if (track === "outbound" || track === "outbound_track") return;
         inboundFrameCount += 1;
         const buf = Buffer.from(frame.media.payload, "base64");
-        if (inboundFrameCount === 1 && buf.length > 0) {
-          // First inbound voice frame means someone is actually there.
-          // Stop silence opener even when ASR partial/final has not arrived yet.
-          clearSilenceOpenerTimer();
-        }
         const audio = normalizeInboundAudio(buf, inboundEncoding, inboundSampleRate);
         asr.send(audio);
         if (ctx.speaking) {

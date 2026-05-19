@@ -336,9 +336,6 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     client_state: encodeTelnyxClientState(payload),
     stream_url: getTelnyxMediaStreamUrl(),
     stream_track: "both_tracks",
-    stream_bidirectional_mode: "rtp",
-    stream_bidirectional_codec: "PCMU",
-    stream_bidirectional_sampling_rate: 8000,
   };
 
   let response: Response;

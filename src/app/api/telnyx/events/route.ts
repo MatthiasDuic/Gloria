@@ -237,9 +237,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       await sendTelnyxCommand(callControlId, "streaming_start", {
         stream_url: getTelnyxMediaStreamUrl(),
         stream_track: "both_tracks",
-        stream_bidirectional_mode: "rtp",
-        stream_bidirectional_codec: "PCMU",
-        stream_bidirectional_sampling_rate: 8000,
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
       });
       // Recording parallel zum Media-Stream starten, damit bei erteilter
