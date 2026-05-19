@@ -21,124 +21,150 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     throw new Error("DEEPGRAM_API_KEY is not configured");
   }
 
-  const model = process.env.DEEPGRAM_MODEL || "nova-3";
+  const configuredModel = process.env.DEEPGRAM_MODEL || "nova-3";
+  const fallbackModel = process.env.DEEPGRAM_FALLBACK_MODEL || "nova-2";
+  let model = configuredModel;
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
-  const isFlux = model.startsWith("flux");
+  let isFlux = model.startsWith("flux");
 
-  const params = new URLSearchParams({
-    model,
-    encoding: "linear16",
-    sample_rate: "16000",
-    channels: "1",
-    punctuate: "true",
-    language,
-  });
+  const buildUrl = (targetModel: string) => {
+    const flux = targetModel.startsWith("flux");
+    const params = new URLSearchParams({
+      model: targetModel,
+      encoding: "linear16",
+      sample_rate: "16000",
+      channels: "1",
+      punctuate: "true",
+      language,
+    });
 
-  if (isFlux) {
-    // Flux uses /v2/listen with semantic turn detection.
-    // language_hint biases flux-general-multi without restricting detection.
-    params.delete("language");
-    if (model === "flux-general-multi") {
-      params.set("language_hint", language);
+    if (flux) {
+      params.delete("language");
+      if (targetModel === "flux-general-multi") {
+        params.set("language_hint", language);
+      }
+    } else {
+      const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "450";
+      const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "700";
+      params.set("interim_results", "true");
+      params.set("endpointing", endpointingMs);
+      params.set("utterance_end_ms", utteranceEndMs);
     }
-  } else {
-    // nova-2 / nova-3: silence-based endpointing + utterance end.
-    const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "450";
-    const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "700";
-    params.set("interim_results", "true");
-    params.set("endpointing", endpointingMs);
-    params.set("utterance_end_ms", utteranceEndMs);
-  }
 
-  const endpoint = isFlux ? "/v2/listen" : "/v1/listen";
-  const url = `${DG_HOST}${endpoint}?${params.toString()}`;
-  log.info("asr.connecting", { model, url });
-  const ws = new WebSocket(url, {
-    headers: { Authorization: `Token ${apiKey}` },
-  });
+    const endpoint = flux ? "/v2/listen" : "/v1/listen";
+    return { url: `${DG_HOST}${endpoint}?${params.toString()}`, flux };
+  };
+
+  let ws: WebSocket;
 
   let opened = false;
+  let retriedWithFallback = false;
   let fluxLastTranscript = "";
   let novaLastPartial = "";
   const queue: Buffer[] = [];
 
-  ws.on("open", () => {
-    opened = true;
-    for (const chunk of queue) ws.send(chunk);
-    queue.length = 0;
-  });
+  const connect = (targetModel: string) => {
+    const endpoint = buildUrl(targetModel);
+    model = targetModel;
+    isFlux = endpoint.flux;
+    log.info("asr.connecting", { model: targetModel, url: endpoint.url });
+    ws = new WebSocket(endpoint.url, {
+      headers: { Authorization: `Token ${apiKey}` },
+    });
 
-  ws.on("message", (data: WebSocket.RawData) => {
-    try {
-      const text = typeof data === "string" ? data : data.toString();
+    ws.on("open", () => {
+      opened = true;
+      for (const chunk of queue) ws.send(chunk);
+      queue.length = 0;
+      log.info("asr.connected", { model });
+    });
 
-      if (isFlux) {
-        // Flux v2 message format: top-level "event" field, top-level "transcript".
-        const msg = JSON.parse(text) as {
-          event?: string;
-          transcript?: string;
-        };
-        const transcript = msg.transcript?.trim() || "";
-        if (transcript) {
-          fluxLastTranscript = transcript;
-        }
-        switch (msg.event) {
-          case "EndOfTurn":
-            // Semantic turn end — fire onFinal with the complete turn transcript.
-            if (transcript || fluxLastTranscript) {
-              events.onFinal(transcript || fluxLastTranscript);
-              fluxLastTranscript = "";
+    ws.on("message", (data: WebSocket.RawData) => {
+      try {
+        const text = typeof data === "string" ? data : data.toString();
+
+        if (isFlux) {
+          const msg = JSON.parse(text) as {
+            event?: string;
+            transcript?: string;
+          };
+          const transcript = msg.transcript?.trim() || "";
+          if (transcript) {
+            fluxLastTranscript = transcript;
+          }
+          switch (msg.event) {
+            case "EndOfTurn":
+              if (transcript || fluxLastTranscript) {
+                events.onFinal(transcript || fluxLastTranscript);
+                fluxLastTranscript = "";
+              }
+              events.onUtteranceEnd?.();
+              break;
+            case "Update":
+            case "StartOfTurn":
+              if (transcript) events.onPartial?.(transcript);
+              break;
+          }
+        } else {
+          const msg = JSON.parse(text) as {
+            type?: string;
+            is_final?: boolean;
+            channel?: { alternatives?: Array<{ transcript?: string }> };
+          };
+
+          if (msg.type === "UtteranceEnd") {
+            if (novaLastPartial) {
+              events.onFinal(novaLastPartial);
+              novaLastPartial = "";
             }
             events.onUtteranceEnd?.();
-            break;
-          case "Update":
-          case "StartOfTurn":
-            // Interim updates — used for barge-in detection.
-            if (transcript) events.onPartial?.(transcript);
-            break;
-          // EagerEndOfTurn / TurnResumed / Connected / etc. — ignore for now.
-        }
-      } else {
-        // nova-3 / v1 message format: nested channel.alternatives[0].transcript.
-        const msg = JSON.parse(text) as {
-          type?: string;
-          is_final?: boolean;
-          channel?: { alternatives?: Array<{ transcript?: string }> };
-        };
-
-        if (msg.type === "UtteranceEnd") {
-          if (novaLastPartial) {
-            events.onFinal(novaLastPartial);
-            novaLastPartial = "";
+            return;
           }
-          events.onUtteranceEnd?.();
-          return;
-        }
 
-        const transcript = msg.channel?.alternatives?.[0]?.transcript?.trim() || "";
-        if (!transcript) return;
+          const transcript = msg.channel?.alternatives?.[0]?.transcript?.trim() || "";
+          if (!transcript) return;
 
-        if (msg.is_final) {
-          events.onFinal(transcript);
-          novaLastPartial = "";
-        } else {
-          novaLastPartial = transcript;
-          events.onPartial?.(transcript);
+          if (msg.is_final) {
+            events.onFinal(transcript);
+            novaLastPartial = "";
+          } else {
+            novaLastPartial = transcript;
+            events.onPartial?.(transcript);
+          }
         }
+      } catch (error) {
+        log.warn("asr.parse_failed", { error: error instanceof Error ? error.message : String(error) });
       }
-    } catch (error) {
-      log.warn("asr.parse_failed", { error: error instanceof Error ? error.message : String(error) });
-    }
-  });
+    });
 
-  ws.on("error", (error) => {
-    log.error("asr.error", { error: error.message });
-    events.onError?.(error);
-  });
+    ws.on("error", (error) => {
+      const message = error.message || "";
+      const looksLikeHandshake400 = !opened && /400/.test(message);
+      if (
+        looksLikeHandshake400 &&
+        !retriedWithFallback &&
+        model !== fallbackModel
+      ) {
+        retriedWithFallback = true;
+        log.warn("asr.fallback_model", { from: model, to: fallbackModel, reason: message });
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        connect(fallbackModel);
+        return;
+      }
 
-  ws.on("close", (code, reason) => {
-    log.info("asr.closed", { code, reason: reason.toString() });
-  });
+      log.error("asr.error", { error: error.message, model });
+      events.onError?.(error);
+    });
+
+    ws.on("close", (code, reason) => {
+      log.info("asr.closed", { code, reason: reason.toString(), model });
+    });
+  };
+  connect(configuredModel);
 
   return {
     send(audioChunk) {

@@ -80,11 +80,42 @@ function mulaw8kToPcm16k(mulaw: Buffer): Buffer {
   return output;
 }
 
+function alaw8kToPcm16k(alaw: Buffer): Buffer {
+  const output = Buffer.alloc(alaw.length * 4);
+  let offset = 0;
+  for (const byte of alaw) {
+    const sample = decodeAlawSample(byte);
+    output.writeInt16LE(sample, offset);
+    output.writeInt16LE(sample, offset + 2);
+    offset += 4;
+  }
+  return output;
+}
+
 function decodeMulawSample(byte: number): number {
   let value = ~byte & 0xff;
   let magnitude = ((value & 0x0f) << 3) + 0x84;
   magnitude <<= (value & 0x70) >> 4;
   return (value & 0x80) !== 0 ? 0x84 - magnitude : magnitude - 0x84;
+}
+
+function decodeAlawSample(byte: number): number {
+  let value = byte ^ 0x55;
+  let t = (value & 0x0f) << 4;
+  const seg = (value & 0x70) >> 4;
+  switch (seg) {
+    case 0:
+      t += 8;
+      break;
+    case 1:
+      t += 0x108;
+      break;
+    default:
+      t += 0x108;
+      t <<= seg - 1;
+      break;
+  }
+  return (value & 0x80) !== 0 ? t : -t;
 }
 
 function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: number): Buffer {
@@ -107,6 +138,15 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
     normalizedEncoding.includes("G711ULAW");
   if (isMulaw) {
     return sampleRate === 16000 ? audio : mulaw8kToPcm16k(audio);
+  }
+  const isAlaw =
+    normalizedEncoding === "PCMA" ||
+    normalizedEncoding === "ALAW" ||
+    normalizedEncoding.includes("PCMA") ||
+    normalizedEncoding.includes("ALAW") ||
+    normalizedEncoding.includes("G711ALAW");
+  if (isAlaw) {
+    return sampleRate === 16000 ? audio : alaw8kToPcm16k(audio);
   }
   // Defensive fallback: when Telnyx omits/changes encoding labels,
   // prefer telephone-safe assumption (8 kHz mu-law) over returning

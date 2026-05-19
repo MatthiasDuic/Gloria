@@ -334,8 +334,6 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     to: payload.to,
     from,
     client_state: encodeTelnyxClientState(payload),
-    stream_url: getTelnyxMediaStreamUrl(),
-    stream_track: "both_tracks",
   };
 
   let response: Response;
