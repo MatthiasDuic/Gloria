@@ -118,6 +118,33 @@ function decodeAlawSample(byte: number): number {
   return (value & 0x80) !== 0 ? t : -t;
 }
 
+function encodeAlawSample(sample: number): number {
+  let pcm = Math.max(-32768, Math.min(32767, sample));
+  let sign = 0x80;
+  if (pcm < 0) {
+    sign = 0x00;
+    pcm = -pcm - 1;
+  }
+
+  let exponent = 7;
+  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
+    exponent -= 1;
+  }
+
+  const mantissa = exponent === 0 ? (pcm >> 4) & 0x0f : (pcm >> (exponent + 3)) & 0x0f;
+  const alaw = sign | (exponent << 4) | mantissa;
+  return alaw ^ 0x55;
+}
+
+function mulaw8kToAlaw8k(mulaw: Buffer): Buffer {
+  const output = Buffer.allocUnsafe(mulaw.length);
+  for (let i = 0; i < mulaw.length; i += 1) {
+    const pcm = decodeMulawSample(mulaw[i]);
+    output[i] = encodeAlawSample(pcm);
+  }
+  return output;
+}
+
 function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: number): Buffer {
   const normalizedEncoding = (encoding || "")
     .toUpperCase()
@@ -157,6 +184,24 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
   return audio;
 }
 
+function normalizeOutboundAudio(audio: Buffer, encoding?: string): Buffer {
+  const normalizedEncoding = (encoding || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+
+  const isAlaw =
+    normalizedEncoding === "PCMA" ||
+    normalizedEncoding === "ALAW" ||
+    normalizedEncoding.includes("PCMA") ||
+    normalizedEncoding.includes("ALAW") ||
+    normalizedEncoding.includes("G711ALAW");
+
+  if (isAlaw) {
+    return mulaw8kToAlaw8k(audio);
+  }
+  return audio;
+}
+
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
   let ctx: CallContext | null = null;
   let asr: AsrSession | null = null;
@@ -176,7 +221,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const sendMedia = (audio: Buffer) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    const payload = audio.toString("base64");
+    const encoded = normalizeOutboundAudio(audio, inboundEncoding);
+    const payload = encoded.toString("base64");
     ws.send(
       JSON.stringify({
         event: "media",
