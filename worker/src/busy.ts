@@ -176,10 +176,11 @@ export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: strin
   if (slots.length === 0) return "";
   const lines = slots.map((s) => `- ${s.phrase}`);
   return [
-    "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab naechster Woche – nutze diese Liste, falls dein erster Vorschlag abgelehnt wird):",
+    "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab nächster Woche – nutze diese Liste, falls dein erster Vorschlag abgelehnt wird):",
     ...lines,
     "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei dieser Slots vor, die zur Praeferenz passen.",
     "Wenn der Anrufende beide ablehnt, nimm zwei weitere passende aus dieser Liste - KEINE freien Erfindungen außerhalb dieser Liste.",
     "",
   ].join("\n");
 }
+

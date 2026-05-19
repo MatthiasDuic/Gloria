@@ -50,7 +50,7 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // gpt-4.1 als Default fuer bessere Gespraechsqualitaet.
+  // gpt-4.1 als Default für bessere Gesprächsqualität.
   // Override via OPENAI_MODEL env.
   const model = process.env.OPENAI_MODEL || "gpt-4.1";
   // Kleinere Kontextfenster + kuerzere Antworten reduzieren die Time-to-first-audio.
@@ -306,7 +306,7 @@ function buildSystemPrompt(ctx: CallContext): string {
   }
   if (ctx.playbookPrompt) {
     parts.push(
-      "\n\nPLAYBOOK-NUTZUNG: Verwende das Playbook als Leitplanke fuer Richtung, Nutzen und Compliance - NICHT als Vorlesetext. " +
+      "\n\nPLAYBOOK-NUTZUNG: Verwende das Playbook als Leitplanke für Richtung, Nutzen und Compliance - NICHT als Vorlesetext. " +
       "Formuliere jede Antwort frisch aus dem Moment, passend zum letzten Kundensatz.",
     );
     parts.push("\n\n" + ctx.playbookPrompt);
@@ -370,7 +370,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       lines.push(
         `Aufzeichnung ist geklärt. Ziel jetzt: Relevanz aufbauen, noch KEINE Terminfrage.`,
         `Klaere frueh die Versicherungsart: "Sind Sie aktuell gesetzlich oder privat versichert?"`,
-        `Nenne NIEMALS "private Krankenversicherung" als Tatsache, bevor der Kunde das selbst bestaetigt hat. Nutze bis dahin neutrale Formulierungen wie "Krankenversicherung" oder "Gesundheitsversorgung".`,
+        `Nenne NIEMALS "private Krankenversicherung" als Tatsache, bevor der Kunde das selbst bestätigt hat. Nutze bis dahin neutrale Formulierungen wie "Krankenversicherung" oder "Gesundheitsversorgung".`,
         `Frag zuerst nach persönlicher Wahrnehmung: Hat er Beitragssteigerungen gespürt? Lass ihn antworten.`,
         `Dann kurz den allgemeinen Rahmen: Reformdruck und steigende Gesundheitskosten landen häufig bei den Beitragszahlern.`,
         `Erst DANACH auf die persönliche Ebene wechseln und den aktuellen Beitrag erfragen.`,
@@ -391,14 +391,14 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `SENSIBILISIERUNGSPHASE (Pflicht vor Termin): Bereite den Kunden aktiv auf das Thema vor, bevor du einen Termin platzierst.`,
       `Stelle gezielte Fragen in Reihenfolge: (1) eigene Wahrnehmung von Beitragserhöhungen, (2) aktueller Beitrag, (3) Ausblick in 10+ Jahren.`,
       `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz.`,
-      `DER Reformdruck und die Kostenentwicklung gehoeren genau hier hin - nicht in den Abschluss.`,
-      `Emotionalisieren ohne Drama: Zeige kurz, was steigende Beitraege fuer Lebensplanung im Alter bedeuten (Planbarkeit, Sicherheit, finanzielle Ruhe).`,
+      `DER Reformdruck und die Kostenentwicklung gehören genau hier hin - nicht in den Abschluss.`,
+      `Emotionalisieren ohne Drama: Zeige kurz, was steigende Beitraege für Lebensplanung im Alter bedeuten (Planbarkeit, Sicherheit, finanzielle Ruhe).`,
       `Wenn der Kunde einen konkreten Beitrag nennt, arbeite mit GENAU dieser Zahl. Keine Runterrechnung und keine frei erfundenen Korrekturen.`,
       `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
     );
   } else if (phase === 6) {
     lines.push(
-      `KONZEPT-BRIDGE (Pflicht vor Termin): Erklaere in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
+      `KONZEPT-BRIDGE (Pflicht vor Termin): Erkläre in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
       `Erst danach in die Terminfrage übergehen. Wenn der Kunde fragt "Worüber genau?", beantworte genau diese Brücke und gehe dann erst zu Phase 7.`,
     );
   } else if (phase === 7) {
@@ -406,7 +406,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Das Interesse ist da. Vor der Terminfrage den Nutzen in einem Satz klar machen: Vertragsanalyse + realistische Beitragsprognose + konkrete Stellschrauben ohne Verkaufsdruck.`,
       `Benenne vor der Terminfrage einmal kurz den reformbedingten Kostendruck im Gesundheitswesen (ohne Panik, ohne Quellen-Show).`,
       `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
-      `Rahme den Termin als persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic, nicht als Telefontermin.`,
+      `Rahme den Termin als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic, nicht als Telefontermin.`,
     );
   } else if (phase === 8) {
     // Prüfe ob Gloria bereits die Überleitung gemacht hat
@@ -420,7 +420,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         : `Der Kunde hat zugestimmt. Stelle GENAU EINE Frage pro Turn. STRENG: Niemals zwei Fragen in einem Satz.`,
       `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
       `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
-      `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Uebergaenge und gehe direkt zur naechsten Frage.`,
+      `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Übergaenge und gehe direkt zur nächsten Frage.`,
       `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz. Das ist verpflichtend.`,
     );
   } else if (phase === 10) {
@@ -435,7 +435,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `ABSOLUT VERBOTEN: Keine weiteren Fragen. Nicht nach Ansprechpartner, nicht nach Basisangaben, nicht nach irgendetwas.`,
       `ABSOLUT VERBOTEN: Keine neue Sensibilisierung mehr, keine Reform- oder Kostendiskussion mehr, kein Nachschub an Argumenten.`,
       `Schreibe 3–4 Sätze:`,
-      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic - niemals als Telefontermin.`,
+      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic - niemals als Telefontermin.`,
       `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
       `(4) Herzliche Verabschiedung im Namen des Owners: "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
@@ -448,21 +448,21 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     ``,
     `WAS IMMER GILT:`,
     `- Meist 1-3 kurze Sätze pro Antwort, höchstens 1 Hauptfrage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
-    `- Natuerlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
-    `- Wenn der Kunde knapp oder in Fragmenten antwortet, erst kurz den Sinn sichern und dann weiterfuehren - nicht vorschnell in den naechsten Pitch springen.`,
-    `- EINWAND-QUALITAET: Bei Einwaenden in genau dieser Reihenfolge antworten: (1) kurz validieren, (2) ein konkreter Substanzsatz, (3) eine klare Rueckfrage.`,
-    `- KONKRET STATT GENERISCH: Greife mindestens ein konkretes Wort aus der letzten Kundenantwort auf (z. B. "Beitrag", "Zeit", "gesetzlich"), bevor du weiterfuehrst.`,
-    `- RHYTHMUS: Vermeide Fuellsaetze wie "Ich verstehe" in Serie. Variiere Bestaetigungen natuerlich (z. B. "guter Punkt", "verstaendlich", "das hoere ich oft").`,
+    `- Natürlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
+    `- Wenn der Kunde knapp oder in Fragmenten antwortet, erst kurz den Sinn sichern und dann weiterführen - nicht vorschnell in den nächsten Pitch springen.`,
+    `- EINWAND-QUALITÄT: Bei Einwänden in genau dieser Reihenfolge antworten: (1) kurz validieren, (2) ein konkreter Substanzsatz, (3) eine klare Rückfrage.`,
+    `- KONKRET STATT GENERISCH: Greife mindestens ein konkretes Wort aus der letzten Kundenantwort auf (z. B. "Beitrag", "Zeit", "gesetzlich"), bevor du weiterführst.`,
+    `- RHYTHMUS: Vermeide Füllsätze wie "Ich verstehe" in Serie. Variiere Bestätigungen natürlich (z. B. "guter Punkt", "verständlich", "das höre ich oft").`,
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
     `- WICHTIGER GESPRÄCHSFLUSS: Nach Aufzeichnung erst Relevanz/Sensibilisierung (allgemein -> persönlich -> Denkfrage), dann Konzept-Bridge, dann Terminfrage.`,
-    `- TERMINART: Es geht um einen persoenlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic. Nenne niemals einen Telefontermin fuer den eigentlichen Fachtermin. Die Telefonie ist nur der Erstkontakt zur Terminvereinbarung.`,
+    `- TERMINART: Es geht um einen persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic. Nenne niemals einen Telefontermin für den eigentlichen Fachtermin. Die Telefonie ist nur der Erstkontakt zur Terminvereinbarung.`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
     `- Termine nur Mo–Fr, 09:00–19:00 Uhr. Schlage NIEMALS einen Slot an oder vor dem heutigen Datum vor.`,
     `- Vor Phase 7 MUSS Phase 5 (Sensibilisierung) und Phase 6 (Konzept-Bridge) erfolgt sein. Keine direkte Terminierung aus dem Opener heraus.`,
     `- Biete in der Terminphase immer genau zwei Optionen aus der NÄCHSTEN WOCHE an. Kein Folgetag-Termin als Erstvorschlag.`,
     `- UHRZEIT-FORMAT (KRITISCH für Sprachausgabe): Schreibe Uhrzeiten IMMER in Worten — "zehn Uhr dreißig", "vierzehn Uhr" — NIEMALS als Ziffern ("10:30", "14:00").`,
-    `- ZAHLEN-SPRACHE: Vermeide Dezimalschreibweisen wie "2,5" im gesprochenen Satz. Nutze natuerliche Formen wie "zweieinhalb Prozent" oder "zwei Komma fuenf Prozent".`,
+    `- ZAHLEN-SPRACHE: Vermeide Dezimalschreibweisen wie "2,5" im gesprochenen Satz. Nutze natürliche Formen wie "zweieinhalb Prozent" oder "zwei Komma fünf Prozent".`,
     `- DATUM-FORMAT (KRITISCH): Schreibe Datum immer ausgeschrieben — "Dienstag, den elften Mai" — NIEMALS "11. Mai" oder "11.05.".`,
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
@@ -570,10 +570,10 @@ function buildStyleGuard(ctx: CallContext): string {
     "NATÜRLICHKEITS-GUARDRAIL:",
     "- Antworte wie im echten Telefonat, nicht wie ein Skript. Variiere Satzanfänge und Rhythmus.",
     "- Vermeide wiederkehrende Standard-Opener. Nutze nicht zweimal hintereinander denselben Einstieg.",
-    "- Nutze sparsame Hoeflichkeitsmarker: ein kurzes Danke ist okay, aber nicht als Pflicht in jeder Zeile.",
-    "- Prioritaet hat Anschlussfaehigkeit: zuerst kurz auf den letzten Kundengedanken eingehen, dann sauber weiterfuehren.",
-    "- Verwende in Einwandmomenten kurze Dreischritt-Antworten: validieren, konkretisieren, rueckfragen.",
-    "- Halte den Ton charmant und auf Augenhoehe: klar fuehren, aber niemals belehrend.",
+    "- Nutze sparsame Höflichkeitsmarker: ein kurzes Danke ist okay, aber nicht als Pflicht in jeder Zeile.",
+    "- Priorität hat Anschlussfähigkeit: zuerst kurz auf den letzten Kundengedanken eingehen, dann sauber weiterführen.",
+    "- Verwende in Einwandmomenten kurze Dreischritt-Antworten: validieren, konkretisieren, rückfragen.",
+    "- Halte den Ton charmant und auf Augenhöhe: klar führen, aber niemals belehrend.",
   ];
 
   if (uniqueStarters.length > 0) {
@@ -592,3 +592,4 @@ function firstWords(text: string, count: number): string {
     .join(" ")
     .toLowerCase();
 }
+

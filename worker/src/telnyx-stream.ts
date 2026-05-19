@@ -632,7 +632,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
             }
             // Barge-in nur, wenn der Anrufer wirklich substanziell spricht
             // (mind. 3 Worte / 14 Zeichen). Vorher reichten 4 Zeichen, das hat zu
-            // Mid-Sentence-Abbruechen gefuehrt (Echo, kurze Fueller wie "hm", "ja").
+            // Mid-Sentence-Abbrüchen geführt (Echo, kurze Füller wie "hm", "ja").
             if (ctx.speaking && currentTts) {
               const trimmed = text.trim();
               const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
@@ -659,7 +659,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         // ("Praxis Müller", "Hallo, Schmidt"). Erst danach reagiert das LLM
         // mit dem passenden Opener (Empfang vs. Entscheider).
         // Falls am anderen Ende niemand aktiv spricht, startet Gloria nach
-        // kurzer Stille mit einem knappen, natuerlichen Opener.
+        // kurzer Stille mit einem knappen, natürlichen Opener.
         const silenceMs = Math.max(
           1800,
           Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "4200", 10),
@@ -814,7 +814,7 @@ function buildSilenceOpenerLine(ctx: CallContext): string {
   return [
     `Guten Tag, hier ist Gloria, die digitale Assistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an.`,
-    "Bin ich richtig bei Ihnen und passt es kurz fuer eine Frage?",
+    "Bin ich richtig bei Ihnen und passt es kurz für eine Frage?",
   ].join(" ");
 }
 
@@ -858,7 +858,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Es geht um die Beitragsentwicklung in der Gesundheitsversorgung - ein Thema, das viele Unternehmer zunehmend beschaeftigt.`;
+    topicLine = `Es geht um die Beitragsentwicklung in der Gesundheitsversorgung - ein Thema, das viele Unternehmer zunehmend beschäftigt.`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
     topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
@@ -932,3 +932,4 @@ function extractConfirmedSlot(text: string): string | null {
   if (!m) return null;
   return m[1].trim().replace(/\s+/g, " ");
 }
+
