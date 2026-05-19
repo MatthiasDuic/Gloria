@@ -17,7 +17,10 @@ export type TtsStreamHandle = {
  */
 export function prewarmElevenLabs(): void {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) {
+    log.error("tts.missing_config", { keyPresent: false, voicePresent: Boolean(process.env.ELEVENLABS_VOICE_ID) });
+    return;
+  }
   void fetch(`https://api.elevenlabs.io/v1/user`, {
     method: "GET",
     headers: { "xi-api-key": apiKey },
@@ -25,6 +28,12 @@ export function prewarmElevenLabs(): void {
     .then((res) => {
       void res.text().catch(() => undefined);
       log.info("tts.prewarm_ok", { status: res.status });
+      if (res.status >= 400) {
+        log.warn("tts.auth_probe_failed", {
+          status: res.status,
+          keyFingerprint: keyFingerprint(apiKey),
+        });
+      }
     })
     .catch(() => {
       /* ignore – best effort */
@@ -48,7 +57,11 @@ export function streamElevenLabsToMulaw(
   const modelId = process.env.ELEVENLABS_MODEL || "eleven_v3";
 
   if (!apiKey || !voiceId) {
-    log.error("tts.missing_config");
+    log.error("tts.missing_config", {
+      keyPresent: Boolean(apiKey),
+      voicePresent: Boolean(voiceId),
+      keyFingerprint: keyFingerprint(apiKey),
+    });
     return { done: Promise.resolve(), abort: () => undefined, aborted: false };
   }
 
@@ -97,7 +110,13 @@ export function streamElevenLabsToMulaw(
 
       if (!res.ok || !res.body) {
         const body = res.body ? await res.text() : "";
-        log.error("tts.http_error", { status: res.status, body: body.slice(0, 200) });
+        log.error("tts.http_error", {
+          status: res.status,
+          body: body.slice(0, 200),
+          keyFingerprint: keyFingerprint(apiKey),
+          voiceId,
+          modelId,
+        });
         return;
       }
 
@@ -152,6 +171,13 @@ function boolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+function keyFingerprint(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length <= 8) return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`;
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 }
 
 /**
