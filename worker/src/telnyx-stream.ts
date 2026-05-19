@@ -9,8 +9,8 @@ import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 
-/** Telnyx wideband RTP uses 20 ms chunks of 16 kHz 16-bit PCM (640 bytes per frame). */
-const FRAME_BYTES = 640;
+/** Telnyx PCMU 8 kHz uses 20 ms chunks (160 bytes per frame). */
+const FRAME_BYTES = 160;
 
 type TelnyxInbound =
   | { event: "connected"; version?: string }
@@ -104,16 +104,24 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let pendingTurn = false;
   let currentTts: TtsStreamHandle | null = null;
   let playbookReady: Promise<void> | null = null;
+  let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
   let inboundSampleRate = 8000;
 
-  const sendMedia = (mulaw: Buffer) => {
+  const clearSilenceOpenerTimer = () => {
+    if (!silenceOpenerTimer) return;
+    clearTimeout(silenceOpenerTimer);
+    silenceOpenerTimer = null;
+  };
+
+  const sendMedia = (audio: Buffer) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    const payload = mulaw.toString("base64");
+    const payload = audio.toString("base64");
     ws.send(
       JSON.stringify({
         event: "media",
+        stream_id: ctx.streamSid,
         media: { payload },
       }),
     );
@@ -121,7 +129,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const sendMark = (name: string) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ event: "mark", mark: { name } }));
+    ws.send(JSON.stringify({ event: "mark", stream_id: ctx.streamSid, mark: { name } }));
   };
 
   const speak = async (text: string) => {
@@ -157,7 +165,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     const handle = streamElevenLabsToMulaw(
       text,
       (chunk) => {
-        buffer = Buffer.concat([buffer, mulaw8kToPcm16k(chunk)]);
+        buffer = Buffer.concat([buffer, chunk]);
         while (buffer.length >= FRAME_BYTES) {
           const frame = buffer.subarray(0, FRAME_BYTES);
           buffer = buffer.subarray(FRAME_BYTES);
@@ -171,8 +179,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     await handle.done;
 
     if (buffer.length > 0) {
-      // Pad final frame with PCM silence so Telnyx can play the trailing fragment cleanly.
-      const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0x00);
+      // Pad final frame with mu-law silence so Telnyx can play the trailing fragment cleanly.
+      const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
       sendAndCount(Buffer.concat([buffer, pad]));
     }
 
@@ -180,11 +188,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     // WICHTIG: Telnyx puffert Audio. Wenn wir direkt nach dem letzten Frame
     // ws.close() rufen, wird das Audio (z. B. "Auf Wiederhören.") nie
-    // ausgespielt. Bei 16 kHz PCM entspricht 1 Byte 1/32000 Sekunde Audio.
+    // ausgespielt. Bei PCMU 8 kHz entspricht 1 Byte 1/8000 Sekunde Audio.
     // Wir warten daher die geschätzte Restspielzeit ab, bevor wir die
     // Sprechen-Phase als beendet markieren.
     if (!handle.aborted) {
-      const playoutMs = Math.ceil(totalAudioBytes / 32) + 120;
+      const playoutMs = Math.ceil(totalAudioBytes / 8) + 120;
       await new Promise<void>((resolve) => setTimeout(resolve, playoutMs));
     }
 
@@ -247,7 +255,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         trimmed,
         (chunk) => {
           if (chainAborted) return;
-          buffer = Buffer.concat([buffer, mulaw8kToPcm16k(chunk)]);
+          buffer = Buffer.concat([buffer, chunk]);
           while (buffer.length >= FRAME_BYTES) {
             const frame = buffer.subarray(0, FRAME_BYTES);
             buffer = buffer.subarray(FRAME_BYTES);
@@ -263,7 +271,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         return;
       }
       if (buffer.length > 0) {
-        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0x00);
+        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
         sendFrame(Buffer.concat([buffer, pad]));
       }
     };
@@ -292,7 +300,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // hat. Wir ziehen die bereits vergangene Zeit seit dem ersten Audio-Byte
     // ab, damit wir nicht doppelt warten.
     if (!chainAborted && totalAudioBytes > 0) {
-      const totalPlayoutMs = Math.ceil(totalAudioBytes / 32) + 120;
+      const totalPlayoutMs = Math.ceil(totalAudioBytes / 8) + 120;
       const elapsed = firstAudioAt ? Date.now() - firstAudioAt : 0;
       const remaining = Math.max(0, totalPlayoutMs - elapsed);
       if (remaining > 0) {
@@ -317,6 +325,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const handleUserUtterance = async (userText: string) => {
     if (!ctx) return;
+    clearSilenceOpenerTimer();
     if (pendingTurn) {
       // Still working on the previous turn — append to transcript only.
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
@@ -464,6 +473,9 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         asr = openDeepgram({
           onPartial: (text) => {
             if (!ctx) return;
+            if (text.trim().length > 0) {
+              clearSilenceOpenerTimer();
+            }
             // Barge-in nur, wenn der Anrufer wirklich substanziell spricht
             // (mind. 3 Worte / 14 Zeichen). Vorher reichten 4 Zeichen, das hat zu
             // Mid-Sentence-Abbruechen gefuehrt (Echo, kurze Fueller wie "hm", "ja").
@@ -492,6 +504,22 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         // Gloria wartet bewusst, bis der Angerufene sich gemeldet hat
         // ("Praxis Müller", "Hallo, Schmidt"). Erst danach reagiert das LLM
         // mit dem passenden Opener (Empfang vs. Entscheider).
+        // Falls am anderen Ende niemand aktiv spricht, startet Gloria nach
+        // kurzer Stille mit einem knappen, natuerlichen Opener.
+        const silenceMs = Math.max(
+          1200,
+          Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "2200", 10),
+        );
+        silenceOpenerTimer = setTimeout(() => {
+          if (!ctx) return;
+          if (pendingTurn || ctx.speaking) return;
+          const heardUser = ctx.transcript.some((entry) => entry.role === "user" && entry.text.trim().length > 0);
+          if (heardUser) return;
+          const opener = buildSilenceOpenerLine(ctx);
+          if (!opener) return;
+          log.info("turn.silence_opener", { callSid: ctx.callSid, waitMs: silenceMs });
+          void speak(opener);
+        }, silenceMs);
         break;
       }
       case "media": {
@@ -531,6 +559,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   ws.on("close", async (code, reason) => {
     log.info("ws.closed", { code, reason: reason.toString(), callSid: ctx?.callSid });
+    clearSilenceOpenerTimer();
     if (currentTts) currentTts.abort();
     try {
       await asr?.finish();
@@ -600,6 +629,26 @@ function normalize(input: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function buildSilenceOpenerLine(ctx: CallContext): string {
+  const company = (ctx.ownerCompanyName || "").trim() || "unserer Agentur";
+  const owner = (ctx.ownerRealName || "").trim() || "Herrn Duic";
+  const contact = (ctx.contactName || "").trim();
+
+  if (contact) {
+    return [
+      `Guten Tag, hier ist Gloria, die digitale Assistentin von ${company}.`,
+      `Ich rufe im Auftrag von ${owner} an.`,
+      `Bin ich richtig bei Ihnen und darf ich kurz mit ${contact} sprechen?`,
+    ].join(" ");
+  }
+
+  return [
+    `Guten Tag, hier ist Gloria, die digitale Assistentin von ${company}.`,
+    `Ich rufe im Auftrag von ${owner} an.`,
+    "Bin ich richtig bei Ihnen und passt es kurz fuer eine Frage?",
+  ].join(" ");
 }
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der

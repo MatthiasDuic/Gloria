@@ -238,8 +238,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         stream_url: getTelnyxMediaStreamUrl(),
         stream_track: "both_tracks",
         stream_bidirectional_mode: "rtp",
-        stream_bidirectional_codec: "L16",
-        stream_bidirectional_sampling_rate: 16000,
+        stream_bidirectional_codec: "PCMU",
+        stream_bidirectional_sampling_rate: 8000,
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
       });
       // Recording parallel zum Media-Stream starten, damit bei erteilter

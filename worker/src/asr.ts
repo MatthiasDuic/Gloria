@@ -58,6 +58,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   });
 
   let opened = false;
+  let fluxLastTranscript = "";
   const queue: Buffer[] = [];
 
   ws.on("open", () => {
@@ -77,10 +78,16 @@ export function openDeepgram(events: AsrEvents): AsrSession {
           transcript?: string;
         };
         const transcript = msg.transcript?.trim() || "";
+        if (transcript) {
+          fluxLastTranscript = transcript;
+        }
         switch (msg.event) {
           case "EndOfTurn":
             // Semantic turn end — fire onFinal with the complete turn transcript.
-            if (transcript) events.onFinal(transcript);
+            if (transcript || fluxLastTranscript) {
+              events.onFinal(transcript || fluxLastTranscript);
+              fluxLastTranscript = "";
+            }
             events.onUtteranceEnd?.();
             break;
           case "Update":
