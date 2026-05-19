@@ -444,6 +444,9 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- Meist 1-3 kurze Sätze pro Antwort, höchstens 1 Hauptfrage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
     `- Natuerlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
     `- Wenn der Kunde knapp oder in Fragmenten antwortet, erst kurz den Sinn sichern und dann weiterfuehren - nicht vorschnell in den naechsten Pitch springen.`,
+    `- EINWAND-QUALITAET: Bei Einwaenden in genau dieser Reihenfolge antworten: (1) kurz validieren, (2) ein konkreter Substanzsatz, (3) eine klare Rueckfrage.`,
+    `- KONKRET STATT GENERISCH: Greife mindestens ein konkretes Wort aus der letzten Kundenantwort auf (z. B. "Beitrag", "Zeit", "gesetzlich"), bevor du weiterfuehrst.`,
+    `- RHYTHMUS: Vermeide Fuellsaetze wie "Ich verstehe" in Serie. Variiere Bestaetigungen natuerlich (z. B. "guter Punkt", "verstaendlich", "das hoere ich oft").`,
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
     `- WICHTIGER GESPRÄCHSFLUSS: Nach Aufzeichnung erst Relevanz/Sensibilisierung (allgemein -> persönlich -> Denkfrage), dann Konzept-Bridge, dann Terminfrage.`,
@@ -561,6 +564,8 @@ function buildStyleGuard(ctx: CallContext): string {
     "- Vermeide wiederkehrende Standard-Opener. Nutze nicht zweimal hintereinander denselben Einstieg.",
     "- Nutze sparsame Hoeflichkeitsmarker: ein kurzes Danke ist okay, aber nicht als Pflicht in jeder Zeile.",
     "- Prioritaet hat Anschlussfaehigkeit: zuerst kurz auf den letzten Kundengedanken eingehen, dann sauber weiterfuehren.",
+    "- Verwende in Einwandmomenten kurze Dreischritt-Antworten: validieren, konkretisieren, rueckfragen.",
+    "- Halte den Ton charmant und auf Augenhoehe: klar fuehren, aber niemals belehrend.",
   ];
 
   if (uniqueStarters.length > 0) {
