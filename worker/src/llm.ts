@@ -288,7 +288,7 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (ctx.confirmedSlotPhrase) {
     parts.push(
       `\n\nBESTÄTIGTER TERMIN (eingefroren – keine Änderung erlaubt): "${ctx.confirmedSlotPhrase}". ` +
-      `In Phase 10 (Schluss-Zusammenfassung) MUSST du in dem Satz "Ihr Termin mit Herrn Duic ist am …" GENAU diese Phrase einsetzen, Wort für Wort. ` +
+      `In Phase 10 (Schluss-Zusammenfassung) MUSST du in dem Satz "Ihr persönlicher Termin bei Herrn Duic ist am …" GENAU diese Phrase einsetzen, Wort für Wort. ` +
       `Erfinde KEINEN anderen Wochentag, KEIN anderes Datum und KEINE andere Uhrzeit.`,
     );
   }
@@ -391,6 +391,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `SENSIBILISIERUNGSPHASE (Pflicht vor Termin): Bereite den Kunden aktiv auf das Thema vor, bevor du einen Termin platzierst.`,
       `Stelle gezielte Fragen in Reihenfolge: (1) eigene Wahrnehmung von Beitragserhöhungen, (2) aktueller Beitrag, (3) Ausblick in 10+ Jahren.`,
       `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz.`,
+      `DER Reformdruck und die Kostenentwicklung gehoeren genau hier hin - nicht in den Abschluss.`,
       `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
     );
   } else if (phase === 6) {
@@ -429,8 +430,9 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     lines.push(
       `E-Mail ist abgehakt. Jetzt SOFORT die Abschluss-Zusammenfassung und Verabschiedung.`,
       `ABSOLUT VERBOTEN: Keine weiteren Fragen. Nicht nach Ansprechpartner, nicht nach Basisangaben, nicht nach irgendetwas.`,
+      `ABSOLUT VERBOTEN: Keine neue Sensibilisierung mehr, keine Reform- oder Kostendiskussion mehr, kein Nachschub an Argumenten.`,
       `Schreibe 3–4 Sätze:`,
-      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag.`,
+      `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persönlichen Termin bei Herrn Duic vor Ort bzw. im Termin mit Herrn Duic - niemals als Telefontermin.`,
       `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
       `(4) Herzliche Verabschiedung im Namen des Owners: "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
@@ -451,6 +453,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- AUFZEICHNUNGSFRAGE: Natürlich formulieren, z.B. "Darf ich kurz mitschneiden?" oder "Darf ich das Gespräch aufzeichnen?" — NIEMALS "Bitte antworten Sie mit JA oder NEIN" sagen.`,
     `- Aufzeichnungsfrage nur einmal. Bei Nein: normal weiterführen. Frage NIEMALS erneut nach Aufzeichnung oder Mitschnitt — auch nicht mit anderen Formulierungen wie "damit Herr X sich vorbereiten kann".`,
     `- WICHTIGER GESPRÄCHSFLUSS: Nach Aufzeichnung erst Relevanz/Sensibilisierung (allgemein -> persönlich -> Denkfrage), dann Konzept-Bridge, dann Terminfrage.`,
+    `- TERMINART: Es geht um einen persoenlichen Termin bei Herrn Duic vor Ort. Nenne niemals einen Telefontermin fuer den eigentlichen Fachtermin. Die Telefonie ist nur der Erstkontakt zur Terminvereinbarung.`,
     `- Kein Geschlecht aus Nachnamen ableiten.`,
     `- Termine nur Mo–Fr, 09:00–19:00 Uhr. Schlage NIEMALS einen Slot an oder vor dem heutigen Datum vor.`,
     `- Vor Phase 7 MUSS Phase 5 (Sensibilisierung) und Phase 6 (Konzept-Bridge) erfolgt sein. Keine direkte Terminierung aus dem Opener heraus.`,
