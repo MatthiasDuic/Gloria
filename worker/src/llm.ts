@@ -418,9 +418,10 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       !hasBasisdatenIntro
         ? `ERSTER SCHRITT: Mach eine kurze Überleitung und frag nach Erlaubnis: "Damit sich Herr Duic gut auf den Termin vorbereiten kann, würde ich noch kurz ein paar Basisangaben mit Ihnen klären – passt das noch?" NOCH KEINE Fragen stellen.`
         : `Der Kunde hat zugestimmt. Stelle GENAU EINE Frage pro Turn. STRENG: Niemals zwei Fragen in einem Satz.`,
-      `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
+      `Wenn der Kunde auf die EINSTIEGSFRAGE "passt das noch kurz?" NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
       `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
       `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Übergaenge und gehe direkt zur nächsten Frage.`,
+      `WICHTIG: Bei den Gesundheitsfragen (Diagnosen/Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien) gilt ein "Nein" als VOLLSTÄNDIGE und gültige Antwort. Kein Nachhaken, keine Umformulierung derselben Frage - sofort zur nächsten Frage übergehen.`,
       `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz. Das ist verpflichtend.`,
     );
   } else if (phase === 10) {
