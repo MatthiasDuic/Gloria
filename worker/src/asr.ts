@@ -59,6 +59,7 @@ export function openDeepgram(events: AsrEvents): AsrSession {
 
   let opened = false;
   let fluxLastTranscript = "";
+  let novaLastPartial = "";
   const queue: Buffer[] = [];
 
   ws.on("open", () => {
@@ -106,6 +107,10 @@ export function openDeepgram(events: AsrEvents): AsrSession {
         };
 
         if (msg.type === "UtteranceEnd") {
+          if (novaLastPartial) {
+            events.onFinal(novaLastPartial);
+            novaLastPartial = "";
+          }
           events.onUtteranceEnd?.();
           return;
         }
@@ -115,7 +120,9 @@ export function openDeepgram(events: AsrEvents): AsrSession {
 
         if (msg.is_final) {
           events.onFinal(transcript);
+          novaLastPartial = "";
         } else {
+          novaLastPartial = transcript;
           events.onPartial?.(transcript);
         }
       }

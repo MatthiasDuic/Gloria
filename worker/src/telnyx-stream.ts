@@ -88,11 +88,24 @@ function decodeMulawSample(byte: number): number {
 }
 
 function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: number): Buffer {
-  const normalizedEncoding = encoding?.toUpperCase();
-  if (normalizedEncoding === "L16" || normalizedEncoding === "LINEAR16") {
+  const normalizedEncoding = (encoding || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  const isLinear16 =
+    normalizedEncoding === "L16" ||
+    normalizedEncoding === "LINEAR16" ||
+    normalizedEncoding.startsWith("L16") ||
+    normalizedEncoding.includes("LINEAR16");
+  if (isLinear16) {
     return audio;
   }
-  if (normalizedEncoding === "PCMU" || normalizedEncoding === "MULAW") {
+  const isMulaw =
+    normalizedEncoding === "PCMU" ||
+    normalizedEncoding === "MULAW" ||
+    normalizedEncoding.includes("PCMU") ||
+    normalizedEncoding.includes("MULAW") ||
+    normalizedEncoding.includes("G711ULAW");
+  if (isMulaw) {
     return sampleRate === 16000 ? audio : mulaw8kToPcm16k(audio);
   }
   return audio;
