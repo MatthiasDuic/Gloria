@@ -121,6 +121,15 @@ function collectMissingBasisQuestions(events: TranscriptEvent[]): string[] {
     return BASIS_FIELD_RULES.map((rule) => rule.question);
   }
 
+  const basisOptOut = events.some((event) => {
+    if (event.speaker !== "Gloria") return false;
+    const text = normalizeText(event.text || "");
+    return /terminbestaetigungsmail|in ruhe beantworten|per mail beantworten|fragen.*mail/.test(text);
+  });
+  if (basisOptOut) {
+    return BASIS_FIELD_RULES.map((rule) => rule.question);
+  }
+
   const asked = new Set<string>();
   const answered = new Set<string>();
 
@@ -164,6 +173,54 @@ function collectMissingBasisQuestions(events: TranscriptEvent[]): string[] {
   }
 
   return missing;
+}
+
+function normalizePotentialEmail(raw: string): string {
+  return normalizeText(raw)
+    .replace(/\b(klammeraffe|at|aett?)\b/g, "@")
+    .replace(/\b(punkt|dot)\b/g, ".")
+    .replace(/\b(bindestrich|minus|dash)\b/g, "-")
+    .replace(/\b(unterstrich|underscore)\b/g, "_")
+    .replace(/[<>()[\],;:"']/g, "")
+    .replace(/\s+/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/@+/g, "@");
+}
+
+function inferAttendeeEmailFromTranscript(events: TranscriptEvent[]): string | undefined {
+  const emailRegex = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+
+  // 1) Bevorzugt: Antwort auf konkrete E-Mail-Frage von Gloria.
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (event.speaker !== "Gloria") continue;
+    if (!/e-?mail|mailadresse|terminbestaetigung/i.test(normalizeText(event.text || ""))) continue;
+
+    const userParts: string[] = [];
+    for (let lookahead = index + 1; lookahead < events.length; lookahead += 1) {
+      const candidate = events[lookahead];
+      if (candidate.speaker === "Gloria") break;
+      if (candidate.speaker === "Interessent" && candidate.text?.trim()) {
+        userParts.push(candidate.text.trim());
+      }
+      if (userParts.length >= 4) break;
+    }
+
+    if (userParts.length > 0) {
+      const normalized = normalizePotentialEmail(userParts.join(" "));
+      const match = normalized.match(emailRegex);
+      if (match?.[0]) return match[0].toLowerCase();
+    }
+  }
+
+  // 2) Fallback: irgendeine Nutzer-Aussage mit direktem @.
+  for (const event of events) {
+    if (event.speaker !== "Interessent") continue;
+    const match = (event.text || "").match(emailRegex);
+    if (match?.[0]) return match[0].toLowerCase();
+  }
+
+  return undefined;
 }
 
 type IncomingTranscriptEntry = {
@@ -308,10 +365,11 @@ export async function POST(request: Request) {
       ? await listCallTranscriptEventsFromPostgres(report.callSid)
       : [];
     const missingBasisQuestions = collectMissingBasisQuestions(transcriptEvents);
+    const transcriptEmail = inferAttendeeEmailFromTranscript(transcriptEvents);
 
     inviteResult = await sendAppointmentInvite({
       report,
-      attendeeEmail: lead?.email,
+      attendeeEmail: lead?.email || transcriptEmail,
       organizerName: user?.realName || user?.companyName,
       missingBasisQuestions,
     });

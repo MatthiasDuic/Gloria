@@ -363,6 +363,8 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     if (isPKV) {
       lines.push(
         `Aufzeichnung ist geklärt. Ziel jetzt: Relevanz aufbauen, noch KEINE Terminfrage.`,
+        `Klaere frueh die Versicherungsart: "Sind Sie aktuell gesetzlich oder privat versichert?"`,
+        `Nenne NIEMALS "private Krankenversicherung" als Tatsache, bevor der Kunde das selbst bestaetigt hat. Nutze bis dahin neutrale Formulierungen wie "Krankenversicherung" oder "Gesundheitsversorgung".`,
         `Frag zuerst nach persönlicher Wahrnehmung: Hat er Beitragssteigerungen gespürt? Lass ihn antworten.`,
         `Dann kurz den allgemeinen Rahmen: Reformdruck und steigende Gesundheitskosten landen häufig bei den Beitragszahlern.`,
         `Erst DANACH auf die persönliche Ebene wechseln und den aktuellen Beitrag erfragen.`,
@@ -393,6 +395,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   } else if (phase === 7) {
     lines.push(
       `Das Interesse ist da. Vor der Terminfrage den Nutzen in einem Satz klar machen: Vertragsanalyse + realistische Beitragsprognose + konkrete Stellschrauben ohne Verkaufsdruck.`,
+      `Benenne vor der Terminfrage einmal kurz den reformbedingten Kostendruck im Gesundheitswesen (ohne Panik, ohne Quellen-Show).`,
       `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
     );
   } else if (phase === 8) {
@@ -407,6 +410,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         : `Der Kunde hat zugestimmt. Stelle GENAU EINE Frage pro Turn. STRENG: Niemals zwei Fragen in einem Satz.`,
       `Wenn der Kunde NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
       `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
+      `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Uebergaenge und gehe direkt zur naechsten Frage.`,
     );
   } else if (phase === 10) {
     lines.push(

@@ -212,11 +212,45 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
   let inboundSampleRate = 8000;
+  let pendingUserFinals: string[] = [];
+  let userFinalCoalesceTimer: NodeJS.Timeout | null = null;
+
+  const userFinalCoalesceMs = Math.max(
+    250,
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "700", 10),
+  );
 
   const clearSilenceOpenerTimer = () => {
     if (!silenceOpenerTimer) return;
     clearTimeout(silenceOpenerTimer);
     silenceOpenerTimer = null;
+  };
+
+  const clearUserFinalCoalesceTimer = () => {
+    if (!userFinalCoalesceTimer) return;
+    clearTimeout(userFinalCoalesceTimer);
+    userFinalCoalesceTimer = null;
+  };
+
+  const flushUserFinals = () => {
+    clearUserFinalCoalesceTimer();
+    const merged = pendingUserFinals
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    pendingUserFinals = [];
+    if (!merged) return;
+    void handleUserUtterance(merged);
+  };
+
+  const queueUserFinal = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    pendingUserFinals.push(trimmed);
+    clearUserFinalCoalesceTimer();
+    userFinalCoalesceTimer = setTimeout(flushUserFinals, userFinalCoalesceMs);
   };
 
   const sendMedia = (audio: Buffer) => {
@@ -598,10 +632,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
             }
           },
           onFinal: (text) => {
-            void handleUserUtterance(text);
+            queueUserFinal(text);
           },
           onUtteranceEnd: () => {
-            // Reserved for future use (e.g. silence-driven prompts).
+            flushUserFinals();
           },
           onError: (error) => {
             log.error("asr.session_error", { error: error.message });
@@ -651,6 +685,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       case "stop": {
         log.info("call.stopped", { callSid: ctx?.callSid, frames: inboundFrameCount });
         try {
+          flushUserFinals();
           await asr?.finish();
         } catch {
           /* ignore */
@@ -678,6 +713,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   ws.on("close", async (code, reason) => {
     log.info("ws.closed", { code, reason: reason.toString(), callSid: ctx?.callSid });
     clearSilenceOpenerTimer();
+    clearUserFinalCoalesceTimer();
     if (currentTts) currentTts.abort();
     try {
       await asr?.finish();
@@ -809,7 +845,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Es geht um die Beitragsentwicklung in Ihrer Krankenversicherung – ein Thema, das viele Unternehmer zunehmend beschäftigt.`;
+    topicLine = `Es geht um die Beitragsentwicklung in der Gesundheitsversorgung - ein Thema, das viele Unternehmer zunehmend beschaeftigt.`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
     topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
