@@ -328,8 +328,12 @@ function parseSlotPhraseToIso(phrase: string): string | undefined {
       day = parsed;
     }
   }
-  for (const [word, value] of Object.entries(ORDINAL_DAY)) {
-    if (lower.includes(word)) {
+  // Wichtig: laengere Ordinalwoerter zuerst pruefen (z. B. "neunundzwanzigsten"
+  // vor "zwanzigsten"), sonst entstehen Teiltreffer mit falschem Tag.
+  const ordinalCandidates = Object.entries(ORDINAL_DAY).sort((a, b) => b[0].length - a[0].length);
+  for (const [word, value] of ordinalCandidates) {
+    const re = new RegExp(`\\b${word}\\b`, "i");
+    if (re.test(lower)) {
       day = value;
       break;
     }
