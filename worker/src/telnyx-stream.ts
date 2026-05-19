@@ -108,6 +108,12 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
   if (isMulaw) {
     return sampleRate === 16000 ? audio : mulaw8kToPcm16k(audio);
   }
+  // Defensive fallback: when Telnyx omits/changes encoding labels,
+  // prefer telephone-safe assumption (8 kHz mu-law) over returning
+  // undecoded bytes into Deepgram.
+  if (!sampleRate || sampleRate <= 8000) {
+    return mulaw8kToPcm16k(audio);
+  }
   return audio;
 }
 
@@ -453,6 +459,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           streamSid: ctx.streamSid,
           company: ctx.company,
           topic: ctx.topic,
+          inboundEncoding,
+          inboundSampleRate,
         });
 
         // Pre-warm TLS/HTTP-Pools zu OpenAI + ElevenLabs SOFORT, damit die
@@ -520,8 +528,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         // Falls am anderen Ende niemand aktiv spricht, startet Gloria nach
         // kurzer Stille mit einem knappen, natuerlichen Opener.
         const silenceMs = Math.max(
-          1200,
-          Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "2200", 10),
+          1800,
+          Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "4200", 10),
         );
         silenceOpenerTimer = setTimeout(() => {
           if (!ctx) return;
@@ -537,9 +545,15 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       }
       case "media": {
         if (!ctx || !asr) return;
-        if (frame.media.track !== "inbound" && frame.media.track !== "inbound_track") return;
+        const track = frame.media.track;
+        if (track === "outbound" || track === "outbound_track") return;
         inboundFrameCount += 1;
         const buf = Buffer.from(frame.media.payload, "base64");
+        if (inboundFrameCount === 1 && buf.length > 0) {
+          // First inbound voice frame means someone is actually there.
+          // Stop silence opener even when ASR partial/final has not arrived yet.
+          clearSilenceOpenerTimer();
+        }
         const audio = normalizeInboundAudio(buf, inboundEncoding, inboundSampleRate);
         asr.send(audio);
         if (ctx.speaking) {
