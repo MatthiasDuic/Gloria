@@ -234,10 +234,18 @@ export async function POST(request: Request): Promise<NextResponse> {
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
       });
     } else if (eventType === "call.answered") {
+      const streamBidirectionalCodec = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim();
       await sendTelnyxCommand(callControlId, "streaming_start", {
         stream_url: getTelnyxMediaStreamUrl(),
         stream_track: "both_tracks",
+        stream_bidirectional_mode: "rtp",
+        stream_bidirectional_codec: streamBidirectionalCodec,
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
+      });
+      log.info("telnyx.events.streaming_start", {
+        callControlId,
+        bidirectionalMode: "rtp",
+        bidirectionalCodec: streamBidirectionalCodec,
       });
       // Recording parallel zum Media-Stream starten, damit bei erteilter
       // Einwilligung eine echte Audiodatei fuer den Report vorliegt.

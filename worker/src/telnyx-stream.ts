@@ -662,6 +662,16 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         }
         break;
       }
+      case "error": {
+        log.error("ws.stream_error", {
+          callSid: ctx?.callSid,
+          code: frame.payload?.code,
+          title: frame.payload?.title,
+          detail: frame.payload?.detail,
+          streamSid: frame.stream_id,
+        });
+        break;
+      }
     }
   });
 
