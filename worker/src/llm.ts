@@ -45,6 +45,12 @@ export async function streamReply(
   userText: string,
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
+  const deterministicReply = buildDeterministicPostBookingReply(ctx);
+  if (deterministicReply) {
+    onSentence(deterministicReply.reply);
+    return deterministicReply;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -591,6 +597,82 @@ const PKV_FIELDS: PkvField[] = [
   "psychische Behandlungen", "Zähne/Zahnersatz", "Allergien",
 ];
 
+const PKV_QUESTIONS: Record<PkvField, string> = {
+  Geburtsdatum: "Wie lautet Ihr Geburtsdatum?",
+  Körpergröße: "Wie groß sind Sie?",
+  Gewicht: "Wie hoch ist Ihr aktuelles Gewicht?",
+  Versicherer: "Bei welchem Krankenversicherer sind Sie aktuell versichert?",
+  Monatsbeitrag: "Wie hoch ist Ihr aktueller Monatsbeitrag?",
+  "Diagnosen/Behandlungen": "Gibt es aktuell bekannte Diagnosen oder laufende Behandlungen?",
+  Medikamente: "Nehmen Sie aktuell regelmäßig Medikamente ein?",
+  "stationäre Aufenthalte": "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
+  "psychische Behandlungen": "Gab es in den letzten zehn Jahren psychische Behandlungen oder entsprechende Diagnosen?",
+  "Zähne/Zahnersatz": "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
+  Allergien: "Sind bei Ihnen Allergien bekannt?",
+};
+
+export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput | null {
+  if (!ctx.confirmedSlotPhrase) return null;
+
+  const pkvData = collectPkvData(ctx);
+  const isPkvCall = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  if (isPkvCall) {
+    const basisDataConsent = getBasisDataConsentState(ctx);
+    if (basisDataConsent === "not-asked") {
+      return {
+        reply: "Für die Vorbereitung würde ich Ihnen jetzt noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?",
+        hangup: false,
+        transfer: false,
+      };
+    }
+
+    if (basisDataConsent === "granted" && pkvData.missing.length > 0) {
+      return {
+        reply: PKV_QUESTIONS[pkvData.missing[0]],
+        hangup: false,
+        transfer: false,
+      };
+    }
+  }
+
+  let emailQuestionIndex = -1;
+  for (let index = ctx.transcript.length - 1; index >= 0; index -= 1) {
+    const turn = ctx.transcript[index];
+    if (turn.role === "assistant" && /e-?mail(?:-adresse)?.*(?:terminbest[äa]tigung|best[äa]tigung)|terminbest[äa]tigung.*e-?mail/i.test(turn.text)) {
+      emailQuestionIndex = index;
+      break;
+    }
+  }
+  if (emailQuestionIndex < 0) {
+    return {
+      reply: "Welche E-Mail-Adresse darf ich für die Terminbestätigung notieren?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  const emailAnswer = ctx.transcript
+    .slice(emailQuestionIndex + 1)
+    .find((turn) => turn.role === "user")?.text.trim() || "";
+  const emailDeclined = /^(?:nein\b|keine e-?mail|ohne e-?mail|m[öo]chte ich nicht|lieber nicht)/i.test(emailAnswer);
+  if (!pkvData.email && !emailDeclined) {
+    return {
+      reply: "Ich habe die E-Mail-Adresse noch nicht vollständig verstanden. Bitte nennen Sie sie noch einmal, gern mit At und Punkt.",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  const confirmationSentence = pkvData.email
+    ? `Die Terminbestätigung sende ich an ${pkvData.email}.`
+    : "Die Terminbestätigung erfolgt wie besprochen ohne E-Mail.";
+  return {
+    reply: `Ihr persönlicher Termin mit Herrn Duic ist am ${ctx.confirmedSlotPhrase}. Herr Duic bereitet die Vertragsanalyse und Beitragsprognose für Sie vor. ${confirmationSentence} Herr Duic freut sich auf das Gespräch. Auf Wiederhören!`,
+    hangup: true,
+    transfer: false,
+  };
+}
+
 function recordingConsentResolved(ctx: CallContext): boolean {
   const turns = ctx.transcript;
   for (let i = 0; i < turns.length; i += 1) {
@@ -714,14 +796,17 @@ function detectAskedPkvField(question: string): PkvField | undefined {
 }
 
 function extractSpokenEmail(text: string): string | undefined {
-  const candidates = text.toLowerCase().match(/[a-z0-9._%+-]+(?:\s+|\s*(?:at|ät|@)\s*)[a-z0-9.-]+(?:\s*(?:punkt|dot|\.)\s*[a-z](?:\s+[a-z]){0,3})/gi);
+  const directEmail = text.toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)?.at(-1);
+  if (directEmail) return directEmail;
+
+  const candidates = text.toLowerCase().match(/[a-z0-9_%+-]+(?:\s*(?:punkt|dot|\.)\s*[a-z0-9_%+-]+)*\s*(?:at|ät|@)\s*[a-z0-9-]+(?:\s*(?:punkt|dot|\.)\s*[a-z0-9-]+)+/gi);
   const raw = candidates?.at(-1);
   if (!raw) return undefined;
   const normalized = raw
     .toLowerCase()
     .replace(/\s+(?:at|ät)\s+/g, "@")
     .replace(/\s*@\s*/g, "@")
-    .replace(/\s*(?:punkt|dot)\s*/g, ".")
+    .replace(/\s*(?:punkt|dot|\.)\s*/g, ".")
     .replace(/\.\s*([a-z])\s+([a-z])\b/g, ".$1$2")
     .replace(/\s+/g, "");
   return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(normalized) ? normalized : undefined;

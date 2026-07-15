@@ -919,7 +919,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
  *   - "Ihr Termin ... ist am ..."
  * Erfasst Wochentag + Datum + Uhrzeit als zusammenhängende Phrase.
  */
-function extractConfirmedSlot(text: string): string | null {
+export function extractConfirmedSlot(text: string): string | null {
   // Schließe reine Vorschlagsfragen aus ("oder ... besser passen?", "wäre ... besser?").
   const lower = text.toLowerCase();
   const isProposal =
@@ -947,6 +947,7 @@ function extractConfirmedSlot(text: string): string | null {
     /\bsteht\s+(?:ihr|der)?\s*termin\b/.test(lower) ||
     /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||
     /\bperfekt\b[^.?!]*\btermin\b/.test(lower) ||
+    /\bich\s+habe\b[^.?!]*\bf[üu]r\s+sie\s+reserviert\b/.test(lower) ||
     /\bich\s+reserviere\b/.test(lower) ||
     /\breserviere\s+ich\b/.test(lower) ||
     /\b(?:ist|wird)\b[^.?!]*\bf[üu]r\s+sie\s+reserviert\b/.test(lower) ||
