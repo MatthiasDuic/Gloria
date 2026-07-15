@@ -368,7 +368,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       ``,
       `BEREITS ERFASSTE BASISANGABEN: ${captured || "noch keine"}.`,
       `Noch offen: ${pkvData.missing.join(", ") || "keine"}.`,
-      `Verbindlich: Bereits erfasste Angaben NICHT erneut fragen. Wenn eine Antwort mehrere Angaben enthält, gelten alle erkannten Angaben als erfasst. Frage nur das erste noch offene Feld.`,
+      `Verbindlich: Bereits erfasste Angaben NICHT erneut fragen. Wenn eine Antwort mehrere Angaben enthält, gelten alle erkannten Angaben als erfasst. VOR dem bestätigten Termin sind diese Angaben nur Gesprächskontext und dürfen nicht als Datenliste abgefragt werden. Erst in Phase 8 fragst du das erste noch offene Feld.`,
     );
     if (pkvData.email) {
       lines.push(`Erkannte E-Mail-Adresse: ${pkvData.email}. Wiederhole sie bei der Bestätigung vollständig inklusive Domain-Endung.`);
@@ -431,6 +431,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Das Interesse ist da. Wiederhole keinen Pitch und keinen Reformdruck. Bestätige knapp, was dem Kunden wichtig war, und gehe ruhig zur Terminabstimmung.`,
       `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
       `Rahme den Termin als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic, nicht als Telefontermin.`,
+      `Wenn der Kunde einen Slot auswählt: bestätige NUR den Termin in einem kurzen Satz und stelle höchstens die Frage, ob noch zwei Minuten für die Vorbereitung passen. KEINE Verabschiedung, KEIN hangup, KEINE Abschluss-Zusammenfassung und nicht behaupten, es sei nichts vorzubereiten.`,
     );
   } else if (phase === 8) {
     // Prüfe ob Gloria bereits die Überleitung gemacht hat
@@ -446,6 +447,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Reihenfolge der noch offenen Fragen: ${pkvData?.missing.join(" → ") || "keine"}.`,
       `INTERVIEW-BREMSE: Nach spätestens zwei Datenfragen kurz Wahlfreiheit geben: "Sollen wir den Rest noch kurz machen oder lieber per Mail?"`,
       `Gesundheitsdaten sind besonders sensibel. Frage sie nur nach ausdrücklicher Bereitschaft, ruhig und ohne verkaufspsychologischen Druck. Nie so tun, als seien sie Voraussetzung für den bereits vereinbarten Termin.`,
+      `ABSOLUT VERBOTEN in Phase 8: Gespräch zusammenfassen, sich verabschieden, hangup=true setzen oder sagen, Herr Duic kläre alles erst im Termin. Solange Angaben offen sind und der Kunde sie nicht auf Mail verschoben hat, bleibst du in diesem Fragenblock.`,
       `WICHTIG: Bei den Gesundheitsfragen (Diagnosen/Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien) gilt ein "Nein" als VOLLSTÄNDIGE und gültige Antwort. Kein Nachhaken, keine Umformulierung derselben Frage - sofort zur nächsten Frage übergehen.`,
       `Körpergröße und Gewicht als getrennte Fragen stellen. Nennt der Kunde freiwillig beides in einer Antwort, beide übernehmen und Gewicht NICHT erneut fragen.`,
     );
@@ -512,6 +514,10 @@ function inferConversationPhase(ctx: CallContext): number {
   if (!turns.length) return 1;
 
   const all = turns.map((t) => t.text.toLowerCase()).join(" \n ");
+  const assistantText = turns
+    .filter((t) => t.role === "assistant")
+    .map((t) => t.text.toLowerCase())
+    .join(" \n ");
   const hasConsentQuestion = /aufzeichn|mitschneid/.test(all);
   const hasConsentAnswer = recordingConsentResolved(ctx);
 
@@ -541,9 +547,9 @@ function inferConversationPhase(ctx: CallContext): number {
   const pkvData = collectPkvData(ctx);
   const hasDataCollection = pkvData.missing.length === 0;
   // Kunde hat Basisangaben abgelehnt: Gloria hat "Terminbestätigungsmail" oder "in Ruhe beantworten" gesagt
-  const hasBasisdatenRefused = /terminbest[äa]tigungsmail|in ruhe (?:beantworten|erg[äa]nzen)|per mail beantworten|bleibt es (?:jetzt )?bei der terminbest[äa]tigung|angaben.*sp[äa]ter/i.test(all);
-  const hasEmailAsked = /\be-?mail\b/i.test(all);
-  const hasSummary = /ich fasse kurz zusammen|terminbest[äa]tigung|auf wiederhören|auf wiedersehen|schönen tag noch/.test(all);
+  const hasBasisdatenRefused = /terminbest[äa]tigungsmail|in ruhe (?:beantworten|erg[äa]nzen)|per mail beantworten|bleibt es (?:jetzt )?bei der terminbest[äa]tigung|angaben.*sp[äa]ter/i.test(assistantText);
+  const hasEmailAsked = /(?:ihre|welche|an welche)\s+e-?mail(?:-adresse)?|e-?mail(?:-adresse)?[^.?!]{0,50}(?:nennen|notieren|best[äa]tigung|schicken)/i.test(assistantText);
+  const hasSummary = /ich fasse kurz zusammen|auf wiederhören|auf wiedersehen|schönen tag noch/.test(assistantText);
 
   if (!hasConsentQuestion) return 2;
   if (!hasConsentAnswer) return 2;

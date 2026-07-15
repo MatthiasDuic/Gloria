@@ -37,13 +37,13 @@ services:
       - key: ELEVENLABS_MODEL
         value: eleven_flash_v2_5
       - key: DEEPGRAM_ENDPOINTING_MS
-        value: 350
+        value: 500
       - key: DEEPGRAM_UTTERANCE_END_MS
-        value: 600
+        value: 900
       - key: ASR_FINAL_COALESCE_MS
-        value: 650
+        value: 1050
       - key: ASR_UTTERANCE_END_GRACE_MS
-        value: 220
+        value: 700
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN

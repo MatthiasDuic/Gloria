@@ -218,11 +218,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const userFinalCoalesceMs = Math.max(
     250,
-    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "650", 10),
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "1050", 10),
   );
   const utteranceEndGraceMs = Math.max(
     120,
-    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "220", 10),
+    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "700", 10),
   );
 
   const clearSilenceOpenerTimer = () => {
@@ -266,7 +266,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // Kurze Fragmente wie "ja" werden am Telefon häufig direkt fortgesetzt
     // ("ja, worum geht es?"). Ein wenig mehr Grace verhindert vorschnelle
     // Antworten, ohne normale vollständige Sätze auszubremsen.
-    const graceMs = wordCount <= 1 ? Math.max(utteranceEndGraceMs, 520) : utteranceEndGraceMs;
+    const graceMs = wordCount <= 2 ? Math.max(utteranceEndGraceMs, 1000) : utteranceEndGraceMs;
     userFinalCoalesceTimer = setTimeout(flushUserFinals, graceMs);
   };
 
@@ -385,6 +385,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
    */
   const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
+    const slotWasConfirmedBeforeTurn = Boolean(ctx.confirmedSlotPhrase);
 
     // Vorherige TTS abbrechen (Barge-in-Sicherheit zwischen Turns).
     if (currentTts) {
@@ -484,7 +485,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       }
     }
 
-    return result;
+    // Eine Terminbestätigung ist nicht das Gesprächsende: Danach folgen noch
+    // freiwillige Vorbereitungsangaben und die E-Mail für die Bestätigung.
+    // Selbst wenn das Modell voreilig hangup=true liefert, bleibt der Call offen.
+    const confirmedSlotThisTurn = !slotWasConfirmedBeforeTurn && Boolean(ctx.confirmedSlotPhrase);
+    return confirmedSlotThisTurn ? { ...result, hangup: false } : result;
   };
 
   const handleUserUtterance = async (userText: string) => {
@@ -651,13 +656,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
             if (text.trim().length > 0) {
               clearSilenceOpenerTimer();
             }
-            // Barge-in nur, wenn der Anrufer wirklich substanziell spricht
-            // (mind. 3 Worte / 14 Zeichen). Vorher reichten 4 Zeichen, das hat zu
-            // Mid-Sentence-Abbrüchen geführt (Echo, kurze Füller wie "hm", "ja").
+            // Echte Fortsetzungen schnell durchlassen. Kurze Füller und Echo
+            // brechen Gloria nicht ab, zwei klare Wörter dagegen schon.
             if (ctx.speaking && currentTts) {
               const trimmed = text.trim();
               const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-              if (trimmed.length >= 14 && wordCount >= 3) {
+              const isFiller = /^(?:ja|nein|hm+|mhm+|okay|ok|genau|also)[,.!?\s]*$/i.test(trimmed);
+              if (!isFiller && trimmed.length >= 8 && wordCount >= 2) {
                 log.info("turn.barge_in", { callSid: ctx.callSid, partial: trimmed });
                 currentTts.abort();
                 currentTts = null;
@@ -943,7 +948,9 @@ function extractConfirmedSlot(text: string): string | null {
     /\bdann\s+steht\b[^.?!]*\btermin\b/.test(lower) ||
     /\bperfekt\b[^.?!]*\btermin\b/.test(lower) ||
     /\bich\s+reserviere\b/.test(lower) ||
-    /\breserviere\s+ich\b/.test(lower);
+    /\breserviere\s+ich\b/.test(lower) ||
+    /\b(?:ist|wird)\b[^.?!]*\bf[üu]r\s+sie\s+reserviert\b/.test(lower) ||
+    /\b(?:ist|wird)\b[^.?!]*\bf[üu]r\s+sie\s+(?:fest\s+)?eingetragen\b/.test(lower);
   if (!isConfirmation) return null;
 
   // Uhrzeiten kommen als Wörter ODER als Ziffern ("10:30 Uhr" / "zehn Uhr dreißig").
