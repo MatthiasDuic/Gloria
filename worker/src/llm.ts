@@ -367,6 +367,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     lines.push(
       ``,
       `BEREITS ERFASSTE BASISANGABEN: ${captured || "noch keine"}.`,
+      `Vom Kunden ausdrücklich übersprungen: ${pkvData.skipped.join(", ") || "keine"}. Diese Punkte nicht erneut fragen.`,
       `Noch offen: ${pkvData.missing.join(", ") || "keine"}.`,
       `Verbindlich: Bereits erfasste Angaben NICHT erneut fragen. Wenn eine Antwort mehrere Angaben enthält, gelten alle erkannten Angaben als erfasst. VOR dem bestätigten Termin sind diese Angaben nur Gesprächskontext und dürfen nicht als Datenliste abgefragt werden. Erst in Phase 8 fragst du das erste noch offene Feld.`,
     );
@@ -434,26 +435,26 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Wenn der Kunde einen Slot auswählt: bestätige NUR den Termin in einem kurzen Satz und stelle höchstens die Frage, ob noch zwei Minuten für die Vorbereitung passen. KEINE Verabschiedung, KEIN hangup, KEINE Abschluss-Zusammenfassung und nicht behaupten, es sei nichts vorzubereiten.`,
     );
   } else if (phase === 8) {
-    // Prüfe ob Gloria bereits die Überleitung gemacht hat
-    const hasBasisdatenIntro = ctx.transcript.some(
-      (t) => t.role === "assistant" && /basisangaben|vorbereit(?:en|ung)|eckdaten|angaben hilfreich/i.test(t.text),
-    );
+    const basisDataConsent = getBasisDataConsentState(ctx);
     lines.push(
       `Termin bestätigt. Jetzt Vertrauen schützen: Die Terminbestätigung ist wichtiger als ein vollständiger Datensatz.`,
-      !hasBasisdatenIntro
-        ? `ERSTER SCHRITT: Erkläre transparent, welche Daten wofür gebraucht werden, und gib eine echte Wahl: "Für die Vorbereitung wären noch ein paar Angaben hilfreich. Möchten Sie zwei, drei Eckdaten jetzt nennen oder die Fragen lieber in Ruhe per Mail beantworten?" NOCH KEINE Datenfrage stellen.`
-        : `Der Kunde hat sich für die telefonische Angabe entschieden. Stelle genau eine Frage pro Turn und erkläre vor sensiblen Gesundheitsangaben kurz den Zweck.`,
-      `Wenn der Kunde Mail, später, ungern, weiß nicht oder Ablehnung signalisiert: sofort akzeptieren: "Gern, dann bleibt es jetzt bei der Terminbestätigung; die Angaben können Sie in Ruhe selbst ergänzen." Dann zur E-Mail wechseln. Nicht überzeugen, nicht nachhaken.`,
+      basisDataConsent === "not-asked"
+        ? `ERSTER SCHRITT: Frage genau einmal: "Für die Vorbereitung würde ich Ihnen jetzt noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?" NOCH KEINE Datenfrage stellen.`
+        : basisDataConsent === "pending"
+          ? `Du hast um Erlaubnis für die Fragerunde gebeten. Werte ausschließlich die aktuelle Antwort aus. Bei Zustimmung beginne mit der ersten noch offenen Frage. Bei Ablehnung gehe zur E-Mail-Adresse. Stelle die Erlaubnisfrage nicht erneut.`
+          : `Die Erlaubnis für die Fragerunde liegt vor. Bleibe ab jetzt strikt im Fragenkatalog und stelle genau eine noch offene Frage pro Turn.`,
+      `Die Freiwilligkeit wurde vor der Fragerunde bereits geklärt. Sage bei den einzelnen Fragen NICHT mehr "wenn Sie möchten", "falls Sie das sagen wollen", "freiwillig", "oder lieber später" und biete nicht von dir aus an, einzelne Punkte zu überspringen. Stelle die Frage freundlich und direkt.`,
+      `Nur wenn der Kunde VON SICH AUS eine konkrete Frage nicht beantworten möchte: Sage knapp "Kein Problem, dann überspringen wir diesen Punkt." und stelle direkt die nächste noch offene Frage. Nicht nach dem Grund fragen.`,
       `Reihenfolge der noch offenen Fragen: ${pkvData?.missing.join(" → ") || "keine"}.`,
-      `INTERVIEW-BREMSE: Nach spätestens zwei Datenfragen kurz Wahlfreiheit geben: "Sollen wir den Rest noch kurz machen oder lieber per Mail?"`,
-      `Gesundheitsdaten sind besonders sensibel. Frage sie nur nach ausdrücklicher Bereitschaft, ruhig und ohne verkaufspsychologischen Druck. Nie so tun, als seien sie Voraussetzung für den bereits vereinbarten Termin.`,
+      `KATALOG-SPERRE: Ausschließlich die erste noch offene Frage aus dieser Reihenfolge stellen. Keine Beitragsprognose, keine Sensibilisierung, keine Konzept-Erklärung, keine Terminfrage und keine Wiederholung bereits erfasster oder übersprungener Felder.`,
+      `Gesundheitsdaten ruhig und neutral abfragen. Die einmalige Zustimmung gilt für den gesamten Katalog; keine erneute Erlaubnis vor jeder Gesundheitsfrage einholen.`,
       `ABSOLUT VERBOTEN in Phase 8: Gespräch zusammenfassen, sich verabschieden, hangup=true setzen oder sagen, Herr Duic kläre alles erst im Termin. Solange Angaben offen sind und der Kunde sie nicht auf Mail verschoben hat, bleibst du in diesem Fragenblock.`,
       `WICHTIG: Bei den Gesundheitsfragen (Diagnosen/Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien) gilt ein "Nein" als VOLLSTÄNDIGE und gültige Antwort. Kein Nachhaken, keine Umformulierung derselben Frage - sofort zur nächsten Frage übergehen.`,
       `Körpergröße und Gewicht als getrennte Fragen stellen. Nennt der Kunde freiwillig beides in einer Antwort, beide übernehmen und Gewicht NICHT erneut fragen.`,
     );
   } else if (phase === 10) {
     lines.push(
-      `Alle Basisangaben sind erfasst. Frag JETZT als einzige Aktion nach der E-Mail-Adresse für die Terminbestätigung.`,
+      `Der Fragenkatalog ist abgeschlossen oder wurde vom Kunden abgelehnt. Frag JETZT als einzige Aktion nach der E-Mail-Adresse für die Terminbestätigung.`,
       `Beispiel: "Darf ich noch kurz Ihre E-Mail-Adresse für die Terminbestätigung notieren?"`,
       `Kein hangup. Kein Zusammenfassen. Nur diese eine Frage.`,
     );
@@ -478,6 +479,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- Meist 1-2 kurze Sätze pro Antwort, höchstens 1 Hauptfrage. Kein Monolog. (Ausnahme: Phase 11 Abschluss-Zusammenfassung — dort bis zu 4 Sätze erlaubt.)`,
     `- ERSTKONTAKT: Nie so sprechen, als kenne der Kunde euch bereits. Keine erfundene Nähe, keine erfundene Empfehlung, keine manipulative Verknappung.`,
     `- PERMISSION-BASED: Bevor du persönliche oder finanzielle Angaben erfragst, erkläre knapp, welchen konkreten Nutzen die Antwort für den Kunden hat, und mache die Freiwilligkeit sprachlich klar.`,
+    `- AUSNAHME FRAGENKATALOG: Nach der einmaligen Zustimmung zu Phase 8 keine Freiwilligkeits- oder Überspringen-Hinweise mehr an jede Einzelfrage hängen. Nur auf eine vom Kunden selbst geäußerte Ablehnung reagieren.`,
     `- DIALOG STATT INTERVIEW: Stelle nie mehr als zwei Informationsfragen hintereinander. Dazwischen muss eine echte Reaktion mit Bezug auf das Gesagte oder ein hilfreicher Substanzsatz stehen.`,
     `- Keine leeren Bestätigungen wie "prima", "perfekt", "super" oder "alles klar" in Serie. Besonders bei sensiblen Angaben neutral und respektvoll reagieren.`,
     `- Natürlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
@@ -546,6 +548,7 @@ function inferConversationPhase(ctx: CallContext): number {
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
   const pkvData = collectPkvData(ctx);
   const hasDataCollection = pkvData.missing.length === 0;
+  const basisDataConsent = getBasisDataConsentState(ctx);
   // Kunde hat Basisangaben abgelehnt: Gloria hat "Terminbestätigungsmail" oder "in Ruhe beantworten" gesagt
   const hasBasisdatenRefused = /terminbest[äa]tigungsmail|in ruhe (?:beantworten|erg[äa]nzen)|per mail beantworten|bleibt es (?:jetzt )?bei der terminbest[äa]tigung|angaben.*sp[äa]ter/i.test(assistantText);
   const hasEmailAsked = /(?:ihre|welche|an welche)\s+e-?mail(?:-adresse)?|e-?mail(?:-adresse)?[^.?!]{0,50}(?:nennen|notieren|best[äa]tigung|schicken)/i.test(assistantText);
@@ -562,8 +565,8 @@ function inferConversationPhase(ctx: CallContext): number {
   if (!hasConfirmedSlot) return 7;
 
   // Termin ist bestätigt: dann Basisdaten -> E-Mail -> Abschluss.
-  if (hasBasisdatenRefused && !hasEmailAsked) return 10; // Basisangaben übersprungen
-  if (!hasDataCollection) return 8;
+  const skipBasisData = basisDataConsent === "declined" || hasBasisdatenRefused;
+  if (!skipBasisData && !hasDataCollection) return 8;
   if (!hasEmailAsked) return 10;  // E-Mail fragen
   if (!hasSummary) return 11;     // Zusammenfassung + Verabschiedung
   return 11;
@@ -598,12 +601,34 @@ function recordingConsentResolved(ctx: CallContext): boolean {
   return false;
 }
 
+function getBasisDataConsentState(ctx: CallContext): "not-asked" | "pending" | "granted" | "declined" {
+  const turns = ctx.transcript;
+  const askIndex = turns.findIndex(
+    (turn) =>
+      turn.role === "assistant" &&
+      /(?:einige|ein paar|kurze)\s+(?:fragen|basisangaben|eckdaten)|fragen.*(?:vorbereitung|in ordnung)|angaben.*(?:vorbereitung|kl[äa]ren)/i.test(turn.text),
+  );
+  if (askIndex < 0) return "not-asked";
+
+  const answer = turns.slice(askIndex + 1).find((turn) => turn.role === "user")?.text.trim().toLowerCase();
+  if (!answer) return "pending";
+  if (/^(?:ja\b|jawohl|gerne\b|klar\b|okay\b|ok\b|(?:das\s+)?ist(?:\s+f[üu]r mich)?\s+in ordnung|passt\b|k[öo]nnen wir|machen wir|von mir aus)/i.test(answer)) {
+    return "granted";
+  }
+  if (/^(?:nein\b|nö\b|lieber nicht|nicht jetzt|per mail|sp[äa]ter|ungern|(?:das\s+)?m[öo]chte ich nicht)/i.test(answer)) {
+    return "declined";
+  }
+  return "pending";
+}
+
 function collectPkvData(ctx: CallContext): {
   values: Partial<Record<PkvField, string>>;
   missing: PkvField[];
+  skipped: PkvField[];
   email?: string;
 } {
   const values: Partial<Record<PkvField, string>> = {};
+  const skipped = new Set<PkvField>();
   const turns = ctx.transcript;
 
   for (let i = 0; i < turns.length; i += 1) {
@@ -614,6 +639,12 @@ function collectPkvData(ctx: CallContext): {
     for (let j = i + 1; j < turns.length && turns[j].role === "user"; j += 1) answers.push(turns[j].text);
     const answer = answers.join(" ").replace(/\s+/g, " ").trim();
     if (!answer) continue;
+
+    const refusedField = detectAskedPkvField(question);
+    if (refusedField && isExplicitFieldRefusal(answer)) {
+      skipped.add(refusedField);
+      continue;
+    }
 
     if (/geburtsdatum|wann.*geboren/.test(question)) values.Geburtsdatum = answer;
     if (/k[öo]rpergr[öo][ßs]e|wie gro[ßs]/.test(question)) values.Körpergröße = answer;
@@ -631,15 +662,55 @@ function collectPkvData(ctx: CallContext): {
     if (/allerg/.test(question)) values.Allergien = answer;
 
     // Freiwillige Kombi-Antworten übernehmen, auch wenn nur nach einem Feld gefragt wurde.
-    if (/\b(?:1|ein(?:s|en)?)\s*(?:meter|m)\b/i.test(answer) || /meter\s+[a-zäöüß\d-]+\s+gro[ßs]/i.test(answer)) {
+    if (
+      /\b(?:1|ein(?:s|en)?)\s*(?:meter|m)\b/i.test(answer) ||
+      /\b(?:meter|komma)\s+[a-zäöüß\d-]+(?:\s+gro[ßs])?/i.test(answer) ||
+      /\b\d[,.]\d{2}\s*(?:meter|m)?\b/i.test(answer)
+    ) {
       values.Körpergröße = answer;
     }
-    if (/\b(?:kilo(?:gramm)?|kg)\b/i.test(answer)) values.Gewicht = answer;
+    if (
+      /\b(?:kilo\s*gramm|kilogramm|kilo|kg)\b/i.test(answer) ||
+      /\b(?:1[,.]\d{2}|ein(?:s|en)?\s+meter(?:\s+\w+)?)\b[^.?!]{0,35}\b(?:[3-9]\d|1\d{2}|2[0-4]\d)\b/i.test(answer)
+    ) {
+      values.Gewicht = answer;
+    }
     if (/\b(?:euro|€)\b/i.test(answer) && /beitrag|zahl|kost/i.test(`${question} ${answer}`)) values.Monatsbeitrag = answer;
   }
 
   const email = extractSpokenEmail(turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" "));
-  return { values, missing: PKV_FIELDS.filter((field) => !values[field]), email };
+  return {
+    values,
+    missing: PKV_FIELDS.filter((field) => !values[field] && !skipped.has(field)),
+    skipped: [...skipped],
+    email,
+  };
+}
+
+function isExplicitFieldRefusal(answer: string): boolean {
+  return /\b(?:m[öo]chte|will|werde)\s+(?:ich\s+)?(?:nicht|nichts)\s+(?:beantworten|sagen|angeben)|\b(?:keine angabe|sage ich nicht|beantworte ich nicht|geht sie nichts an|[üu]berspringen wir|lassen wir (?:das|die frage))\b/i.test(answer);
+}
+
+function detectAskedPkvField(question: string): PkvField | undefined {
+  const patterns: Array<[PkvField, RegExp]> = [
+    ["Geburtsdatum", /geburtsdatum|wann.*geboren/i],
+    ["Körpergröße", /k[öo]rpergr[öo][ßs]e|wie gro[ßs]/i],
+    ["Gewicht", /gewicht|wie viel wiegen/i],
+    ["Versicherer", /krankenversicherer|welcher.*(?:kasse|versicherung)/i],
+    ["Monatsbeitrag", /monatsbeitrag|wie hoch.*beitrag/i],
+    ["Diagnosen\/Behandlungen", /diagnos|laufende behandlung/i],
+    ["Medikamente", /medikament/i],
+    ["stationäre Aufenthalte", /station[äa]re|krankenhaus/i],
+    ["psychische Behandlungen", /psychisch/i],
+    ["Zähne\/Zahnersatz", /z[äa]hne|zahnersatz/i],
+    ["Allergien", /allerg/i],
+  ];
+  let detected: { field: PkvField; index: number } | undefined;
+  for (const [field, pattern] of patterns) {
+    const match = pattern.exec(question);
+    if (match && (!detected || match.index > detected.index)) detected = { field, index: match.index };
+  }
+  return detected?.field;
 }
 
 function extractSpokenEmail(text: string): string | undefined {
