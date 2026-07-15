@@ -880,7 +880,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Es geht um die Beitragsentwicklung in der Gesundheitsversorgung - ein Thema, das viele Unternehmer zunehmend beschäftigt.`;
+    topicLine = `Wir hatten bisher noch keinen Kontakt. Es geht um die Frage, wie planbar Ihre Krankenversicherungsbeiträge bis zum Ruhestand bleiben.`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
     topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
@@ -898,9 +898,9 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   // im nächsten Turn frei, ohne "bitte antworten Sie mit JA oder NEIN".
   return [
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
-    `Ich rufe im Auftrag von ${owner} an —`,
+    `Ich rufe im Auftrag von ${owner} an.`,
     topicLine,
-    `Passt es kurz für eine Frage?`,
+    `Darf ich Ihnen in zwei Sätzen sagen, weshalb ich anrufe?`,
   ].join(" ");
 }
 

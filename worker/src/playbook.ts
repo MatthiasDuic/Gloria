@@ -122,6 +122,9 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
 
   const parts: string[] = [];
   parts.push("PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:");
+  parts.push(
+    "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über diesem Playbook. Ältere Formulierungen wie Pflichtfragen, harte Konter oder angeblich notwendige Datenerhebung dürfen niemals Druck erzeugen.",
+  );
   if (topic) parts.push(`THEMA: ${topic}`);
 
   if (callObjective) {
@@ -144,7 +147,7 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
 
   if (requiredData) {
     parts.push("");
-    parts.push("BASISDATEN / PFLICHTFRAGEN (in der Basisdaten-Phase einzeln abfragen):");
+    parts.push("MÖGLICHE VORBEREITUNGSDATEN (freiwillig, erst nach Termin und ausdrücklichem Opt-in; bei Zurückhaltung per Mail anbieten, nie als Terminbedingung darstellen):");
     parts.push(requiredData);
   }
 
@@ -159,7 +162,7 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
   if (objectionResponses) {
     parts.push("");
     parts.push(
-      "EINWAND-BIBLIOTHEK (verbindliche Konter-Linien — Format pro Zeile: \"Einwand: Konter\". Nutze die Konter-Logik in eigenen Worten, max. 1–2 Sätze, OHNE \"Ich verstehe\"/\"Absolut\"-Vorlauf):",
+      "EINWAND-BIBLIOTHEK (nur als fachlicher Hintergrund, nicht wortgetreu und nie als Druckmittel. Bei Skepsis transparent antworten; bei erstem Nein höchstens eine kurze Relevanzfrage, jedes weitere Nein akzeptieren):",
     );
     parts.push(objectionResponses);
   }
