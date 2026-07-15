@@ -15,7 +15,11 @@ const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 const server = http.createServer((req, res) => {
   if (req.url === "/health" || req.url === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, service: "gloria-stream-worker" }));
+    res.end(JSON.stringify({
+      ok: true,
+      service: "gloria-stream-worker",
+      revision: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || "local",
+    }));
     return;
   }
   res.writeHead(404, { "content-type": "text/plain" });
