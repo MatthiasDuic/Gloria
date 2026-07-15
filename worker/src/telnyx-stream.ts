@@ -213,15 +213,16 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let inboundEncoding = "PCMU";
   let inboundSampleRate = 8000;
   let pendingUserFinals: string[] = [];
+  let pendingUtterancesDuringTurn: string[] = [];
   let userFinalCoalesceTimer: NodeJS.Timeout | null = null;
 
   const userFinalCoalesceMs = Math.max(
     250,
-    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "900", 10),
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "650", 10),
   );
   const utteranceEndGraceMs = Math.max(
     120,
-    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "320", 10),
+    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "220", 10),
   );
 
   const clearSilenceOpenerTimer = () => {
@@ -260,7 +261,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   const nudgeUserFinalFlush = () => {
     if (pendingUserFinals.length === 0) return;
     clearUserFinalCoalesceTimer();
-    userFinalCoalesceTimer = setTimeout(flushUserFinals, utteranceEndGraceMs);
+    const merged = pendingUserFinals.join(" ").trim();
+    const wordCount = merged.split(/\s+/).filter(Boolean).length;
+    // Kurze Fragmente wie "ja" werden am Telefon häufig direkt fortgesetzt
+    // ("ja, worum geht es?"). Ein wenig mehr Grace verhindert vorschnelle
+    // Antworten, ohne normale vollständige Sätze auszubremsen.
+    const graceMs = wordCount <= 1 ? Math.max(utteranceEndGraceMs, 520) : utteranceEndGraceMs;
+    userFinalCoalesceTimer = setTimeout(flushUserFinals, graceMs);
   };
 
   const sendMedia = (audio: Buffer) => {
@@ -279,6 +286,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   const sendMark = (name: string) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
     ws.send(JSON.stringify({ event: "mark", stream_id: ctx.streamSid, mark: { name } }));
+  };
+
+  const clearOutboundAudio = () => {
+    if (!ctx || ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ event: "clear", stream_id: ctx.streamSid }));
   };
 
   const speak = async (text: string) => {
@@ -479,9 +491,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     if (!ctx) return;
     clearSilenceOpenerTimer();
     if (pendingTurn) {
-      // Still working on the previous turn — append to transcript only.
-      ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
-      updateConversationMemory(ctx, userText);
+      // Nicht verlieren: Eine Unterbrechung wird direkt nach dem abgebrochenen
+      // Gloria-Turn als neuer Turn verarbeitet. Zuvor wurde sie nur protokolliert
+      // und blieb unbeantwortet.
+      pendingUtterancesDuringTurn.push(userText);
       return;
     }
     pendingTurn = true;
@@ -552,6 +565,14 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       }
     } finally {
       pendingTurn = false;
+      const interruptedText = pendingUtterancesDuringTurn
+        .splice(0)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (interruptedText && ws.readyState === ws.OPEN) {
+        queueMicrotask(() => void handleUserUtterance(interruptedText));
+      }
     }
   };
 
@@ -640,6 +661,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
                 log.info("turn.barge_in", { callSid: ctx.callSid, partial: trimmed });
                 currentTts.abort();
                 currentTts = null;
+                clearOutboundAudio();
                 ctx.speaking = false;
               }
             }

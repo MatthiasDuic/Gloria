@@ -32,14 +32,14 @@ export function openDeepgram(events: AsrEvents): AsrSession {
   const language = process.env.DEEPGRAM_LANGUAGE || "de";
 
   const connectPlan: ConnectVariant[] = [
-    { model: configuredModel, minimalParams: true, label: "primary/header/minimal" },
     { model: configuredModel, minimalParams: false, label: "primary/header/full" },
+    { model: configuredModel, minimalParams: true, label: "primary/header/minimal" },
   ];
 
   if (fallbackModel !== configuredModel) {
     connectPlan.push(
-      { model: fallbackModel, minimalParams: true, label: "fallback/header/minimal" },
       { model: fallbackModel, minimalParams: false, label: "fallback/header/full" },
+      { model: fallbackModel, minimalParams: true, label: "fallback/header/minimal" },
     );
   }
 
@@ -62,8 +62,8 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     } else {
       params.set("interim_results", "true");
       if (!variant.minimalParams) {
-        const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "450";
-        const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "700";
+        const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "350";
+        const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "600";
         params.set("endpointing", endpointingMs);
         params.set("utterance_end_ms", utteranceEndMs);
       }

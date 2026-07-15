@@ -52,7 +52,7 @@ export async function streamReply(
 
   // gpt-4.1 als Default für bessere Gesprächsqualität.
   // Override via OPENAI_MODEL env.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   // Kleinere Kontextfenster + kuerzere Antworten reduzieren die Time-to-first-audio.
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 12, 6, 24);
   const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 130, 60, 220);
@@ -62,7 +62,12 @@ export async function streamReply(
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
   ];
-  for (const turn of ctx.transcript.slice(-transcriptTurns)) {
+  // handleUserUtterance hat den aktuellen Nutzerturn bereits ins Transkript
+  // geschrieben. Nicht ein zweites Mal an das Modell senden.
+  const history = ctx.transcript.at(-1)?.role === "user" && ctx.transcript.at(-1)?.text === userText
+    ? ctx.transcript.slice(0, -1)
+    : ctx.transcript;
+  for (const turn of history.slice(-transcriptTurns)) {
     messages.push({ role: turn.role, content: turn.text });
   }
   messages.push({ role: "user", content: userText });
@@ -319,6 +324,7 @@ function buildSystemPrompt(ctx: CallContext): string {
   if (styleBlock) parts.push("\n\n" + styleBlock);
   parts.push(
     `\n\nANTWORTFORMAT: Antworte ausschließlich als JSON: {"reply": "deutscher Antworttext", "hangup": false, "transfer": false}. ` +
+    `Gib die Schlüssel zwingend in dieser Reihenfolge aus: reply, hangup, transfer. Beginne den reply sofort und ohne interne Vorbemerkung. ` +
     `Setze hangup=true nur wenn der Anrufende ein klares Nein signalisiert oder das Gespräch sauber beendet wurde. ` +
     `Setze transfer=true (und hangup=false) wenn du den Anrufenden an Frau Brost weiterleitest — NUR wenn er das ausdrücklich wünscht.`,
   );
@@ -352,6 +358,22 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   }
 
+  const pkvData = isPKV ? collectPkvData(ctx) : null;
+  if (pkvData) {
+    const captured = Object.entries(pkvData.values)
+      .map(([field, value]) => `${field}: ${value}`)
+      .join(" | ");
+    lines.push(
+      ``,
+      `BEREITS ERFASSTE BASISANGABEN: ${captured || "noch keine"}.`,
+      `Noch offen: ${pkvData.missing.join(", ") || "keine"}.`,
+      `Verbindlich: Bereits erfasste Angaben NICHT erneut fragen. Wenn eine Antwort mehrere Angaben enthält, gelten alle erkannten Angaben als erfasst. Frage nur das erste noch offene Feld.`,
+    );
+    if (pkvData.email) {
+      lines.push(`Erkannte E-Mail-Adresse: ${pkvData.email}. Wiederhole sie bei der Bestätigung vollständig inklusive Domain-Endung.`);
+    }
+  }
+
   // CONVERSATION STATE — observational, not commanding
   lines.push(``, `WO IHR GERADE SEID:`);
 
@@ -362,7 +384,8 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   } else if (phase === 2) {
     lines.push(
-      `Du hast dich vorgestellt. Jetzt: einen natürlichen Anlasssatz, dann ganz entspannt fragen ob du aufzeichnen darfst — z.B. "Bevor wir anfangen: darf ich das Gespräch kurz mitschneiden?" Kein "bitte antworten Sie mit JA oder NEIN". Einfach fragen und warten.`,
+      `Du hast dich vorgestellt. Wenn der Kunde "Worum geht es?", "Warum rufen Sie an?" oder sinngleich fragt, beantworte ZUERST konkret den Anlass und Nutzen in einem kurzen Satz. Erst danach darfst du um Aufzeichnung bitten. Weiche der Frage niemals mit der Aufzeichnungsfrage aus.`,
+      `Wenn keine offene Rückfrage vorliegt: einen natürlichen Anlasssatz, dann ganz entspannt fragen ob du aufzeichnen darfst — z.B. "Bevor wir anfangen: darf ich das Gespräch kurz mitschneiden?" Kein "bitte antworten Sie mit JA oder NEIN". Einfach fragen und warten.`,
       `Ein Gruß oder eine Namensmeldung ist noch keine Einwilligung — warte auf eine echte Antwort.`,
     );
   } else if (phase === 4) {
@@ -419,10 +442,10 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         ? `ERSTER SCHRITT: Mach eine kurze Überleitung und frag nach Erlaubnis: "Damit sich Herr Duic gut auf den Termin vorbereiten kann, würde ich noch kurz ein paar Basisangaben mit Ihnen klären – passt das noch?" NOCH KEINE Fragen stellen.`
         : `Der Kunde hat zugestimmt. Stelle GENAU EINE Frage pro Turn. STRENG: Niemals zwei Fragen in einem Satz.`,
       `Wenn der Kunde auf die EINSTIEGSFRAGE "passt das noch kurz?" NEIN sagt: "Kein Problem, ich lege die Fragen in die Terminbestätigungsmail – die können Sie dann in Ruhe beantworten." Dann weiter zu Phase 10 (E-Mail).`,
-      `Reihenfolge der Fragen: Geburtsdatum → Körpergröße → Gewicht → Versicherer → Monatsbeitrag → laufende Diagnosen/Behandlungen → Medikamente → stationäre Aufenthalte letzte 5 Jahre → psychische Behandlungen letzte 10 Jahre → Zähne/Zahnersatz → Allergien.`,
+      `Reihenfolge der noch offenen Fragen: ${pkvData?.missing.join(" → ") || "keine"}.`,
       `WICHTIG im Fragenblock: Kein Dank in jeder Zeile. Nutze kurze Übergaenge und gehe direkt zur nächsten Frage.`,
       `WICHTIG: Bei den Gesundheitsfragen (Diagnosen/Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien) gilt ein "Nein" als VOLLSTÄNDIGE und gültige Antwort. Kein Nachhaken, keine Umformulierung derselben Frage - sofort zur nächsten Frage übergehen.`,
-      `Körpergröße und Gewicht IMMER als zwei getrennte Fragen stellen, niemals kombiniert in einem Satz. Das ist verpflichtend.`,
+      `Körpergröße und Gewicht als getrennte Fragen stellen. Nennt der Kunde freiwillig beides in einer Antwort, beide übernehmen und Gewicht NICHT erneut fragen.`,
     );
   } else if (phase === 10) {
     lines.push(
@@ -484,7 +507,7 @@ function inferConversationPhase(ctx: CallContext): number {
 
   const all = turns.map((t) => t.text.toLowerCase()).join(" \n ");
   const hasConsentQuestion = /aufzeichn|mitschneid/.test(all);
-  const hasConsentAnswer = /\b(ja|nein|einverstanden|ok|okay|in ordnung)\b/.test(all);
+  const hasConsentAnswer = recordingConsentResolved(ctx);
 
   // Termin-Hinweis: Mehrere Signale nötig, damit ein einzelnes Schlüsselwort
   // (z. B. "Montag" in einem anderen Kontext) keinen Phase-Sprung auslöst.
@@ -509,7 +532,8 @@ function inferConversationPhase(ctx: CallContext): number {
     /vertragsanalyse|prognose|stellschrauben|ohne verkaufsdruck|gespr[aä]ch mit herrn duic|herr duic schaut/.test(all);
 
   const hasConfirmedSlot = Boolean(ctx.confirmedSlotPhrase);
-  const hasDataCollection = /geburtsdatum|k[öo]rpergr[öo][ßs]e|gewicht|diagnose|medikamente|allerg/.test(all);
+  const pkvData = collectPkvData(ctx);
+  const hasDataCollection = pkvData.missing.length === 0;
   // Kunde hat Basisangaben abgelehnt: Gloria hat "Terminbestätigungsmail" oder "in Ruhe beantworten" gesagt
   const hasBasisdatenRefused = /terminbest[äa]tigungsmail|in ruhe beantworten/i.test(all);
   const hasEmailAsked = /\be-?mail\b/i.test(all);
@@ -531,6 +555,93 @@ function inferConversationPhase(ctx: CallContext): number {
   if (!hasEmailAsked) return 10;  // E-Mail fragen
   if (!hasSummary) return 11;     // Zusammenfassung + Verabschiedung
   return 11;
+}
+
+type PkvField =
+  | "Geburtsdatum"
+  | "Körpergröße"
+  | "Gewicht"
+  | "Versicherer"
+  | "Monatsbeitrag"
+  | "Diagnosen/Behandlungen"
+  | "Medikamente"
+  | "stationäre Aufenthalte"
+  | "psychische Behandlungen"
+  | "Zähne/Zahnersatz"
+  | "Allergien";
+
+const PKV_FIELDS: PkvField[] = [
+  "Geburtsdatum", "Körpergröße", "Gewicht", "Versicherer", "Monatsbeitrag",
+  "Diagnosen/Behandlungen", "Medikamente", "stationäre Aufenthalte",
+  "psychische Behandlungen", "Zähne/Zahnersatz", "Allergien",
+];
+
+function recordingConsentResolved(ctx: CallContext): boolean {
+  const turns = ctx.transcript;
+  for (let i = 0; i < turns.length; i += 1) {
+    if (turns[i].role !== "assistant" || !/aufzeichn|mitschneid/i.test(turns[i].text)) continue;
+    const answer = turns.slice(i + 1).find((turn) => turn.role === "user")?.text.trim().toLowerCase() || "";
+    return /^(?:ja\b|jawohl|gerne\b|einverstanden|okay\b|ok\b|in ordnung|kein problem|nein\b|nö\b|lieber nicht|bitte nicht)/i.test(answer);
+  }
+  return false;
+}
+
+function collectPkvData(ctx: CallContext): {
+  values: Partial<Record<PkvField, string>>;
+  missing: PkvField[];
+  email?: string;
+} {
+  const values: Partial<Record<PkvField, string>> = {};
+  const turns = ctx.transcript;
+
+  for (let i = 0; i < turns.length; i += 1) {
+    const turn = turns[i];
+    if (turn.role !== "assistant") continue;
+    const question = turn.text.toLowerCase();
+    const answers: string[] = [];
+    for (let j = i + 1; j < turns.length && turns[j].role === "user"; j += 1) answers.push(turns[j].text);
+    const answer = answers.join(" ").replace(/\s+/g, " ").trim();
+    if (!answer) continue;
+
+    if (/geburtsdatum|wann.*geboren/.test(question)) values.Geburtsdatum = answer;
+    if (/k[öo]rpergr[öo][ßs]e|wie gro[ßs]/.test(question)) values.Körpergröße = answer;
+    if (/gewicht|wie viel wiegen/.test(question)) values.Gewicht = answer;
+    if (/krankenversicherer|welcher.*(?:kasse|versicherung)/.test(question)) values.Versicherer = answer;
+    if (/monatsbeitrag|wie hoch.*beitrag/.test(question)) values.Monatsbeitrag = answer;
+    if (/diagnos|laufende behandlung/.test(question)) values["Diagnosen/Behandlungen"] = answer;
+    if (/medikament/.test(question)) {
+      const medicationOnly = /^(?:eine?|einen?)\s+medikamente?[.!?]?$/i.test(answer);
+      if (!medicationOnly) values.Medikamente = answer;
+    }
+    if (/station[äa]re|krankenhaus/.test(question)) values["stationäre Aufenthalte"] = answer;
+    if (/psychisch/.test(question)) values["psychische Behandlungen"] = answer;
+    if (/z[äa]hne|zahnersatz/.test(question)) values["Zähne/Zahnersatz"] = answer;
+    if (/allerg/.test(question)) values.Allergien = answer;
+
+    // Freiwillige Kombi-Antworten übernehmen, auch wenn nur nach einem Feld gefragt wurde.
+    if (/\b(?:1|ein(?:s|en)?)\s*(?:meter|m)\b/i.test(answer) || /meter\s+[a-zäöüß\d-]+\s+gro[ßs]/i.test(answer)) {
+      values.Körpergröße = answer;
+    }
+    if (/\b(?:kilo(?:gramm)?|kg)\b/i.test(answer)) values.Gewicht = answer;
+    if (/\b(?:euro|€)\b/i.test(answer) && /beitrag|zahl|kost/i.test(`${question} ${answer}`)) values.Monatsbeitrag = answer;
+  }
+
+  const email = extractSpokenEmail(turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" "));
+  return { values, missing: PKV_FIELDS.filter((field) => !values[field]), email };
+}
+
+function extractSpokenEmail(text: string): string | undefined {
+  const candidates = text.toLowerCase().match(/[a-z0-9._%+-]+(?:\s+|\s*(?:at|ät|@)\s*)[a-z0-9.-]+(?:\s*(?:punkt|dot|\.)\s*[a-z](?:\s+[a-z]){0,3})/gi);
+  const raw = candidates?.at(-1);
+  if (!raw) return undefined;
+  const normalized = raw
+    .toLowerCase()
+    .replace(/\s+(?:at|ät)\s+/g, "@")
+    .replace(/\s*@\s*/g, "@")
+    .replace(/\s*(?:punkt|dot)\s*/g, ".")
+    .replace(/\.\s*([a-z])\s+([a-z])\b/g, ".$1$2")
+    .replace(/\s+/g, "");
+  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(normalized) ? normalized : undefined;
 }
 
 function buildMemoryBlock(ctx: CallContext): string {

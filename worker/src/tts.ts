@@ -54,7 +54,7 @@ export function streamElevenLabsToMulaw(
   // eleven_v3: expressivste Stimme (2025), 70+ Sprachen, besonders menschlich klingendes Deutsch.
   // eleven_multilingual_v2: stabil, niedrigere Latenz — Fallback via ELEVENLABS_MODEL env.
   // eleven_flash_v2_5: ultra-low-latency (~75ms) für latenz-kritische Use Cases.
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_v3";
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
   if (!apiKey || !voiceId) {
     log.error("tts.missing_config", {
