@@ -654,8 +654,14 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
   const emailAnswer = ctx.transcript
     .slice(emailQuestionIndex + 1)
     .find((turn) => turn.role === "user")?.text.trim() || "";
+  const emailTurnsSinceQuestion = ctx.transcript
+    .slice(emailQuestionIndex + 1)
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text)
+    .join(" ");
+  const resolvedEmail = extractSpokenEmail(emailTurnsSinceQuestion) || pkvData.email;
   const emailDeclined = /^(?:nein\b|keine e-?mail|ohne e-?mail|m[öo]chte ich nicht|lieber nicht)/i.test(emailAnswer);
-  if (!pkvData.email && !emailDeclined) {
+  if (!resolvedEmail && !emailDeclined) {
     return {
       reply: "Ich habe die E-Mail-Adresse noch nicht vollständig verstanden. Bitte nennen Sie sie noch einmal, gern mit At und Punkt.",
       hangup: false,
@@ -663,8 +669,8 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     };
   }
 
-  const confirmationSentence = pkvData.email
-    ? `Die Terminbestätigung sende ich an ${pkvData.email}.`
+  const confirmationSentence = resolvedEmail
+    ? `Die Terminbestätigung sende ich an ${resolvedEmail}.`
     : "Die Terminbestätigung erfolgt wie besprochen ohne E-Mail.";
   return {
     reply: `Ihr persönlicher Termin mit Herrn Duic ist am ${ctx.confirmedSlotPhrase}. Herr Duic bereitet die Vertragsanalyse und Beitragsprognose für Sie vor. ${confirmationSentence} Herr Duic freut sich auf das Gespräch. Auf Wiederhören!`,
@@ -801,15 +807,27 @@ function extractSpokenEmail(text: string): string | undefined {
 
   const candidates = text.toLowerCase().match(/[a-z0-9_%+-]+(?:\s*(?:punkt|dot|\.)\s*[a-z0-9_%+-]+)*\s*(?:at|ät|@)\s*[a-z0-9-]+(?:\s*(?:punkt|dot|\.)\s*[a-z0-9-]+)+/gi);
   const raw = candidates?.at(-1);
-  if (!raw) return undefined;
-  const normalized = raw
+  if (raw) {
+    const normalized = raw
+      .toLowerCase()
+      .replace(/\s+(?:at|ät)\s+/g, "@")
+      .replace(/\s*@\s*/g, "@")
+      .replace(/\s*(?:punkt|dot|\.)\s*/g, ".")
+      .replace(/\.\s*([a-z])\s+([a-z])\b/g, ".$1$2")
+      .replace(/\s+/g, "");
+    if (/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(normalized)) return normalized;
+  }
+
+  // Fallback for spelled addresses like "info at firma punkt d e" spread across turns.
+  const normalizedAcrossTurns = text
     .toLowerCase()
-    .replace(/\s+(?:at|ät)\s+/g, "@")
+    .replace(/\b(?:klammeraffe|at|ät|aett?)\b/g, "@")
     .replace(/\s*@\s*/g, "@")
-    .replace(/\s*(?:punkt|dot|\.)\s*/g, ".")
-    .replace(/\.\s*([a-z])\s+([a-z])\b/g, ".$1$2")
+    .replace(/\b(?:punkt|dot)\b/g, ".")
+    .replace(/[<>()[\],;:"']/g, "")
     .replace(/\s+/g, "");
-  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(normalized) ? normalized : undefined;
+  const fallbackEmail = normalizedAcrossTurns.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g)?.at(-1);
+  return fallbackEmail;
 }
 
 function buildMemoryBlock(ctx: CallContext): string {

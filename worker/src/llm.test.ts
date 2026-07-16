@@ -100,6 +100,68 @@ test("does not end after an unusable email answer", () => {
   assert.match(reply.reply, /max\.neumann@example\.de/);
 });
 
+test("accepts spelled email suffix across multiple turns", () => {
+  const ctx = newContext({
+    callSid: "test-email-spelled-tld",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "gewerbliche Sachversicherung",
+  });
+
+  let reply = nextReply(ctx);
+  assert.match(reply.reply, /E-Mail-Adresse/);
+  appendExchange(ctx, reply, "Donnerstag.");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info at Musterbau");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Punkt d e.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /info@musterbau\.de/);
+});
+
+test("closes once fragmented spoken email becomes complete", () => {
+  const ctx = newContext({
+    callSid: "test-email-real-fragmented",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "gewerbliche Sachversicherung",
+  });
+
+  let reply = nextReply(ctx);
+  assert.match(reply.reply, /E-Mail-Adresse/);
+  appendExchange(ctx, reply, "Donnerstag.");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info at");
+
+  reply = nextReply(ctx);
+  assert.match(reply.reply, /noch nicht vollständig verstanden/);
+  appendExchange(ctx, reply, "Info at Musterbau Punkt d e.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /info@musterbau\.de/);
+});
+
 test("skips the PKV catalog for other campaign topics", () => {
   const ctx = newContext({
     callSid: "test-non-pkv",
