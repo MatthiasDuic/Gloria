@@ -1,6 +1,7 @@
 import { fetch } from "undici";
 import type { CallContext } from "./state.js";
 import { log } from "./log.js";
+import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 
 type Outcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt";
 
@@ -11,6 +12,13 @@ type ExtractedReport = {
   summary: string;
   nextCallAt?: string;
   directDial?: string;
+};
+
+type ReportDocumentation = {
+  conversationOccurred: boolean;
+  callDisposition: "Gespraech" | "Anrufbeantworter" | "Warteschleife ohne Gespraech" | "Kein Gespraech";
+  followUpPlanned: boolean;
+  followUpAt?: string;
 };
 
 const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das Transkript unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit folgenden Feldern:
@@ -153,6 +161,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     extracted?.summary ||
     `Anruf bei ${ctx.company} zum Thema ${ctx.topic}. Keine Auswertung verfügbar.`;
   const contactEmail: string | undefined = extracted?.contactEmail;
+  const documentation = deriveReportDocumentation(ctx, extracted);
 
   if (ctx.confirmedSlotPhrase) {
     outcome = "Termin";
@@ -170,6 +179,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
       summary = `Termin vereinbart: ${ctx.confirmedSlotPhrase}.`;
     }
   }
+
+  summary = withDocumentationHeader(summary, outcome, documentation);
 
   const token = process.env.APP_INTERNAL_TOKEN || "";
   const url = `${baseUrl}/api/calls/webhook`;
@@ -189,6 +200,10 @@ export async function postReport(ctx: CallContext): Promise<void> {
     topic: ctx.topic,
     summary,
     outcome,
+    conversationOccurred: documentation.conversationOccurred,
+    callDisposition: documentation.callDisposition,
+    followUpPlanned: documentation.followUpPlanned,
+    followUpAt: documentation.followUpAt,
     appointmentAt,
     nextCallAt: extracted?.nextCallAt,
     directDial: extracted?.directDial,
@@ -242,6 +257,54 @@ export async function postReport(ctx: CallContext): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function deriveReportDocumentation(
+  ctx: CallContext,
+  extracted: ExtractedReport | null,
+): ReportDocumentation {
+  const userTurns = ctx.transcript
+    .filter((entry) => entry.role === "user")
+    .map((entry) => entry.text.trim())
+    .filter(Boolean);
+
+  const hasMeaningfulHumanTurn = userTurns.some((text) => looksLikeMeaningfulHumanTurn(text));
+  const hasVoicemailCue = Boolean(ctx.detectedVoicemail) || userTurns.some((text) => classifyInboundSpeech(text) === "voicemail");
+  const hasQueueCue = Boolean(ctx.queueDetected) || userTurns.some((text) => classifyInboundSpeech(text) === "queue");
+
+  const callDisposition: ReportDocumentation["callDisposition"] = hasVoicemailCue
+    ? "Anrufbeantworter"
+    : hasQueueCue && !hasMeaningfulHumanTurn
+      ? "Warteschleife ohne Gespraech"
+      : hasMeaningfulHumanTurn
+        ? "Gespraech"
+        : "Kein Gespraech";
+
+  const conversationOccurred = hasMeaningfulHumanTurn && !hasVoicemailCue;
+  const followUpAt = extracted?.nextCallAt;
+  const followUpPlanned = extracted?.outcome === "Wiedervorlage" || Boolean(followUpAt);
+
+  return {
+    conversationOccurred,
+    callDisposition,
+    followUpPlanned,
+    followUpAt,
+  };
+}
+
+function withDocumentationHeader(summary: string, outcome: Outcome, documentation: ReportDocumentation): string {
+  const header = [
+    `Dokumentation:`,
+    `- Gespraech stattgefunden: ${documentation.conversationOccurred ? "Ja" : "Nein"}`,
+    `- Einordnung: ${documentation.callDisposition}`,
+    `- Ergebnis: ${outcome}`,
+    `- Weiterer Anruf geplant: ${documentation.followUpPlanned ? "Ja" : "Nein"}`,
+    `- Rueckrufzeitpunkt: ${documentation.followUpAt || "-"}`,
+  ].join("\n");
+
+  const trimmed = summary.trim();
+  if (trimmed.startsWith("Dokumentation:")) return trimmed;
+  return `${header}\n\nZusammenfassung:\n${trimmed}`;
 }
 
 /**

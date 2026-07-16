@@ -8,6 +8,7 @@ import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
+import { classifyInboundSpeech } from "./call-classification.js";
 
 /** Telnyx PCMU 8 kHz uses 20 ms chunks (160 bytes per frame). */
 const FRAME_BYTES = 160;
@@ -495,6 +496,41 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   const handleUserUtterance = async (userText: string) => {
     if (!ctx) return;
     clearSilenceOpenerTimer();
+
+    const classification = classifyInboundSpeech(userText);
+
+    if (classification === "voicemail") {
+      ctx.detectedVoicemail = true;
+      ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      log.info("turn.voicemail_detected", { callSid: ctx.callSid, text: userText });
+      try {
+        ws.close(1000, "voicemail");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    if (classification === "queue") {
+      ctx.waitingForDecisionMaker = true;
+      ctx.queueDetected = true;
+      ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      log.info("turn.queue_detected", { callSid: ctx.callSid, text: userText });
+      return;
+    }
+
+    if (ctx.waitingForDecisionMaker) {
+      // In der Durchstellung/Warteschlange NICHT sprechen; erst reagieren,
+      // wenn wieder eine normale menschliche Antwort erkennbar ist.
+      if (classification !== "human") {
+        ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+        log.info("turn.queue_wait", { callSid: ctx.callSid, text: userText });
+        return;
+      }
+      ctx.waitingForDecisionMaker = false;
+      log.info("turn.queue_handover_complete", { callSid: ctx.callSid });
+    }
+
     if (pendingTurn) {
       // Nicht verlieren: Eine Unterbrechung wird direkt nach dem abgebrochenen
       // Gloria-Turn als neuer Turn verarbeitet. Zuvor wurde sie nur protokolliert

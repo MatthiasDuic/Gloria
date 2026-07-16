@@ -50,6 +50,10 @@ export type CallContext = {
   speaking: boolean;
   // Counter for inbound user utterances during a Gloria turn (used to abort TTS).
   userBytesWhileSpeaking: number;
+  // Runtime-Klassifikation fuer Spezialfaelle im Call.
+  detectedVoicemail?: boolean;
+  waitingForDecisionMaker?: boolean;
+  queueDetected?: boolean;
 };
 
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {
