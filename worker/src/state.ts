@@ -7,6 +7,7 @@ export type CallContext = {
   leadId?: string;
   company?: string;
   contactName?: string;
+  leadNote?: string;
   topic?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
