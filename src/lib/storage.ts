@@ -7,9 +7,12 @@ import {
   appendConversationEventToPostgres,
   bootstrapUserScriptsFromDefaults,
   clearReportRecordingInPostgres,
+  diagnosePostgresConnection,
   deleteAllReportsFromPostgres,
   deleteReportFromPostgres,
   deleteReportsOlderThanInPostgres,
+  getLastPostgresFailureReason,
+  isDatabaseUrlConfigured,
   readCampaignListsStateFromPostgres,
   readConversationEventsFromPostgres,
   findUserById,
@@ -610,6 +613,16 @@ async function writeLeads(leads: Lead[], userId?: string): Promise<void> {
 
   // In production (Vercel), Postgres is required since file system is read-only
   if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    if (isDatabaseUrlConfigured()) {
+      const lastFailure = getLastPostgresFailureReason();
+      if (lastFailure) {
+        throw new Error(`Postgres storage write failed: ${lastFailure}`);
+      }
+
+      const diagnosis = await diagnosePostgresConnection();
+      throw new Error(`Postgres storage is unavailable. ${diagnosis}`);
+    }
+
     throw new Error(
       "DATABASE_URL is not configured. Please set DATABASE_URL environment variable for Postgres storage."
     );
@@ -650,6 +663,23 @@ async function writeCampaignState(state: CampaignStateFile, userId?: string): Pr
 
   if (wroteToPostgres) {
     return;
+  }
+
+  // In production (Vercel), Postgres is required since file system is read-only.
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    if (isDatabaseUrlConfigured()) {
+      const lastFailure = getLastPostgresFailureReason();
+      if (lastFailure) {
+        throw new Error(`Postgres storage write failed: ${lastFailure}`);
+      }
+
+      const diagnosis = await diagnosePostgresConnection();
+      throw new Error(`Postgres storage is unavailable. ${diagnosis}`);
+    }
+
+    throw new Error(
+      "DATABASE_URL is not configured. Please set DATABASE_URL environment variable for Postgres storage.",
+    );
   }
 
   if (!userId) {
@@ -732,7 +762,9 @@ function buildMetrics(
 
 export async function getDashboardData(options?: { userId?: string; role?: "master" | "user" }): Promise<DashboardData> {
   const userId = options?.userId;
-  const scopeReportsToUser = options?.role === "user" && Boolean(userId);
+  // Tenant isolation: sobald ein userId-Kontext vorhanden ist, werden
+  // Reports/Leads/Events strikt auf diesen User gescoped.
+  const scopeReportsToUser = Boolean(userId);
   const scopedUserId = scopeReportsToUser ? userId : undefined;
   const [leads, reportState, scriptsState, events] = await Promise.all([
     readLeads(scopedUserId),
@@ -948,16 +980,24 @@ export async function storeCallReport(payload: {
     topic: payload.topic,
   });
 
-  const [leads, reportDb] = await Promise.all([
-    readLeads(payload.userId),
-    readReportDatabase(),
-  ]);
+  const reportDb = await readReportDatabase();
   const reports = reportDb.reports;
 
   const existingIndex = payload.callSid
     ? reports.findIndex((report) => report.callSid === payload.callSid)
     : -1;
   const existingReport = existingIndex >= 0 ? reports[existingIndex] : undefined;
+
+  let resolvedUserId = payload.userId || existingReport?.userId;
+
+  if (!resolvedUserId && payload.leadId) {
+    const existingLead = await getLeadById(payload.leadId);
+    if (existingLead?.userId) {
+      resolvedUserId = existingLead.userId;
+    }
+  }
+
+  const leads = await readLeads(resolvedUserId);
 
   const mergeSummary = (existing: string, incoming?: string, chunk?: string) => {
     let merged = (existing || "").trim();
@@ -993,7 +1033,7 @@ export async function storeCallReport(payload: {
 
   const report: CallReport = {
     id: existingReport?.id || `report-${Date.now()}`,
-    userId: payload.userId || existingReport?.userId,
+    userId: resolvedUserId || existingReport?.userId,
     phoneNumberId: payload.phoneNumberId || existingReport?.phoneNumberId,
     callSid: payload.callSid || existingReport?.callSid,
     leadId: payload.leadId || existingReport?.leadId,
@@ -1093,7 +1133,7 @@ export async function storeCallReport(payload: {
 
   await Promise.all([
     writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
-    writeLeads(updatedLeads, payload.userId),
+    writeLeads(updatedLeads, resolvedUserId),
   ]);
 
   // Live-Monitor: Terminal-Event mit dem finalen Outcome anhaengen, damit
@@ -1118,7 +1158,7 @@ export async function storeCallReport(payload: {
             ? `Wiedervorlage: ${payload.nextCallAt}`
             : undefined,
       },
-      { userId: payload.userId },
+      { userId: resolvedUserId },
     );
   }
 
@@ -1142,11 +1182,32 @@ export async function getLatestReportSummaryForLead(
 }
 
 export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
-  const leads = await readLeads();
+  const [leads, campaignState] = await Promise.all([
+    readLeads(),
+    readCampaignState(),
+  ]);
+
+  const activeListsByUser = new Map<string, Set<string>>();
+  for (const entry of campaignState.lists) {
+    if (!entry.active) continue;
+    const userKey = entry.userId || "__global__";
+    if (!activeListsByUser.has(userKey)) {
+      activeListsByUser.set(userKey, new Set());
+    }
+    activeListsByUser.get(userKey)!.add(entry.listId || "legacy");
+  }
+
   const now = Date.now();
 
   return leads
     .filter((lead) => {
+      const userKey = lead.userId || "__global__";
+      const activeLists = activeListsByUser.get(userKey);
+      const listId = lead.listId || "legacy";
+      if (!activeLists || !activeLists.has(listId)) {
+        return false;
+      }
+
       if (lead.status !== "wiedervorlage" || !lead.nextCallAt) {
         return false;
       }
@@ -1186,6 +1247,7 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     listId: string;
     listName: string;
     active: boolean;
+    currentlyDialing: boolean;
     total: number;
     pending: number;
     called: number;
@@ -1194,8 +1256,56 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     rejections: number;
   }>
 > {
-  const leads = await readLeads(userId);
-  const campaignState = await readCampaignState(userId);
+  const [leads, campaignState, scopedEvents, globalEvents] = await Promise.all([
+    readLeads(userId),
+    readCampaignState(userId),
+    getRecentConversationEvents({ userId, minutes: 20, limit: 400 }),
+    userId ? getRecentConversationEvents({ minutes: 20, limit: 400 }) : Promise.resolve([]),
+  ]);
+
+  const eventMap = new Map<string, ConversationEvent>();
+  for (const event of [...scopedEvents, ...globalEvents]) {
+    eventMap.set(event.id, event);
+  }
+  const recentEvents = [...eventMap.values()];
+
+  const terminalEvents = new Set([
+    "call_completed",
+    "call_ended",
+    "hangup",
+    "appointment_booked",
+    "rejection_final",
+    "transfer_failed",
+  ]);
+
+  const orderedEvents = [...recentEvents].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const activeSessions = new Map<string, { company: string; topic: string; lastEventType: string }>();
+
+  for (const event of orderedEvents) {
+    const key = event.callSid || `no-sid-${event.company}-${event.topic}`;
+    activeSessions.set(key, {
+      company: event.company,
+      topic: event.topic,
+      lastEventType: event.eventType,
+    });
+  }
+
+  const currentlyDialingListIds = new Set<string>();
+  for (const session of activeSessions.values()) {
+    if (terminalEvents.has(session.lastEventType)) {
+      continue;
+    }
+
+    for (const lead of leads) {
+      const sameCompany = lead.company.trim().toLowerCase() === session.company.trim().toLowerCase();
+      const sameTopic = String(lead.topic || "").trim() === String(session.topic || "").trim();
+      if (!sameCompany || !sameTopic) {
+        continue;
+      }
+
+      currentlyDialingListIds.add(lead.listId || "legacy");
+    }
+  }
 
   const grouped = new Map<
     string,
@@ -1251,6 +1361,7 @@ export async function getCampaignListsSummary(userId?: string): Promise<
       active: Boolean(
         campaignState.lists.find((entry) => entry.listId === list.listId)?.active,
       ),
+      currentlyDialing: currentlyDialingListIds.has(list.listId),
     }))
     .sort((a, b) => a.listName.localeCompare(b.listName, "de"));
 }

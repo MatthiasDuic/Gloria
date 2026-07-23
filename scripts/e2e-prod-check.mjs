@@ -185,11 +185,11 @@ let reportId = "";
   add("user_reports_contains_own", reports.some((x) => x.id === reportId), `reportId=${reportId}`);
 }
 
-// 11) master sees user report
+// 11) strict tenant isolation: master should NOT see another user's report
 {
   const r = await master.request("/api/reports");
   const reports = Array.isArray(r.json?.reports) ? r.json.reports : [];
-  add("master_reports_contains_user_report", reports.some((x) => x.id === reportId), `reportId=${reportId}`);
+  add("master_reports_excludes_user_report", !reports.some((x) => x.id === reportId), `reportId=${reportId}`);
 }
 
 const failed = checks.filter((c) => !c.ok);

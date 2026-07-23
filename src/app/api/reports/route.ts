@@ -74,12 +74,10 @@ export async function DELETE(request: NextRequest) {
   const reportId = request.nextUrl.searchParams.get("reportId");
   const all = request.nextUrl.searchParams.get("all");
 
-  // Bulk-Löschung aller Reports des angemeldeten Nutzers.
-  // Master-Accounts löschen global, User-Accounts nur ihre eigenen
-  // Datensätze (über userId-Filter im DB-Layer).
+  // Bulk-Löschung ist immer auf den angemeldeten Benutzer begrenzt.
+  // Dadurch bleiben Report-Daten strikt mandantensepariert.
   if (all === "1" && !reportId) {
-    const scope = sessionUser.role === "master" ? {} : { userId: sessionUser.id };
-    const result = await deleteAllReports(scope);
+    const result = await deleteAllReports({ userId: sessionUser.id });
     return NextResponse.json({
       ok: true,
       deletedReports: result.deletedReports,
@@ -91,13 +89,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "reportId fehlt." }, { status: 400 });
   }
 
-  if (sessionUser.role !== "master") {
-    const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
-    const owned = ownData.reports.some((report) => report.id === reportId);
+  const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
+  const owned = ownData.reports.some((report) => report.id === reportId);
 
-    if (!owned) {
-      return NextResponse.json({ error: "Keine Berechtigung." }, { status: 403 });
-    }
+  if (!owned) {
+    return NextResponse.json({ error: "Keine Berechtigung." }, { status: 403 });
   }
 
   await deleteReport(reportId);
