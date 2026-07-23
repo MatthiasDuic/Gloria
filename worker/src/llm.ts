@@ -377,6 +377,21 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     );
   }
 
+  if (isCommercialInsurance) {
+    lines.push(
+      ``,
+      `WAS DU UEBER GEWERBLICHE VERSICHERUNGEN WEISST (verinnerlichen - nicht ablesen):`,
+      `Das Thema ist ein strukturierter Vergleich bestehender Policen und ein Check-up, ob die Absicherung heute noch marktkonform ist.`,
+      `Der Ersttermin ist ein Analyse-Termin: ${owner} stellt sich und seine Arbeitsweise vor, nimmt die noetigen Daten fuer den Vergleich auf und vereinbart direkt einen zweiten Termin zur Ergebnisvorstellung.`,
+      `Der Zweittermin ist der Ergebnis-Termin: Dort werden Einsparpotenziale, Leistungsverbesserungen und moegliche Deckungsluecken transparent praesentiert.`,
+      `Realistischer Nutzenanker: In vielen Faellen lassen sich bis zu dreißig Prozent Beitrag einsparen - oft bei gleichzeitig besseren Leistungen.`,
+      `Zusatznutzen: Hauefig werden Risiken sichtbar, die bisher gar nicht oder nicht ausreichend abgesichert sind.`,
+      `Typisches Kundenmuster: Viele Betriebe schliessen Policen einmal ab und pruefen sie jahrelang nicht mehr. Probleme fallen oft erst im Schadenfall auf.`,
+      `Weiteres Muster: Manche verlassen sich voll auf den Makler und haben keinen klaren Ueberblick, was konkret versichert ist und was nicht.`,
+      `Deine Aufgabe im Gespraech: Nicht druecken, sondern Struktur und Klarheit geben. Der Kunde soll verstehen, dass der erste Termin eine saubere Bestandsaufnahme ist - kein Produktverkaufstermin.`,
+    );
+  }
+
   const pkvData = isPKV ? collectPkvData(ctx) : null;
   if (pkvData) {
     const captured = Object.entries(pkvData.values)
@@ -433,6 +448,9 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         `Aufzeichnung ist geklärt. Jetzt zuerst Vertrauen vor Terminierung: kurz auf die letzte Aussage eingehen, Nutzen greifbar machen und dann eine einzige offene Frage stellen.`,
         `Nicht-PKV Leitlinie: Kein Termin-Push in den ersten Zügen nach Einwilligung. Erst Relevanz und Verständnis aufbauen, dann behutsam zur Terminfrage überleiten.`,
         isCommercialInsurance
+          ? `Setze frueh den Rahmen fuer die 2-Termin-Logik: Der erste Termin dient der Bestandsaufnahme und Datenerhebung fuer den Vergleich, der zweite Termin praesentiert die Analyseergebnisse.`
+          : ``,
+        isCommercialInsurance
           ? `GEWERBE-LEITFRAGEN (eine pro Turn, nie als Dreierblock): (1) "Wann wurde Ihre Absicherung zuletzt als Gesamtbild geprüft?" (2) "Hat sich bei Ihnen in den letzten Jahren etwas verändert – z. B. Wachstum, neue Tätigkeiten oder mehr Mitarbeitende?" (3) "Wo hätten Sie heute den größten Klärungsbedarf: Deckungslücken oder Beitrag-Leistung?"`
           : ``,
         `Wenn die Person skeptisch ist: validieren, konkretisieren, rückfragen (Dreischritt) statt pitchen.`,
@@ -456,6 +474,12 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         isCommercialInsurance
           ? `Bei gewerblichen Versicherungen bleib in der Sache bei Betriebskontext: gewachsenes Unternehmen, neue Tätigkeiten, verändertes Risikoprofil, Aktualität der Policen.`
           : ``,
+        isCommercialInsurance
+          ? `Wirkungsanker fuer Gewerbe: Viele Unternehmen zahlen seit Jahren zu viel oder haben gleichzeitig Leistungsluecken. Formuliere das als pruefbare Arbeitshypothese, nicht als Behauptung.`
+          : ``,
+        isCommercialInsurance
+          ? `Nutze Einspar- und Leistungsnutzen vorsichtig konkret: "In vielen Faellen lassen sich deutliche Beitragsvorteile erzielen, teils bis zu dreißig Prozent - haeufig mit besserem Schutz."`
+          : ``,
         `Keine Angstkommunikation und kein künstliches Dramatisieren. Sprich über Planbarkeit, Schutzniveau und Entscheidungsfreiheit.`,
         `Beende diese Phase mit einer aktivierenden Denkfrage ohne Themenwechsel, z. B. "Wurde das bei Ihnen schon einmal strukturiert gegengeprüft?"`,
       );
@@ -463,11 +487,17 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
   } else if (phase === 6) {
     lines.push(
       `KONZEPT-BRIDGE: Knüpfe ausdrücklich an die letzte Aussage des Kunden an und erkläre in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
+      isCommercialInsurance
+        ? `Bei gewerblichen Versicherungen muss klar sein: Termin 1 = Datenaufnahme und Vergleichsgrundlage, Termin 2 = Ergebnisvorstellung mit konkreten Optionen und Empfehlung.`
+        : ``,
       `Mache einen Verständnisschritt vor dem Termin: "Wäre so eine nüchterne Einordnung grundsätzlich hilfreich für Sie?" Erst bei Offenheit terminieren.`,
     );
   } else if (phase === 7) {
     lines.push(
       `Das Interesse ist da. Wiederhole keinen Pitch und keinen Reformdruck. Bestätige knapp, was dem Kunden wichtig war, und gehe ruhig zur Terminabstimmung.`,
+      isCommercialInsurance
+        ? `Rahme den Ersttermin fuer Gewerbe als strukturierten Analyse-Termin: Vorstellung, Sichtung der aktuellen Absicherung, Aufnahme der Vergleichsdaten, danach Termin 2 zur Ergebnisbesprechung.`
+        : ``,
       `Dann Termin schließen: erst fragen ob eher Vormittag oder Nachmittag passt, dann genau zwei konkrete Slots aus der NÄCHSTEN WOCHE anbieten (nicht am nächsten Tag). Wenn beide nicht passen: zwei weitere Slots aus der darauffolgenden freien Woche anbieten, keinen bereits abgelehnten Slot wiederholen.`,
       `Rahme den Termin als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic, nicht als Telefontermin.`,
       `Wenn der Kunde einen Slot auswählt: bestätige NUR den Termin in einem kurzen Satz und stelle höchstens die Frage, ob noch zwei Minuten für die Vorbereitung passen. KEINE Verabschiedung, KEIN hangup, KEINE Abschluss-Zusammenfassung und nicht behaupten, es sei nichts vorzubereiten.`,
