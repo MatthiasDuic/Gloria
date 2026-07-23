@@ -51,9 +51,8 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  // eleven_v3: expressivste Stimme (2025), 70+ Sprachen, besonders menschlich klingendes Deutsch.
-  // eleven_multilingual_v2: stabil, niedrigere Latenz — Fallback via ELEVENLABS_MODEL env.
-  // eleven_flash_v2_5: ultra-low-latency (~75ms) für latenz-kritische Use Cases.
+  // Premium-Sweetspot: sehr schnelle Startlatenz bei weiterhin natuerlicher
+  // Prosodie fuer Telefonakquise.
   const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
   if (!apiKey || !voiceId) {
@@ -79,10 +78,10 @@ export function streamElevenLabsToMulaw(
   // hält die Stimm-Identität stabil. style=0.35 erlaubt Ausdruck ohne
   // Drama. speed=0.86 ist bewusst langsamer, damit Gloria am Telefon
   // Endsilben sauber ausgesprochen werden.
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.35);
-  const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.85);
-  const style = numEnv("ELEVENLABS_STYLE", 0.45);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.88);
+  const stability = numEnv("ELEVENLABS_STABILITY", 0.4);
+  const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
+  const style = numEnv("ELEVENLABS_STYLE", 0.38);
+  const speed = numEnv("ELEVENLABS_SPEED", 0.9);
   const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
 
   const done = (async () => {

@@ -65,6 +65,31 @@ ELEVENLABS_API_KEY=
 ELEVENLABS_VOICE_ID=
 ```
 
+### Premium Voice Profile (Locked Sweetspot)
+Set these values in production (Render worker) to keep one consistent premium mode:
+
+```
+OPENAI_MODEL=gpt-4.1
+LLM_TRANSCRIPT_TURNS=10
+LLM_MAX_TOKENS=115
+LLM_TIMEOUT_MS=7600
+LLM_EARLY_FLUSH_CHARS=34
+
+ELEVENLABS_MODEL=eleven_flash_v2_5
+ELEVENLABS_STABILITY=0.4
+ELEVENLABS_SIMILARITY=0.88
+ELEVENLABS_STYLE=0.38
+ELEVENLABS_SPEED=0.9
+ELEVENLABS_SPEAKER_BOOST=true
+
+DEEPGRAM_ENDPOINTING_MS=420
+DEEPGRAM_UTTERANCE_END_MS=760
+```
+
+Notes:
+- This profile is tuned for fast first audio while preserving a natural premium sales tone.
+- Keep these values identical across staging and production to avoid drift in call behavior.
+
 ### Build & Runtime
 - Next.js 16.2.3 (App Router, TypeScript)
 - Vercel deployment (nodejs runtime for API routes)

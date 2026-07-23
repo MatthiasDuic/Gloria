@@ -45,6 +45,12 @@ export async function streamReply(
   userText: string,
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
+  const trustReply = buildDeterministicTrustReply(ctx, userText);
+  if (trustReply) {
+    onSentence(trustReply.reply);
+    return trustReply;
+  }
+
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
     onSentence(deterministicReply.reply);
@@ -56,14 +62,15 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // gpt-4.1 als Default für bessere Gesprächsqualität.
-  // Override via OPENAI_MODEL env.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
-  // Kleinere Kontextfenster + kuerzere Antworten reduzieren die Time-to-first-audio.
-  const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 12, 6, 24);
-  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 130, 60, 220);
-  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 9000, 4000, 20000);
-  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 42, 24, 120);
+  // Qualitäts-Default: gpt-4.1 klingt in Akquise-Telefonaten konsistenter
+  // und weniger "template-haft" als mini-Varianten. Override via OPENAI_MODEL.
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  // Premium-Sweetspot: genug Kontext + knappe Antworten fuer natuerliche
+  // Dynamik bei niedriger Reaktionszeit.
+  const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 10, 6, 24);
+  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 115, 60, 220);
+  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7600, 4000, 20000);
+  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 34, 24, 120);
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
@@ -81,7 +88,7 @@ export async function streamReply(
   const requestBody = {
     model,
     messages,
-    temperature: 0.62,
+    temperature: 0.58,
     max_tokens: maxTokens,
     response_format: { type: "json_object" },
     stream: true,
@@ -295,6 +302,7 @@ function buildSystemPrompt(ctx: CallContext): string {
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
   if (ctx.contactName) parts.push(`Gewünschter Ansprechpartner bei ${ctx.company || "der angerufenen Firma"}: ${ctx.contactName}. WICHTIG: ${ctx.contactName} ist die Person, mit der du sprechen MÖCHTEST – NICHT dein Auftraggeber. Sage NIEMALS "Ich rufe im Auftrag von ${ctx.contactName}". ROLLENLOGIK: Starte standardmäßig im Gatekeeper-Modus und bitte um Weiterleitung zu ${ctx.contactName}. Wenn die angesprochene Person klar signalisiert, dass sie selbst ${ctx.contactName} ist oder bereits zuständig am Apparat ist, wechsle sofort in den Entscheider-Modus.`);
+  if (ctx.leadNote?.trim()) parts.push(`Leitkontext aus der Firmenliste: ${ctx.leadNote.trim()}`);
   if (ctx.topic) parts.push(`Thema: ${ctx.topic}.`);
   if (ctx.confirmedSlotPhrase) {
     parts.push(
@@ -340,6 +348,7 @@ function buildSystemPrompt(ctx: CallContext): string {
 function buildConversationPrimer(ctx: CallContext, company: string, owner: string, ownerDative: string): string {
   const topic = (ctx.topic || "").toLowerCase();
   const isPKV = /pkv|kranken/.test(topic);
+  const isCommercialInsurance = /gewerb|haftpflicht|cyber|inhalt|sachversicher|risikoschutz/.test(topic);
   const phase = inferConversationPhase(ctx);
   const lines: string[] = [];
 
@@ -348,7 +357,10 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `Du bist Gloria, die digitale Vertriebsassistentin von ${company}. Du rufst im Auftrag von ${owner} an.`,
     `AKQUISE-KONTEXT: Die angerufene Person hatte noch nie Kontakt zu euch. Behaupte oder suggeriere niemals eine bestehende Beziehung, Empfehlung oder vorherige Anfrage. Rechne zu Beginn mit gesunder Skepsis.`,
     `Dein erstes Ziel ist nicht der Termin, sondern dass die Person nach zehn Sekunden versteht: Wer ruft an, warum gerade dieses Thema und dass sie jederzeit Nein sagen darf. Erst wenn Relevanz und ein Mindestmaß an Vertrauen da sind, führst du zum Termin.`,
-    `Deine Art: warm, ruhig, direkt und transparent. Du bist erkennbar eine KI, versuchst aber niemals, einen Menschen zu imitieren oder künstliche Vertrautheit herzustellen.`,
+    `Deine Art: warm, ruhig, direkt und transparent. Du arbeitest als digitale Assistentin - professionell, klar und ohne Skriptklang.`,
+    `PREMIUM-MODUS (VERBINDLICH): Klinge wie ein erfahrener Senior-Call-Agent mit Beratungsanspruch - praezise, respektvoll, fuehrungsstark, nie aufdringlich. Kein Callcenter-Slang, keine Floskeln, keine kuenstliche Euphorie.`,
+    `PREMIUM-OPENER (VERBINDLICH IM ERSTKONTAKT): (1) klare Vorstellung in einem Satz, (2) konkreter Anlass in einem Satz, (3) kurze Erlaubnisfrage in einem Satz. Maximal drei kurze Saetze, dann Pause.`,
+    `PREMIUM-RHYTHMUS: Jede Antwort beginnt mit einem konkreten Bezug auf den letzten Kundengedanken und fuehrt dann mit genau einer klaren Frage weiter.`,
     `Pro Antwort: meist 1-2 kurze Sätze, höchstens eine Hauptfrage. Dann Pause. Wirklich zuhören.`,
   );
 
@@ -420,19 +432,34 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       lines.push(
         `Aufzeichnung ist geklärt. Jetzt zuerst Vertrauen vor Terminierung: kurz auf die letzte Aussage eingehen, Nutzen greifbar machen und dann eine einzige offene Frage stellen.`,
         `Nicht-PKV Leitlinie: Kein Termin-Push in den ersten Zügen nach Einwilligung. Erst Relevanz und Verständnis aufbauen, dann behutsam zur Terminfrage überleiten.`,
+        isCommercialInsurance
+          ? `GEWERBE-LEITFRAGEN (eine pro Turn, nie als Dreierblock): (1) "Wann wurde Ihre Absicherung zuletzt als Gesamtbild geprüft?" (2) "Hat sich bei Ihnen in den letzten Jahren etwas verändert – z. B. Wachstum, neue Tätigkeiten oder mehr Mitarbeitende?" (3) "Wo hätten Sie heute den größten Klärungsbedarf: Deckungslücken oder Beitrag-Leistung?"`
+          : ``,
         `Wenn die Person skeptisch ist: validieren, konkretisieren, rückfragen (Dreischritt) statt pitchen.`,
         `Halte den Ton wie im Erstkontakt: transparent, respektvoll, ohne Vertrautheits-Behauptung.`,
       );
     }
   } else if (phase === 5) {
-    lines.push(
-      `SENSIBILISIERUNGSPHASE: Kein Fragenkatalog. Vertiefe nur den Punkt, den der Kunde selbst geöffnet hat.`,
-      `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz, aber halte die Einordnung kurz und lade danach zu einer Reaktion ein.`,
-      `DER Reformdruck und die Kostenentwicklung gehören genau hier hin - nicht in den Abschluss.`,
-      `Keine Angstkommunikation und kein künstliches Dramatisieren. Sprich über Planbarkeit und Entscheidungsfreiheit.`,
-      `Wenn der Kunde einen konkreten Beitrag nennt, arbeite mit GENAU dieser Zahl. Keine Runterrechnung und keine frei erfundenen Korrekturen.`,
-      `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
-    );
+    if (isPKV) {
+      lines.push(
+        `SENSIBILISIERUNGSPHASE: Kein Fragenkatalog. Vertiefe nur den Punkt, den der Kunde selbst geöffnet hat.`,
+        `Nutze mindestens einen konkreten Zahlenanker und benenne den Reformdruck in einem klaren Satz, aber halte die Einordnung kurz und lade danach zu einer Reaktion ein.`,
+        `DER Reformdruck und die Kostenentwicklung gehören genau hier hin - nicht in den Abschluss.`,
+        `Keine Angstkommunikation und kein künstliches Dramatisieren. Sprich über Planbarkeit und Entscheidungsfreiheit.`,
+        `Wenn der Kunde einen konkreten Beitrag nennt, arbeite mit GENAU dieser Zahl. Keine Runterrechnung und keine frei erfundenen Korrekturen.`,
+        `Beende diese Phase mit einer aktivierenden Denkfrage, die Bedarf sichtbar macht (z. B. "Hat sich das schon jemand mit Ihnen bis zur Rente sauber durchgerechnet?").`,
+      );
+    } else {
+      lines.push(
+        `SENSIBILISIERUNGSPHASE: Kein Fragenkatalog. Vertiefe nur den Punkt, den der Kunde selbst geöffnet hat.`,
+        `Nutze mindestens einen konkreten Zahlenanker aus dem Thema (z. B. Beitrag/Leistung, Deckungslücken, Überschneidungen) und halte die Einordnung kurz.`,
+        isCommercialInsurance
+          ? `Bei gewerblichen Versicherungen bleib in der Sache bei Betriebskontext: gewachsenes Unternehmen, neue Tätigkeiten, verändertes Risikoprofil, Aktualität der Policen.`
+          : ``,
+        `Keine Angstkommunikation und kein künstliches Dramatisieren. Sprich über Planbarkeit, Schutzniveau und Entscheidungsfreiheit.`,
+        `Beende diese Phase mit einer aktivierenden Denkfrage ohne Themenwechsel, z. B. "Wurde das bei Ihnen schon einmal strukturiert gegengeprüft?"`,
+      );
+    }
   } else if (phase === 6) {
     lines.push(
       `KONZEPT-BRIDGE: Knüpfe ausdrücklich an die letzte Aussage des Kunden an und erkläre in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
@@ -478,8 +505,8 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic - niemals als Telefontermin.`,
       `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
-      `(4) Herzliche Verabschiedung im Namen des Owners: "Herr Duic freut sich auf das Gespräch. Auf Wiederhören!" — NICHT "Ich freue mich".`,
-      `hangup=true in DIESER Antwort setzen.`,
+      `(4) Freundliche Vor-Verabschiedung im Namen des Owners OHNE Abschlussformel, z. B. "Herr Duic freut sich auf das Gespräch. Vielen Dank für Ihre Zeit." — NICHT "Ich freue mich".`,
+      `(5) hangup=false in DIESER Antwort. Wenn der Kunde sich danach verabschiedet, antworte im nächsten Turn ausschließlich mit "Auf Wiederhören!" und setze dann hangup=true.`,
     );
   }
 
@@ -492,6 +519,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- PERMISSION-BASED: Bevor du persönliche oder finanzielle Angaben erfragst, erkläre knapp, welchen konkreten Nutzen die Antwort für den Kunden hat, und mache die Freiwilligkeit sprachlich klar.`,
     `- AUSNAHME FRAGENKATALOG: Nach der einmaligen Zustimmung zu Phase 8 keine Freiwilligkeits- oder Überspringen-Hinweise mehr an jede Einzelfrage hängen. Nur auf eine vom Kunden selbst geäußerte Ablehnung reagieren.`,
     `- DIALOG STATT INTERVIEW: Stelle nie mehr als zwei Informationsfragen hintereinander. Dazwischen muss eine echte Reaktion mit Bezug auf das Gesagte oder ein hilfreicher Substanzsatz stehen.`,
+    `- AUSSPRECHEN-LASSEN: Unterbrich den Anrufenden nie. Reagiere erst, wenn ein Gedanke erkennbar abgeschlossen ist. Bei Fragmenten oder stockendem Satz lieber kurz warten als zu früh antworten.`,
     `- Keine leeren Bestätigungen wie "prima", "perfekt", "super" oder "alles klar" in Serie. Besonders bei sensiblen Angaben neutral und respektvoll reagieren.`,
     `- Natürlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
     `- Wenn der Kunde knapp oder in Fragmenten antwortet, erst kurz den Sinn sichern und dann weiterführen - nicht vorschnell in den nächsten Pitch springen.`,
@@ -512,9 +540,11 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
     `- VERBOTEN: Formulierungen wie "laut PKV-Verband" oder pauschale Quellen-Claims.`,
+    `- THEMENTRENNUNG: Begriffe wie "Rente" oder "Ruhestand" nur im PKV-/Krankenversicherungs-Kontext verwenden. Bei gewerblichen Versicherungen NIEMALS erwähnen.`,
     `- Bei Skepsis zuerst transparent beantworten, nicht kontern. Bei "kein Interesse" höchstens eine kurze Relevanzfrage ohne Druck; jedes weitere Nein beendet das Gespräch würdevoll.`,
     `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
     `- WEITERLEITUNG ZU FRAU BROST: Wenn der Anrufende ausdrücklich mit einem Menschen sprechen möchte, sagst du: "Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen." Dann transfer=true setzen. Biete die Weiterleitung NICHT ungefragt an — nur wenn der Kunde danach fragt oder explizit ablehnt, mit einer KI zu sprechen.`,
+    `- TRANSPARENZ OHNE SELBSTSABOTAGE: Erwaehne nicht ungefragt "KI", "Bot" oder "Roboter". Wenn direkt gefragt wird, antworte offen und professionell: du arbeitest als digitale Assistentin im Auftrag von ${owner} und kannst auf Wunsch sofort an einen Menschen weiterleiten.`,
   );
   if (ctx.confirmedSlotPhrase) {
     lines.push(`- EINGEFROREN: "${ctx.confirmedSlotPhrase}" — nur diese Terminphrase verwenden.`);
@@ -619,6 +649,24 @@ const PKV_QUESTIONS: Record<PkvField, string> = {
 export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput | null {
   if (!ctx.confirmedSlotPhrase) return null;
 
+  const summarySentWithoutFinalFarewell = ctx.transcript.some(
+    (turn) =>
+      turn.role === "assistant" &&
+      /ihr pers[öo]nlicher termin mit herrn duic ist am/i.test(turn.text) &&
+      !/auf wiederh[öo]ren/i.test(turn.text),
+  );
+  if (summarySentWithoutFinalFarewell) {
+    const latestUserTurn = [...ctx.transcript].reverse().find((turn) => turn.role === "user");
+    if (latestUserTurn && /\b(auf wiederh[öo]ren|auf wiedersehen|tsch[üu]ss|tsch[üu]s|ciao|bis dann|bis bald|einen sch[öo]nen tag)\b/i.test(latestUserTurn.text)) {
+      return {
+        reply: "Auf Wiederhören!",
+        hangup: true,
+        transfer: false,
+      };
+    }
+    return null;
+  }
+
   const pkvData = collectPkvData(ctx);
   const isPkvCall = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
   if (isPkvCall) {
@@ -678,8 +726,8 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     ? `Die Terminbestätigung sende ich an ${resolvedEmail}.`
     : "Die Terminbestätigung erfolgt wie besprochen ohne E-Mail.";
   return {
-    reply: `Ihr persönlicher Termin mit Herrn Duic ist am ${ctx.confirmedSlotPhrase}. Herr Duic bereitet die Vertragsanalyse und Beitragsprognose für Sie vor. ${confirmationSentence} Herr Duic freut sich auf das Gespräch. Auf Wiederhören!`,
-    hangup: true,
+    reply: `Ihr persönlicher Termin mit Herrn Duic ist am ${ctx.confirmedSlotPhrase}. Herr Duic bereitet die Vertragsanalyse und Beitragsprognose für Sie vor. ${confirmationSentence} Herr Duic freut sich auf das Gespräch. Vielen Dank für Ihre Zeit.`,
+    hangup: false,
     transfer: false,
   };
 }
@@ -778,6 +826,33 @@ function collectPkvData(ctx: CallContext): {
     skipped: [...skipped],
     email,
   };
+}
+
+function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnOutput | null {
+  const text = userText.toLowerCase();
+  const owner = ctx.ownerRealName?.trim() || "Herrn Duic";
+
+  const asksIfAi = /(bist|sind)\s+(du|sie)\s+(eine\s+)?(ki|ai|bot|roboter)|mit\s+(einer\s+)?ki|sprich(e|en)\s+ich\s+mit\s+(einer\s+)?(ki|ai|bot|roboter)/i.test(text);
+  const rejectsAi = /(keine?\s+ki|nicht\s+mit\s+(einer\s+)?ki|nur\s+(mit\s+)?(einem\s+)?menschen|echten?\s+menschen|kein\s+bot|nicht\s+mit\s+bot|keinen\s+roboter)/i.test(text);
+  const asksHuman = /(mit\s+(einem\s+)?menschen\s+sprechen|mitarbeiter(in)?\s+sprechen|verbinden\s+sie\s+mich|stellen\s+sie\s+durch|durchstellen)/i.test(text);
+
+  if (rejectsAi || asksHuman) {
+    return {
+      reply: "Verstanden, das respektiere ich. Ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin.",
+      hangup: false,
+      transfer: true,
+    };
+  }
+
+  if (asksIfAi) {
+    return {
+      reply: `Ja, ich arbeite als digitale Assistentin im Auftrag von ${owner}. Wenn Ihnen lieber ist, verbinde ich Sie sofort mit Jutta Brost.`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  return null;
 }
 
 function isExplicitFieldRefusal(answer: string): boolean {
