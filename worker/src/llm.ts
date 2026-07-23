@@ -247,21 +247,44 @@ export async function streamReply(
 
 function consentAlreadyGranted(ctx: CallContext): boolean {
   // Suche im Transkript: Gloria hat "aufzeichnen" gefragt UND danach hat der
-  // Anrufende mit JA / okay / einverstanden geantwortet.
+  // Anrufende eine klare Zustimmung gegeben. Das muss auch bei Rueckfragen wie
+  // "Duerfen Sie?" robust funktionieren.
   const turns = ctx.transcript;
   for (let i = 0; i < turns.length; i++) {
     const t = turns[i];
     if (t.role !== "assistant" || !/aufzeichn|mitschneid/i.test(t.text)) continue;
     for (let j = i + 1; j < turns.length; j++) {
-      if (turns[j].role !== "user") continue;
-      const ans = turns[j].text.toLowerCase().trim();
-      if (/^(ja\b|jawohl|gerne|in ordnung|einverstanden|okay|ok\b|geht klar|kein problem)/i.test(ans)) {
+      const turn = turns[j];
+      if (turn.role !== "user") continue;
+      const decision = parseRecordingConsentDecision(turn.text);
+      if (decision === "granted") {
         return true;
       }
-      break;
+      if (decision === "declined") {
+        return false;
+      }
     }
   }
   return false;
+}
+
+function parseRecordingConsentDecision(text: string): "granted" | "declined" | null {
+  const ans = text.toLowerCase().trim();
+
+  // Eindeutige Zustimmung.
+  if (
+    /^(ja\b|jawohl|gerne|in ordnung|einverstanden|okay|ok\b|geht klar|kein problem|nat[üu]rlich|klar\b)/i.test(ans) ||
+    /\b(sie\s+k[öo]nnen\s+gerne\s+aufzeichn|k[öo]nnen\s+sie\s+gern\s+aufzeichn|d[üu]rfen\s+sie\b|ja,?\s+d[üu]rfen\s+sie)\b/i.test(ans)
+  ) {
+    return "granted";
+  }
+
+  // Eindeutige Ablehnung.
+  if (/^(nein\b|n[öo]\b|lieber nicht|bitte nicht|keine aufzeichnung|nicht aufzeichnen)/i.test(ans)) {
+    return "declined";
+  }
+
+  return null;
 }
 
 function stripConsentQuestion(text: string): string {
@@ -766,8 +789,13 @@ function recordingConsentResolved(ctx: CallContext): boolean {
   const turns = ctx.transcript;
   for (let i = 0; i < turns.length; i += 1) {
     if (turns[i].role !== "assistant" || !/aufzeichn|mitschneid/i.test(turns[i].text)) continue;
-    const answer = turns.slice(i + 1).find((turn) => turn.role === "user")?.text.trim().toLowerCase() || "";
-    return /^(?:ja\b|jawohl|gerne\b|einverstanden|okay\b|ok\b|in ordnung|kein problem|nein\b|nö\b|lieber nicht|bitte nicht)/i.test(answer);
+    for (let j = i + 1; j < turns.length; j += 1) {
+      const turn = turns[j];
+      if (turn.role !== "user") continue;
+      const decision = parseRecordingConsentDecision(turn.text);
+      if (decision) return true;
+    }
+    return false;
   }
   return false;
 }
