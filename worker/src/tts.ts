@@ -1,6 +1,13 @@
 import { fetch } from "undici";
 import { log } from "./log.js";
 
+export type ParsedWav = {
+  sampleRate: number;
+  channels: number;
+  bitDepth: number;
+  samples: Int16Array;
+};
+
 export type TtsStreamHandle = {
   /** Resolves when streaming finished or aborted. */
   done: Promise<void>;
@@ -51,41 +58,27 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  // Premium-Sweetspot: sehr schnelle Startlatenz bei weiterhin natuerlicher
-  // Prosodie fuer Telefonakquise.
   const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
-  if (!apiKey || !voiceId) {
-    log.error("tts.missing_config", {
-      keyPresent: Boolean(apiKey),
-      voicePresent: Boolean(voiceId),
-      keyFingerprint: keyFingerprint(apiKey),
-    });
-    return { done: Promise.resolve(), abort: () => undefined, aborted: false };
-  }
-
   const controller = new AbortController();
-
-  // optimize_streaming_latency=2 ist der Sweet-Spot zwischen Latenz und
-  // Qualität. Bei =3 werden Wort-Endungen hörbar abgeschnitten, was im
-  // Deutschen besonders auffällt ("-en", "-er", "-ung").
-  const url =
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream` +
-    `?output_format=ulaw_8000`;
-
-  // stability=0.5 erlaubt natürlichere Prosodie und Betonung der Wort-
-  // Endungen. Bei 0.7+ klingt Gloria roboterhaft/monoton. similarity=0.85
-  // hält die Stimm-Identität stabil. style=0.35 erlaubt Ausdruck ohne
-  // Drama. speed=0.86 ist bewusst langsamer, damit Gloria am Telefon
-  // Endsilben sauber ausgesprochen werden.
-  const stability = numEnv("ELEVENLABS_STABILITY", 0.4);
-  const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
-  const style = numEnv("ELEVENLABS_STYLE", 0.38);
-  const speed = numEnv("ELEVENLABS_SPEED", 0.9);
-  const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
-
   const done = (async () => {
     try {
+      if (!apiKey || !voiceId) {
+        log.error("tts.missing_config", {
+          keyPresent: Boolean(apiKey),
+          voicePresent: Boolean(voiceId),
+          keyFingerprint: keyFingerprint(apiKey),
+        });
+        throw new Error("elevenlabs unavailable");
+      }
+
+      const stability = numEnv("ELEVENLABS_STABILITY", 0.4);
+      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
+      const style = numEnv("ELEVENLABS_STYLE", 0.38);
+      const speed = numEnv("ELEVENLABS_SPEED", 0.9);
+      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=ulaw_8000`;
+
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -116,7 +109,7 @@ export function streamElevenLabsToMulaw(
           voiceId,
           modelId,
         });
-        return;
+        throw new Error(`elevenlabs ${res.status}`);
       }
 
       const reader = res.body.getReader();
@@ -136,8 +129,123 @@ export function streamElevenLabsToMulaw(
         }
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
+      log.error("tts.stream_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (process.env.OPENAI_API_KEY) {
+        log.warn("tts.falling_back_to_openai", { text: text.slice(0, 80) });
+        const fallback = streamOpenAiTtsToMulaw(text, onChunk);
+        await fallback.done;
+      }
+    }
+  })();
+
+  return {
+    done: done.catch(() => undefined).then(() => undefined),
+    abort: () => {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    },
+    get aborted() {
+      return controller.signal.aborted;
+    },
+  };
+}
+
+export function parseWavToPcm16(buffer: Buffer): ParsedWav {
+  const header = buffer.subarray(0, 44);
+  const riff = header.toString("ascii", 0, 4);
+  const wave = header.toString("ascii", 8, 12);
+  if (riff !== "RIFF" || wave !== "WAVE") {
+    throw new Error("Unsupported WAV header");
+  }
+
+  const audioFormat = header.readUInt16LE(20);
+  const channels = header.readUInt16LE(22);
+  const sampleRate = header.readUInt32LE(24);
+  const bitsPerSample = header.readUInt16LE(34);
+  const dataOffset = 44;
+  const dataSize = header.readUInt32LE(40);
+  const payload = buffer.subarray(dataOffset, dataOffset + dataSize);
+
+  if (audioFormat !== 1) {
+    throw new Error(`Unsupported WAV format ${audioFormat}`);
+  }
+
+  const sampleBytes = bitsPerSample / 8;
+  const sampleCount = payload.length / sampleBytes;
+  const samples = new Int16Array(sampleCount);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const start = index * sampleBytes;
+    samples[index] = payload.readInt16LE(start);
+  }
+
+  return {
+    sampleRate,
+    channels,
+    bitDepth: bitsPerSample,
+    samples,
+  };
+}
+
+export function buildOpenAiTtsRequest(text: string): {
+  model: string;
+  input: string;
+  voice: string;
+  response_format: string;
+} {
+  return {
+    model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
+    input: applyPronunciationFixes(text),
+    voice: process.env.OPENAI_TTS_VOICE || "alloy",
+    response_format: "wav",
+  };
+}
+
+export function streamOpenAiTtsToMulaw(text: string, onChunk: (mulaw: Buffer) => void): TtsStreamHandle {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    log.error("tts.openai_missing_config", { keyPresent: false });
+    return { done: Promise.resolve(), abort: () => undefined, aborted: false };
+  }
+
+  const controller = new AbortController();
+  const done = (async () => {
+    try {
+      const res = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(buildOpenAiTtsRequest(text)),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const body = res.body ? await res.text() : "";
+        log.error("tts.openai_http_error", {
+          status: res.status,
+          body: body.slice(0, 200),
+        });
+        return;
+      }
+
+      const audioBytes = Buffer.from(await res.arrayBuffer());
+      const parsed = parseWavToPcm16(audioBytes);
+      const pcm = parsed.samples;
+      const mulaw = Buffer.alloc(pcm.length);
+      for (let i = 0; i < pcm.length; i += 1) {
+        mulaw[i] = pcmToMulaw(pcm[i]);
+      }
+      onChunk(mulaw);
+    } catch (error) {
       if (!controller.signal.aborted) {
-        log.error("tts.stream_failed", {
+        log.error("tts.openai_stream_failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -157,6 +265,17 @@ export function streamElevenLabsToMulaw(
       return controller.signal.aborted;
     },
   };
+}
+
+function pcmToMulaw(sample: number): number {
+  const pcm = Math.max(-32768, Math.min(32767, sample));
+  const sign = pcm < 0 ? 0x80 : 0x00;
+  const abs = Math.abs(pcm);
+  const magnitude = Math.min(32767, abs);
+  const normalized = magnitude / 32768;
+  const exp = Math.max(0, Math.min(7, Math.floor(Math.log2(normalized * 255))));
+  const mantissa = Math.floor((normalized * 255) / (2 ** exp));
+  return sign | (exp << 4) | mantissa;
 }
 
 function numEnv(name: string, fallback: number): number {

@@ -1,3 +1,4 @@
+import { fetch } from "undici";
 import WebSocket from "ws";
 import { log } from "./log.js";
 
@@ -15,11 +16,28 @@ export type AsrSession = {
 
 const DG_HOST = "wss://api.deepgram.com";
 
+export type AsrProvider = "deepgram" | "openai";
+
+export function resolveAsrProvider(env: NodeJS.ProcessEnv = process.env): AsrProvider {
+  const explicit = env.ASR_PROVIDER?.trim().toLowerCase();
+  if (explicit === "openai") return "openai";
+  if (explicit === "deepgram") return "deepgram";
+  if (env.DEEPGRAM_API_KEY?.trim()) return "deepgram";
+  if (env.OPENAI_API_KEY?.trim()) return "openai";
+  return "deepgram";
+}
+
 type ConnectVariant = {
   model: string;
   minimalParams: boolean;
   label: string;
 };
+
+export function openAsr(events: AsrEvents): AsrSession {
+  const provider = resolveAsrProvider();
+  if (provider === "openai") return openOpenAIAsr(events);
+  return openDeepgram(events);
+}
 
 export function openDeepgram(events: AsrEvents): AsrSession {
   const apiKey = process.env.DEEPGRAM_API_KEY;
@@ -236,6 +254,74 @@ export function openDeepgram(events: AsrEvents): AsrSession {
       } catch {
         /* ignore */
       }
+    },
+  };
+}
+
+function openOpenAIAsr(events: AsrEvents): AsrSession {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured for ASR fallback");
+  }
+
+  const bufferQueue: Buffer[] = [];
+  let ready = false;
+  let closed = false;
+
+  const transcribeBuffer = async (audioChunk: Buffer) => {
+    if (closed) return;
+    if (!ready) {
+      bufferQueue.push(Buffer.from(audioChunk));
+      return;
+    }
+
+    const payload = new Uint8Array(audioChunk);
+    const formData = new FormData();
+    formData.append("file", new Blob([payload], { type: "audio/wav" }) as unknown as Blob, "audio.wav");
+    formData.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe");
+    formData.append("language", process.env.DEEPGRAM_LANGUAGE || "de");
+    formData.append("response_format", "json");
+
+    const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData as never,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`OpenAI transcription failed: ${res.status} ${body.slice(0, 200)}`);
+    }
+
+    const json = await res.json() as { text?: string };
+    const text = json.text?.trim() || "";
+    if (text) {
+      events.onPartial?.(text);
+      events.onFinal(text);
+    }
+  };
+
+  ready = true;
+  queueMicrotask(() => {
+    for (const chunk of bufferQueue) {
+      void transcribeBuffer(chunk).catch((error) => {
+        log.error("asr.openai_failed", { error: error instanceof Error ? error.message : String(error) });
+        events.onError?.(error instanceof Error ? error : new Error(String(error)));
+      });
+    }
+    bufferQueue.length = 0;
+  });
+
+  return {
+    send(audioChunk) {
+      void transcribeBuffer(audioChunk).catch((error) => {
+        log.error("asr.openai_failed", { error: error instanceof Error ? error.message : String(error) });
+        events.onError?.(error instanceof Error ? error : new Error(String(error)));
+      });
+    },
+    async finish() {
+      closed = true;
+      events.onUtteranceEnd?.();
     },
   };
 }

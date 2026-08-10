@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
-import { openDeepgram, type AsrSession } from "./asr.js";
+import { openAsr, type AsrSession } from "./asr.js";
 import { streamReply, prewarmOpenAi } from "./llm.js";
 import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
@@ -47,6 +47,7 @@ type TelnyxInbound =
 type DecodedClientState = {
   company?: string;
   contactName?: string;
+  leadNote?: string;
   topic?: string;
   leadId?: string;
   userId?: string;
@@ -203,6 +204,33 @@ function normalizeOutboundAudio(audio: Buffer, encoding?: string): Buffer {
   return audio;
 }
 
+export function shouldInterruptOnPartialSpeech(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const compact = trimmed.replace(/[.,!?;:]/g, " ").replace(/\s+/g, " ").trim();
+  if (!compact) return false;
+
+  const words = compact.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return false;
+
+  const normalized = compact.toLowerCase();
+  if (/^(?:ja|nein|okay|ok|hm+|mhm+|genau|also|gut|aha|danke|tschüss|tschuess|hallo|moin|guten tag|guten morgen|guten abend|bitte)(?:\s|$)/i.test(normalized)) {
+    return false;
+  }
+  if (/^(?:ja|nein)\s+(?:danke|bitte|gern|klar|okay|ok)\b/i.test(normalized)) {
+    return false;
+  }
+  if (/^(?:ja|nein|okay|ok|hm+|mhm+|also|genau)\s*$/i.test(normalized)) {
+    return false;
+  }
+  if (words.length <= 2 && !/[?]/.test(trimmed)) {
+    return false;
+  }
+
+  return trimmed.length >= 6 || /[?]/.test(trimmed) || words.some((word) => word.length >= 4);
+}
+
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
   let ctx: CallContext | null = null;
   let asr: AsrSession | null = null;
@@ -219,11 +247,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const userFinalCoalesceMs = Math.max(
     250,
-    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "1050", 10),
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "1250", 10),
   );
   const utteranceEndGraceMs = Math.max(
     120,
-    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "700", 10),
+    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "950", 10),
   );
 
   const clearSilenceOpenerTimer = () => {
@@ -267,7 +295,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // Kurze Fragmente wie "ja" werden am Telefon häufig direkt fortgesetzt
     // ("ja, worum geht es?"). Ein wenig mehr Grace verhindert vorschnelle
     // Antworten, ohne normale vollständige Sätze auszubremsen.
-    const graceMs = wordCount <= 2 ? Math.max(utteranceEndGraceMs, 1000) : utteranceEndGraceMs;
+    const graceMs =
+      wordCount <= 2
+        ? Math.max(utteranceEndGraceMs, 1300)
+        : wordCount <= 5
+          ? Math.max(utteranceEndGraceMs, 1050)
+          : utteranceEndGraceMs;
     userFinalCoalesceTimer = setTimeout(flushUserFinals, graceMs);
   };
 
@@ -641,6 +674,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           leadId: state.leadId,
           company: state.company,
           contactName: state.contactName,
+          leadNote: state.leadNote,
           topic: state.topic,
           ownerRealName: state.ownerRealName,
           ownerCompanyName: state.ownerCompanyName,
@@ -686,19 +720,18 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           log.info("busy.applied", { count: slots.length, free: free.length });
         });
 
-        asr = openDeepgram({
+        asr = openAsr({
           onPartial: (text) => {
             if (!ctx) return;
             if (text.trim().length > 0) {
               clearSilenceOpenerTimer();
             }
             // Echte Fortsetzungen schnell durchlassen. Kurze Füller und Echo
-            // brechen Gloria nicht ab, zwei klare Wörter dagegen schon.
+            // brechen Gloria nicht ab, aber sinnvolle Nachfragen oder Einwände
+            // sollten eine Unterbrechung rechtfertigen.
             if (ctx.speaking && currentTts) {
               const trimmed = text.trim();
-              const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-              const isFiller = /^(?:ja|nein|hm+|mhm+|okay|ok|genau|also)[,.!?\s]*$/i.test(trimmed);
-              if (!isFiller && trimmed.length >= 8 && wordCount >= 2) {
+              if (shouldInterruptOnPartialSpeech(trimmed)) {
                 log.info("turn.barge_in", { callSid: ctx.callSid, partial: trimmed });
                 currentTts.abort();
                 currentTts = null;
@@ -865,20 +898,31 @@ function buildSilenceOpenerLine(ctx: CallContext): string {
   const company = (ctx.ownerCompanyName || "").trim() || "unserer Agentur";
   const owner = (ctx.ownerRealName || "").trim() || "Herrn Duic";
   const contact = (ctx.contactName || "").trim();
+  const note = (ctx.leadNote || "").trim();
+
+  const noteLine = note
+    ? `Zusatzkontext aus der Firmenliste: ${note}`
+    : "";
 
   if (contact) {
     return [
       `Guten Tag, hier ist Gloria, die digitale Assistentin von ${company}.`,
       `Ich rufe im Auftrag von ${owner} an.`,
+      noteLine,
       `Bin ich richtig bei Ihnen und darf ich kurz mit ${contact} sprechen?`,
-    ].join(" ");
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   return [
     `Guten Tag, hier ist Gloria, die digitale Assistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an.`,
+    noteLine,
     "Bin ich richtig bei Ihnen und passt es kurz für eine Frage?",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 // buildOpener wurde entfernt: Gloria spricht erst, nachdem der
@@ -925,7 +969,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
     topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
-    topicLine = `Es geht um Ihre gewerblichen Versicherungen und wie Sie Risiken im Unternehmen sauber absichern.`;
+    topicLine = `Kurz zum Anlass: Viele Betriebe haben ihre gewerblichen Policen seit Jahren laufen, obwohl sich im Unternehmen viel verändert hat. Genau dafür bietet ${owner} einen kurzen neutralen Abgleich an.`;
   } else if (/strom|gas|energie/i.test(topic)) {
     topicLine = `Es geht um Ihre Energiekosten und wie sich diese mittelfristig planbar machen lassen.`;
   } else if (ctx.topic && ctx.topic.trim().length > 0) {
