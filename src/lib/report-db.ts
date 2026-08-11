@@ -54,13 +54,40 @@ export interface UserPhoneNumber {
 
 let pool: Pool | null = null;
 let schemaReady = false;
+let lastPostgresFailureReason = "";
 
 function getDatabaseUrl() {
   return process.env.DATABASE_URL?.trim() || "";
 }
 
+export function isDatabaseUrlConfigured() {
+  return Boolean(getDatabaseUrl());
+}
+
+export function getLastPostgresFailureReason() {
+  return lastPostgresFailureReason;
+}
+
 function shouldUsePostgres() {
   return Boolean(getDatabaseUrl());
+}
+
+export async function diagnosePostgresConnection(): Promise<string> {
+  const connectionString = getDatabaseUrl();
+  if (!connectionString) {
+    return "DATABASE_URL is not configured.";
+  }
+
+  try {
+    const db = getPool();
+    const started = Date.now();
+    await db.query("SELECT 1");
+    const latency = Date.now() - started;
+    return `Postgres reachable (${latency}ms).`;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `Postgres connection failed: ${reason}`;
+  }
 }
 
 function getPool() {
@@ -1596,6 +1623,9 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
 
     try {
       await client.query("BEGIN");
+      const leadsLockKey = `gloria_leads:${userId || "__all__"}`;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1));", [leadsLockKey]);
+
       if (userId) {
         await client.query("DELETE FROM gloria_leads WHERE user_id = $1", [userId]);
       } else {
@@ -1624,7 +1654,24 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             updated_at
           ) VALUES (
             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()
-          );
+          )
+          ON CONFLICT (id)
+          DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            list_id = EXCLUDED.list_id,
+            list_name = EXCLUDED.list_name,
+            company = EXCLUDED.company,
+            contact_name = EXCLUDED.contact_name,
+            phone = EXCLUDED.phone,
+            direct_dial = EXCLUDED.direct_dial,
+            email = EXCLUDED.email,
+            location = EXCLUDED.location,
+            topic = EXCLUDED.topic,
+            note = EXCLUDED.note,
+            next_call_at = EXCLUDED.next_call_at,
+            status = EXCLUDED.status,
+            attempts = EXCLUDED.attempts,
+            updated_at = NOW();
           `,
           [
             lead.id,
@@ -1655,6 +1702,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
       client.release();
     }
   } catch (error) {
+    lastPostgresFailureReason = error instanceof Error ? error.message : String(error);
     console.error("Postgres lead write failed, fallback to file storage", error);
     return false;
   }
@@ -1704,6 +1752,9 @@ export async function writeCampaignListsStateToPostgres(
 
     try {
       await client.query("BEGIN");
+      const listsLockKey = `gloria_campaign_lists:${userId || "__all__"}`;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1));", [listsLockKey]);
+
       if (userId) {
         await client.query("DELETE FROM gloria_campaign_lists WHERE user_id = $1", [userId]);
       } else {
@@ -1722,7 +1773,16 @@ export async function writeCampaignListsStateToPostgres(
             stopped_at,
             last_run_at,
             updated_at
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW());
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+          ON CONFLICT (list_id)
+          DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            list_name = EXCLUDED.list_name,
+            active = EXCLUDED.active,
+            started_at = EXCLUDED.started_at,
+            stopped_at = EXCLUDED.stopped_at,
+            last_run_at = EXCLUDED.last_run_at,
+            updated_at = NOW();
           `,
           [
             userId || null,
@@ -1745,6 +1805,7 @@ export async function writeCampaignListsStateToPostgres(
       client.release();
     }
   } catch (error) {
+    lastPostgresFailureReason = error instanceof Error ? error.message : String(error);
     console.error("Postgres campaign list write failed, fallback to file storage", error);
     return false;
   }

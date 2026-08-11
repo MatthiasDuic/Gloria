@@ -68,11 +68,17 @@ test("runs qualification once, requires email, and closes with the locked slot",
   appendExchange(ctx, reply, "max.neumann@example.de");
 
   reply = nextReply(ctx);
-  assert.equal(reply.hangup, true);
+  assert.equal(reply.hangup, false);
   assert.match(reply.reply, new RegExp(LOCKED_SLOT));
   assert.match(reply.reply, /max\.neumann@example\.de/);
-  assert.match(reply.reply, /Auf Wiederhören!/);
+  assert.doesNotMatch(reply.reply, /Auf Wiederhören!/);
   assert.doesNotMatch(reply.reply, /um neun Uhr\b/);
+
+  appendExchange(ctx, reply, "Vielen Dank, auf Wiederhören.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
 test("does not end after an unusable email answer", () => {
@@ -96,8 +102,14 @@ test("does not end after an unusable email answer", () => {
   appendExchange(ctx, reply, "max punkt neumann at example punkt de");
 
   reply = nextReply(ctx);
-  assert.equal(reply.hangup, true);
+  assert.equal(reply.hangup, false);
   assert.match(reply.reply, /max\.neumann@example\.de/);
+
+  appendExchange(ctx, reply, "Tschüss.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
 test("accepts spelled email suffix across multiple turns", () => {
@@ -125,8 +137,14 @@ test("accepts spelled email suffix across multiple turns", () => {
   appendExchange(ctx, reply, "Punkt d e.");
 
   reply = nextReply(ctx);
-  assert.equal(reply.hangup, true);
+  assert.equal(reply.hangup, false);
   assert.match(reply.reply, /info@musterbau\.de/);
+
+  appendExchange(ctx, reply, "Auf Wiederhören.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
 test("closes once fragmented spoken email becomes complete", () => {
@@ -158,8 +176,14 @@ test("closes once fragmented spoken email becomes complete", () => {
   appendExchange(ctx, reply, "Info at Musterbau Punkt d e.");
 
   reply = nextReply(ctx);
-  assert.equal(reply.hangup, true);
+  assert.equal(reply.hangup, false);
   assert.match(reply.reply, /info@musterbau\.de/);
+
+  appendExchange(ctx, reply, "Tschüss.");
+
+  reply = nextReply(ctx);
+  assert.equal(reply.hangup, true);
+  assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
 test("skips the PKV catalog for other campaign topics", () => {

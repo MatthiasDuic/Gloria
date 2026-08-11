@@ -1,7 +1,7 @@
 import { signAudioText } from "@/lib/audio-signature";
 
 /**
- * Baut die signierte URL zum ElevenLabs-TTS-Endpoint.
+ * Baut die signierte URL zum Deepgram-TTS-Endpoint.
  * Hängt `exp` (Unix-Sekunden) und `sig` (HMAC-SHA256 base64url) an, damit
  * /api/twilio/audio beliebigen Fremdtext ablehnen kann.
  */

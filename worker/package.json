@@ -17,8 +17,9 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "ws": "^8.18.0",
-    "undici": "^6.20.1"
+    "lamejs": "^1.2.1",
+    "undici": "^6.20.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

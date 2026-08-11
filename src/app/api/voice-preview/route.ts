@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { generateDeepgramPreview, isDeepgramConfigured } from "@/lib/deepgram-tts";
 import { buildSystemPrompt, buildVoicePreview } from "@/lib/gloria";
 import { getDashboardData } from "@/lib/storage";
 import type { Topic } from "@/lib/types";
@@ -132,19 +132,19 @@ async function buildVoicePayload(request: Request, topic?: Topic, voiceId?: stri
 
   const latestUser = await findUserById(sessionUser.id);
   const resolvedVoiceId = String(voiceId || latestUser?.selectedVoiceId || "").trim() || undefined;
-  const voiceResult = await generateElevenLabsPreview(preview, resolvedVoiceId);
+  const voiceResult = await generateDeepgramPreview(preview, resolvedVoiceId);
 
   return {
     preview,
     systemPrompt,
     provider: voiceResult.provider,
-    elevenLabsConfigured: isElevenLabsConfigured(),
+    deepgramConfigured: isDeepgramConfigured(),
     audioBase64: voiceResult.audioBase64,
     audioMimeType: voiceResult.audioMimeType,
     voiceId: resolvedVoiceId,
     message:
-      voiceResult.provider === "elevenlabs"
-        ? "ElevenLabs-Stimme mit erhöhter Qualität geladen (LLM-generiert)."
+      voiceResult.provider === "deepgram"
+        ? "Deepgram Aura-Stimme geladen (LLM-generiert)."
         : voiceResult.error || "Browser-Stimme wird als Fallback verwendet.",
   };
 }

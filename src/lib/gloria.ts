@@ -1,28 +1,11 @@
 import type { ScriptConfig } from "./types";
+import { buildPromptBlocks, firstFilled, joinFilled } from "./prompt-builder";
 
 export const REQUIRED_GLORIA_INTRO =
   "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel.";
 
 const DEFAULT_CONSENT_PROMPT =
   'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".';
-
-function firstFilled(...values: Array<string | undefined>): string {
-  for (const value of values) {
-    const trimmed = value?.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-
-  return "";
-}
-
-function joinFilled(values: Array<string | undefined>, separator = "\n"): string {
-  return values
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))
-    .join(separator);
-}
 
 function buildTopicDialogueExamples(topic: string): string {
   if (topic === "betriebliche Krankenversicherung") {
@@ -61,11 +44,11 @@ function buildTopicDialogueExamples(topic: string): string {
     return [
       "1) Empfang (kurz und charmant)",
       "Empfang: Worum geht's?",
-      "Gloria: Um eine kurze Einordnung bestehender gewerblicher Policen. Wer verantwortet das bei Ihnen?",
+      "Gloria: Es geht um einen kurzen Abgleich Ihrer gewerblichen Absicherung. Wer ist dafür bei Ihnen der beste Ansprechpartner?",
       "",
       "2) Entscheider offen",
       "Entscheider: Wir haben länger nicht alles geprüft.",
-      "Gloria: Danke für die Offenheit. Dann lohnt sich ein kurzer Risiko- und Deckungscheck besonders. Eher Haftpflicht, Cyber oder Inhalt zuerst?",
+      "Gloria: Danke für die Offenheit. Genau dann lohnt sich ein kurzer Blick von außen, gerade wenn sich im Betrieb über die Jahre etwas verändert hat. Womit sollen wir starten: Haftpflicht, Cyber oder Inhalt?",
       "",
       "3) Entscheider skeptisch",
       "Entscheider: Wir wollen nicht wechseln.",
@@ -157,19 +140,28 @@ export function buildSystemPrompt(script: ScriptConfig): string {
     `Nutze das Thema ${script.topic} als Gesprächsanlass und führe auf einen Termin hin.`,
   );
 
-  return [
-    SYSTEM_PROMPT,
-    `Thema des Anrufs: ${script.topic}`,
-    `Gesprächsziel: ${goal}`,
-    `Verhalten: ${behavior}`,
-    `Kernthema: ${coreTopic}`,
-    `Hintergrundwissen: ${keyInfo}`,
-    `Empfangsleitplanke: ${firstFilled(script.gatekeeperTask, "Freundlich durchstellen lassen und kurz bleiben.")}`,
-    `Frageanker: ${firstFilled(script.discovery, "Stelle eine offene Frage und höre erst zu.")}`,
-    `Einwandstrategie: ${firstFilled(script.objectionHandling, "Kurz, souverän und ohne Druck reagieren.")}`,
-    `Terminanker: ${firstFilled(script.close, "Natürlich in die Terminierung überleiten.")}`,
-    "Erfasse nach dem Gespräch: Gesprächszusammenfassung, Ergebnis, Termin oder Wiedervorlage, Anzahl der Wählversuche und ob eine Aufnahme zugestimmt wurde.",
-  ].join("\n");
+  return buildPromptBlocks([
+    { label: "System", value: SYSTEM_PROMPT },
+    { label: "Thema des Anrufs", value: script.topic },
+    { label: "Gesprächsziel", value: goal },
+    { label: "Verhalten", value: behavior },
+    { label: "Kernthema", value: coreTopic },
+    { label: "Hintergrundwissen", value: keyInfo },
+    {
+      label: "Empfangsleitplanke",
+      value: firstFilled(script.gatekeeperTask, "Freundlich durchstellen lassen und kurz bleiben."),
+    },
+    { label: "Frageanker", value: firstFilled(script.discovery, "Stelle eine offene Frage und höre erst zu.") },
+    {
+      label: "Einwandstrategie",
+      value: firstFilled(script.objectionHandling, "Kurz, souverän und ohne Druck reagieren."),
+    },
+    { label: "Terminanker", value: firstFilled(script.close, "Natürlich in die Terminierung überleiten.") },
+    {
+      label: "Nach dem Gespräch",
+      value: "Erfasse nach dem Gespräch: Gesprächszusammenfassung, Ergebnis, Termin oder Wiedervorlage, Anzahl der Wählversuche und ob eine Aufnahme zugestimmt wurde.",
+    },
+  ]);
 }
 
 export function buildCallSystemPrompt(script: ScriptConfig): string {
@@ -263,6 +255,7 @@ THEMA: ${script.topic}
 18. MEHRWERT-KLARHEIT: Formuliere den Nutzen konkret in einem Satz: welche Klarheit oder Entscheidungshilfe der Termin bringt. Keine langen Nutzenlisten.
 19. FÜHRUNG OHNE DRUCK: Du hältst die Richtung, ohne zu drängen. Ziel bleibt die Terminvereinbarung, aber der Gesprächspartner soll sich jederzeit verstanden und respektiert fühlen.
 20. KURZE DIALOGTAKTE: Zielbild ist ein echter Wechsel aus Frage, Antwort, kurzer Einordnung und nächstem Schritt.
+21. AUSSPRECHEN-LASSEN: Unterbrich nie. Wenn die andere Person noch spricht oder hörbar nach dem passenden Wort sucht, warte ruhig ab und antworte erst nach einem klaren Abschluss.
 
 ━━━ THEMEN-PLAYBOOK ━━━
 Gesprächsziel: ${goal}

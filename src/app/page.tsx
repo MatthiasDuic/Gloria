@@ -129,6 +129,12 @@ function normalizePhoneDigits(value?: string) {
   return (value || "").replace(/\D+/g, "");
 }
 
+function ensureStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+}
+
 function phoneLooksEqual(a?: string, b?: string) {
   const left = normalizePhoneDigits(a);
   const right = normalizePhoneDigits(b);
@@ -273,6 +279,42 @@ function buildConversationLines(summary: string) {
       const isGloria = l.startsWith("Gloria:");
       return { speaker: isGloria ? "Gloria" : "Interessent", text: l.replace(/^Gloria:|^Interessent:/, "").trim() };
     });
+}
+
+function readDocumentationField(summary: string, field: string): string | undefined {
+  if (!summary) {
+    return undefined;
+  }
+
+  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = summary.match(new RegExp(`^-\\s*${escaped}:\\s*(.+)$`, "mi"));
+  return match?.[1]?.trim();
+}
+
+function reportHasRealConversation(report: DashboardData["reports"][number]): boolean {
+  const summary = report.summary || "";
+  const documentation = readDocumentationField(summary, "Gespraech stattgefunden");
+
+  if (documentation) {
+    return /ja/i.test(documentation);
+  }
+
+  const disposition = readDocumentationField(summary, "Einordnung");
+  if (disposition) {
+    const normalized = disposition.toLowerCase();
+    if (normalized.includes("gespraech") && !normalized.includes("kein gespraech")) {
+      return true;
+    }
+  }
+
+  if (report.outcome !== "Kein Kontakt") {
+    return true;
+  }
+
+  const lines = buildConversationLines(summary);
+  const hasGloria = lines.some((line) => line.speaker === "Gloria");
+  const hasUser = lines.some((line) => line.speaker === "Interessent");
+  return hasGloria && hasUser;
 }
 
 function detectLostStage(summary: string): string {
@@ -824,6 +866,7 @@ export default function HomePage() {
     listId: string;
     listName: string;
     active: boolean;
+    currentlyDialing?: boolean;
     total: number;
     pending: number;
     called: number;
@@ -866,7 +909,6 @@ export default function HomePage() {
   const [newPhoneUserId, setNewPhoneUserId] = useState("");
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [newPhoneLabel, setNewPhoneLabel] = useState("");
-  void newPhoneUserId; void setNewPhoneUserId; void newPhoneNumber; void setNewPhoneNumber; void newPhoneLabel; void setNewPhoneLabel;
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
     username: string;
@@ -940,6 +982,11 @@ export default function HomePage() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
   const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
   const [runningListIds, setRunningListIds] = useState<string[]>([]);
+  const blockedOutboundNumbers = useMemo(() => new Set(["+18446290030"]), []);
+
+  function normalizePhoneNumber(value?: string) {
+    return String(value || "").replace(/[\s()-]/g, "").trim();
+  }
 
   const activeDraft = draftScripts[detailTopic];
   const playbookTopicOptions = useMemo(
@@ -977,17 +1024,21 @@ export default function HomePage() {
     () => findTopicCategoryLabel(detailTopic),
     [detailTopic],
   );
+  const currentUserAllowedTopics = useMemo(
+    () => ensureStringArray(currentUser?.allowedPlaybookTopics),
+    [currentUser?.allowedPlaybookTopics],
+  );
   const voiceTopicOptions = useMemo(
     () => Array.from(
       new Set(
-        (currentUser?.allowedPlaybookTopics?.length
-          ? currentUser.allowedPlaybookTopics
+        (currentUserAllowedTopics.length
+          ? currentUserAllowedTopics
           : [...TOPICS])
           .map((topic) => String(topic).trim())
           .filter(Boolean),
       ),
     ),
-    [currentUser?.allowedPlaybookTopics],
+    [currentUserAllowedTopics],
   );
   const voiceTopicGroups = useMemo(
     () => buildTopicGroups(voiceTopicOptions),
@@ -1048,10 +1099,15 @@ export default function HomePage() {
   const reportingInsights = useMemo(() => {
     const reports = data.reports;
     const total = reports.length;
+    const realConversations = reports.filter((report) => reportHasRealConversation(report)).length;
     const appointments = reports.filter((r) => r.outcome === "Termin").length;
     const rejections = reports.filter((r) => r.outcome === "Absage").length;
     const callbacks = reports.filter((r) => r.outcome === "Wiedervorlage").length;
     const noContact = reports.filter((r) => r.outcome === "Kein Kontakt").length;
+    const noContactWithConversation = reports.filter(
+      (r) => r.outcome === "Kein Kontakt" && reportHasRealConversation(r),
+    ).length;
+    const noConversation = total - realConversations;
     const contacts = total - noContact;
     const contactRate = total > 0 ? Math.round((contacts / total) * 100) : 0;
     const appointmentRate = contacts > 0 ? Math.round((appointments / contacts) * 100) : 0;
@@ -1128,6 +1184,9 @@ export default function HomePage() {
 
     return {
       total,
+      realConversations,
+      noConversation,
+      noContactWithConversation,
       contacts,
       appointments,
       rejections,
@@ -1193,6 +1252,7 @@ export default function HomePage() {
 
     for (const entry of managedPhoneNumbers) {
       if (!entry.phoneNumber) continue;
+      if ([...blockedOutboundNumbers].some((blocked) => normalizePhoneNumber(blocked) === normalizePhoneNumber(entry.phoneNumber))) continue;
       byNumber.set(entry.phoneNumber, {
         number: entry.phoneNumber,
         label: entry.label || entry.phoneNumber,
@@ -1201,6 +1261,7 @@ export default function HomePage() {
 
     for (const entry of anrufEinzelfirmaFromOptions) {
       if (!entry.number) continue;
+      if ([...blockedOutboundNumbers].some((blocked) => normalizePhoneNumber(blocked) === normalizePhoneNumber(entry.number))) continue;
       if (!byNumber.has(entry.number)) {
         byNumber.set(entry.number, {
           number: entry.number,
@@ -1210,7 +1271,7 @@ export default function HomePage() {
     }
 
     return Array.from(byNumber.values());
-  }, [managedPhoneNumbers, anrufEinzelfirmaFromOptions]);
+  }, [managedPhoneNumbers, anrufEinzelfirmaFromOptions, blockedOutboundNumbers]);
 
   async function loadDashboard() {
     const [dashboardResponse, learningResponse] = await Promise.all([
@@ -1306,6 +1367,15 @@ export default function HomePage() {
     void loadCampaignLists();
     void loadSessionAndAdminData();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "master") return;
+    if (newPhoneUserId) return;
+    const firstUser = adminUsers.find((entry) => entry.role === "user") || adminUsers[0];
+    if (firstUser?.id) {
+      setNewPhoneUserId(firstUser.id);
+    }
+  }, [adminUsers, currentUser, newPhoneUserId]);
 
   useEffect(() => {
     void (async () => {
@@ -1464,7 +1534,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, listId }),
       });
-      const payload = (await response.json()) as {
+      const payload = (await response.json().catch(() => ({}))) as {
         lists?: CampaignListSummary[];
         error?: string;
       };
@@ -1691,8 +1761,8 @@ export default function HomePage() {
   async function applyRecommendedPlaybooksToAccount() {
     const availableTopics = Array.from(
       new Set(
-        (currentUser?.allowedPlaybookTopics?.length
-          ? currentUser.allowedPlaybookTopics
+        (currentUserAllowedTopics.length
+          ? currentUserAllowedTopics
           : [...TOPICS, ...Object.keys(draftScripts)])
           .map((topic) => topic.trim())
           .filter(Boolean),
@@ -2019,6 +2089,31 @@ export default function HomePage() {
     }
   }
 
+  async function deletePhoneByAdmin(id: string, number: string) {
+    if (!confirm(`Rufnummer ${number} wirklich löschen?`)) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/admin/phone-numbers?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Rufnummer konnte nicht gelöscht werden.");
+      }
+
+      setNotice(`Rufnummer ${number} gelöscht.`);
+      await loadSessionAndAdminData();
+      await loadDashboard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Rufnummer konnte nicht gelöscht werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteUserByAdmin(userId: string, username: string) {
     if (currentUser?.id === userId) {
       setNotice("Der aktuell angemeldete Master-Benutzer kann hier nicht gelöscht werden.");
@@ -2318,10 +2413,10 @@ export default function HomePage() {
             (data.reports || []).filter((r) => {
               const d = new Date(r.conversationDate);
               const today = new Date();
-              return d.toDateString() === today.toDateString();
+              return d.toDateString() === today.toDateString() && reportHasRealConversation(r);
             }).length
           }</div>
-          <div className="kpi-sub">{data.metrics.conversations} Gespräche gesamt</div>
+          <div className="kpi-sub">{reportingInsights.realConversations} echte Gespräche gesamt</div>
         </article>
         <article className="kpi-card">
           <div className="kpi-label">Offene Wiedervorlagen</div>
@@ -2338,7 +2433,8 @@ export default function HomePage() {
       <CollapsiblePanel title="Kennzahlen" defaultOpen>
         <section className="stats-grid">
           <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
-          <article className="stat-card"><span>Gespräche</span><strong>{data.metrics.conversations}</strong></article>
+          <article className="stat-card"><span>Echte Gespräche</span><strong>{reportingInsights.realConversations}</strong></article>
+          <article className="stat-card"><span>Ohne Gespräch</span><strong>{reportingInsights.noConversation}</strong></article>
           <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
           <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
           <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
@@ -2353,14 +2449,16 @@ export default function HomePage() {
         ) : (
           <div className="stack" style={{ gap: "24px" }}>
             <div>
-              <p className="subtle" style={{ marginBottom: 8 }}><strong>Conversion-Funnel (alle Gespräche)</strong></p>
+              <p className="subtle" style={{ marginBottom: 8 }}><strong>Conversion-Funnel (Report-Basis + Gesprächsqualität)</strong></p>
               <section className="stats-grid">
                 <article className="stat-card"><span>Reports gesamt</span><strong>{reportingInsights.total}</strong></article>
+                <article className="stat-card"><span>Echte Gespräche</span><strong>{reportingInsights.realConversations}</strong></article>
                 <article className="stat-card"><span>Kontakte erreicht</span><strong>{reportingInsights.contacts}<small className="subtle"> ({reportingInsights.contactRate}%)</small></strong></article>
                 <article className="stat-card"><span>Termine</span><strong>{reportingInsights.appointments}<small className="subtle"> ({reportingInsights.appointmentRate}% v. Kontakte)</small></strong></article>
                 <article className="stat-card"><span>Wiedervorlagen</span><strong>{reportingInsights.callbacks}</strong></article>
                 <article className="stat-card"><span>Absagen</span><strong>{reportingInsights.rejections}<small className="subtle"> ({reportingInsights.rejectionRate}% v. Kontakte)</small></strong></article>
                 <article className="stat-card"><span>Kein Kontakt</span><strong>{reportingInsights.noContact}</strong></article>
+                <article className="stat-card"><span>Kein Kontakt trotz Gespräch</span><strong>{reportingInsights.noContactWithConversation}</strong></article>
               </section>
             </div>
 
@@ -2417,7 +2515,7 @@ export default function HomePage() {
                 </ul>
               )}
               <p className="subtle" style={{ marginTop: 8, fontSize: "0.85rem" }}>
-                Ableitung erfolgt per Textanalyse der Report-Zusammenfassung (Schlagwörter). "Sonstige" umfasst Absagen ohne erkennbares Muster.
+                Ableitung erfolgt per Textanalyse der Report-Zusammenfassung (Schlagwörter). &quot;Sonstige&quot; umfasst Absagen ohne erkennbares Muster.
               </p>
             </div>
 
@@ -2616,7 +2714,7 @@ export default function HomePage() {
               </p>
               {campaignLists.map((list) => {
                 const leadsForList = data.leads.filter((lead) => (lead.listId || "legacy") === list.listId);
-                const isRunning = list.active || runningListSet.has(list.listId);
+                const isRunning = list.active || Boolean(list.currentlyDialing) || runningListSet.has(list.listId);
 
                 return (
                   <div key={list.listId} className="mini-panel">
@@ -3279,7 +3377,7 @@ export default function HomePage() {
                         <button className="btn" onClick={() => void createUserByAdmin()} disabled={busy}>Benutzer anlegen</button>
                       </div>
                       <p className="subtle top-gap" style={{ fontSize: "0.8rem" }}>
-                        Hinweis: Die zugewiesene Rufnummer (Anrufer-ID) kann nach dem Anlegen über „Bearbeiten" gesetzt werden.
+                        Hinweis: Die zugewiesene Rufnummer (Anrufer-ID) kann nach dem Anlegen über „Bearbeiten&quot; gesetzt werden.
                       </p>
                     </div>
 
@@ -3453,6 +3551,81 @@ export default function HomePage() {
                                   </tr>
                                 ) : null}
                               </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mini-panel top-gap">
+                      <h3>Telefonnummern verwalten</h3>
+                      <p className="subtle">
+                        Hier sehen Sie alle hinterlegten Telefonnummern und können neue Nummern direkt einem Benutzer zuweisen.
+                      </p>
+                      <div className="field-grid top-gap">
+                        <div>
+                          <label>Benutzer</label>
+                          <select value={newPhoneUserId} onChange={(event) => setNewPhoneUserId(event.target.value)}>
+                            <option value="">Bitte wählen</option>
+                            {adminUsers.map((entry) => (
+                              <option key={entry.id} value={entry.id}>
+                                {entry.username} · {entry.realName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label>Telefonnummer</label>
+                          <input
+                            value={newPhoneNumber}
+                            onChange={(event) => setNewPhoneNumber(event.target.value)}
+                            placeholder="+49..."
+                          />
+                        </div>
+                        <div>
+                          <label>Label</label>
+                          <input
+                            value={newPhoneLabel}
+                            onChange={(event) => setNewPhoneLabel(event.target.value)}
+                            placeholder="z. B. Vertrieb Inbound"
+                          />
+                        </div>
+                      </div>
+                      <div className="row top-gap">
+                        <button className="btn" onClick={() => void createPhoneByAdmin()} disabled={busy}>
+                          Telefonnummer hinzufügen
+                        </button>
+                      </div>
+
+                      <table className="top-gap">
+                        <thead>
+                          <tr>
+                            <th>Benutzer</th>
+                            <th>Label</th>
+                            <th>Rufnummer</th>
+                            <th>Status</th>
+                            <th style={{ width: 1 }}>Aktion</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {managedPhoneNumbers.map((entry) => {
+                            const owner = adminUsers.find((user) => user.id === entry.userId);
+                            return (
+                              <tr key={entry.id}>
+                                <td>{owner ? `${owner.username} · ${owner.realName}` : entry.userId}</td>
+                                <td>{entry.label}</td>
+                                <td>{entry.phoneNumber}</td>
+                                <td>{entry.active ? "aktiv" : "inaktiv"}</td>
+                                <td>
+                                  <button
+                                    className="btn danger"
+                                    onClick={() => void deletePhoneByAdmin(entry.id, entry.phoneNumber)}
+                                    disabled={busy}
+                                  >
+                                    Löschen
+                                  </button>
+                                </td>
+                              </tr>
                             );
                           })}
                         </tbody>
@@ -3699,10 +3872,17 @@ export default function HomePage() {
                   {transcriptLoading ? (
                     <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
                   ) : transcriptEvents.length === 0 ? (
-                    <p className="subtle" style={{ marginTop: 6 }}>
-                      Kein Live-Mitschnitt vorhanden (z. B. weil dieser Anruf noch über die alte Edge-Pipeline lief
-                      oder kein Sprach-Streaming aktiv war).
-                    </p>
+                    conversationLines.length > 0 ? (
+                      <p className="subtle" style={{ marginTop: 6 }}>
+                        Kein technischer Live-Mitschnitt gespeichert. Es liegt aber ein Gesprächsverlauf in der
+                        Zusammenfassung vor (oben angezeigt).
+                      </p>
+                    ) : (
+                      <p className="subtle" style={{ marginTop: 6 }}>
+                        Für diesen Anruf liegt kein Live-Mitschnitt vor. Das passiert typischerweise bei älteren
+                        Calls ohne Streaming oder wenn die Pipeline vorzeitig beendet wurde.
+                      </p>
+                    )
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                       {transcriptEvents.map((entry) => {

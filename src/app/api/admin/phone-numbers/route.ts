@@ -11,6 +11,23 @@ import {
 
 export const runtime = "nodejs";
 
+const BLOCKED_OUTBOUND_NUMBERS = new Set(["+18446290030"]);
+
+function normalizePhoneNumber(value?: string): string {
+  return String(value || "").replace(/[\s()-]/g, "").trim();
+}
+
+function isBlockedOutboundNumber(value?: string): boolean {
+  const normalized = normalizePhoneNumber(value);
+  if (!normalized) return false;
+  for (const blocked of BLOCKED_OUTBOUND_NUMBERS) {
+    if (normalizePhoneNumber(blocked) === normalized) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function GET(request: Request) {
   try {
     await ensureMasterAdmin();
@@ -63,6 +80,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "userId, phoneNumber und label sind erforderlich." }, { status: 400 });
     }
 
+    if (isBlockedOutboundNumber(phoneNumber)) {
+      return NextResponse.json(
+        { error: "Diese Rufnummer ist gesperrt und darf nicht für Telefonie verwendet werden." },
+        { status: 400 },
+      );
+    }
+
     const created = await createPhoneNumber({
       userId,
       phoneNumber,
@@ -99,6 +123,13 @@ export async function PATCH(request: Request) {
 
     if (!id) {
       return NextResponse.json({ error: "id ist erforderlich." }, { status: 400 });
+    }
+
+    if (payload.phoneNumber !== undefined && isBlockedOutboundNumber(payload.phoneNumber)) {
+      return NextResponse.json(
+        { error: "Diese Rufnummer ist gesperrt und darf nicht für Telefonie verwendet werden." },
+        { status: 400 },
+      );
     }
 
     if (sessionUser.role !== "master") {

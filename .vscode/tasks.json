@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "git-push-deploy",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"push"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

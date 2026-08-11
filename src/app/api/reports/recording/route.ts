@@ -5,6 +5,32 @@ import { getDashboardData } from "@/lib/storage";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type TelephonyProvider = "twilio" | "telnyx" | "unknown";
+
+function getConfiguredTelnyxHost(): string {
+  try {
+    return new URL(process.env.TELNYX_API_BASE_URL?.trim() || "https://api.telnyx.com/v2").hostname;
+  } catch {
+    return "api.telnyx.com";
+  }
+}
+
+function detectProvider(hostname: string): TelephonyProvider {
+  if (hostname === "api.twilio.com" || hostname.endsWith(".twilio.com")) {
+    return "twilio";
+  }
+
+  if (
+    hostname === getConfiguredTelnyxHost() ||
+    hostname.endsWith(".telnyx.com") ||
+    hostname.endsWith(".telnyxusercontent.com")
+  ) {
+    return "telnyx";
+  }
+
+  return "unknown";
+}
+
 export async function GET(request: NextRequest) {
   const sessionUser = getSessionUserFromRequest(request);
 
@@ -26,10 +52,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Ungültige URL." }, { status: 400 });
   }
 
-  const telephonyApiHost = new URL(process.env.TELNYX_API_BASE_URL?.trim() || "https://api.telnyx.com/v2").hostname;
-  const allowedHosts = new Set(["api.twilio.com", telephonyApiHost]);
+  const provider = detectProvider(parsedUrl.hostname);
 
-  if (!allowedHosts.has(parsedUrl.hostname)) {
+  if (provider === "unknown") {
     return NextResponse.json(
       { error: "Nur Aufnahmen vom konfigurierten Telephony-Provider können abgerufen werden." },
       { status: 403 },
@@ -45,31 +70,47 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
-  const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+  const headers: Record<string, string> = {};
 
-  if (!accountSid || !authToken) {
-    return NextResponse.json({ error: "Twilio-Zugangsdaten nicht konfiguriert." }, { status: 503 });
+  if (provider === "twilio") {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+
+    if (!accountSid || !authToken) {
+      return NextResponse.json({ error: "Twilio-Zugangsdaten nicht konfiguriert." }, { status: 503 });
+    }
+
+    const credentials = btoa(`${accountSid}:${authToken}`);
+    headers.Authorization = `Basic ${credentials}`;
   }
 
-  const credentials = btoa(`${accountSid}:${authToken}`);
+  if (provider === "telnyx") {
+    const isApiHost =
+      parsedUrl.hostname === getConfiguredTelnyxHost() ||
+      parsedUrl.hostname.endsWith(".telnyx.com");
+
+    if (isApiHost) {
+      const telnyxApiKey = process.env.TELNYX_API_KEY?.trim();
+      if (!telnyxApiKey) {
+        return NextResponse.json({ error: "Telnyx-Zugangsdaten nicht konfiguriert." }, { status: 503 });
+      }
+      headers.Authorization = `Bearer ${telnyxApiKey}`;
+    }
+  }
 
   try {
-    const twilioResponse = await fetch(url, {
-      headers: {
-        Authorization: `Basic ${credentials}`,
-      },
-    });
+    const providerResponse = await fetch(url, { headers });
 
-    if (!twilioResponse.ok) {
+    if (!providerResponse.ok) {
+      const providerLabel = provider === "telnyx" ? "Telnyx" : "Twilio";
       return NextResponse.json(
-        { error: `Twilio antwortete mit ${twilioResponse.status}.` },
-        { status: twilioResponse.status },
+        { error: `${providerLabel} antwortete mit ${providerResponse.status}.` },
+        { status: providerResponse.status },
       );
     }
 
-    const contentType = twilioResponse.headers.get("content-type") ?? "audio/mpeg";
-    const audioBuffer = await twilioResponse.arrayBuffer();
+    const contentType = providerResponse.headers.get("content-type") ?? "audio/mpeg";
+    const audioBuffer = await providerResponse.arrayBuffer();
     const download = request.nextUrl.searchParams.get("download") === "1";
     const ext = contentType.includes("wav") ? "wav" : "mp3";
 

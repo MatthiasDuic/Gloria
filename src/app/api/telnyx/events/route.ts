@@ -170,6 +170,12 @@ function findRecordingUrl(input: unknown): string | undefined {
   return undefined;
 }
 
+function buildRecordingUrlFromId(recordingId?: string): string | undefined {
+  const id = recordingId?.trim();
+  if (!id) return undefined;
+  return `${getApiBaseUrl()}/recordings/${encodeURIComponent(id)}/actions/download`;
+}
+
 async function postRecordingToCallsWebhook(params: {
   callSid: string;
   state: DecodedClientState;
@@ -221,6 +227,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const clientState = decodeClientState(event.payload?.client_state);
   const extractedRecordingUrl =
     event.payload?.recording_url ||
+    buildRecordingUrlFromId(event.payload?.recording_id) ||
     findRecordingUrl((parsedBody as { data?: { payload?: unknown } })?.data?.payload);
 
   if (!callControlId) {

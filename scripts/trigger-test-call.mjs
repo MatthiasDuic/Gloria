@@ -4,24 +4,29 @@ import path from "node:path";
 
 const root = process.cwd();
 const envPath = path.join(root, ".env.local");
-const envRaw = fs.readFileSync(envPath, "utf8");
 const cfg = {};
-for (const rawLine of envRaw.split(/\r?\n/)) {
-  const line = rawLine.trim();
-  if (!line || line.startsWith("#")) continue;
-  const eq = line.indexOf("=");
-  if (eq <= 0) continue;
-  const key = line.slice(0, eq).trim();
-  let value = line.slice(eq + 1).trim();
-  if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-  cfg[key] = value;
+if (fs.existsSync(envPath)) {
+  const envRaw = fs.readFileSync(envPath, "utf8");
+  for (const rawLine of envRaw.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    cfg[key] = value;
+  }
+}
+for (const [key, value] of Object.entries(process.env)) {
+  if (value && !cfg[key]) cfg[key] = value;
 }
 
 const base = "https://gloria.agentur-duic-sprockhoevel.de";
 const username = cfg.BASIC_AUTH_USERNAME;
 const password = cfg.BASIC_AUTH_PASSWORD;
 if (!username || !password) {
-  throw new Error("BASIC_AUTH_USERNAME/BASIC_AUTH_PASSWORD fehlen in .env.local");
+  throw new Error("BASIC_AUTH_USERNAME/BASIC_AUTH_PASSWORD fehlen in .env.local oder Umgebungsvariablen");
 }
 
 let cookieHeader = "";
@@ -65,13 +70,14 @@ const callerIds = (cfg.TWILIO_CALLER_IDS || cfg.TWILIO_PHONE_NUMBER || "")
   .filter(Boolean);
 console.log("  allowed caller ids (from local .env.local):", callerIds);
 const firstPhone =
+  (phones.json?.phoneNumbers || []).find((p) => p.userId === login.json?.user?.id) ||
   (phones.json?.phoneNumbers || []).find((p) => p.phoneNumber === "+4923399255995") ||
   phones.json?.phoneNumbers?.[0];
 if (!firstPhone) throw new Error("Keine Telefonnummer verfügbar.");
-console.log("  using:", firstPhone.phoneNumber, "id:", firstPhone.id);
+console.log("  using:", firstPhone.phoneNumber, "id:", firstPhone.id, "ownerUser:", firstPhone.userId);
 
 console.log("Test-Call …");
-const call = await req("/api/twilio/test-call", {
+const call = await req("/api/telnyx/test-call", {
   method: "POST",
   json: {
     to: "+4915755806701",

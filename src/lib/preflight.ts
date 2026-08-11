@@ -1,9 +1,10 @@
 import { AI_CONFIG } from "./ai-config";
-import { isElevenLabsConfigured } from "./elevenlabs";
+import { isDeepgramConfigured } from "./deepgram-tts";
+import { diagnosePostgresConnection, isDatabaseUrlConfigured } from "./report-db";
 import { getTelnyxApiBaseUrl, isTelnyxConfigured } from "./telnyx";
 
 export interface PreflightCheck {
-  service: "openai" | "elevenlabs" | "telnyx";
+  service: "openai" | "deepgram" | "telnyx" | "postgres";
   ok: boolean;
   latencyMs: number;
   status?: number;
@@ -87,48 +88,40 @@ async function checkOpenAI(timeoutMs: number): Promise<PreflightCheck> {
   };
 }
 
-async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
-  if (!isElevenLabsConfigured()) {
+async function checkDeepgram(timeoutMs: number): Promise<PreflightCheck> {
+  if (!isDeepgramConfigured()) {
     return {
-      service: "elevenlabs",
+      service: "deepgram",
       ok: false,
       latencyMs: 0,
-      reason: "ELEVENLABS_API_KEY oder ELEVENLABS_VOICE_ID fehlt.",
+      reason: "DEEPGRAM_API_KEY fehlt.",
     };
   }
 
-  const apiKey = process.env.ELEVENLABS_API_KEY!.trim();
-  const voiceId = process.env.ELEVENLABS_VOICE_ID!.trim();
+  const apiKey = process.env.DEEPGRAM_API_KEY!.trim();
+  const model = process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-helios-en";
 
-  // Wir prüfen exakt den Endpoint, der im Call auch verwendet wird, mit dem
-  // absolut kleinstmöglichen Payload ("Hi"). Das testet die tatsächlich
-  // nötige TTS-Permission statt eines möglicherweise fehlenden voices_read.
-  const url = new URL(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-  );
-  url.searchParams.set("optimize_streaming_latency", "0");
-  url.searchParams.set("output_format", "ulaw_8000");
+  const url = new URL("https://api.deepgram.com/v1/speak");
+  url.searchParams.set("model", model);
+  url.searchParams.set("encoding", "mulaw");
+  url.searchParams.set("sample_rate", "8000");
 
   const { response, error, latencyMs } = await timedFetch(
     url.toString(),
     {
       method: "POST",
       headers: {
+        Authorization: `Token ${apiKey}`,
         "Content-Type": "application/json",
-        Accept: "audio/basic",
-        "xi-api-key": apiKey,
       },
-      body: JSON.stringify({
-        text: "Hi.",
-        model_id: process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_multilingual_v2",
-      }),
+      body: JSON.stringify({ text: "Hi." }),
     },
     timeoutMs,
   );
 
   if (error) {
     return {
-      service: "elevenlabs",
+      service: "deepgram",
       ok: false,
       latencyMs,
       reason: error instanceof Error ? error.message : String(error),
@@ -138,15 +131,14 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
   if (!response || !response.ok) {
     const detail = response ? await response.text().catch(() => "") : "";
     return {
-      service: "elevenlabs",
+      service: "deepgram",
       ok: false,
       status: response?.status,
       latencyMs,
-      reason: `ElevenLabs TTS-Stream antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+      reason: `Deepgram TTS antwortete ${response?.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
     };
   }
 
-  // Body abbrechen, wir wollen nicht komplette Audio-Bytes laden.
   try {
     await response.body?.cancel();
   } catch {
@@ -154,7 +146,7 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
   }
 
   return {
-    service: "elevenlabs",
+    service: "deepgram",
     ok: true,
     status: response.status,
     latencyMs,
@@ -211,18 +203,42 @@ async function checkTelnyx(timeoutMs: number): Promise<PreflightCheck> {
   };
 }
 
+async function checkPostgres(): Promise<PreflightCheck> {
+  if (!isDatabaseUrlConfigured()) {
+    return {
+      service: "postgres",
+      ok: false,
+      latencyMs: 0,
+      reason: "DATABASE_URL fehlt.",
+    };
+  }
+
+  const started = Date.now();
+  const diagnosis = await diagnosePostgresConnection();
+  const latencyMs = Date.now() - started;
+  const ok = diagnosis.startsWith("Postgres reachable");
+
+  return {
+    service: "postgres",
+    ok,
+    latencyMs,
+    reason: ok ? undefined : diagnosis,
+  };
+}
+
 export async function runPreflight(options?: {
   timeoutMs?: number;
   services?: ReadonlyArray<PreflightCheck["service"]>;
 }): Promise<PreflightResult> {
   const timeoutMs = Math.max(500, Math.min(8000, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
-  const wanted = options?.services ?? (["openai", "elevenlabs", "telnyx"] as const);
+  const wanted = options?.services ?? (["openai", "deepgram", "telnyx", "postgres"] as const);
   const started = Date.now();
 
   const tasks: Array<Promise<PreflightCheck>> = [];
   if (wanted.includes("openai")) tasks.push(checkOpenAI(timeoutMs));
-  if (wanted.includes("elevenlabs")) tasks.push(checkElevenLabs(timeoutMs));
+  if (wanted.includes("deepgram")) tasks.push(checkDeepgram(timeoutMs));
   if (wanted.includes("telnyx")) tasks.push(checkTelnyx(timeoutMs));
+  if (wanted.includes("postgres")) tasks.push(checkPostgres());
 
   const checks = await Promise.all(tasks);
   return {

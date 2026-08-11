@@ -4,7 +4,7 @@ import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { openAsr, type AsrSession } from "./asr.js";
 import { streamReply, prewarmOpenAi } from "./llm.js";
-import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
+import { streamDeepgramToMulaw, prewarmDeepgram, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
@@ -357,7 +357,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       sendMedia(frame);
       totalAudioBytes += frame.length;
     };
-    const handle = streamElevenLabsToMulaw(
+    const handle = streamDeepgramToMulaw(
       text,
       (chunk) => {
         buffer = Buffer.concat([buffer, chunk]);
@@ -409,7 +409,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   };
 
   /**
-   * Streamt die LLM-Antwort und pipelined sie satzweise durch ElevenLabs:
+   * Streamt die LLM-Antwort und pipelined sie satzweise durch Deepgram TTS:
    * sobald der erste Satz aus OpenAI fertig ist, startet das TTS – während
    * OpenAI noch den zweiten/dritten Satz generiert. Das spart pro Turn
    * 0.5–1.0 s First-Audio-Latenz gegenüber dem alten "warte bis LLM fertig,
@@ -449,7 +449,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         totalAudioBytes += frame.length;
       };
 
-      const handle = streamElevenLabsToMulaw(
+      const handle = streamDeepgramToMulaw(
         trimmed,
         (chunk) => {
           if (chainAborted) return;
@@ -692,11 +692,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           inboundSampleRate,
         });
 
-        // Pre-warm TLS/HTTP-Pools zu OpenAI + ElevenLabs SOFORT, damit die
+        // Pre-warm TLS/HTTP-Pools zu OpenAI + Deepgram SOFORT, damit die
         // allererste LLM-/TTS-Anfrage keine 300–600 ms Handshake-Latenz hat.
         // Der Anrufer braucht ~1–2 s, bis er sich meldet – diese Zeit nutzen wir.
         prewarmOpenAi();
-        prewarmElevenLabs();
+        prewarmDeepgram();
 
         // Lade Playbook (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
         playbookReady = loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {

@@ -1,5 +1,6 @@
 import type { Topic } from "./types";
 import { prepareCall } from "./telephony-runtime";
+import { listPhoneNumbersByUser } from "./report-db";
 
 export interface TelnyxCallerIdOption {
   number: string;
@@ -10,6 +11,7 @@ export interface TelnyxCallRequest {
   to: string;
   company: string;
   contactName?: string;
+  leadNote?: string;
   topic: Topic;
   leadId?: string;
   userId?: string;
@@ -43,6 +45,22 @@ const PREPARE_CALL_RETRY_MS = Math.max(
   150,
   Number.parseInt(process.env.PREPARE_CALL_RETRY_MS || "350", 10),
 );
+const BLOCKED_OUTBOUND_NUMBERS = new Set(["+18446290030"]);
+
+function normalizePhoneNumber(value?: string): string {
+  return String(value || "").replace(/[\s()-]/g, "").trim();
+}
+
+function isBlockedOutboundNumber(value?: string): boolean {
+  const normalized = normalizePhoneNumber(value);
+  if (!normalized) return false;
+  for (const blocked of BLOCKED_OUTBOUND_NUMBERS) {
+    if (normalizePhoneNumber(blocked) === normalized) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function getAppBaseUrl(request?: Request): string {
   const configured = process.env.APP_BASE_URL?.trim();
@@ -126,6 +144,7 @@ function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     v: 1,
     company: payload.company,
     contactName: payload.contactName,
+    leadNote: payload.leadNote,
     topic: payload.topic,
     leadId: payload.leadId,
     userId: payload.userId,
@@ -275,11 +294,46 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
   const apiKey = readEnv("TELNYX_API_KEY");
   const connectionId = readEnv("TELNYX_CONNECTION_ID");
   const defaultFrom = readEnv("TELNYX_PHONE_NUMBER");
-  const allowedCallerIds = getTelnyxCallerIds();
-  const from = payload.from?.trim() || defaultFrom;
+  const allowedCallerIds = getTelnyxCallerIds().filter((number) => !isBlockedOutboundNumber(number));
+
+  let from = payload.from?.trim();
+
+  if (payload.userId) {
+    const assignedNumbers = (await listPhoneNumbersByUser(payload.userId))
+      .filter((entry) => entry.active)
+      .filter((entry) => !isBlockedOutboundNumber(entry.phoneNumber));
+
+    if (assignedNumbers.length === 0) {
+      throw new Error("Für diesen Benutzer ist keine aktive, zugewiesene Ausgangsnummer hinterlegt.");
+    }
+
+    if (payload.phoneNumberId) {
+      const selected = assignedNumbers.find((entry) => entry.id === payload.phoneNumberId);
+      if (!selected) {
+        throw new Error("Die ausgewählte Ausgangsnummer ist diesem Benutzer nicht zugewiesen oder nicht aktiv.");
+      }
+      from = selected.phoneNumber;
+    } else if (from) {
+      const matching = assignedNumbers.find(
+        (entry) => normalizePhoneNumber(entry.phoneNumber) === normalizePhoneNumber(from),
+      );
+      if (!matching) {
+        throw new Error("Es dürfen nur dem Benutzer zugewiesene Ausgangsnummern verwendet werden.");
+      }
+      from = matching.phoneNumber;
+    } else {
+      from = assignedNumbers[0].phoneNumber;
+    }
+  }
+
+  from = from || defaultFrom;
+
+  if (isBlockedOutboundNumber(from)) {
+    throw new Error("Diese Ausgangsnummer ist gesperrt und darf nicht für Telefonie verwendet werden.");
+  }
 
   const ownedCallerIds = await listOwnedTelnyxNumbers();
-  const allowedSet = new Set([...allowedCallerIds, ...ownedCallerIds]);
+  const allowedSet = new Set([...allowedCallerIds, ...ownedCallerIds.filter((number) => !isBlockedOutboundNumber(number))]);
 
   if (!allowedSet.has(from)) {
     throw new Error("Ausgangsnummer ist nicht freigegeben. Bitte waehlen Sie eine konfigurierte Telnyx-Nummer.");

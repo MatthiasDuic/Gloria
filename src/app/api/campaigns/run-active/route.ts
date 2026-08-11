@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  isCampaignListActive,
   listActiveCampaignLists,
   pullNextLeadForCampaignList,
   setCampaignListActive,
@@ -11,6 +12,7 @@ import {
   isWithinCampaignHours,
 } from "@/lib/campaign-schedule";
 import { findUserById } from "@/lib/report-db";
+import { normalizePhoneForDial } from "@/lib/phone-utils";
 
 export const runtime = "nodejs";
 
@@ -109,13 +111,27 @@ async function handle(request: Request) {
         continue;
       }
 
-      const to = (lead.directDial || lead.phone || "").trim();
+      const rawTo = (lead.directDial || lead.phone || "").trim();
+      const to = normalizePhoneForDial(rawTo);
       if (!to) {
         results.push({
           userId: userKey,
           listId: list.listId,
           dialed: false,
-          reason: "missing_phone",
+          reason: rawTo ? "invalid_phone_format" : "missing_phone",
+        });
+        continue;
+      }
+
+      // Hard stop guard: if list got stopped while this cron run is still
+      // processing, do not start another call for it.
+      const stillActive = await isCampaignListActive(list.listId, userId);
+      if (!stillActive) {
+        results.push({
+          userId: userKey,
+          listId: list.listId,
+          dialed: false,
+          reason: "list_not_active",
         });
         continue;
       }
@@ -126,9 +142,10 @@ async function handle(request: Request) {
             to,
             company: lead.company,
             contactName: lead.contactName,
+            leadNote: lead.note,
             topic: lead.topic,
             leadId: lead.id,
-            userId,
+            userId: lead.userId || userId,
             ownerRealName: user?.realName,
             ownerCompanyName: user?.companyName,
             ownerGesellschaft: user?.gesellschaft,

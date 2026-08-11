@@ -1,6 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import {
   getLatestReportSummaryForLead,
+  isCampaignListActive,
   listDueCallbackLeads,
   markLeadCallbackScheduled,
   storeCallReport,
@@ -8,6 +9,7 @@ import {
 import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { isWithinCampaignHours } from "@/lib/campaign-schedule";
 import { sendOperationalEmail } from "@/lib/mailer";
+import { normalizePhoneForDial } from "@/lib/phone-utils";
 
 export const runtime = "nodejs";
 
@@ -65,11 +67,25 @@ async function handle(request: Request) {
 
   for (let idx = 0; idx < dueLeads.length; idx++) {
     const lead = dueLeads[idx];
-    const to = (lead.directDial || lead.phone || "").trim();
+
+    // Hard stop guard: callbacks must pause immediately after list stop and
+    // continue only when list gets started again.
+    const listId = lead.listId || "legacy";
+    const stillActive = await isCampaignListActive(listId, lead.userId);
+    if (!stillActive) {
+      const reason = "list_not_active";
+      failed.push({ leadId: lead.id, company: lead.company, reason });
+      logLine({ event: "skip_lead", leadId: lead.id, reason });
+      continue;
+    }
+
+    const rawTo = (lead.directDial || lead.phone || "").trim();
+    const to = normalizePhoneForDial(rawTo);
 
     if (!to) {
-      failed.push({ leadId: lead.id, company: lead.company, reason: "missing_phone" });
-      logLine({ event: "skip_lead", leadId: lead.id, reason: "missing_phone" });
+      const reason = rawTo ? "invalid_phone_format" : "missing_phone";
+      failed.push({ leadId: lead.id, company: lead.company, reason });
+      logLine({ event: "skip_lead", leadId: lead.id, reason });
       continue;
     }
 

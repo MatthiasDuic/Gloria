@@ -17,20 +17,16 @@ export type TtsStreamHandle = {
   readonly aborted: boolean;
 };
 
-/**
- * Pre-warmt die TLS/HTTP-Verbindung zu ElevenLabs, damit die ALLERERSTE TTS-
- * Anfrage (Glorias Begrüßung) nicht durch einen frischen TLS-Handshake
- * verzögert wird. Wird beim "start"-Event eines Calls aufgerufen.
- */
-export function prewarmElevenLabs(): void {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+/** Pre-warmt die TLS/HTTP-Verbindung zu Deepgram für die erste TTS-Anfrage. */
+export function prewarmDeepgram(): void {
+  const apiKey = process.env.DEEPGRAM_API_KEY;
   if (!apiKey) {
-    log.error("tts.missing_config", { keyPresent: false, voicePresent: Boolean(process.env.ELEVENLABS_VOICE_ID) });
+    log.error("tts.missing_config", { keyPresent: false });
     return;
   }
-  void fetch(`https://api.elevenlabs.io/v1/user`, {
+  void fetch("https://api.deepgram.com/v1/auth/token", {
     method: "GET",
-    headers: { "xi-api-key": apiKey },
+    headers: { Authorization: `Token ${apiKey}` },
   })
     .then((res) => {
       void res.text().catch(() => undefined);
@@ -48,55 +44,40 @@ export function prewarmElevenLabs(): void {
 }
 
 /**
- * Streams ElevenLabs TTS as μ-law 8000 Hz audio and invokes `onChunk`
+ * Streams Deepgram Aura TTS as μ-law 8000 Hz audio and invokes `onChunk`
  * with raw μ-law buffers (typically ~160-640 bytes).
  */
-export function streamElevenLabsToMulaw(
+export function streamDeepgramToMulaw(
   text: string,
   onChunk: (mulaw: Buffer) => void,
   selectedVoiceId?: string,
 ): TtsStreamHandle {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
+  const apiKey = process.env.DEEPGRAM_API_KEY;
+  const model = (selectedVoiceId || process.env.DEEPGRAM_VOICE_MODEL || "aura-helios-en").trim();
 
   const controller = new AbortController();
   const done = (async () => {
     try {
-      if (!apiKey || !voiceId) {
+      if (!apiKey) {
         log.error("tts.missing_config", {
-          keyPresent: Boolean(apiKey),
-          voicePresent: Boolean(voiceId),
+          keyPresent: false,
           keyFingerprint: keyFingerprint(apiKey),
         });
-        throw new Error("elevenlabs unavailable");
+        throw new Error("deepgram unavailable");
       }
 
-      const stability = numEnv("ELEVENLABS_STABILITY", 0.4);
-      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
-      const style = numEnv("ELEVENLABS_STYLE", 0.38);
-      const speed = numEnv("ELEVENLABS_SPEED", 0.9);
-      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
-      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=ulaw_8000`;
+      const url = new URL("https://api.deepgram.com/v1/speak");
+      url.searchParams.set("model", model);
+      url.searchParams.set("encoding", "mulaw");
+      url.searchParams.set("sample_rate", "8000");
 
-      const res = await fetch(url, {
+      const res = await fetch(url.toString(), {
         method: "POST",
         headers: {
-          "xi-api-key": apiKey,
+          Authorization: `Token ${apiKey}`,
           "content-type": "application/json",
-          accept: "audio/basic",
         },
-        body: JSON.stringify({
-          text: applyPronunciationFixes(text),
-          model_id: modelId,
-          voice_settings: {
-            stability,
-            similarity_boost: similarity,
-            style,
-            use_speaker_boost: speakerBoost,
-            speed,
-          },
-        }),
+        body: JSON.stringify({ text: applyPronunciationFixes(text) }),
         signal: controller.signal,
       });
 
@@ -106,10 +87,9 @@ export function streamElevenLabsToMulaw(
           status: res.status,
           body: body.slice(0, 200),
           keyFingerprint: keyFingerprint(apiKey),
-          voiceId,
-          modelId,
+          model,
         });
-        throw new Error(`elevenlabs ${res.status}`);
+        throw new Error(`deepgram ${res.status}`);
       }
 
       const reader = res.body.getReader();
@@ -138,6 +118,7 @@ export function streamElevenLabsToMulaw(
         const fallback = streamOpenAiTtsToMulaw(text, onChunk);
         await fallback.done;
       }
+      // Note: OpenAI TTS is fallback only; Deepgram Aura is the primary TTS.
     }
   })();
 
@@ -278,19 +259,6 @@ function pcmToMulaw(sample: number): number {
   return sign | (exp << 4) | mantissa;
 }
 
-function numEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const v = Number(raw);
-  return Number.isFinite(v) ? v : fallback;
-}
-
-function boolEnv(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
-  if (raw === undefined) return fallback;
-  return /^(1|true|yes|on)$/i.test(raw.trim());
-}
-
 function keyFingerprint(value?: string): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
@@ -305,12 +273,9 @@ function keyFingerprint(value?: string): string | undefined {
  */
 function applyPronunciationFixes(text: string): string {
   let out = text;
-  // "Duic" -> klingt im Deutschen wie "Du-itsch" (Bindestrich erzwingt
-  // bei ElevenLabs eine deutliche Trennung der Silben, sonst wird das
-  // "i" verschluckt und es klingt wie "Duc").
   out = out.replace(/\bDuic\b/g, "Du-itsch");
-  // "Sprockhövel" wird gelegentlich verschluckt – Bindestrich hilft beim Tempo
-  out = out.replace(/\bSprockhövel\b/g, "Sprock-Hövel");
+  // "Sprockhövel" kann von TTS-Modellen verschluckt werden.
+  out = out.replace(/\bSprockhövel\b/g, "Sprockhövel");
   // Wortwahl: "private/privaten Krankenversicherung(sbeiträge)" -> "Krankenversicherung(sbeiträge)"
   out = out.replace(/\b(privaten|private|privater|privates|privat)\s+Krankenversicherung/gi, "Krankenversicherung");
   // Dezimalzahlen fuer TTS robuster machen: "2,5" -> "2 komma 5"
@@ -318,9 +283,7 @@ function applyPronunciationFixes(text: string): string {
   // Tausenderpunkte vermeiden, damit TTS keine "Punkt"-Pause spricht.
   out = out.replace(/\b(\d)\.(\d{3})\b/g, "$1$2");
   // Saubere Endungen: ein TTS-Segment ohne abschließendes Satzzeichen wird
-  // von ElevenLabs intonatorisch "in der Schwebe" gelassen – der letzte
-  // Vokal klingt dann verschluckt. Wir hängen einen Punkt an, falls keiner
-  // vorhanden ist. Das ist beim satzweisen Pipelining besonders wichtig.
+  // intonatorisch offen gelassen. Punkt anhängen für satzweises Pipelining.
   const trimmed = out.trim();
   if (trimmed.length > 0 && !/[.!?;:,…”"')\]]$/.test(trimmed)) {
     out = `${trimmed}.`;

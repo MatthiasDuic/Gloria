@@ -1,6 +1,6 @@
 // HMAC-signierte, kurzlebige Tokens für /api/twilio/audio?text=...
 //
-// Zweck: Verhindert, dass Dritte beliebigen Text durch unsere ElevenLabs-Pipeline
+// Zweck: Verhindert, dass Dritte beliebigen Text durch unsere Deepgram-Pipeline
 // ziehen (Quota-Missbrauch + Log-Leak). Signatur bindet den konkreten Text +
 // Ablaufzeit an unser CALL_STATE_SECRET. Twilio ruft die URL nur wenige Sekunden
 // nach Generierung ab, daher reicht ein 5-Minuten-TTL.

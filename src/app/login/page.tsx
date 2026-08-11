@@ -1,15 +1,47 @@
 "use client";
 
-import { Suspense, FormEvent, useState } from "react";
+import { Suspense, FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const formRef = useRef<HTMLFormElement | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const suppressExternalPageEventsError = (event: ErrorEvent) => {
+      const source = event.filename || "";
+      const message = String(event.message || "");
+
+      if (!source.includes("page-events.js")) return;
+      if (!message.includes("reading 'length'")) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+
+    const containLoginKeydown = (event: KeyboardEvent) => {
+      const form = formRef.current;
+      if (!form) return;
+
+      const eventTarget = event.target;
+      if (eventTarget instanceof Node && form.contains(eventTarget)) {
+        event.stopPropagation();
+      }
+    };
+
+    window.addEventListener("error", suppressExternalPageEventsError, true);
+    document.addEventListener("keydown", containLoginKeydown, true);
+
+    return () => {
+      window.removeEventListener("error", suppressExternalPageEventsError, true);
+      document.removeEventListener("keydown", containLoginKeydown, true);
+    };
+  }, []);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -39,11 +71,29 @@ function LoginForm() {
     }
   }
 
+  function stopKeyboardPropagation(event: ReactKeyboardEvent<HTMLElement>) {
+    // Protect login inputs from broken/global document key handlers injected by
+    // external scripts or extensions (e.g. page-events.js errors).
+    event.stopPropagation();
+  }
+
   return (
-    <form onSubmit={onSubmit} className="stack top-gap">
+    <form
+      ref={formRef}
+      onSubmit={onSubmit}
+      onKeyDownCapture={stopKeyboardPropagation}
+      onKeyUpCapture={stopKeyboardPropagation}
+      className="stack top-gap"
+    >
       <div>
         <label>Benutzername</label>
-        <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+        <input
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          onKeyDownCapture={stopKeyboardPropagation}
+          onKeyUpCapture={stopKeyboardPropagation}
+          autoComplete="username"
+        />
       </div>
       <div>
         <label>Passwort</label>
@@ -51,6 +101,8 @@ function LoginForm() {
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
+          onKeyDownCapture={stopKeyboardPropagation}
+          onKeyUpCapture={stopKeyboardPropagation}
           autoComplete="current-password"
         />
       </div>

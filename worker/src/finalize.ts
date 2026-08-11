@@ -139,8 +139,17 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
 
 export async function postReport(ctx: CallContext): Promise<void> {
   if (!ctx.company || !ctx.topic) {
+    // Continue posting when we still have correlation IDs; backend can recover
+    // missing company/topic from leadId or existing callSid report.
+    if (!ctx.leadId && !ctx.callSid) {
     log.info("finalize.skip_no_company_or_topic", { callSid: ctx.callSid });
     return;
+    }
+
+    log.info("finalize.missing_company_or_topic_recoverable", {
+      callSid: ctx.callSid,
+      hasLeadId: Boolean(ctx.leadId),
+    });
   }
 
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");

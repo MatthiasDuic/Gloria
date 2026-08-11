@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
-import { getLeadById, storeCallReport } from "@/lib/storage";
+import { getDashboardData, getLeadById, storeCallReport } from "@/lib/storage";
 import {
   appendCallTranscriptEventToPostgres,
   findUserById,
@@ -283,6 +283,52 @@ export async function POST(request: Request) {
   await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
+    // Recovery path for incomplete finalize payloads: if leadId/callSid is present,
+    // derive missing context (company/topic/userId) from lead or existing report.
+    if (payload.summary && payload.outcome && (payload.leadId || payload.callSid)) {
+      const dashboard = await getDashboardData();
+      const existingByCallSid = payload.callSid
+        ? dashboard.reports.find((entry) => entry.callSid === payload.callSid)
+        : undefined;
+      const recoveredUserId = payload.userId || existingByCallSid?.userId;
+      const lead = payload.leadId ? await getLeadById(payload.leadId, recoveredUserId) : undefined;
+
+      const recoveredCompany =
+        payload.company || existingByCallSid?.company || lead?.company;
+      const recoveredTopic =
+        payload.topic || existingByCallSid?.topic || lead?.topic;
+      const finalUserId = recoveredUserId || lead?.userId;
+      const recoveredContactName =
+        payload.contactName || existingByCallSid?.contactName || lead?.contactName;
+
+      if (recoveredCompany && recoveredTopic) {
+        const report = await storeCallReport({
+          userId: finalUserId,
+          phoneNumberId: payload.phoneNumberId || existingByCallSid?.phoneNumberId,
+          callSid: payload.callSid,
+          leadId: payload.leadId || existingByCallSid?.leadId,
+          company: recoveredCompany,
+          contactName: recoveredContactName,
+          topic: recoveredTopic,
+          summary: payload.summary,
+          summaryChunk: payload.summaryChunk,
+          outcome: payload.outcome,
+          appointmentAt: payload.appointmentAt,
+          nextCallAt: payload.nextCallAt,
+          directDial: payload.directDial,
+          attempts: payload.attempts,
+          recordingConsent: payload.recordingConsent,
+          recordingUrl: payload.recordingUrl,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          recoveredFinalizePayload: true,
+          report,
+        });
+      }
+    }
+
     if (payload.callSid && payload.company && payload.topic && payload.summaryChunk?.trim()) {
       const report = await storeCallReport({
         userId: payload.userId,
@@ -322,6 +368,37 @@ export async function POST(request: Request) {
         recordingUpdated: true,
         report,
       });
+    }
+
+    // Telnyx liefert bei recording-events vereinzelt kein client_state.
+    // Dann fehlt company/topic im Payload, obwohl ein Platzhalter-Report
+    // mit callSid schon existiert. In diesem Fall das Recording per callSid
+    // an den bestehenden Report anhängen.
+    if (payload.callSid && payload.recordingUrl) {
+      const dashboard = await getDashboardData();
+      const existing = dashboard.reports.find((entry) => entry.callSid === payload.callSid);
+
+      if (existing) {
+        const report = await storeCallReport({
+          userId: payload.userId || existing.userId,
+          phoneNumberId: payload.phoneNumberId || existing.phoneNumberId,
+          callSid: payload.callSid,
+          leadId: payload.leadId || existing.leadId,
+          company: existing.company,
+          contactName: payload.contactName || existing.contactName,
+          topic: existing.topic,
+          recordingConsent: payload.recordingConsent ?? existing.recordingConsent,
+          recordingUrl: payload.recordingUrl,
+          attempts: payload.attempts,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          recordingUpdated: true,
+          recoveredByCallSid: true,
+          report,
+        });
+      }
     }
 
     return NextResponse.json({

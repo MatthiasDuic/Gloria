@@ -1,4 +1,4 @@
-import { isElevenLabsConfigured, maybeWarmupElevenLabsVoice } from "./elevenlabs";
+import { isDeepgramConfigured, maybeWarmupDeepgram } from "./deepgram-tts";
 import { TOPICS } from "./types";
 import type { ScriptConfig, Topic } from "./types";
 import type { ContactRole } from "@/lib/call-state-token";
@@ -87,13 +87,12 @@ async function initAudioPipeline() {
   void new TextDecoder();
   runtimeState.audioPipelineReady = true;
 
-  if (!isElevenLabsConfigured()) {
+  if (!isDeepgramConfigured()) {
     runtimeState.elevenLabsWarm = true;
     return;
   }
 
-  // Warmup must never block call setup path.
-  void maybeWarmupElevenLabsVoice(true)
+  void maybeWarmupDeepgram(true)
     .then(() => {
       runtimeState.elevenLabsWarm = true;
     })
@@ -146,7 +145,7 @@ function buildTopicProfileKey(script: ScriptConfig): string {
 
 // Stub kept for compatibility with older call sites. Gloria never uses the
 // OpenAI Realtime audio API — the voice output is always produced by the
-// ElevenLabs TTS service through /api/telnyx/audio.
+// Deepgram Aura TTS service through /api/telnyx/audio.
 async function ensureOpenAiRealtimeSessions(
   _baseUrl: string,
   _topics: readonly Topic[] = TOPICS,
@@ -338,9 +337,9 @@ async function preflightWorkerAndCalendar(baseUrl: string, userId?: string): Pro
     );
   }
 
-  // 3) ElevenLabs-Voice-Cache (best-effort – ggf. schon initial gewärmt).
+  // 3) Deepgram TTS-Verbindung vorwärmen (best-effort).
   tasks.push(
-    maybeWarmupElevenLabsVoice(false)
+    maybeWarmupDeepgram(false)
       .then(() => undefined)
       .catch(() => undefined),
   );
