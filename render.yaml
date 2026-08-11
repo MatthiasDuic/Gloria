@@ -28,7 +28,7 @@ services:
       - key: LLM_TIMEOUT_MS
         value: 7600
       - key: LLM_EARLY_FLUSH_CHARS
-        value: 70
+        value: 95
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: ELEVENLABS_API_KEY
@@ -38,17 +38,17 @@ services:
       - key: ELEVENLABS_MODEL
         value: eleven_flash_v2_5
       - key: ELEVENLABS_STABILITY
-        value: 0.4
+        value: 0.35
       - key: ELEVENLABS_SIMILARITY
-        value: 0.88
+        value: 0.9
       - key: ELEVENLABS_STYLE
-        value: 0.3
+        value: 0.45
       - key: ELEVENLABS_SPEED
-        value: 0.97
+        value: 0.92
       - key: ELEVENLABS_SPEAKER_BOOST
         value: true
       - key: ELEVENLABS_LATENCY_MODE
-        value: 3
+        value: 2
       - key: DEEPGRAM_MODEL
         value: nova-3
       - key: DEEPGRAM_LANGUAGE
