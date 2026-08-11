@@ -508,6 +508,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
     const slotWasConfirmedBeforeTurn = Boolean(ctx.confirmedSlotPhrase);
+    const turnStartedAt = Date.now();
 
     if (currentTts) {
       currentTts.abort();
@@ -526,6 +527,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     let llmDone = false;
     let stopPlayback = false;
     let resolveQueueWait: (() => void) | null = null;
+    let queuedSentenceCount = 0;
+    let firstSentenceQueuedAt: number | undefined;
+    const firstAudioSloMs = Math.max(
+      1200,
+      Number.parseInt(process.env.TURN_FIRST_AUDIO_SLO_MS || "2400", 10),
+    );
+    let bridgeInjected = false;
 
     const wakeQueue = () => {
       if (!resolveQueueWait) return;
@@ -541,6 +549,15 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     let firstAudioAt: number | undefined;
     let totalAudioBytes = 0;
+
+    const audioSloTimer = setTimeout(() => {
+      if (firstAudioAt !== undefined || llmDone || stopPlayback || bridgeInjected) return;
+      if (queuedSentenceCount > 0) return;
+      bridgeInjected = true;
+      segmentQueue.push("Einen kurzen Moment, ich bin direkt bei Ihnen.");
+      wakeQueue();
+      log.warn("turn.audio_slo_bridge", { callSid: ctx.callSid, ms: firstAudioSloMs });
+    }, firstAudioSloMs);
 
     let firstFrameOfTurn = true;
     const speakSegment = async (segmentText: string): Promise<void> => {
@@ -639,6 +656,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     result = await streamReply(ctx, userText, (sentence) => {
       const trimmed = sentence.trim();
       if (!trimmed || stopPlayback) return;
+      queuedSentenceCount += 1;
+      if (!firstSentenceQueuedAt) {
+        firstSentenceQueuedAt = Date.now();
+      }
       segmentQueue.push(trimmed);
       wakeQueue();
     });
@@ -660,6 +681,18 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     if (latencyMs !== undefined) {
       log.info("turn.reaction_time", { callSid: ctx.callSid, ms: latencyMs });
     }
+
+    log.info("turn.pipeline", {
+      callSid: ctx.callSid,
+      turnTotalMs: Date.now() - turnStartedAt,
+      firstSentenceMs:
+        firstSentenceQueuedAt && ctx.lastUserFinalAt
+          ? firstSentenceQueuedAt - ctx.lastUserFinalAt
+          : undefined,
+      firstAudioMs: latencyMs,
+      sentenceCount: queuedSentenceCount,
+      bridgeInjected,
+    });
 
     sendMark("gloria-end");
 
@@ -685,6 +718,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     }
 
     const confirmedSlotThisTurn = !slotWasConfirmedBeforeTurn && Boolean(ctx.confirmedSlotPhrase);
+    clearTimeout(audioSloTimer);
     return confirmedSlotThisTurn ? { ...result, hangup: false } : result;
   };
 

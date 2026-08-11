@@ -18,6 +18,12 @@ function parseEnvInt(name: string, fallback: number, min: number, max: number): 
   return Math.min(max, Math.max(min, parsed));
 }
 
+function parseEnvBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
 async function recoverAbortedStream(params: {
   apiKey: string;
   model: string;
@@ -380,7 +386,12 @@ function buildSystemPrompt(ctx: CallContext): string {
   const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
   const ownerDative = /^Herr(n|n\b|n\s)/i.test(owner) ? owner : `Herrn ${owner}`;
-  const parts = [buildConversationPrimer(ctx, company, owner, ownerDative)];
+  const compactPrompt = parseEnvBool("LLM_COMPACT_PROMPT", true);
+  const parts = [
+    compactPrompt
+      ? buildCompactConversationPrimer(ctx, company, owner, ownerDative)
+      : buildConversationPrimer(ctx, company, owner, ownerDative),
+  ];
   const today = new Date();
   const todayStr = today.toLocaleDateString("de-DE", {
     weekday: "long",
@@ -443,6 +454,52 @@ function buildSystemPrompt(ctx: CallContext): string {
     `Setze transfer=true (und hangup=false) wenn du den Anrufenden an Frau Brost weiterleitest — NUR wenn er das ausdrücklich wünscht.`,
   );
   return parts.join("\n");
+}
+
+function buildCompactConversationPrimer(ctx: CallContext, company: string, owner: string, ownerDative: string): string {
+  const topic = (ctx.topic || "").toLowerCase();
+  const isPKV = /pkv|kranken/.test(topic);
+  const phase = inferConversationPhase(ctx);
+
+  const lines: string[] = [
+    `Du bist Gloria, die digitale Vertriebsassistentin von ${company}. Du rufst im Auftrag von ${owner} an.`,
+    `Stil: natürlich, ruhig, professionell, kurze Telefon-Sätze. Kein Skriptklang.`,
+    `Antwortformat: JSON mit Schlüsseln in dieser Reihenfolge: reply, hangup, transfer.`,
+    `Maximal 1-2 kurze Sätze plus genau eine klare Frage pro Turn.`,
+    `Keine erfundene Vertrautheit. Es ist ein Erstkontakt.`,
+    `Nenne bei Vorstellung und Auftrag immer ${owner}. Niemals den Zielkontakt als Auftraggeber.`,
+    `Aufzeichnungsfrage nur einmal. Bei Nein normal weiterführen, nie erneut fragen.`,
+    `Terminart ist persönlicher Vor-Ort-Termin mit ${ownerDative}, kein Telefontermin.`,
+    `hangup=true nur mit echter Verabschiedung. transfer=true nur bei ausdrücklichem Wunsch nach menschlicher Weiterleitung.`,
+  ];
+
+  if (ctx.contactName) {
+    lines.push(`Zielkontakt: ${ctx.contactName}. Starte mit Gatekeeper-Logik und bitte um Weiterleitung.`);
+  }
+  if (ctx.leadNote?.trim()) {
+    lines.push(`Leitkontext: ${ctx.leadNote.trim()}`);
+  }
+  if (ctx.confirmedSlotPhrase) {
+    lines.push(`Termin ist eingefroren: "${ctx.confirmedSlotPhrase}". Nicht ändern.`);
+  }
+
+  if (phase <= 2) {
+    lines.push(`Phase: Opener + Anlass + ggf. Aufzeichnungsfrage. Keine Datenerhebung, kein Pitch-Block.`);
+  } else if (phase <= 6) {
+    lines.push(`Phase: Relevanz aufbauen, ein konkreter Nutzenpunkt, dann Rückfrage. Noch keine harte Termin-Schließung.`);
+  } else if (phase === 7) {
+    lines.push(`Phase: Terminierung mit zwei konkreten Slots aus nächster Woche.`);
+  } else if (phase === 8) {
+    lines.push(`Phase: Nach bestätigtem Termin genau eine Vorbereitungsfrage pro Turn.`);
+  } else if (phase >= 10) {
+    lines.push(`Phase: E-Mail für Bestätigung, dann kurze Abschlusszusammenfassung.`);
+  }
+
+  if (isPKV) {
+    lines.push(`PKV-Kontext: mit konkreten Kundenzahlen arbeiten, keine Quellen-Claims, keine Monologe.`);
+  }
+
+  return lines.join("\n");
 }
 
 function buildConversationPrimer(ctx: CallContext, company: string, owner: string, ownerDative: string): string {

@@ -29,6 +29,10 @@ services:
         value: 11000
       - key: LLM_EARLY_FLUSH_CHARS
         value: 100
+      - key: LLM_COMPACT_PROMPT
+        value: 1
+      - key: TURN_FIRST_AUDIO_SLO_MS
+        value: 2400
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: ELEVENLABS_API_KEY
@@ -53,12 +57,8 @@ services:
         value: nova-3
       - key: DEEPGRAM_LANGUAGE
         value: de
-      - key: DEEPGRAM_KEYTERMS
-        value: "Duic,Matthias Duic,Sprockhoevel"
       - key: DEEPGRAM_ENDPOINTING_MS
         value: 420
-      - key: DEEPGRAM_UTTERANCE_END_MS
-        value: 820
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: ASR_FINAL_COALESCE_MS
