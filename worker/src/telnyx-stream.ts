@@ -259,6 +259,34 @@ function normalizeOutboundAudio(audio: Buffer, encoding?: string): Buffer {
   return audio;
 }
 
+function detectTelephonyCodec(encoding?: string): "PCMA" | "PCMU" | undefined {
+  const normalized = (encoding || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+
+  if (
+    normalized === "PCMA" ||
+    normalized === "ALAW" ||
+    normalized.includes("PCMA") ||
+    normalized.includes("ALAW") ||
+    normalized.includes("G711ALAW")
+  ) {
+    return "PCMA";
+  }
+
+  if (
+    normalized === "PCMU" ||
+    normalized === "MULAW" ||
+    normalized.includes("PCMU") ||
+    normalized.includes("MULAW") ||
+    normalized.includes("G711ULAW")
+  ) {
+    return "PCMU";
+  }
+
+  return undefined;
+}
+
 export function shouldInterruptOnPartialSpeech(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -800,6 +828,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       case "start": {
         const state = decodeClientState(frame.start.client_state);
         inboundEncoding = frame.start.media_format?.encoding || inboundEncoding;
+        // Prefer the codec Telnyx actually reports for this stream leg.
+        // This avoids hard mismatches (PCMA vs PCMU) that produce loud noise.
+        const negotiatedCodec = detectTelephonyCodec(inboundEncoding);
+        if (negotiatedCodec) {
+          outboundEncoding = negotiatedCodec;
+        }
         inboundSampleRate = frame.start.media_format?.sample_rate || inboundSampleRate;
         ctx = newContext({
           callSid: frame.start.call_control_id,

@@ -60,7 +60,7 @@ services:
       - key: DEEPGRAM_UTTERANCE_END_MS
         value: 820
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
-        value: PCMU
+        value: PCMA
       - key: ASR_FINAL_COALESCE_MS
         value: 520
       - key: ASR_UTTERANCE_END_GRACE_MS
