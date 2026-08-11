@@ -1,7 +1,7 @@
 # Gloria Stream Worker (Render)
 
-Persistenter WebSocket-Server, der Twilio Media Streams für Gloria verarbeitet.
-Pipeline: **Twilio (μ-law 8 kHz) → Deepgram ASR → OpenAI GPT-4o-mini → ElevenLabs TTS (μ-law 8 kHz) → Twilio**.
+Persistenter WebSocket-Server, der Telnyx Media Streams für Gloria verarbeitet.
+Pipeline: **Telnyx (μ-law 8 kHz) → Deepgram ASR → OpenAI GPT-4.1 → ElevenLabs TTS (μ-law 8 kHz) → Telnyx**.
 
 Vercel kann keine langlebigen WebSocket-Server hosten, deshalb läuft dieser
 Worker separat auf Render. Vercel liefert weiterhin Dashboard, REST-API,
@@ -11,10 +11,10 @@ Reports und das TwiML, das den Anruf via `<Connect><Stream>` an diesen Worker
 ## Architektur
 
 ```
-Twilio  ───►  Vercel /api/twilio/voice  (TwiML mit <Connect><Stream wss://…>)
+Telnyx  ───►  Vercel /api/telnyx/call  (Call-Control + WebSocket-Stream)
    │
    └── Audio (μ-law 8 kHz, 20 ms Frames)
-       └────►  Render-Worker  ws://…/twilio-stream
+      └────►  Render-Worker  ws://…/telnyx-stream
                 ├─ Deepgram (ASR, mulaw 8000 native)
                 ├─ OpenAI Chat Completions (Antwortgenerator)
                 └─ ElevenLabs (TTS, output_format=ulaw_8000)
@@ -30,13 +30,13 @@ npm run dev           # tsx watch — Reload bei Änderungen
 ```
 
 Der Worker hört auf `http://localhost:8080`. Health-Check: `GET /health`.
-Twilio-Streams: `ws://localhost:8080/twilio-stream`.
+Telnyx-Streams: `ws://localhost:8080/telnyx-stream`.
 
 Lokales Testing mit echten Anrufen geht via [ngrok](https://ngrok.com/):
 
 ```bash
 ngrok http 8080
-# Setze MEDIA_STREAM_WSS_URL=wss://<sub>.ngrok-free.app/twilio-stream auf Vercel
+# Setze TELNYX_MEDIA_STREAM_URL=wss://<sub>.ngrok-free.app/telnyx-stream auf Vercel
 ```
 
 ## Deploy auf Render (1× Setup)
@@ -55,27 +55,29 @@ ngrok http 8080
 
 ## Vercel-Seite aktivieren
 
-Auf Vercel zwei Env-Vars setzen (Production + Preview):
+Auf Vercel folgende Env-Var setzen (Production + Preview):
 
 ```
-USE_MEDIA_STREAMS=1
-MEDIA_STREAM_WSS_URL=wss://gloria-stream-worker.onrender.com/twilio-stream
+TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
 ```
 
-Solange `USE_MEDIA_STREAMS` nicht `1` ist, läuft die alte Gather/Play-Pipeline
-unverändert weiter — der Worker ist also vollständig per Flag aktivierbar.
+Optional als Legacy-Fallback (falls bereits genutzt):
+
+```
+MEDIA_STREAM_WSS_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
+```
 
 ## Status
 
-- [x] WebSocket-Server, Twilio-Frame-Parser
+- [x] WebSocket-Server, Telnyx-Frame-Parser
 - [x] Deepgram Streaming-ASR (μ-law 8 kHz nativ, Endpointing 300 ms)
 - [x] OpenAI Turn-Handler (JSON-Antwort, max. 25 Wörter)
 - [x] ElevenLabs Streaming-TTS direkt in μ-law 8 kHz (kein Resampling nötig)
 - [x] Barge-in (Aborts laufende TTS, sobald Deepgram-Partials beim sprechenden
       Zustand eintreffen)
 - [x] Opener-Begrüßung beim `start`-Event
-- [x] `<Connect><Stream>`-Switch in `src/app/api/twilio/voice/route.ts`
-      (`USE_MEDIA_STREAMS=1`)
+- [x] Telnyx Stream-Switch in `src/app/api/telnyx/call/route.ts`
+      (`TELNYX_MEDIA_STREAM_URL` gesetzt)
 
 ### Offen (nächste Iteration)
 
@@ -83,10 +85,10 @@ unverändert weiter — der Worker ist also vollständig per Flag aktivierbar.
       (`POST /api/reports` mit `APP_INTERNAL_TOKEN`).
 - [ ] Strukturiertes Outcome-Parsing (Termin / Absage / Wiedervorlage / Kein
       Kontakt) — heute übernimmt das LLM nur `hangup`.
-- [ ] Twilio-Signatur am `<Connect>`-Switch prüfen (HMAC mit
-      `STREAM_SHARED_SECRET` auf einem Custom-Parameter).
+- [ ] Telnyx Event-Signatur prüfen (HMAC mit
+      `STREAM_SHARED_SECRET` auf eingehenden Event-Requests).
 - [ ] Reconnect-/Retry-Logik bei Deepgram-Drop (~1 % der Fälle).
-- [ ] Aufnahme/Recording (Twilio `<Start><Recording>` parallel zum Stream).
+- [ ] Aufnahme/Recording (Telnyx Recording-Flow parallel zum Stream).
 - [ ] Healthcheck mit Provider-Pings (Deepgram/OpenAI/ElevenLabs).
 
 ## Operatives

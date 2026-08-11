@@ -50,12 +50,12 @@ Danach im Browser öffnen:
 |---|---|
 | Dashboard-Daten | `/api/reports` |
 | CSV-Auftrag importieren | `/api/campaigns/import` |
-| Skript speichern | `/api/scripts` |
-| Stimmtest / Prompt-Vorschau | `/api/scripts/test-voice` |
+| Playbooks lesen/speichern | `/api/playbooks` |
+| Stimmtest / Prompt-Vorschau | `/api/voice-preview` |
 | Gesprächsreport von Telefonie empfangen | `/api/calls/webhook` |
-| Twilio-Testanruf starten | `/api/twilio/test-call` |
-| Twilio-Sprachdialog (Webhook) | `/api/twilio/voice` |
-| Twilio-Status-Webhook | `/api/twilio/status` |
+| Telnyx-Testanruf starten | `/api/telnyx/test-call` |
+| Telnyx-Anruf starten | `/api/telnyx/call` |
+| Telnyx-Event-Webhook | `/api/telnyx/events` |
 | Automatische Wiedervorlagen ausführen | `/api/callbacks/run` |
 | Outlook-Termine exportieren | `/api/export/outlook` |
 
@@ -85,7 +85,7 @@ BASIC_AUTH_USERNAME=MDUIC
 BASIC_AUTH_PASSWORD=dein_starkes_passwort
 ```
 
-Wichtig: Die Admin-Seite und internen APIs sind geschützt. Die Twilio-Webhooks für Telefonie bleiben bewusst erreichbar.
+Wichtig: Die Admin-Seite und internen APIs sind geschützt. Die Telnyx-Callbacks für Telefonie bleiben bewusst erreichbar.
 
 ## SMTP / E-Mail konfigurieren
 
@@ -111,11 +111,11 @@ Wenn Gloria auch bei Abweichungen vom Skript inhaltlich frei reagieren und trotz
 
 ```env
 OPENAI_API_KEY=dein_openai_key
-OPENAI_MODEL=gpt-5
+OPENAI_MODEL=gpt-4.1
 OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
 ```
 
-Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL`. Wenn dein OpenAI-Account es freigeschaltet hat, kannst du hier direkt auf `gpt-5.4` wechseln. `OPENAI_REALTIME_MODEL` ist für zukünftige Realtime-Erweiterungen zentral hinterlegt und bewusst auf `gpt-4o-realtime-preview` fixiert.
+Die laufende turn-basierte Gesprächslogik nutzt `OPENAI_MODEL` (empfohlen: `gpt-4.1` für stabile Live-Latenz). `OPENAI_REALTIME_MODEL` ist nur für zukünftige Realtime-Erweiterungen hinterlegt und wird im aktuellen Worker-Flow nicht für die Audioausgabe verwendet.
 
 ## ElevenLabs-Stimme aktivieren
 
@@ -124,24 +124,28 @@ Trage zusätzlich in `.env` deine ElevenLabs-Daten ein:
 ```env
 ELEVENLABS_API_KEY=dein_api_key
 ELEVENLABS_VOICE_ID=deine_voice_id
-ELEVENLABS_MODEL_ID=eleven_multilingual_v2
-ELEVENLABS_STABILITY=0.45
-ELEVENLABS_SIMILARITY_BOOST=0.8
+ELEVENLABS_MODEL=eleven_v3
+ELEVENLABS_STABILITY=0.4
+ELEVENLABS_SIMILARITY=0.88
+ELEVENLABS_STYLE=0.38
+ELEVENLABS_SPEED=0.9
+ELEVENLABS_SPEAKER_BOOST=true
 ```
 
 Danach nutzt der Button **„Stimme testen“** im Dashboard direkt deine echte ElevenLabs-Stimme für Gloria. Ohne diese Werte greift automatisch die Browser-Stimme als Fallback.
 
-## Twilio direkt anbinden
+## Telnyx direkt anbinden
 
-Wenn du bereits einen **Twilio-Account** hast, ist Gloria jetzt auf einen direkten Testanruf vorbereitet.
+Wenn du bereits einen **Telnyx-Account** hast, ist Gloria auf direkte Testanrufe vorbereitet.
 
 Trage in `.env.local` ein:
 
 ```env
 APP_BASE_URL=https://deine-oeffentliche-url.de
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=dein_auth_token
-TWILIO_PHONE_NUMBER=+49XXXXXXXXXX
+TELNYX_API_KEY=dein_telnyx_api_key
+TELNYX_CONNECTION_ID=deine_connection_id
+TELNYX_PHONE_NUMBER=+49XXXXXXXXXX
+TELNYX_MEDIA_STREAM_URL=wss://dein-render-worker.onrender.com/telnyx-stream
 ```
 
 Danach:
@@ -149,31 +153,30 @@ Danach:
 1. lokalen Server starten: `npm run dev`
 2. öffentliche URL bereitstellen, z. B. `cloudflared tunnel --url http://localhost:3000` oder `ngrok http 3000`
 3. diese URL als `APP_BASE_URL` in `.env.local` setzen
-4. im Dashboard unter **„Twilio Live-Testanruf“** eine Zielnummer eingeben und den Anruf starten
+4. im Dashboard unter **„Live-Testanruf“** eine Zielnummer eingeben und den Anruf starten
 
-Twilio ruft dann diese Endpunkte auf:
+Telnyx nutzt dann diese Endpunkte:
 
-- `/api/twilio/voice` – Gloria eröffnet das Gespräch
-- `/api/twilio/audio` – liefert bei aktiver ElevenLabs-Konfiguration die echte Gloria-Stimme als Audio
-- `/api/twilio/voice/process` – verarbeitet jetzt auch mehrstufige, freie Live-Gespräche auf Vercel
-- `/api/twilio/status` – nimmt Statusupdates von Twilio entgegen
+- `/api/telnyx/call` – startet den Anruf via Telnyx API
+- `/api/telnyx/events` – verarbeitet Telnyx-Status- und Stream-Events
+- `/api/calls/webhook` – nimmt aggregierte Gesprächsergebnisse entgegen
 
-## Live-Gespräche auf Vercel
+## Live-Gespräche mit Render-Worker
 
-Gloria läuft auf Vercel stabil im turn-basierten Sprachfluss:
+Gloria läuft im Live-Flow über den Render-Worker stabil im turn-basierten Sprachfluss:
 
-- Twilio Gather für Spracheingaben
+- Telnyx Media Streams für Audio in Echtzeit
 - OpenAI Chat Completions für Antwortentscheidungen
 - ElevenLabs für Audioausgabe
 
-Es wird kein separater Media-Stream-Endpunkt benötigt.
+Der Worker-Endpunkt wird über `TELNYX_MEDIA_STREAM_URL` angebunden.
 
 ## So wird daraus echte automatische Telefonie
 
 Für **echte autonome Telefonate über euren Telefonanschluss** brauchst du zusätzlich einen Voice-/Telefonie-Provider, z. B.:
 
-1. **Twilio** für Rufnummer, Anrufe und Webhooks
-2. optional **Vapi** oder **Retell AI** für noch freiere Live-KI-Konversation
+1. **Telnyx** für Rufnummer, Anrufe, Events und Streaming
+2. den **Render-Worker** für dauerhafte WebSocket-Verbindungen
 3. Übergabe des Gesprächsergebnisses an `/api/calls/webhook`
 4. Rückruftermine über geplante Jobs / Scheduler erneut anstoßen
 
@@ -204,11 +207,12 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `APP_BASE_URL` | Öffentliche App-URL (z. B. `https://gloria-ki-assistent.vercel.app`) |
 | `BASIC_AUTH_USERNAME` | Benutzername für Dashboard-Zugriff |
 | `BASIC_AUTH_PASSWORD` | Passwort für Dashboard-Zugriff |
-| `OPENAI_API_KEY` | Live-Antworten im Twilio-Gesprächsfluss |
-| `OPENAI_MODEL` | Empfohlen: `gpt-5` (optional `gpt-5.4`, falls verfügbar) |
-| `TWILIO_ACCOUNT_SID` | Twilio API-Zugang |
-| `TWILIO_AUTH_TOKEN` | Twilio API-Zugang |
-| `TWILIO_PHONE_NUMBER` | Ausgehende Twilio-Rufnummer |
+| `OPENAI_API_KEY` | Live-Antworten im Telefonie-Gesprächsfluss |
+| `OPENAI_MODEL` | Empfohlen: `gpt-4.1` |
+| `TELNYX_API_KEY` | Telnyx API-Zugang |
+| `TELNYX_CONNECTION_ID` | Telnyx Voice Connection für Outbound Calls |
+| `TELNYX_PHONE_NUMBER` | Ausgehende Telnyx-Rufnummer |
+| `TELNYX_MEDIA_STREAM_URL` | WSS-URL des Render-Workers (`.../telnyx-stream`) |
 | `CALL_STATE_SECRET` | Signierung des Gesprächsstatus-Tokens |
 
 ### 2) Pflicht, wenn Feature genutzt wird
@@ -224,22 +228,21 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `REPORT_TO_EMAIL` | E-Mail-Reports an abweichende Adresse gehen sollen |
 | `ELEVENLABS_API_KEY` | echte ElevenLabs-Stimme genutzt werden soll |
 | `ELEVENLABS_VOICE_ID` | echte ElevenLabs-Stimme genutzt werden soll |
-| `ELEVENLABS_MODEL_ID` | ElevenLabs-Modell überschrieben werden soll |
+| `ELEVENLABS_MODEL` | ElevenLabs-Modell überschrieben werden soll |
 | `ELEVENLABS_STABILITY` | ElevenLabs-Voice-Tuning genutzt wird |
-| `ELEVENLABS_SIMILARITY_BOOST` | ElevenLabs-Voice-Tuning genutzt wird |
+| `ELEVENLABS_SIMILARITY` | ElevenLabs-Voice-Tuning genutzt wird |
 | `ELEVENLABS_STYLE` | ElevenLabs-Voice-Tuning genutzt wird |
 | `ELEVENLABS_SPEED` | ElevenLabs-Voice-Tuning genutzt wird |
-| `ELEVENLABS_USE_SPEAKER_BOOST` | ElevenLabs-Voice-Tuning genutzt wird |
-| `ELEVENLABS_LATENCY_MODE` | ElevenLabs Streaming-Latenz explizit gesteuert wird |
-| `TWILIO_CONVERSATION_MODE` | Modus explizit gesetzt werden soll (`live`/`media-stream`) |
-| `TWILIO_MEDIA_STREAM_URL` | `TWILIO_CONVERSATION_MODE=media-stream` genutzt wird |
+| `ELEVENLABS_SPEAKER_BOOST` | ElevenLabs-Voice-Tuning genutzt wird |
+| `MEDIA_STREAM_WSS_URL` | optionaler Legacy-Fallback für Stream-URL |
+| `TELNYX_API_BASE_URL` | nur bei abweichender Telnyx-API-Basis notwendig |
 | `LIVE_AI_TIMEOUT_MS` | OpenAI-Timeout vom Standard abweichen soll |
 
 ### 3) Empfohlene Belegung für Preview
 
 - Setze mindestens: `APP_BASE_URL`, `BASIC_AUTH_USERNAME`, `BASIC_AUTH_PASSWORD`.
-- Für sichere Tests mit echter Telefonie setze zusätzlich Twilio + OpenAI Variablen.
-- Wenn Preview ohne echte Calls laufen soll, lasse Twilio/ElevenLabs leer.
+- Für sichere Tests mit echter Telefonie setze zusätzlich Telnyx + OpenAI Variablen.
+- Wenn Preview ohne echte Calls laufen soll, lasse Telnyx/ElevenLabs leer.
 
 ### 4) Schnell-Check nach dem Setzen
 
@@ -247,7 +250,7 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 2. Health prüfen: `GET /api/health`.
 3. Dashboard öffnen und Testlauf machen:
   - Stimmtest
-  - Twilio-Testanruf
+  - Telnyx-Testanruf
   - Report entsteht im Dashboard
 4. Outlook-Export prüfen: `GET /api/export/outlook`.
 
@@ -255,7 +258,7 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 
 ```env
 APP_BASE_URL=https://gloria-ki-assistent.vercel.app
-OPENAI_MODEL=gpt-4o
-TWILIO_CONVERSATION_MODE=live
+OPENAI_MODEL=gpt-4.1
+TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
 LIVE_AI_TIMEOUT_MS=1000
 ```

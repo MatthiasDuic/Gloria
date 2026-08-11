@@ -8,6 +8,7 @@ out
 coverage
 .vercel
 .env*.local
+*.tsbuildinfo
 
 vercel_last.log
 vercel-logs.tmp

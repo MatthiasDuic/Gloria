@@ -4,7 +4,7 @@ import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { openAsr, type AsrSession } from "./asr.js";
 import { streamReply, prewarmOpenAi } from "./llm.js";
-import { streamDeepgramToMulaw, prewarmDeepgram, type TtsStreamHandle } from "./tts.js";
+import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
 import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
@@ -12,6 +12,8 @@ import { classifyInboundSpeech } from "./call-classification.js";
 
 /** Telnyx PCMU 8 kHz uses 20 ms chunks (160 bytes per frame). */
 const FRAME_BYTES = 160;
+const MULAW_SILENCE_BYTE = 0xff;
+const MULAW_FRAME_SAMPLES = 160;
 
 type TelnyxInbound =
   | { event: "connected"; version?: string }
@@ -101,6 +103,28 @@ function decodeMulawSample(byte: number): number {
   return (value & 0x80) !== 0 ? 0x84 - magnitude : magnitude - 0x84;
 }
 
+function encodeMulawSample(sample: number): number {
+  const BIAS = 0x84;
+  const CLIP = 32635;
+
+  let pcm = Math.max(-32768, Math.min(32767, sample));
+  let sign = 0;
+  if (pcm < 0) {
+    sign = 0x80;
+    pcm = -pcm;
+  }
+  if (pcm > CLIP) pcm = CLIP;
+
+  pcm += BIAS;
+
+  let exponent = 7;
+  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
+    exponent -= 1;
+  }
+  const mantissa = (pcm >> (exponent + 3)) & 0x0f;
+  return ~(sign | (exponent << 4) | mantissa) & 0xff;
+}
+
 function decodeAlawSample(byte: number): number {
   let value = byte ^ 0x55;
   let t = (value & 0x0f) << 4;
@@ -145,6 +169,37 @@ function mulaw8kToAlaw8k(mulaw: Buffer): Buffer {
     output[i] = encodeAlawSample(pcm);
   }
   return output;
+}
+
+function smoothMulawFrame(
+  frame: Buffer,
+  options: { fadeIn?: boolean; fadeOut?: boolean; rampSamples?: number },
+): Buffer {
+  if (!options.fadeIn && !options.fadeOut) return frame;
+  if (frame.length === 0) return frame;
+
+  const out = Buffer.from(frame);
+  const sampleCount = Math.min(frame.length, MULAW_FRAME_SAMPLES);
+  const ramp = Math.max(8, Math.min(options.rampSamples ?? 32, sampleCount));
+
+  if (options.fadeIn) {
+    for (let i = 0; i < ramp; i += 1) {
+      const gain = i / ramp;
+      const pcm = decodeMulawSample(out[i]);
+      out[i] = encodeMulawSample(Math.round(pcm * gain));
+    }
+  }
+
+  if (options.fadeOut) {
+    for (let i = 0; i < ramp; i += 1) {
+      const index = sampleCount - 1 - i;
+      const gain = i / ramp;
+      const pcm = decodeMulawSample(out[index]);
+      out[index] = encodeMulawSample(Math.round(pcm * gain));
+    }
+  }
+
+  return out;
 }
 
 function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: number): Buffer {
@@ -246,12 +301,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let userFinalCoalesceTimer: NodeJS.Timeout | null = null;
 
   const userFinalCoalesceMs = Math.max(
-    250,
-    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "1250", 10),
+    140,
+    Number.parseInt(process.env.ASR_FINAL_COALESCE_MS || "520", 10),
   );
   const utteranceEndGraceMs = Math.max(
-    120,
-    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "950", 10),
+    90,
+    Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "320", 10),
   );
 
   const clearSilenceOpenerTimer = () => {
@@ -297,9 +352,9 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // Antworten, ohne normale vollständige Sätze auszubremsen.
     const graceMs =
       wordCount <= 2
-        ? Math.max(utteranceEndGraceMs, 1300)
+        ? Math.max(utteranceEndGraceMs, 520)
         : wordCount <= 5
-          ? Math.max(utteranceEndGraceMs, 1050)
+          ? Math.max(utteranceEndGraceMs, 400)
           : utteranceEndGraceMs;
     userFinalCoalesceTimer = setTimeout(flushUserFinals, graceMs);
   };
@@ -365,7 +420,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       sendMedia(frame);
       totalAudioBytes += frame.length;
     };
-    const handle = streamDeepgramToMulaw(
+    const handle = streamElevenLabsToMulaw(
       text,
       (chunk) => {
         buffer = Buffer.concat([buffer, chunk]);
@@ -417,8 +472,9 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   };
 
   /**
-   * Wartet auf die vollständige LLM-Antwort und spricht sie als EINEN
-   * einzigen Deepgram-TTS-Aufruf. Kein Segment-Chaining → kein Klicken.
+   * Spricht die LLM-Antwort progressiv satzweise, um die Reaktionszeit
+   * deutlich zu senken. Segmentgrenzen werden durch kurze Rampen geglättet,
+   * um Klick-Artefakte beim Wechsel zu minimieren.
    */
   const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
@@ -428,52 +484,144 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       currentTts.abort();
       currentTts = null;
     }
-    ctx.speaking = true;
+    ctx.speaking = false;
     ctx.userBytesWhileSpeaking = 0;
 
-    // Alle LLM-Sätze sammeln, dann EINEN TTS-Aufruf machen.
     const collectedSegments: string[] = [];
-    const result = await streamReply(ctx, userText, (sentence) => {
-      const trimmed = sentence.trim();
-      if (trimmed) collectedSegments.push(trimmed);
-    });
+    const segmentQueue: string[] = [];
+    let result: { reply: string; hangup: boolean; transfer: boolean } = {
+      reply: "",
+      hangup: false,
+      transfer: false,
+    };
+    let llmDone = false;
+    let stopPlayback = false;
+    let resolveQueueWait: (() => void) | null = null;
 
-    const fullText = collectedSegments.join(" ").replace(/\s+/g, " ").trim();
-    const spokenText = fullText || result.reply.trim();
+    const wakeQueue = () => {
+      if (!resolveQueueWait) return;
+      const resolve = resolveQueueWait;
+      resolveQueueWait = null;
+      resolve();
+    };
+
+    const waitForQueue = async (): Promise<void> =>
+      new Promise<void>((resolve) => {
+        resolveQueueWait = resolve;
+      });
 
     let firstAudioAt: number | undefined;
     let totalAudioBytes = 0;
 
-    if (spokenText && !ctx.userBytesWhileSpeaking) {
-      log.info("turn.gloria_segment", { callSid: ctx.callSid, text: spokenText });
+    let firstFrameOfTurn = true;
+    const speakSegment = async (segmentText: string): Promise<void> => {
+      if (!ctx || stopPlayback) return;
+      if (!segmentText.trim()) return;
+
+      log.info("turn.gloria_segment", { callSid: ctx.callSid, text: segmentText });
+      collectedSegments.push(segmentText);
 
       let buffer = Buffer.alloc(0);
-      // 2 Frames Stille als Pre-Roll für sauberen Audiostart.
-      sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
-      sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
+      let segmentHadAudio = false;
+      let lastFrame: Buffer | null = null;
 
-      const handle = streamDeepgramToMulaw(
-        spokenText,
+      const flushFrame = (frame: Buffer, isSegmentLastFrame: boolean) => {
+        if (firstAudioAt === undefined) {
+          if (!ctx) return;
+          // Ein kurzer Pre-Roll reicht aus und spart 20 ms gegenüber 2 Frames.
+          sendMedia(Buffer.alloc(FRAME_BYTES, MULAW_SILENCE_BYTE));
+          firstAudioAt = Date.now();
+          ctx.speaking = true;
+        }
+
+        let out = frame;
+        if (firstFrameOfTurn) {
+          out = smoothMulawFrame(out, { fadeIn: true });
+          firstFrameOfTurn = false;
+        }
+        if (isSegmentLastFrame) {
+          out = smoothMulawFrame(out, { fadeOut: true });
+        }
+
+        sendMedia(out);
+        totalAudioBytes += out.length;
+        segmentHadAudio = true;
+      };
+
+      const handle = streamElevenLabsToMulaw(
+        segmentText,
         (chunk) => {
           buffer = Buffer.concat([buffer, chunk]);
           while (buffer.length >= FRAME_BYTES) {
             const frame = buffer.subarray(0, FRAME_BYTES);
             buffer = buffer.subarray(FRAME_BYTES);
-            if (firstAudioAt === undefined) firstAudioAt = Date.now();
-            sendMedia(frame);
-            totalAudioBytes += frame.length;
+            if (lastFrame) {
+              flushFrame(lastFrame, false);
+            }
+            lastFrame = Buffer.from(frame);
           }
         },
         ctx.voiceId,
       );
+
       currentTts = handle;
       await handle.done;
 
-      if (!handle.aborted && buffer.length > 0) {
-        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
-        sendMedia(Buffer.concat([buffer, pad]));
-        totalAudioBytes += buffer.length;
+      if (handle.aborted) {
+        stopPlayback = true;
+        currentTts = null;
+        segmentQueue.length = 0;
+        return;
       }
+
+      if (buffer.length > 0) {
+        const pad = Buffer.alloc(FRAME_BYTES - buffer.length, MULAW_SILENCE_BYTE);
+        const padded = Buffer.concat([buffer, pad]);
+        if (lastFrame) {
+          flushFrame(lastFrame, false);
+        }
+        flushFrame(padded, true);
+        lastFrame = null;
+      } else if (lastFrame) {
+        flushFrame(lastFrame, true);
+        lastFrame = null;
+      }
+
+      currentTts = null;
+      if (!segmentHadAudio) {
+        log.warn("turn.segment_empty_audio", { callSid: ctx.callSid });
+      }
+    };
+
+    const playbackPump = (async () => {
+      while (!stopPlayback) {
+        const next = segmentQueue.shift();
+        if (next) {
+          await speakSegment(next);
+          continue;
+        }
+        if (llmDone) {
+          break;
+        }
+        await waitForQueue();
+      }
+    })();
+
+    result = await streamReply(ctx, userText, (sentence) => {
+      const trimmed = sentence.trim();
+      if (!trimmed || stopPlayback) return;
+      segmentQueue.push(trimmed);
+      wakeQueue();
+    });
+
+    llmDone = true;
+    wakeQueue();
+    await playbackPump;
+
+    const spokenText = collectedSegments.join(" ").replace(/\s+/g, " ").trim() || result.reply.trim();
+
+    if (!collectedSegments.length && spokenText && !ctx.userBytesWhileSpeaking && !stopPlayback) {
+      await speakSegment(spokenText);
     }
 
     const latencyMs =
@@ -677,11 +825,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           inboundSampleRate,
         });
 
-        // Pre-warm TLS/HTTP-Pools zu OpenAI + Deepgram SOFORT, damit die
+        // Pre-warm TLS/HTTP-Pools zu OpenAI + ElevenLabs SOFORT, damit die
         // allererste LLM-/TTS-Anfrage keine 300–600 ms Handshake-Latenz hat.
         // Der Anrufer braucht ~1–2 s, bis er sich meldet – diese Zeit nutzen wir.
         prewarmOpenAi();
-        prewarmDeepgram();
+        prewarmElevenLabs();
 
         // Lade Playbook (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
         playbookReady = loadPlaybook({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {

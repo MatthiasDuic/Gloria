@@ -31,14 +31,28 @@ services:
         value: 180
       - key: DEEPGRAM_API_KEY
         sync: true
+      - key: ELEVENLABS_API_KEY
+        sync: true
+      - key: ELEVENLABS_VOICE_ID
+        sync: true
+      - key: ELEVENLABS_MODEL
+        value: eleven_v3
+      - key: ELEVENLABS_STABILITY
+        value: 0.4
+      - key: ELEVENLABS_SIMILARITY
+        value: 0.88
+      - key: ELEVENLABS_STYLE
+        value: 0.38
+      - key: ELEVENLABS_SPEED
+        value: 0.9
+      - key: ELEVENLABS_SPEAKER_BOOST
+        value: true
       - key: DEEPGRAM_MODEL
         value: nova-3
       - key: DEEPGRAM_LANGUAGE
         value: de
       - key: DEEPGRAM_KEYTERMS
         value: "Duic,Matthias Duic,Sprockhoevel"
-      - key: DEEPGRAM_VOICE_MODEL
-        value: aura-2-aurelia-de
       - key: DEEPGRAM_ENDPOINTING_MS
         value: 480
       - key: DEEPGRAM_UTTERANCE_END_MS

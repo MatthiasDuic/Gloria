@@ -8,6 +8,8 @@ import { log } from "./log.js";
 // - STREAM_SHARED_SECRET
 // - DEEPGRAM_MODEL (set to flux-general-multi)
 // - DEEPGRAM_LANGUAGE (set to de)
+// - ELEVENLABS_API_KEY
+// - ELEVENLABS_VOICE_ID
 // Otherwise, worker will not authenticate with Vercel APIs
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
