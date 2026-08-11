@@ -507,6 +507,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
    */
   const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
+    const callSidForTurn = ctx.callSid;
     const slotWasConfirmedBeforeTurn = Boolean(ctx.confirmedSlotPhrase);
     const turnStartedAt = Date.now();
 
@@ -556,7 +557,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       bridgeInjected = true;
       segmentQueue.push("Einen kurzen Moment, ich bin direkt bei Ihnen.");
       wakeQueue();
-      log.warn("turn.audio_slo_bridge", { callSid: ctx.callSid, ms: firstAudioSloMs });
+      log.warn("turn.audio_slo_bridge", { callSid: callSidForTurn, ms: firstAudioSloMs });
     }, firstAudioSloMs);
 
     let firstFrameOfTurn = true;
