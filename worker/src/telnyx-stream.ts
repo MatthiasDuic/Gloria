@@ -451,13 +451,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       spokenSegments.push(trimmed);
 
       let buffer = Buffer.alloc(0);
+      // 1 Frame Stille vor jedem Segment verhindert den Klick-Artefakt beim
+      // abrupten DC-Offset-Sprung am Anfang jedes Deepgram-TTS-Streams.
+      sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
       const sendFrame = (frame: Buffer) => {
-        // Pre-roll Stille nur vor dem allerersten Audio-Frame des gesamten Turns,
-        // nicht vor jedem Segment — sonst entsteht ein Klick an jeder Segmentgrenze.
-        if (firstAudioAt === undefined) {
-          sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
-          sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
-        }
         if (firstAudioAt === undefined) firstAudioAt = Date.now();
         sendMedia(frame);
         totalAudioBytes += frame.length;

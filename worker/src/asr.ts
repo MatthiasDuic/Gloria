@@ -80,10 +80,9 @@ export function openDeepgram(events: AsrEvents): AsrSession {
     } else {
       params.set("interim_results", "true");
       if (!variant.minimalParams) {
-        const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "420";
-        const utteranceEndMs = process.env.DEEPGRAM_UTTERANCE_END_MS?.trim() || "760";
+        const endpointingMs = process.env.DEEPGRAM_ENDPOINTING_MS?.trim() || "480";
+        // utterance_end_ms removed — causes HTTP 400 with nova-3 + language=de.
         params.set("endpointing", endpointingMs);
-        params.set("utterance_end_ms", utteranceEndMs);
       }
     }
 

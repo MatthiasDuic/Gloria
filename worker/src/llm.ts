@@ -162,7 +162,7 @@ export async function streamReply(
             if (!isAbbrev) flushSentence();
           }
           // Sicherheitspuffer: sehr lange Segmente an Leerzeichen trennen.
-          if (pendingFlush.length >= 180 && /\s/.test(ch)) {
+          if (pendingFlush.length >= 250 && /\s/.test(ch)) {
             flushSentence();
           }
         }
