@@ -353,7 +353,15 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     let buffer = Buffer.alloc(0);
     let totalAudioBytes = 0;
+    let firstFrameSent = false;
     const sendAndCount = (frame: Buffer) => {
+      // 20 ms Stille vor dem ersten Frame verhindert den Klick-Artefakt
+      // beim abrupten Übergang von Stille zu Audio.
+      if (!firstFrameSent) {
+        sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
+        sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
+        firstFrameSent = true;
+      }
       sendMedia(frame);
       totalAudioBytes += frame.length;
     };
@@ -443,7 +451,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       spokenSegments.push(trimmed);
 
       let buffer = Buffer.alloc(0);
+      let firstFrameSent = false;
       const sendFrame = (frame: Buffer) => {
+        if (!firstFrameSent) {
+          sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
+          sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
+          firstFrameSent = true;
+        }
         if (firstAudioAt === undefined) firstAudioAt = Date.now();
         sendMedia(frame);
         totalAudioBytes += frame.length;

@@ -40,13 +40,13 @@ services:
       - key: DEEPGRAM_VOICE_MODEL
         value: aura-2-aurelia-de
       - key: DEEPGRAM_ENDPOINTING_MS
-        value: 420
+        value: 340
       - key: DEEPGRAM_UTTERANCE_END_MS
-        value: 760
+        value: 680
       - key: ASR_FINAL_COALESCE_MS
-        value: 1050
+        value: 800
       - key: ASR_UTTERANCE_END_GRACE_MS
-        value: 700
+        value: 520
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN
