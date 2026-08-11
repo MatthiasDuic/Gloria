@@ -271,14 +271,25 @@ export function streamOpenAiTtsToMulaw(text: string, onChunk: (mulaw: Buffer) =>
 }
 
 function pcmToMulaw(sample: number): number {
-  const pcm = Math.max(-32768, Math.min(32767, sample));
-  const sign = pcm < 0 ? 0x80 : 0x00;
-  const abs = Math.abs(pcm);
-  const magnitude = Math.min(32767, abs);
-  const normalized = magnitude / 32768;
-  const exp = Math.max(0, Math.min(7, Math.floor(Math.log2(normalized * 255))));
-  const mantissa = Math.floor((normalized * 255) / (2 ** exp));
-  return sign | (exp << 4) | mantissa;
+  const BIAS = 0x84;
+  const CLIP = 32635;
+
+  let pcm = Math.max(-32768, Math.min(32767, sample));
+  let sign = 0;
+  if (pcm < 0) {
+    sign = 0x80;
+    pcm = -pcm;
+  }
+  if (pcm > CLIP) pcm = CLIP;
+
+  pcm += BIAS;
+
+  let exponent = 7;
+  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
+    exponent -= 1;
+  }
+  const mantissa = (pcm >> (exponent + 3)) & 0x0f;
+  return ~(sign | (exponent << 4) | mantissa) & 0xff;
 }
 
 function numEnv(name: string, fallback: number): number {
