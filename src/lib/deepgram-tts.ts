@@ -1,5 +1,5 @@
 // Deepgram Aura TTS – ersetzt ElevenLabs vollständig.
-// Verwendet aura-2-julius-de als Standardstimme (männlich, natürlich, freundlich, Deutsch).
+// Verwendet aura-2-viktoria-de als Standardstimme (weiblich, charmant, warm, Deutsch).
 
 export interface DeepgramVoiceOption {
   id: string;
@@ -24,7 +24,7 @@ export function getProjectVoicePresets(): DeepgramVoiceOption[] {
 }
 
 export function getDefaultDeepgramVoiceId(): string {
-  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-2-julius-de";
+  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-2-viktoria-de";
 }
 
 export function isDeepgramConfigured(): boolean {
