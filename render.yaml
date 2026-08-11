@@ -38,7 +38,7 @@ services:
       - key: DEEPGRAM_KEYTERMS
         value: "Duic,Matthias Duic,Sprockhoevel"
       - key: DEEPGRAM_VOICE_MODEL
-        value: aura-2-viktoria-de
+        value: aura-2-aurelia-de
       - key: DEEPGRAM_ENDPOINTING_MS
         value: 420
       - key: DEEPGRAM_UTTERANCE_END_MS

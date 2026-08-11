@@ -1,5 +1,5 @@
 // Deepgram Aura TTS – ersetzt ElevenLabs vollständig.
-// Verwendet aura-2-viktoria-de als Standardstimme (weiblich, charmant, warm, Deutsch).
+// Verwendet aura-2-aurelia-de als Standardstimme (weiblich, natürlich, entspannt, Deutsch).
 
 export interface DeepgramVoiceOption {
   id: string;
@@ -24,7 +24,7 @@ export function getProjectVoicePresets(): DeepgramVoiceOption[] {
 }
 
 export function getDefaultDeepgramVoiceId(): string {
-  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-2-viktoria-de";
+  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-2-aurelia-de";
 }
 
 export function isDeepgramConfigured(): boolean {

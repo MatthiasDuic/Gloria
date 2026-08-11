@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     const selectedVoiceId = userRecord?.selectedVoiceId || fallback;
 
     const voices = dedupeVoices([
-      ...(fallback ? [{ id: fallback, name: "Gloria Standard (Viktoria)", category: "default" }] : []),
+      ...(fallback ? [{ id: fallback, name: "Gloria Standard (Aurelia)", category: "default" }] : []),
       ...getProjectVoicePresets(),
       ...(selectedVoiceId && selectedVoiceId !== fallback
         ? [{ id: selectedVoiceId, name: "Ausgewählte Benutzerstimme", category: "user" }]
