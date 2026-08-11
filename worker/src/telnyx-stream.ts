@@ -976,7 +976,7 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Wir hatten bisher noch keinen Kontakt. Es geht um die Frage, wie planbar Ihre Krankenversicherungsbeiträge bis zum Ruhestand bleiben.`;
+    topicLine = `Wir hatten bisher noch keinen Kontakt \u2013 daher ganz direkt gefragt: Sprechen Sie kurz mit mir, oder legen Sie lieber auf, ohne zu wissen, worum es geht?`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
     topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
@@ -996,7 +996,6 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an.`,
     topicLine,
-    `Darf ich Ihnen in zwei Sätzen sagen, weshalb ich anrufe?`,
   ].join(" ");
 }
 

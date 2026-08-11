@@ -24,7 +24,7 @@ services:
       - key: LLM_TRANSCRIPT_TURNS
         value: 10
       - key: LLM_MAX_TOKENS
-        value: 115
+        value: 80
       - key: LLM_TIMEOUT_MS
         value: 7600
       - key: LLM_EARLY_FLUSH_CHARS
