@@ -417,19 +417,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   };
 
   /**
-   * Streamt die LLM-Antwort und pipelined sie satzweise durch Deepgram TTS:
-   * sobald der erste Satz aus OpenAI fertig ist, startet das TTS – während
-   * OpenAI noch den zweiten/dritten Satz generiert. Das spart pro Turn
-   * 0.5–1.0 s First-Audio-Latenz gegenüber dem alten "warte bis LLM fertig,
-   * dann spreche". Übernimmt die gleichen Aufgaben wie speak() (Barge-in,
-   * Echo-Suppression, Transcript, Slot-Lock), aber als ein Vorgang über
-   * mehrere Segmente.
+   * Wartet auf die vollständige LLM-Antwort und spricht sie als EINEN
+   * einzigen Deepgram-TTS-Aufruf. Kein Segment-Chaining → kein Klicken.
    */
   const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
     const slotWasConfirmedBeforeTurn = Boolean(ctx.confirmedSlotPhrase);
 
-    // Vorherige TTS abbrechen (Barge-in-Sicherheit zwischen Turns).
     if (currentTts) {
       currentTts.abort();
       currentTts = null;
@@ -437,64 +431,51 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = true;
     ctx.userBytesWhileSpeaking = 0;
 
+    // Alle LLM-Sätze sammeln, dann EINEN TTS-Aufruf machen.
+    const collectedSegments: string[] = [];
+    const result = await streamReply(ctx, userText, (sentence) => {
+      const trimmed = sentence.trim();
+      if (trimmed) collectedSegments.push(trimmed);
+    });
+
+    const fullText = collectedSegments.join(" ").replace(/\s+/g, " ").trim();
+    const spokenText = fullText || result.reply.trim();
+
     let firstAudioAt: number | undefined;
     let totalAudioBytes = 0;
-    let chainAborted = false;
-    let chain: Promise<void> = Promise.resolve();
-    const spokenSegments: string[] = [];
 
-    const speakSegment = async (text: string): Promise<void> => {
-      if (chainAborted || !ctx) return;
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      log.info("turn.gloria_segment", { callSid: ctx.callSid, text: trimmed });
-      spokenSegments.push(trimmed);
+    if (spokenText && !ctx.userBytesWhileSpeaking) {
+      log.info("turn.gloria_segment", { callSid: ctx.callSid, text: spokenText });
 
       let buffer = Buffer.alloc(0);
-      // 1 Frame Stille vor jedem Segment verhindert den Klick-Artefakt beim
-      // abrupten DC-Offset-Sprung am Anfang jedes Deepgram-TTS-Streams.
+      // 2 Frames Stille als Pre-Roll für sauberen Audiostart.
       sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
-      const sendFrame = (frame: Buffer) => {
-        if (firstAudioAt === undefined) firstAudioAt = Date.now();
-        sendMedia(frame);
-        totalAudioBytes += frame.length;
-      };
+      sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
 
       const handle = streamDeepgramToMulaw(
-        trimmed,
+        spokenText,
         (chunk) => {
-          if (chainAborted) return;
           buffer = Buffer.concat([buffer, chunk]);
           while (buffer.length >= FRAME_BYTES) {
             const frame = buffer.subarray(0, FRAME_BYTES);
             buffer = buffer.subarray(FRAME_BYTES);
-            sendFrame(frame);
+            if (firstAudioAt === undefined) firstAudioAt = Date.now();
+            sendMedia(frame);
+            totalAudioBytes += frame.length;
           }
         },
         ctx.voiceId,
       );
       currentTts = handle;
       await handle.done;
-      if (handle.aborted) {
-        chainAborted = true;
-        return;
-      }
-      if (buffer.length > 0) {
+
+      if (!handle.aborted && buffer.length > 0) {
         const pad = Buffer.alloc(FRAME_BYTES - buffer.length, 0xff);
-        sendFrame(Buffer.concat([buffer, pad]));
+        sendMedia(Buffer.concat([buffer, pad]));
+        totalAudioBytes += buffer.length;
       }
-    };
+    }
 
-    const result = await streamReply(ctx, userText, (sentence) => {
-      // Sentences sequentiell in den Chain einreihen – während OpenAI noch
-      // den nächsten Satz erzeugt, wird der vorherige bereits gesprochen.
-      chain = chain.then(() => speakSegment(sentence));
-    });
-
-    await chain;
-
-    // Reaktionszeit = Zeit bis zum ERSTEN Audio-Frame (was der Anrufende
-    // wirklich hört), nicht bis zum Ende des LLM-Streams.
     const latencyMs =
       firstAudioAt && ctx.lastUserFinalAt && firstAudioAt > ctx.lastUserFinalAt
         ? firstAudioAt - ctx.lastUserFinalAt
@@ -505,10 +486,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     sendMark("gloria-end");
 
-    // Echo-Suppression: warten bis Telnyx das gepufferte Audio ausgespielt
-    // hat. Wir ziehen die bereits vergangene Zeit seit dem ersten Audio-Byte
-    // ab, damit wir nicht doppelt warten.
-    if (!chainAborted && totalAudioBytes > 0) {
+    if (totalAudioBytes > 0) {
       const totalPlayoutMs = Math.ceil(totalAudioBytes / 8) + 120;
       const elapsed = firstAudioAt ? Date.now() - firstAudioAt : 0;
       const remaining = Math.max(0, totalPlayoutMs - elapsed);
@@ -519,20 +497,16 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     ctx.speaking = false;
     currentTts = null;
-    const spokenText = spokenSegments.join(" ").replace(/\s+/g, " ").trim();
-    ctx.transcript.push({ role: "assistant", text: spokenText || result.reply, at: Date.now(), latencyMs });
+    ctx.transcript.push({ role: "assistant", text: spokenText, at: Date.now(), latencyMs });
 
     if (!ctx.confirmedSlotPhrase) {
-      const slot = extractConfirmedSlot(spokenText || result.reply);
+      const slot = extractConfirmedSlot(spokenText);
       if (slot) {
         ctx.confirmedSlotPhrase = slot;
         log.info("turn.slot_locked", { callSid: ctx.callSid, slot });
       }
     }
 
-    // Eine Terminbestätigung ist nicht das Gesprächsende: Danach folgen noch
-    // freiwillige Vorbereitungsangaben und die E-Mail für die Bestätigung.
-    // Selbst wenn das Modell voreilig hangup=true liefert, bleibt der Call offen.
     const confirmedSlotThisTurn = !slotWasConfirmedBeforeTurn && Boolean(ctx.confirmedSlotPhrase);
     return confirmedSlotThisTurn ? { ...result, hangup: false } : result;
   };

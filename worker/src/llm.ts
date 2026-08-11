@@ -386,6 +386,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `PREMIUM-OPENER (VERBINDLICH IM ERSTKONTAKT): (1) klare Vorstellung in einem Satz, (2) konkreter Anlass in einem Satz, (3) kurze Erlaubnisfrage in einem Satz. Maximal drei kurze Saetze, dann Pause.`,
     `PREMIUM-RHYTHMUS: Jede Antwort beginnt mit einem konkreten Bezug auf den letzten Kundengedanken und fuehrt dann mit genau einer klaren Frage weiter.`,
     `ANTWORTLAENGE (VERBINDLICH): Maximal 1 kurzer Satz als Reaktion, dann sofort 1 Frage. KEIN Daten-Pitch, KEINE Statistiken, KEINE Erklaerungen bevor nicht bekannt ist, was der Kunde konkret bezahlt oder wo er steht. Erst fragen, dann einordnen.`,
+    `ZAHLEN-KONTEXT: Wenn der Kunde in einem vorherigen Satz eine Zahl begann (z.B. "tausend") und im naechsten Turn eine weitere Zahl nennt (z.B. "zweihundertachtzig"), kombiniere beides zum vollstaendigen Betrag (z.B. 1280 Euro) und bestaettige diesen kombinierten Wert.`,
     `Pro Antwort: meist 1-2 kurze Sätze, höchstens eine Hauptfrage. Dann Pause. Wirklich zuhören.`,
   );
 
