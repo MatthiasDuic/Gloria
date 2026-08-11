@@ -1,5 +1,5 @@
 // Deepgram Aura TTS – ersetzt ElevenLabs vollständig.
-// Verwendet aura-helios-en als Standardstimme (warm, klarer Männerton).
+// Verwendet aura-2-julius-de als Standardstimme (männlich, natürlich, freundlich, Deutsch).
 
 export interface DeepgramVoiceOption {
   id: string;
@@ -8,20 +8,15 @@ export interface DeepgramVoiceOption {
   labels?: Record<string, string>;
 }
 
-// Alle verfügbaren Deepgram Aura-Stimmen als statische Liste.
+// Deutsche Aura-2-Stimmen (de-de).
 const AURA_VOICES: DeepgramVoiceOption[] = [
-  { id: "aura-helios-en",   name: "Helios",   category: "male" },
-  { id: "aura-zeus-en",     name: "Zeus",     category: "male" },
-  { id: "aura-orion-en",    name: "Orion",    category: "male" },
-  { id: "aura-arcas-en",    name: "Arcas",    category: "male" },
-  { id: "aura-perseus-en",  name: "Perseus",  category: "male" },
-  { id: "aura-angus-en",    name: "Angus",    category: "male" },
-  { id: "aura-orpheus-en",  name: "Orpheus",  category: "male" },
-  { id: "aura-asteria-en",  name: "Asteria",  category: "female" },
-  { id: "aura-luna-en",     name: "Luna",     category: "female" },
-  { id: "aura-stella-en",   name: "Stella",   category: "female" },
-  { id: "aura-athena-en",   name: "Athena",   category: "female" },
-  { id: "aura-hera-en",     name: "Hera",     category: "female" },
+  { id: "aura-2-julius-de",   name: "Julius",   category: "male" },
+  { id: "aura-2-fabian-de",   name: "Fabian",   category: "male" },
+  { id: "aura-2-viktoria-de", name: "Viktoria", category: "female" },
+  { id: "aura-2-elara-de",    name: "Elara",    category: "female" },
+  { id: "aura-2-aurelia-de",  name: "Aurelia",  category: "female" },
+  { id: "aura-2-lara-de",     name: "Lara",     category: "female" },
+  { id: "aura-2-kara-de",     name: "Kara",     category: "female" },
 ];
 
 export function getProjectVoicePresets(): DeepgramVoiceOption[] {
@@ -29,7 +24,7 @@ export function getProjectVoicePresets(): DeepgramVoiceOption[] {
 }
 
 export function getDefaultDeepgramVoiceId(): string {
-  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-helios-en";
+  return process.env.DEEPGRAM_VOICE_MODEL?.trim() || "aura-2-julius-de";
 }
 
 export function isDeepgramConfigured(): boolean {
