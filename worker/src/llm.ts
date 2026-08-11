@@ -31,7 +31,7 @@ async function recoverAbortedStream(params: {
   maxTokens: number;
 }): Promise<TurnOutput | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3200);
+  const timeout = setTimeout(() => controller.abort(), 1800);
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -130,7 +130,7 @@ export async function streamReply(
   // Dynamik bei niedriger Reaktionszeit.
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 10, 6, 24);
   const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 105, 60, 220);
-  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 11000, 4000, 20000);
+  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7000, 3500, 20000);
   const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 100, 24, 400);
 
   const messages: Array<{ role: string; content: string }> = [
@@ -311,6 +311,13 @@ export async function streamReply(
         maxTokens,
       });
       if (recovered) {
+        if (recovered.reply?.trim()) {
+          try {
+            onSentence(recovered.reply.trim());
+          } catch {
+            // ignore callback issues in fallback path
+          }
+        }
         if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(recovered.reply)) {
           recovered.reply = stripConsentQuestion(recovered.reply);
         }
@@ -318,8 +325,17 @@ export async function streamReply(
       }
     }
 
+    const fallbackReply = replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?";
+    if (fallbackReply) {
+      try {
+        onSentence(fallbackReply);
+      } catch {
+        // ignore callback issues in emergency fallback path
+      }
+    }
+
     return {
-      reply: replyText.trim() || "Einen Moment bitte, ich habe Sie kurz nicht verstanden.",
+      reply: fallbackReply,
       hangup: false,
       transfer: false,
     };
