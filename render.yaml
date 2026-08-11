@@ -20,15 +20,15 @@ services:
       - key: OPENAI_API_KEY
         sync: true
       - key: OPENAI_MODEL
-        value: gpt-4.1
+        value: gpt-4.1-mini
       - key: LLM_TRANSCRIPT_TURNS
         value: 10
       - key: LLM_MAX_TOKENS
-        value: 115
+        value: 105
       - key: LLM_TIMEOUT_MS
-        value: 7600
+        value: 11000
       - key: LLM_EARLY_FLUSH_CHARS
-        value: 110
+        value: 100
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: ELEVENLABS_API_KEY
@@ -38,17 +38,17 @@ services:
       - key: ELEVENLABS_MODEL
         value: eleven_multilingual_v2
       - key: ELEVENLABS_STABILITY
-        value: 0.45
+        value: 0.5
       - key: ELEVENLABS_SIMILARITY
-        value: 0.88
+        value: 0.9
       - key: ELEVENLABS_STYLE
-        value: 0.35
+        value: 0.25
       - key: ELEVENLABS_SPEED
         value: 0.94
       - key: ELEVENLABS_SPEAKER_BOOST
-        value: true
+        value: false
       - key: ELEVENLABS_LATENCY_MODE
-        value: 2
+        value: 1
       - key: DEEPGRAM_MODEL
         value: nova-3
       - key: DEEPGRAM_LANGUAGE

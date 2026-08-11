@@ -72,12 +72,12 @@ export function streamElevenLabsToMulaw(
         throw new Error("elevenlabs unavailable");
       }
 
-      const stability = numEnv("ELEVENLABS_STABILITY", 0.45);
-      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
-      const style = numEnv("ELEVENLABS_STYLE", 0.35);
+      const stability = numEnv("ELEVENLABS_STABILITY", 0.5);
+      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.9);
+      const style = numEnv("ELEVENLABS_STYLE", 0.25);
       const speed = numEnv("ELEVENLABS_SPEED", 0.94);
-      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
-      const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 2, 0, 4);
+      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", false);
+      const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 1, 0, 4);
       const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream`);
       url.searchParams.set("output_format", "ulaw_8000");
       url.searchParams.set("optimize_streaming_latency", String(latencyMode));

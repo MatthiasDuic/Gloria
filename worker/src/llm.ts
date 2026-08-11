@@ -62,15 +62,15 @@ export async function streamReply(
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  // Qualitäts-Default: gpt-4.1 klingt in Akquise-Telefonaten konsistenter
-  // und weniger "template-haft" als mini-Varianten. Override via OPENAI_MODEL.
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  // Live-Default: gpt-4.1-mini reduziert Timeout-Abbrüche deutlich und hält
+  // den Turn-Flow in Telefonaten stabil. Override via OPENAI_MODEL.
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   // Premium-Sweetspot: genug Kontext + knappe Antworten fuer natuerliche
   // Dynamik bei niedriger Reaktionszeit.
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 10, 6, 24);
-  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 115, 60, 220);
-  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7600, 4000, 20000);
-  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 34, 24, 400);
+  const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 105, 60, 220);
+  const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 11000, 4000, 20000);
+  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 100, 24, 400);
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
