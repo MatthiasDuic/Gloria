@@ -18,6 +18,61 @@ function parseEnvInt(name: string, fallback: number, min: number, max: number): 
   return Math.min(max, Math.max(min, parsed));
 }
 
+async function recoverAbortedStream(params: {
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  maxTokens: number;
+}): Promise<TurnOutput | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3200);
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        temperature: 0.5,
+        max_tokens: Math.min(90, Math.max(50, params.maxTokens)),
+        response_format: { type: "json_object" },
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      return null;
+    }
+
+    const payload = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = payload.choices?.[0]?.message?.content?.trim() || "";
+    if (!content) return null;
+
+    try {
+      const parsed = JSON.parse(content) as { reply?: string; hangup?: boolean; transfer?: boolean };
+      const reply = parsed.reply?.trim();
+      if (!reply) return null;
+      return {
+        reply,
+        hangup: Boolean(parsed.hangup),
+        transfer: Boolean(parsed.transfer),
+      };
+    } catch {
+      return { reply: content, hangup: false, transfer: false };
+    }
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Pre-warmt den TLS/HTTP-Pool zu OpenAI, damit die ALLERERSTE LLM-Antwort
  * nicht ~300–600 ms Handshake-Latenz hat. Wird beim "start"-Event eines
@@ -161,6 +216,11 @@ export async function streamReply(
               tail.endsWith(" b.");
             if (!isAbbrev) flushSentence();
           }
+          // Latenzbremsen vermeiden: bei langen Teilsaetzen an natuerlichen
+          // Klauselgrenzen frueh flushen, statt auf den finalen Punkt zu warten.
+          if (pendingFlush.length >= earlyFlushChars && /[,;:]/.test(ch)) {
+            flushSentence();
+          }
           // Sicherheitspuffer: sehr lange Segmente an Leerzeichen trennen.
           if (pendingFlush.length >= 250 && /\s/.test(ch)) {
             flushSentence();
@@ -236,6 +296,22 @@ export async function streamReply(
     log.error("llm.stream_failed", {
       error: error instanceof Error ? error.message : String(error),
     });
+
+    if (!replyText.trim()) {
+      const recovered = await recoverAbortedStream({
+        apiKey,
+        model,
+        messages,
+        maxTokens,
+      });
+      if (recovered) {
+        if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(recovered.reply)) {
+          recovered.reply = stripConsentQuestion(recovered.reply);
+        }
+        return recovered;
+      }
+    }
+
     return {
       reply: replyText.trim() || "Einen Moment bitte, ich habe Sie kurz nicht verstanden.",
       hangup: false,
@@ -892,6 +968,15 @@ function collectPkvData(ctx: CallContext): {
 function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnOutput | null {
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herrn Duic";
+
+  const confirmsConversation = /\b(k[öo]nnen\s+gerne\s+miteinander\s+sprechen|wir\s+k[öo]nnen\s+gerne\s+miteinander\s+sprechen|ja\s*,?\s*gerne|gern\b|nat[üu]rlich\b|klar\b)\b/i.test(text);
+  if (confirmsConversation) {
+    return {
+      reply: `Perfekt, vielen Dank. Dann direkt kurz: ich rufe im Auftrag von ${owner} zum Thema private Krankenversicherung an. Haben Sie gerade zwei Minuten für eine kurze Einordnung?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
 
   const asksIfAi = /(bist|sind)\s+(du|sie)\s+(eine\s+)?(ki|ai|bot|roboter)|mit\s+(einer\s+)?ki|sprich(e|en)\s+ich\s+mit\s+(einer\s+)?(ki|ai|bot|roboter)/i.test(text);
   const rejectsAi = /(keine?\s+ki|nicht\s+mit\s+(einer\s+)?ki|nur\s+(mit\s+)?(einem\s+)?menschen|echten?\s+menschen|kein\s+bot|nicht\s+mit\s+bot|keinen\s+roboter)/i.test(text);
