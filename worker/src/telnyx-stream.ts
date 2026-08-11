@@ -295,6 +295,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
+  let outboundEncoding = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim().toUpperCase();
   let inboundSampleRate = 8000;
   let pendingUserFinals: string[] = [];
   let pendingUtterancesDuringTurn: string[] = [];
@@ -361,7 +362,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
   const sendMedia = (audio: Buffer) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    const encoded = normalizeOutboundAudio(audio, inboundEncoding);
+    const encoded = normalizeOutboundAudio(audio, outboundEncoding);
     const payload = encoded.toString("base64");
     ws.send(
       JSON.stringify({
@@ -822,6 +823,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           company: ctx.company,
           topic: ctx.topic,
           inboundEncoding,
+          outboundEncoding,
           inboundSampleRate,
         });
 
