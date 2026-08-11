@@ -124,12 +124,13 @@ Trage zusätzlich in `.env` deine ElevenLabs-Daten ein:
 ```env
 ELEVENLABS_API_KEY=dein_api_key
 ELEVENLABS_VOICE_ID=deine_voice_id
-ELEVENLABS_MODEL=eleven_v3
+ELEVENLABS_MODEL=eleven_flash_v2_5
 ELEVENLABS_STABILITY=0.4
 ELEVENLABS_SIMILARITY=0.88
-ELEVENLABS_STYLE=0.38
-ELEVENLABS_SPEED=0.9
+ELEVENLABS_STYLE=0.3
+ELEVENLABS_SPEED=0.97
 ELEVENLABS_SPEAKER_BOOST=true
+ELEVENLABS_LATENCY_MODE=3
 ```
 
 Danach nutzt der Button **„Stimme testen“** im Dashboard direkt deine echte ElevenLabs-Stimme für Gloria. Ohne diese Werte greift automatisch die Browser-Stimme als Fallback.

@@ -58,7 +58,7 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_v3";
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
   const controller = new AbortController();
   const done = (async () => {
@@ -77,9 +77,12 @@ export function streamElevenLabsToMulaw(
       const style = numEnv("ELEVENLABS_STYLE", 0.38);
       const speed = numEnv("ELEVENLABS_SPEED", 0.9);
       const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
-      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=ulaw_8000`;
+      const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 3, 0, 4);
+      const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream`);
+      url.searchParams.set("output_format", "ulaw_8000");
+      url.searchParams.set("optimize_streaming_latency", String(latencyMode));
 
-      const res = await fetch(url, {
+      const res = await fetch(url.toString(), {
         method: "POST",
         headers: {
           "xi-api-key": apiKey,
@@ -289,6 +292,14 @@ function boolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+function intEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
 }
 
 function keyFingerprint(value?: string): string | undefined {
