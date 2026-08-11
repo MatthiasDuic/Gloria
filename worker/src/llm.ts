@@ -70,7 +70,7 @@ export async function streamReply(
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 10, 6, 24);
   const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 115, 60, 220);
   const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7600, 4000, 20000);
-  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 34, 24, 120);
+  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 34, 24, 400);
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
@@ -149,7 +149,8 @@ export async function streamReply(
         } else {
           replyText += ch;
           pendingFlush += ch;
-          // Satzgrenze: Satzzeichen + ausreichend Kontext, NICHT bei Abkürzungen.
+          // Satzgrenze: nur echte Satzenden flushen (kein Komma-Split).
+          // Komma-Splits erzeugen Satzfragmente mit falscher Intonation im TTS.
           if (/[.!?]/.test(ch) && pendingFlush.length >= 8) {
             // Schutz gegen Abkürzungen: "z." / "B." / "Hr." / "Fr." / Ordinalia.
             const tail = replyText.slice(-3).toLowerCase();
@@ -160,8 +161,8 @@ export async function streamReply(
               tail.endsWith(" b.");
             if (!isAbbrev) flushSentence();
           }
-          // Frueh ausgeben, damit die Stimme meist unter 2s startet.
-          if ((/[,;:)]/.test(ch) && pendingFlush.length >= earlyFlushChars) || (pendingFlush.length >= earlyFlushChars * 2 && /\s/.test(ch))) {
+          // Sicherheitspuffer: sehr lange Segmente an Leerzeichen trennen.
+          if (pendingFlush.length >= 180 && /\s/.test(ch)) {
             flushSentence();
           }
         }

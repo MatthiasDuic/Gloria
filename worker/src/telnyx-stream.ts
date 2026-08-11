@@ -451,12 +451,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       spokenSegments.push(trimmed);
 
       let buffer = Buffer.alloc(0);
-      let firstFrameSent = false;
       const sendFrame = (frame: Buffer) => {
-        if (!firstFrameSent) {
+        // Pre-roll Stille nur vor dem allerersten Audio-Frame des gesamten Turns,
+        // nicht vor jedem Segment — sonst entsteht ein Klick an jeder Segmentgrenze.
+        if (firstAudioAt === undefined) {
           sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
           sendMedia(Buffer.alloc(FRAME_BYTES, 0xff));
-          firstFrameSent = true;
         }
         if (firstAudioAt === undefined) firstAudioAt = Date.now();
         sendMedia(frame);

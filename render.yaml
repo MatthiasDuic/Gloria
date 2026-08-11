@@ -28,7 +28,7 @@ services:
       - key: LLM_TIMEOUT_MS
         value: 7600
       - key: LLM_EARLY_FLUSH_CHARS
-        value: 34
+        value: 180
       - key: DEEPGRAM_API_KEY
         sync: true
       - key: DEEPGRAM_MODEL
