@@ -31,7 +31,7 @@ async function recoverAbortedStream(params: {
   maxTokens: number;
 }): Promise<TurnOutput | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1800);
+  const timeout = setTimeout(() => controller.abort(), 1400);
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -43,7 +43,7 @@ async function recoverAbortedStream(params: {
         model: params.model,
         messages: params.messages,
         temperature: 0.5,
-        max_tokens: Math.min(90, Math.max(50, params.maxTokens)),
+        max_tokens: Math.min(70, Math.max(36, params.maxTokens)),
         response_format: { type: "json_object" },
         stream: false,
       }),
@@ -131,6 +131,7 @@ export async function streamReply(
   const transcriptTurns = parseEnvInt("LLM_TRANSCRIPT_TURNS", 10, 6, 24);
   const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 105, 60, 220);
   const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7000, 3500, 20000);
+  const firstTokenTimeoutMs = parseEnvInt("LLM_FIRST_TOKEN_TIMEOUT_MS", 1600, 700, 5000);
   const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 100, 24, 400);
 
   const messages: Array<{ role: string; content: string }> = [
@@ -157,6 +158,11 @@ export async function streamReply(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let firstTokenSeen = false;
+  const firstTokenTimer = setTimeout(() => {
+    if (firstTokenSeen) return;
+    controller.abort(new Error("llm_first_token_timeout"));
+  }, firstTokenTimeoutMs);
 
   // Streaming-State für inkrementelles Reply-Extrahieren.
   let assembled = "";
@@ -273,7 +279,10 @@ export async function streamReply(
             choices?: Array<{ delta?: { content?: string } }>;
           };
           const delta = json.choices?.[0]?.delta?.content;
-          if (delta) consume(delta);
+          if (delta) {
+            firstTokenSeen = true;
+            consume(delta);
+          }
         } catch {
           /* heartbeat / non-json */
         }
@@ -301,6 +310,7 @@ export async function streamReply(
   } catch (error) {
     log.error("llm.stream_failed", {
       error: error instanceof Error ? error.message : String(error),
+      firstTokenSeen,
     });
 
     if (!replyText.trim()) {
@@ -341,6 +351,7 @@ export async function streamReply(
     };
   } finally {
     clearTimeout(timeout);
+    clearTimeout(firstTokenTimer);
   }
 }
 

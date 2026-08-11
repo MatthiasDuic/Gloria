@@ -27,6 +27,8 @@ services:
         value: 105
       - key: LLM_TIMEOUT_MS
         value: 7000
+      - key: LLM_FIRST_TOKEN_TIMEOUT_MS
+        value: 1600
       - key: LLM_EARLY_FLUSH_CHARS
         value: 100
       - key: LLM_COMPACT_PROMPT
