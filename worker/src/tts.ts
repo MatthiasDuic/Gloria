@@ -58,7 +58,7 @@ export function streamElevenLabsToMulaw(
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
-  const modelId = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
+  const modelId = process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2";
 
   const controller = new AbortController();
   const done = (async () => {
@@ -72,10 +72,10 @@ export function streamElevenLabsToMulaw(
         throw new Error("elevenlabs unavailable");
       }
 
-      const stability = numEnv("ELEVENLABS_STABILITY", 0.35);
-      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.9);
-      const style = numEnv("ELEVENLABS_STYLE", 0.45);
-      const speed = numEnv("ELEVENLABS_SPEED", 0.92);
+      const stability = numEnv("ELEVENLABS_STABILITY", 0.45);
+      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.88);
+      const style = numEnv("ELEVENLABS_STYLE", 0.35);
+      const speed = numEnv("ELEVENLABS_SPEED", 0.94);
       const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", true);
       const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 2, 0, 4);
       const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream`);
