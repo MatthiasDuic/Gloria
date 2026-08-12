@@ -400,9 +400,34 @@ function enforceRealtimeReplyPolicy(ctx: CallContext, userText: string, text: st
 
   const phase = inferConversationPhase(ctx);
   const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  if (isPkv && phase <= 6) {
+    out = rewriteRepeatedPkvDiscoveryQuestion(ctx, userText, out);
+  }
   if (isPkv && phase <= 6 && containsEarlySchedulingQuestion(out) && !isPkvSchedulingReady(ctx)) {
     out = buildPkvDiscoveryQuestion(ctx, userText);
   }
+  return out;
+}
+
+function rewriteRepeatedPkvDiscoveryQuestion(ctx: CallContext, userText: string, out: string): string {
+  const userHistory = `${ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text)
+    .join(" ")} ${userText}`.toLowerCase();
+
+  const insuranceKnown = hasInsuranceSignal(userHistory);
+  const contributionKnown = hasContributionSignal(userHistory);
+
+  if (/\b(privat|gesetzlich)\b[^.?!]*\bversichert\b|\bprivat\s+oder\s+gesetzlich\b/i.test(out) && insuranceKnown) {
+    return contributionKnown
+      ? "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?"
+      : "Danke für die Einordnung. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?";
+  }
+
+  if (/monatsbeitrag|gr[öo]ßenordnung[^.?!]*beitrag|wie\s+hoch[^.?!]*beitrag/i.test(out) && contributionKnown) {
+    return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+  }
+
   return out;
 }
 

@@ -3,6 +3,10 @@ import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 type Outcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt";
 
 type ExtractedReport = {
@@ -239,32 +243,50 @@ export async function postReport(ctx: CallContext): Promise<void> {
     hasLeadId: Boolean(ctx.leadId),
   });
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { "x-gloria-internal-token": token } : {}),
-      },
-      body: JSON.stringify(body),
-    });
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { "x-gloria-internal-token": token } : {}),
+        },
+        body: JSON.stringify(body),
+      });
 
-    const text = await res.text();
-    if (!res.ok) {
-      log.error("finalize.post_failed", { status: res.status, body: text.slice(0, 400) });
-      return;
+      const text = await res.text();
+      if (res.ok) {
+        log.info("finalize.posted", {
+          callSid: ctx.callSid,
+          outcome,
+          appointmentAt,
+          email: contactEmail,
+          response: text.slice(0, 200),
+          attempt,
+        });
+        return;
+      }
+
+      const retryable = res.status >= 500 || res.status === 429;
+      log.error("finalize.post_failed", {
+        status: res.status,
+        body: text.slice(0, 400),
+        attempt,
+        retryable,
+      });
+      if (!retryable || attempt >= maxAttempts) {
+        return;
+      }
+      await wait(250 * attempt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("finalize.post_error", { error: message, attempt });
+      if (attempt >= maxAttempts) {
+        return;
+      }
+      await wait(250 * attempt);
     }
-    log.info("finalize.posted", {
-      callSid: ctx.callSid,
-      outcome,
-      appointmentAt,
-      email: contactEmail,
-      response: text.slice(0, 200),
-    });
-  } catch (error) {
-    log.error("finalize.post_error", {
-      error: error instanceof Error ? error.message : String(error),
-    });
   }
 }
 
