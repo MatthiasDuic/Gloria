@@ -285,6 +285,35 @@ test("stream path keeps PKV structure after contribution-rise response", async (
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
+test("does not treat the remembered starting contribution as current", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-starting-contribution",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Wie stark spüren Sie diese Entwicklung bei sich?", at: 0 },
+    { role: "user", text: "Man nimmt das so hin.", at: 0.5 },
+    { role: "assistant", text: "Mit welchem Beitrag haben Sie einmal angefangen?", at: 1 },
+    { role: "user", text: "Ja, mit sechshundert Euro.", at: 2 },
+    { role: "assistant", text: "Haben Sie sich das schon einmal detailliert angeschaut?", at: 3 },
+    { role: "user", text: "Nein.", at: 4 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Nein.");
+  assert.ok(reply);
+  assert.match(reply.reply, /privat oder gesetzlich/);
+
+  ctx.transcript.push(
+    { role: "assistant", text: reply.reply, at: 5 },
+    { role: "user", text: "Gesetzlich.", at: 6 },
+  );
+  const currentContributionQuestion = buildDeterministicPkvFlowReply(ctx, "Gesetzlich.");
+  assert.ok(currentContributionQuestion);
+  assert.match(currentContributionQuestion.reply, /aktueller Monatsbeitrag/);
+  assert.doesNotMatch(currentContributionQuestion.reply, /Zehn-Jahres-Prognose/);
+});
+
 test("uses concrete projection after captured PKV contribution", () => {
   const ctx = newContext({
     callSid: "test-pkv-projection",

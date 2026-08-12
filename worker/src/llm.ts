@@ -423,7 +423,7 @@ function rewriteRepeatedPkvDiscoveryQuestion(ctx: CallContext, userText: string,
     .join(" ")} ${userText}`.toLowerCase();
 
   const insuranceKnown = hasInsuranceSignal(userHistory);
-  const contributionKnown = hasContributionSignal(userHistory);
+  const contributionKnown = hasCurrentContributionSignal(ctx, userText);
 
   if (/\b(privat|gesetzlich)\b[^.?!]*\bversichert\b|\bprivat\s+oder\s+gesetzlich\b/i.test(out) && insuranceKnown) {
     return contributionKnown
@@ -458,7 +458,7 @@ function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
   const insuranceKnown = hasInsuranceSignal(userHistory);
   if (!insuranceKnown) return "need_insurance";
 
-  const contributionKnown = hasContributionSignal(userHistory);
+  const contributionKnown = hasCurrentContributionSignal(ctx, userText);
   if (!contributionKnown) return "need_contribution";
 
   const projectionGiven =
@@ -752,7 +752,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     return {
       reply: contributionQuestionAsked
         ? "Danke. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
-        : "Danke, das ist ein wichtiger Punkt. Wenn Sie die Größenordnung nennen möchten, kann ich Ihnen direkt zeigen, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Welche Größenordnung liegt bei Ihnen aktuell vor?",
+        : "Danke, das ist ein wichtiger Punkt. Wenn Sie die Größenordnung nennen möchten, kann ich Ihnen direkt zeigen, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Wie hoch ist Ihr aktueller Monatsbeitrag?",
       hangup: false,
       transfer: false,
     };
@@ -808,7 +808,7 @@ function isPkvSchedulingReady(ctx: CallContext): boolean {
     .join(" \n ");
 
   const insuranceKnown = hasInsuranceSignal(userText);
-  const contributionKnown = hasContributionSignal(userText);
+  const contributionKnown = hasCurrentContributionSignal(ctx, userText);
   const projectionGiven =
     /zehn\s+jahr|10\s+jahr|bis\s+zum\s+ruhend?stand|hochrechn|projektion|beitragsprognose/.test(
       assistantText,
@@ -826,10 +826,10 @@ function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {
     .join(" ")} ${userText}`.toLowerCase();
 
   const insuranceKnown = hasInsuranceSignal(userHistory);
-  const contributionKnown = hasContributionSignal(userHistory);
+  const contributionKnown = hasCurrentContributionSignal(ctx, userText);
   const contributionQuestionAsked = ctx.transcript.some(
     (turn) =>
-      turn.role === "assistant" && /(?:monatsbeitrag|gr[öo]ßenordnung).*(?:beitrag|euro)|wie\s+hoch.*beitrag/i.test(turn.text),
+      turn.role === "assistant" && isCurrentContributionQuestion(turn.text),
   );
 
   if (!insuranceKnown) {
@@ -861,6 +861,32 @@ function hasContributionSignal(text: string): boolean {
     return true;
   }
   return false;
+}
+
+function hasCurrentContributionSignal(ctx: CallContext, userText: string): boolean {
+  const turns = ctx.transcript.some(
+    (turn) => turn.role === "user" && turn.text === userText,
+  )
+    ? ctx.transcript
+    : [...ctx.transcript, { role: "user" as const, text: userText, at: Date.now() }];
+
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (turn.role !== "assistant" || !isCurrentContributionQuestion(turn.text)) continue;
+
+    const answer = turns
+      .slice(index + 1)
+      .find((candidate) => candidate.role === "user")?.text || "";
+    if (parseGermanEuroAmount(answer) !== undefined) return true;
+  }
+
+  return false;
+}
+
+function isCurrentContributionQuestion(text: string): boolean {
+  return /(?:aktuellen?|derzeitigen?|heutigen?)\s+(?:monatlichen?\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(
+    text,
+  );
 }
 
 function consentAlreadyGranted(ctx: CallContext): boolean {
