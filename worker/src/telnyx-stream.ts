@@ -1169,17 +1169,17 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Wir hatten bisher noch keinen Kontakt \u2013 daher ganz direkt gefragt: Sprechen Sie kurz mit mir, oder legen Sie lieber auf, ohne zu wissen, worum es geht?`;
+    topicLine = `Kurzer Anlass: Es geht um eine kurze Einordnung zur privaten Krankenversicherung. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
-    topicLine = `Es geht um Ihre betriebliche Altersvorsorge und wie sich diese langfristig planbar gestalten lässt.`;
+    topicLine = `Kurzer Anlass: Es geht um Ihre betriebliche Altersvorsorge. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
-    topicLine = `Kurz zum Anlass: Viele Betriebe haben ihre gewerblichen Policen seit Jahren laufen, obwohl sich im Unternehmen viel verändert hat. Genau dafür bietet ${owner} einen kurzen neutralen Abgleich an.`;
+    topicLine = `Kurzer Anlass: Es geht um einen kurzen Abgleich Ihrer gewerblichen Absicherung. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/strom|gas|energie/i.test(topic)) {
-    topicLine = `Es geht um Ihre Energiekosten und wie sich diese mittelfristig planbar machen lassen.`;
+    topicLine = `Kurzer Anlass: Es geht um Ihre Energiekosten. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (ctx.topic && ctx.topic.trim().length > 0) {
-    topicLine = `Es geht um das Thema ${ctx.topic.trim()} – ein Punkt, bei dem ${owner} Ihnen eine kurze Einordnung geben kann.`;
+    topicLine = `Kurzer Anlass: Es geht um ${ctx.topic.trim()}. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else {
-    topicLine = `Es geht um ein Thema, bei dem ${owner} Ihnen eine kurze, fundierte Einordnung geben möchte.`;
+    topicLine = `Kurzer Anlass: ${owner} hat eine kurze fachliche Einordnung für Sie. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   }
 
   // Kurze, natürliche Begrüßung mit offener Abschlussfrage.

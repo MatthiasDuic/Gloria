@@ -121,9 +121,9 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
   }
 
   const parts: string[] = [];
-  parts.push("PLAYBOOK – verbindlicher Leitfaden für dieses Gespräch:");
+  parts.push("PLAYBOOK – fachliche Leitlinie für dieses Gespräch:");
   parts.push(
-    "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über diesem Playbook. Ältere Formulierungen wie Pflichtfragen, harte Konter oder angeblich notwendige Datenerhebung dürfen niemals Druck erzeugen.",
+    "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über diesem Playbook. Nutze das Playbook als Orientierung für Inhalt und Richtung, aber antworte immer situativ auf die letzte Kundenaussage und nicht als Skript.",
   );
   if (topic) parts.push(`THEMA: ${topic}`);
 
@@ -141,7 +141,7 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
 
   if (conversationGuardrails) {
     parts.push("");
-    parts.push("HARTE REGELN & VERBOTE (themenspezifisch, verbindlich):");
+    parts.push("THEMENSPEZIFISCHE GRENZEN & HINWEISE (nicht als Skript vorlesen):");
     parts.push(conversationGuardrails);
   }
 
@@ -154,7 +154,7 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
   if (proofPoints) {
     parts.push("");
     parts.push(
-      "ZAHLEN & FAKTEN (HARTE PFLICHT — in Phase 5 mind. eine dieser Zahlen aktiv nennen, bevor zu Phase 6 übergeleitet wird):",
+      "ZAHLEN & FAKTEN (als optionaler inhaltlicher Anker, nur wenn sie zur Kundenaussage passen):",
     );
     parts.push(proofPoints);
   }

@@ -303,6 +303,7 @@ export async function streamReply(
     }
 
     let reply = replyText.trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
+    reply = sanitizeReplyText(reply);
     if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(reply)) {
       reply = stripConsentQuestion(reply);
     }
@@ -323,11 +324,12 @@ export async function streamReply(
       if (recovered) {
         if (recovered.reply?.trim()) {
           try {
-            onSentence(recovered.reply.trim());
+            onSentence(sanitizeReplyText(recovered.reply.trim()));
           } catch {
             // ignore callback issues in fallback path
           }
         }
+        recovered.reply = sanitizeReplyText(recovered.reply);
         if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(recovered.reply)) {
           recovered.reply = stripConsentQuestion(recovered.reply);
         }
@@ -335,7 +337,9 @@ export async function streamReply(
       }
     }
 
-    const fallbackReply = replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?";
+    const fallbackReply = sanitizeReplyText(
+      replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?",
+    );
     if (fallbackReply) {
       try {
         onSentence(fallbackReply);
@@ -353,6 +357,13 @@ export async function streamReply(
     clearTimeout(timeout);
     clearTimeout(firstTokenTimer);
   }
+}
+
+function sanitizeReplyText(text: string): string {
+  let out = text || "";
+  out = out.replace(/\blaut\s+pkv-?verband\b/gi, "Erfahrungsgemäß");
+  out = out.replace(/\s+/g, " ").trim();
+  return out;
 }
 
 function consentAlreadyGranted(ctx: CallContext): boolean {
@@ -1052,11 +1063,22 @@ function collectPkvData(ctx: CallContext): {
 function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnOutput | null {
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herrn Duic";
+  const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
+
+  const askedBriefPermission =
+    /in\s+20\s+sekunden|in\s+zwei\s+s[aä]tzen|kurz\s+sagen\s*,?\s*worum\s+es\s+geht|sprechen\s+sie\s+kurz\s+mit\s+mir/.test(
+      latestAssistant,
+    );
+  const hadOwnerIntro = /ich\s+rufe\s+im\s+auftrag\s+von/.test(ctx.transcript.map((turn) => turn.text.toLowerCase()).join(" "));
 
   const confirmsConversation = /\b(k[öo]nnen\s+gerne\s+miteinander\s+sprechen|wir\s+k[öo]nnen\s+gerne\s+miteinander\s+sprechen|ja\s*,?\s*gerne|gern\b|nat[üu]rlich\b|klar\b)\b/i.test(text);
-  if (confirmsConversation) {
+  if (confirmsConversation && askedBriefPermission) {
+    const shortTopic = ctx.topic?.trim() ? `zum Thema ${ctx.topic.trim()}` : "zum Anliegen";
+    const followup = hadOwnerIntro
+      ? `Danke. Dann kurz ${shortTopic}: Welche Rolle haben Sie dabei aktuell im Unternehmen?`
+      : `Danke. Ich rufe im Auftrag von ${owner} an ${shortTopic}. Darf ich mit einem kurzen Überblick starten?`;
     return {
-      reply: `Perfekt, vielen Dank. Dann direkt kurz: ich rufe im Auftrag von ${owner} zum Thema private Krankenversicherung an. Haben Sie gerade zwei Minuten für eine kurze Einordnung?`,
+      reply: followup,
       hangup: false,
       transfer: false,
     };
