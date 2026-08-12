@@ -118,6 +118,12 @@ export async function streamReply(
     return deterministicReply;
   }
 
+  const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
+  if (deterministicPkvReply) {
+    onSentence(deterministicPkvReply.reply);
+    return deterministicPkvReply;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -431,6 +437,138 @@ function rewriteRepeatedPkvDiscoveryQuestion(ctx: CallContext, userText: string,
   return out;
 }
 
+type PkvFlowState =
+  | "need_insurance"
+  | "need_contribution"
+  | "need_projection"
+  | "need_interest"
+  | "ready_for_schedule";
+
+function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
+  const userHistory = `${ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text)
+    .join(" ")} ${userText}`.toLowerCase();
+  const assistantHistory = ctx.transcript
+    .filter((turn) => turn.role === "assistant")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" \n ");
+
+  const insuranceKnown = hasInsuranceSignal(userHistory);
+  if (!insuranceKnown) return "need_insurance";
+
+  const contributionKnown = hasContributionSignal(userHistory);
+  if (!contributionKnown) return "need_contribution";
+
+  const projectionGiven =
+    /zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|vier\s+prozent\s+pro\s+jahr|4\s*%\s+pro\s+jahr/.test(
+      assistantHistory,
+    );
+  if (!projectionGiven) return "need_projection";
+
+  const interestAsked = /w[äa]re\s+.*(?:hilfreich|hilfreich)|sinnvoll\s+f[üu]r\s+sie|sollen\s+wir\s+uns\s+das\s+anschauen/.test(
+    assistantHistory,
+  );
+  const interestConfirmed = ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .some((turn) => /\b(ja|gern|gerne|macht\s+sinn|hilfreich|interessant|klingt\s+gut|okay|ok)\b/i.test(turn.text));
+
+  if (interestAsked && !interestConfirmed) return "need_interest";
+  return "ready_for_schedule";
+}
+
+function extractLatestContributionPhrase(text: string): string | undefined {
+  const direct = text.match(/\b\d{2,5}(?:[.,:]\d{1,2})?\s*(?:euro|€)\b/gi);
+  if (direct?.length) return direct.at(-1)?.replace(/\s+/g, " ").trim();
+  const spoken = text.match(/\b(?:[a-zäöüß-]*tausend[a-zäöüß-]*|[a-zäöüß-]*hundert[a-zäöüß-]*)(?:\s+[a-zäöüß-]+){0,4}\s+euro\b/gi);
+  if (spoken?.length) return spoken.at(-1)?.replace(/\s+/g, " ").trim();
+  return undefined;
+}
+
+function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
+  const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  if (!isPkv) return null;
+  if (ctx.confirmedSlotPhrase) return null;
+
+  const phase = inferConversationPhase(ctx);
+  if (phase >= 7) return null;
+
+  const text = userText.toLowerCase();
+  const owner = ctx.ownerRealName?.trim() || "Herr Duic";
+  const state = detectPkvFlowState(ctx, userText);
+
+  if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
+    return {
+      reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (/was\s+soll\s+bei\s+diesem\s+termin|was\s+wird\s+gemacht|wof[üu]r\s+ist\s+der\s+termin/.test(text)) {
+    if (state === "need_contribution") {
+      return {
+        reply: `Gute Frage: ${owner} macht mit Ihnen eine persönliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Stellschrauben bekommen. Wenn Sie möchten: In welcher Größenordnung liegt Ihr Monatsbeitrag aktuell?`,
+        hangup: false,
+        transfer: false,
+      };
+    }
+    return {
+      reply: `Gute Frage: ${owner} zeigt Ihnen im Termin die persönliche Beitragsprognose bis in zehn Jahre und konkrete Stellschrauben für mehr Planbarkeit. Wäre so eine klare Einordnung für Sie hilfreich?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (state === "need_insurance") {
+    return {
+      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (state === "need_contribution") {
+    const contributionQuestionAsked = ctx.transcript.some(
+      (turn) =>
+        turn.role === "assistant" && /(?:monatsbeitrag|gr[öo]ßenordnung).*(?:beitrag|euro)|wie\s+hoch.*beitrag/i.test(turn.text),
+    );
+    return {
+      reply: contributionQuestionAsked
+        ? "Danke. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
+        : "Danke, das ist ein wichtiger Punkt. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (state === "need_projection") {
+    const allUserText = ctx.transcript
+      .filter((turn) => turn.role === "user")
+      .map((turn) => turn.text)
+      .join(" ");
+    const contribution = extractLatestContributionPhrase(allUserText);
+    const line = contribution
+      ? `Danke, bei rund ${contribution} kann über zehn Jahre ein spürbarer Mehrbetrag entstehen, wenn die Entwicklung so weiterläuft.`
+      : "Danke, in dieser Größenordnung entsteht über zehn Jahre oft ein spürbarer Mehrbetrag.";
+    return {
+      reply: `${line} Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (state === "need_interest") {
+    return {
+      reply: `Mir geht es um Klarheit statt Verkauf: Wäre so eine persönliche Einordnung mit ${owner} grundsätzlich hilfreich für Sie?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  return null;
+}
+
 function isDanglingContinuation(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
@@ -460,7 +598,10 @@ function isPkvSchedulingReady(ctx: CallContext): boolean {
     /zehn\s+jahr|10\s+jahr|bis\s+zum\s+ruhend?stand|hochrechn|projektion|beitragsprognose/.test(
       assistantText,
     );
-  return insuranceKnown && contributionKnown && projectionGiven;
+  const interestConfirmed = ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .some((turn) => /\b(ja|gern|gerne|hilfreich|interessant|macht\s+sinn|klingt\s+gut|ok|okay)\b/i.test(turn.text));
+  return insuranceKnown && contributionKnown && projectionGiven && interestConfirmed;
 }
 
 function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {

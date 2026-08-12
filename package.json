@@ -7,7 +7,8 @@
     "build": "node ./node_modules/next/dist/bin/next build",
     "start": "node ./node_modules/next/dist/bin/next start",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
-    "test": "node --test --import tsx src/lib/prompt-builder.test.ts worker/src/call-classification.test.ts worker/src/llm.test.ts worker/src/telnyx-stream.test.ts"
+    "test": "node --test --import tsx src/lib/prompt-builder.test.ts worker/src/call-classification.test.ts worker/src/llm.test.ts worker/src/telnyx-stream.test.ts",
+    "qa:call-log": "node scripts/qa-call-log.mjs"
   },
   "dependencies": {
     "next": "16.2.3",
