@@ -171,6 +171,9 @@ export async function streamReply(
   let pendingFlush = "";
   let replyText = "";
   let scanPos = 0;
+  let emittedSegmentCount = 0;
+  let emittedQuestion = false;
+  let lastEmittedNorm = "";
 
   const flushSentence = () => {
     const out = pendingFlush.trim();
@@ -178,8 +181,18 @@ export async function streamReply(
     if (out.length > 0) {
       const filtered = enforceRealtimeReplyPolicy(ctx, userText, sanitizeReplyText(out));
       if (!filtered) return;
+      const normalized = filtered.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!normalized) return;
+      if (normalized === lastEmittedNorm) return;
+      if (isDanglingContinuation(filtered) && emittedSegmentCount > 0) return;
+      const hasQuestion = /\?/.test(filtered);
+      if (hasQuestion && emittedQuestion) return;
+      if (emittedSegmentCount >= 2) return;
       try {
         onSentence(filtered);
+        emittedSegmentCount += 1;
+        if (hasQuestion) emittedQuestion = true;
+        lastEmittedNorm = normalized;
       } catch (err) {
         log.error("llm.onSentence_failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -393,6 +406,13 @@ function enforceRealtimeReplyPolicy(ctx: CallContext, userText: string, text: st
   return out;
 }
 
+function isDanglingContinuation(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t.length > 95) return false;
+  return /^(?:um|und|oder|damit|wobei|sowie|denn|also)\b/i.test(t);
+}
+
 function containsEarlySchedulingQuestion(text: string): boolean {
   return /\b(termin|vormittag|nachmittag|welcher\s+tag|wann\s+passt|w[üu]rde\s+.*\stermin|h[äa]tten\s+sie\s+interesse\s+an\s+einem\s+termin)\b/i.test(
     text,
@@ -409,12 +429,8 @@ function isPkvSchedulingReady(ctx: CallContext): boolean {
     .map((turn) => turn.text.toLowerCase())
     .join(" \n ");
 
-  const insuranceKnown = /\b(privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/.test(
-    userText,
-  );
-  const contributionKnown =
-    /\b(?:\d{2,4}(?:[.,:]\d{1,2})?)\b[^\n.?!]{0,16}\b(?:euro|€)\b/.test(userText) ||
-    /\b(?:beitrag|kosten)\b[^\n.?!]{0,24}\b(?:euro|€|tausend|hundert)\b/.test(userText);
+  const insuranceKnown = hasInsuranceSignal(userText);
+  const contributionKnown = hasContributionSignal(userText);
   const projectionGiven =
     /zehn\s+jahr|10\s+jahr|bis\s+zum\s+ruhend?stand|hochrechn|projektion|beitragsprognose/.test(
       assistantText,
@@ -428,18 +444,42 @@ function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {
     .map((turn) => turn.text)
     .join(" ")} ${userText}`.toLowerCase();
 
-  const insuranceKnown = /\b(privat|pkv|gesetzlich|gkv)\b/.test(userHistory);
-  const contributionKnown =
-    /\b(?:\d{2,4}(?:[.,:]\d{1,2})?)\b[^\n.?!]{0,16}\b(?:euro|€)\b/.test(userHistory) ||
-    /\b(beitrag|kosten)\b[^\n.?!]{0,24}\b(?:tausend|hundert)\b/.test(userHistory);
+  const insuranceKnown = hasInsuranceSignal(userHistory);
+  const contributionKnown = hasContributionSignal(userHistory);
+  const contributionQuestionAsked = ctx.transcript.some(
+    (turn) =>
+      turn.role === "assistant" && /(?:monatsbeitrag|gr[öo]ßenordnung).*(?:beitrag|euro)|wie\s+hoch.*beitrag/i.test(turn.text),
+  );
 
   if (!insuranceKnown) {
     return "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell eher privat oder gesetzlich versichert?";
   }
   if (!contributionKnown) {
+    if (contributionQuestionAsked) {
+      return "Verstehe. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich die Zehn-Jahres-Entwicklung sauber einordnen kann.";
+    }
     return "Danke, das ist ein wichtiger Punkt. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?";
   }
-  return "Danke. Wenn Sie mir die Zahl grob nennen, rechne ich Ihnen direkt vor, wie das in zehn Jahren aussehen kann.";
+  return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+}
+
+function hasInsuranceSignal(text: string): boolean {
+  return /\b(privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(
+    text,
+  );
+}
+
+function hasContributionSignal(text: string): boolean {
+  if (/\b(?:\d{2,4}(?:[.,:]\d{1,2})?)\b[^\n.?!]{0,16}\b(?:euro|€)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:beitrag|kosten|monatlich)\b[^\n.?!]{0,30}\b(?:euro|€|tausend|hundert)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:tausend|hundert|einhundert|zweihundert|dreihundert|vierhundert|f[üu]nfhundert|sechshundert|siebenhundert|achthundert|neunhundert)\w*\s+euro\b/i.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 function consentAlreadyGranted(ctx: CallContext): boolean {
