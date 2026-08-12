@@ -342,10 +342,13 @@ test("flow state records only the current contribution", () => {
   state = observeAssistantFlowState(state, "Mit welchem Beitrag haben Sie einmal angefangen?");
   state = observeUserFlowState(state, "Sechshundert Euro.");
   assert.equal(state.contributionKnown, false);
+  assert.equal(state.pkvData.startingContribution, 600);
+  assert.equal(state.pkvData.currentContribution, undefined);
 
   state = observeAssistantFlowState(state, "Wie hoch ist Ihr aktueller Monatsbeitrag?");
   state = observeUserFlowState(state, "Tausendzweihundert Euro.");
   assert.equal(state.contributionKnown, true);
+  assert.equal(state.pkvData.currentContribution, 1200);
 });
 
 test("offers and locks only supplied calendar slots", () => {
@@ -401,6 +404,48 @@ test("never asks to choose unnamed appointment slots", () => {
   assert.ok(reply);
   assert.doesNotMatch(reply.reply, /welcher der beiden|welcher Termin/);
   assert.match(reply.reply, /Kalender|Moment/);
+});
+
+test("runs a complete PKV acquisition scenario through structured state", async () => {
+  const ctx = newContext({
+    callSid: "test-pkv-full-scenario",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "- Mittwoch, den neunzehnten August um zehn Uhr",
+      "- Freitag, den einundzwanzigsten August um elf Uhr",
+    ].join("\n"),
+  });
+  ctx.transcript.push({ role: "assistant", text: "Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?", at: 1 });
+
+  const turn = async (userText: string): Promise<string> => {
+    ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+    ctx.flow = observeUserFlowState(ctx.flow, userText);
+    const reply = await streamReply(ctx, userText, () => undefined);
+    ctx.transcript.push({ role: "assistant", text: reply.reply, at: Date.now() });
+    ctx.flow = observeAssistantFlowState(ctx.flow, reply.reply);
+    return reply.reply;
+  };
+
+  assert.match(await turn("Ja, das dürfen Sie."), /Beiträge in der Gesundheitsversorgung/);
+  assert.match(await turn("Ja, das spüre ich."), /mit welchem Beitrag/);
+  assert.match(await turn("Mit sechshundert Euro."), /detailliert angeschaut/);
+  assert.match(await turn("Nein."), /privat oder gesetzlich/);
+  assert.match(await turn("Gesetzlich."), /aktueller Monatsbeitrag/);
+  assert.match(await turn("Tausendzweihundertachtzig Euro."), /1280 Euro/);
+  assert.equal(ctx.flow.pkvData.currentContribution, 1280);
+  assert.equal(ctx.flow.projectionDelivered, true);
+  assert.equal(ctx.flow.awaiting, "projection_interest");
+  const afterInterest = await turn("Ja, gerne.");
+  assert.match(afterInterest, /Vormittag|Nachmittag/);
+  assert.equal(ctx.flow.pkvData.interest, "positive");
+  assert.equal(ctx.flow.stage, "scheduling");
+  assert.match(await turn("Vormittag."), /Mittwoch|Freitag/);
+  assert.equal(ctx.flow.pkvData.startingContribution, 600);
+  assert.equal(ctx.flow.pkvData.currentContribution, 1280);
+  assert.equal(ctx.flow.pkvData.insuranceStatus, "gkv");
+  assert.equal(ctx.flow.pkvData.interest, "positive");
+  assert.equal(ctx.flow.pkvData.appointmentPreference, "morning");
 });
 
 test("uses concrete projection after captured PKV contribution", () => {

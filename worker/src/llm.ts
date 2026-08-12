@@ -446,6 +446,15 @@ type PkvFlowState =
   | "ready_for_schedule";
 
 function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
+  const structured = ctx.flow.pkvData;
+  if (ctx.topicKind === "pkv" && (structured.insuranceStatus || structured.currentContribution !== undefined || structured.interest)) {
+    if (!structured.insuranceStatus) return "need_insurance";
+    if (structured.currentContribution === undefined) return "need_contribution";
+    if (!ctx.flow.projectionDelivered) return "need_projection";
+    if (structured.interest !== "positive") return "need_interest";
+    return "ready_for_schedule";
+  }
+
   const userHistory = `${ctx.transcript
     .filter((turn) => turn.role === "user")
     .map((turn) => turn.text)
@@ -787,7 +796,8 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (state === "ready_for_schedule") {
     const offeredSlots = extractFreeSlotPhrases(ctx.freeSlotsPrompt);
     const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
-    if (offeredSlots.length >= 2 && /oder/.test(latestAssistant.toLowerCase())) {
+    const offeredInLatestReply = offeredSlots.filter((slot) => latestAssistant.includes(slot));
+    if (offeredInLatestReply.length >= 2) {
       const selected = selectOfferedSlot(latestAssistant, userText, offeredSlots);
       if (selected) {
         return {
@@ -992,7 +1002,7 @@ function hasCurrentProjection(ctx: CallContext): boolean {
 }
 
 function isCurrentContributionQuestion(text: string): boolean {
-  return /(?:aktuellen?|derzeitigen?|heutigen?)\s+(?:monatlichen?\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(
+  return /(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(
     text,
   );
 }

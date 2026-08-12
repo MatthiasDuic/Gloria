@@ -10,6 +10,14 @@ export type VoiceProfile = {
   segmentPauseMs: number;
 };
 
+export type PkvConversationData = {
+  insuranceStatus?: "pkv" | "gkv";
+  startingContribution?: number;
+  currentContribution?: number;
+  interest?: "positive" | "negative" | "unclear";
+  appointmentPreference?: "morning" | "afternoon";
+};
+
 export type CallFlowState = {
   topicKind: TopicKind;
   stage:
@@ -26,6 +34,17 @@ export type CallFlowState = {
   contributionKnown: boolean;
   projectionDelivered: boolean;
   interestConfirmed: boolean;
+  pkvData: PkvConversationData;
+  awaiting:
+    | "relevance"
+    | "starting_contribution"
+    | "concept_interest"
+    | "insurance_status"
+    | "current_contribution"
+    | "projection_interest"
+    | "appointment_preference"
+    | "appointment_selection"
+    | undefined;
   lastUserSignal?: string;
   lastAssistantSignal?: string;
 };
@@ -49,6 +68,8 @@ export function createInitialFlowState(topic?: string): CallFlowState {
       contributionKnown: false,
       projectionDelivered: false,
       interestConfirmed: false,
+      pkvData: {},
+      awaiting: "relevance",
     };
   }
 
@@ -59,6 +80,8 @@ export function createInitialFlowState(topic?: string): CallFlowState {
     contributionKnown: false,
     projectionDelivered: false,
     interestConfirmed: false,
+    pkvData: {},
+    awaiting: undefined,
   };
 }
 
@@ -137,6 +160,46 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
   const text = userText.toLowerCase();
   const next = { ...state };
 
+  if (next.topicKind === "pkv") {
+    const amount = parseGermanEuroAmount(text);
+    if (next.awaiting === "starting_contribution" && amount !== undefined) {
+      next.pkvData = { ...next.pkvData, startingContribution: amount };
+      next.lastUserSignal = "starting_contribution";
+    }
+    if (next.awaiting === "current_contribution" && amount !== undefined) {
+      next.pkvData = { ...next.pkvData, currentContribution: amount };
+      next.contributionKnown = true;
+      next.lastUserSignal = "current_contribution";
+    }
+    if (next.awaiting === "insurance_status") {
+      if (/\b(?:privat|pkv)\b/i.test(text)) {
+        next.pkvData = { ...next.pkvData, insuranceStatus: "pkv" };
+        next.insuranceKnown = true;
+      } else if (/\b(?:gesetzlich|gkv)\b/i.test(text)) {
+        next.pkvData = { ...next.pkvData, insuranceStatus: "gkv" };
+        next.insuranceKnown = true;
+      }
+    }
+    if (next.awaiting === "projection_interest") {
+      if (/\b(?:ja|gern|gerne|hilfreich|interessant|passt|okay|ok)\b/i.test(text)) {
+        next.pkvData = { ...next.pkvData, interest: "positive" };
+        next.interestConfirmed = true;
+      } else if (/\b(?:nein|n[öo]|eher nicht|kein interesse)\b/i.test(text)) {
+        next.pkvData = { ...next.pkvData, interest: "negative" };
+        next.interestConfirmed = false;
+      } else {
+        next.pkvData = { ...next.pkvData, interest: "unclear" };
+      }
+    }
+    if (next.awaiting === "appointment_preference") {
+      if (/vormittag|morgens|fr[üu]h/i.test(text)) {
+        next.pkvData = { ...next.pkvData, appointmentPreference: "morning" };
+      } else if (/nachmittag|mittags|sp[äa]ter/i.test(text)) {
+        next.pkvData = { ...next.pkvData, appointmentPreference: "afternoon" };
+      }
+    }
+  }
+
   if (/\b(normal|schon normal|ist ja auch normal|hoechstbeitrag|höchstbeitrag)\b/i.test(text)) {
     next.lastUserSignal = "normalized_risk";
     if (next.topicKind === "pkv" && next.stage === "need_relevance") next.stage = "need_insurance";
@@ -184,7 +247,26 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
   const text = assistantText.toLowerCase();
   const next = { ...state };
 
-  if (/zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|vier\s+prozent\s+pro\s+jahr|4\s*%\s+pro\s+jahr/i.test(text)) {
+  if (next.topicKind === "pkv") {
+    if (/mit welchem Beitrag.*angefangen|gestartet/i.test(text)) {
+      next.awaiting = "starting_contribution";
+    } else if (/wie stark sp[üu]ren|wie erleben Sie.*Beitragsentwicklung/i.test(text)) {
+      next.awaiting = "relevance";
+    } else if (/privat oder gesetzlich|gesetzlich oder privat/i.test(text)) {
+      next.awaiting = "insurance_status";
+    } else if (/aktuellen? Monatsbeitrag|derzeitigen? Monatsbeitrag|wie hoch.*Beitrag/i.test(text)) {
+      next.awaiting = "current_contribution";
+    } else if (/Zehn-Jahres-Prognose.*hilfreich|Beitragsprognose.*hilfreich/i.test(text)) {
+      next.awaiting = "projection_interest";
+    } else if (/Vormittag.*oder.*Nachmittag/i.test(text)) {
+      next.awaiting = "appointment_preference";
+    } else if (/Wie wäre es mit .* oder /i.test(text)) {
+      next.awaiting = "appointment_selection";
+    }
+  }
+
+  const isCurrentContributionQuestion = /(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text);
+  if (!isCurrentContributionQuestion && /zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|vier\s+prozent\s+pro\s+jahr|4\s*%\s+pro\s+jahr/i.test(text)) {
     next.projectionDelivered = true;
     if (next.topicKind === "pkv" && next.stage === "need_projection") next.stage = "need_interest";
     next.lastAssistantSignal = "projection";
@@ -205,7 +287,7 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
     next.lastAssistantSignal = "post_booking";
   }
 
-  if (/(?:aktuellen?|derzeitigen?|heutigen?)\s+(?:monatlichen?\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text)) {
+  if (/(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text)) {
     next.lastAssistantSignal = "current_contribution_question";
   }
 
@@ -222,4 +304,35 @@ function hasContributionSignal(text: string): boolean {
   if (/\b(?:beitrag|kosten|monatlich)\b[^\n.?!]{0,30}\b(?:euro|€|tausend|hundert)\b/i.test(text)) return true;
   if (/\b(?:[a-zäöüß-]*tausend[a-zäöüß-]*|[a-zäöüß-]*hundert[a-zäöüß-]*)\b[^\n.?!]{0,24}\beuro\b/i.test(text)) return true;
   return false;
+}
+
+function parseGermanEuroAmount(text: string): number | undefined {
+  const direct = text.match(/\b(\d{2,5})(?:[.,]\d{1,2})?\s*(?:euro|€)\b/i);
+  if (direct) return Number.parseInt(direct[1], 10);
+  const words = text.match(/\b(?:[a-zäöüß-]*tausend[a-zäöüß-]*|[a-zäöüß-]*hundert[a-zäöüß-]*)(?:\s+[a-zäöüß-]+){0,3}/i)?.[0];
+  if (!words) return undefined;
+  const normalized = words
+    .toLowerCase()
+    .replace(/\s+euro\b/, "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/-/g, "")
+    .replace(/\s+/g, "");
+  const units: Record<string, number> = { ein: 1, eins: 1, zwei: 2, drei: 3, vier: 4, fuenf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9 };
+  const tens: Record<string, number> = { zehn: 10, zwanzig: 20, dreissig: 30, vierzig: 40, fuenfzig: 50, sechzig: 60, siebzig: 70, achtzig: 80, neunzig: 90 };
+  const parse = (value: string): number | undefined => {
+    if (/^\d+$/.test(value)) return Number.parseInt(value, 10);
+    if (value in units) return units[value];
+    if (value in tens) return tens[value];
+    const thousand = value.indexOf("tausend");
+    if (thousand >= 0) return (parse(value.slice(0, thousand) || "ein") || 0) * 1000 + (parse(value.slice(thousand + 7)) || 0);
+    const hundred = value.indexOf("hundert");
+    if (hundred >= 0) return (parse(value.slice(0, hundred) || "ein") || 0) * 100 + (parse(value.slice(hundred + 7)) || 0);
+    const und = value.indexOf("und");
+    if (und > 0) return (units[value.slice(0, und)] || 0) + (tens[value.slice(und + 3)] || 0);
+    return undefined;
+  };
+  return parse(normalized);
 }
