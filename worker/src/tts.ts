@@ -1,5 +1,6 @@
 import { fetch } from "undici";
 import { log } from "./log.js";
+import type { VoiceProfile } from "./topic-policy.js";
 
 export type ParsedWav = {
   sampleRate: number;
@@ -55,6 +56,7 @@ export function streamElevenLabsToMulaw(
   text: string,
   onChunk: (mulaw: Buffer) => void,
   selectedVoiceId?: string,
+  voiceProfile?: VoiceProfile,
 ): TtsStreamHandle {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = (selectedVoiceId || process.env.ELEVENLABS_VOICE_ID || "").trim();
@@ -72,11 +74,11 @@ export function streamElevenLabsToMulaw(
         throw new Error("elevenlabs unavailable");
       }
 
-      const stability = numEnv("ELEVENLABS_STABILITY", 0.5);
-      const similarity = numEnv("ELEVENLABS_SIMILARITY", 0.9);
-      const style = numEnv("ELEVENLABS_STYLE", 0.25);
-      const speed = numEnv("ELEVENLABS_SPEED", 0.94);
-      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", false);
+      const stability = numEnv("ELEVENLABS_STABILITY", voiceProfile?.stability ?? 0.5);
+      const similarity = numEnv("ELEVENLABS_SIMILARITY", voiceProfile?.similarity ?? 0.9);
+      const style = numEnv("ELEVENLABS_STYLE", voiceProfile?.style ?? 0.25);
+      const speed = numEnv("ELEVENLABS_SPEED", voiceProfile?.speed ?? 0.94);
+      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", voiceProfile?.speakerBoost ?? false);
       const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 1, 0, 4);
       const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream`);
       url.searchParams.set("output_format", "ulaw_8000");
@@ -111,6 +113,7 @@ export function streamElevenLabsToMulaw(
           keyFingerprint: keyFingerprint(apiKey),
           voiceId,
           modelId,
+          voiceProfile: voiceProfile?.profileName,
         });
         throw new Error(`elevenlabs ${res.status}`);
       }

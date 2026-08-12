@@ -1,3 +1,11 @@
+import {
+  createInitialFlowState,
+  createVoiceProfile,
+  type CallFlowState,
+  type TopicKind,
+  type VoiceProfile,
+} from "./topic-policy.js";
+
 export type CallContext = {
   callSid: string;
   streamSid: string;
@@ -13,6 +21,9 @@ export type CallContext = {
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
   voiceId?: string;
+  topicKind: TopicKind;
+  voiceProfile: VoiceProfile;
+  flow: CallFlowState;
   // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
   playbookPrompt?: string;
   // Wiedervorlage-Anruf: Zusammenfassung des vorherigen Gesprächs (vom Backend
@@ -58,6 +69,7 @@ export type CallContext = {
 };
 
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {
+  const topic = initial.topic;
   return {
     memory: {
       facts: [],
@@ -70,5 +82,8 @@ export function newContext(initial: Partial<CallContext> & { callSid: string; st
     userBytesWhileSpeaking: 0,
     startedAt: Date.now(),
     ...initial,
+    topicKind: initial.topicKind || createInitialFlowState(topic).topicKind,
+    voiceProfile: initial.voiceProfile || createVoiceProfile(topic),
+    flow: initial.flow || createInitialFlowState(topic),
   };
 }

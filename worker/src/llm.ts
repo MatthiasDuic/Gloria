@@ -1,6 +1,7 @@
 import { fetch } from "undici";
 import type { CallContext } from "./state.js";
 import { log } from "./log.js";
+import { canScheduleFromFlow } from "./topic-policy.js";
 
 // buildBasePrompt and generateReply removed — dead code.
 // Live path is exclusively streamReply (sentence-level LLM→TTS pipeline).
@@ -486,7 +487,7 @@ function extractLatestContributionPhrase(text: string): string | undefined {
 }
 
 function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
-  const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
   if (ctx.confirmedSlotPhrase) return null;
 
@@ -495,7 +496,7 @@ function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): Tur
 
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herr Duic";
-  const state = detectPkvFlowState(ctx, userText);
+  const state = canScheduleFromFlow(ctx.flow) ? "ready_for_schedule" : detectPkvFlowState(ctx, userText);
 
   if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
     return {
@@ -583,6 +584,9 @@ function containsEarlySchedulingQuestion(text: string): boolean {
 }
 
 function isPkvSchedulingReady(ctx: CallContext): boolean {
+  if (canScheduleFromFlow(ctx.flow)) {
+    return true;
+  }
   const userText = ctx.transcript
     .filter((turn) => turn.role === "user")
     .map((turn) => turn.text.toLowerCase())

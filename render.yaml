@@ -43,6 +43,8 @@ services:
         sync: true
       - key: ELEVENLABS_MODEL
         value: eleven_multilingual_v2
+      - key: GLORIA_VOICE_MODE
+        value: balanced
       - key: ELEVENLABS_STABILITY
         value: 0.42
       - key: ELEVENLABS_SIMILARITY

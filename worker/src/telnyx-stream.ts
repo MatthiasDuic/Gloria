@@ -9,6 +9,7 @@ import { loadPlaybook, playbookToSystemPrompt } from "./playbook.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 import { classifyInboundSpeech } from "./call-classification.js";
+import { observeAssistantFlowState, observeUserFlowState } from "./topic-policy.js";
 
 /** Telnyx PCMU 8 kHz uses 20 ms chunks (160 bytes per frame). */
 const FRAME_BYTES = 160;
@@ -460,6 +461,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         }
       },
       ctx.voiceId,
+      ctx.voiceProfile,
     );
     currentTts = handle;
 
@@ -486,6 +488,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text, at: Date.now(), latencyMs });
+    ctx.flow = observeAssistantFlowState(ctx.flow, text);
     // Termin-Slot extrahieren – nur aus echten Bestätigungs-Sätzen
     // ("wird am … bei Ihnen sein", "bestätige ich für Sie …", "Termin … ist am …",
     // "notiere ich …" / "ich notiere …").
@@ -609,6 +612,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           }
         },
         ctx.voiceId,
+        ctx.voiceProfile,
       );
 
       currentTts = handle;
@@ -637,6 +641,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       currentTts = null;
       if (!segmentHadAudio) {
         log.warn("turn.segment_empty_audio", { callSid: ctx.callSid });
+      }
+
+      const pauseMs = Math.max(0, ctx.voiceProfile.segmentPauseMs || 0);
+      if (!stopPlayback && pauseMs > 0 && (segmentQueue.length > 0 || !llmDone)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, pauseMs));
       }
     };
 
@@ -709,6 +718,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     ctx.speaking = false;
     currentTts = null;
     ctx.transcript.push({ role: "assistant", text: spokenText, at: Date.now(), latencyMs });
+    ctx.flow = observeAssistantFlowState(ctx.flow, spokenText);
 
     if (!ctx.confirmedSlotPhrase) {
       const slot = extractConfirmedSlot(spokenText);
@@ -772,6 +782,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     try {
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
       updateConversationMemory(ctx, userText);
+      ctx.flow = observeUserFlowState(ctx.flow, userText);
       ctx.lastUserFinalAt = Date.now();
       log.info("turn.user_said", { callSid: ctx.callSid, text: userText });
 
