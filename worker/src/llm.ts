@@ -644,7 +644,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     .map((turn) => turn.text.toLowerCase())
     .join(" \n ");
 
-  if (/per\s+mail|e-?mail|schicken\s+sie\s+mir|senden\s+sie\s+mir|einfach\s+was\s+per\s+mail/i.test(text)) {
+    if (/per\s+mail|e-?mail|schicken\s+sie\s+mir|senden\s+sie\s+mir|einfach\s+was\s+per\s+mail/i.test(text)) {
     return {
       reply: "Gerne. Ich kann Ihnen eine kurze Übersicht per E-Mail senden. Welche E-Mail-Adresse darf ich dafür notieren?",
       hangup: false,
@@ -665,11 +665,11 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     .filter((turn) => turn.role === "user")
     .some((turn) => hasInsuranceSignal(turn.text));
   if (!isDiscoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
-    return {
-      reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist damit Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
-      hangup: false,
-      transfer: false,
-    };
+      return {
+        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist damit Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+        hangup: false,
+        transfer: false,
+      };
   }
 
   if (!isDiscoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
@@ -1260,7 +1260,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
         `Frage nach dem aktuellen Beitrag nur permission-based und begründe den Nutzen: "Wenn Sie die Größenordnung nennen möchten, kann ich den Zehn-Jahres-Effekt grob einordnen." Ein "möchte ich nicht sagen" sofort akzeptieren.`,
         `Wenn er seinen Beitrag nennt (z.B. 900 €): mit genau dieser Zahl rechnen und danach eine Denkfrage stellen, z.B. "Hat sich das schon einmal jemand mit Ihnen bis zum Rentenalter sauber durchgerechnet?"`,
         `Wenn er sagt "hab ich mir keine Gedanken gemacht": Das ist dein Moment. Nicht weiterpitchen — kurz innehalten: "Genau das ist das Tückische daran. Das merkt man erst, wenn der nächste Bescheid kommt." Dann Pause.`,
-        `NIEMALS "laut PKV-Verband", "Studien zeigen" oder ähnliche Quellen-Claims sagen — das klingt wie eine Broschüre. Rechne mit seinen Zahlen, nicht mit Durchschnittswerten.`,
+        `Nenne in der Sensibilisierung höchstens einmal einen vorsichtig formulierten Zahlenanker: "Nach Angaben des PKV-Verbands liegen Beitragsanpassungen im langjährigen Durchschnitt häufig bei etwa drei bis fünf Prozent jährlich." Keine Zahlenkette und keine Garantie. Danach mit den persönlichen Zahlen des Kunden arbeiten.`,
         `Erst wenn er selbst sagt "das ist viel" oder ähnliches — dann die Brücke: "Genau dafür ist das Gespräch mit Herrn Duic da."`,
         `GKV-Versicherte: Beitragsentwicklung ist genauso ihr Thema. Nie nach Mitarbeitern oder Unternehmenskosten fragen.`,
         `WICHTIG: Frag pro Turn GENAU EINE Frage. Kein Doppeln.`,
@@ -1392,7 +1392,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- DATUM-FORMAT (KRITISCH): Schreibe Datum immer ausgeschrieben — "Dienstag, den elften Mai" — NIEMALS "11. Mai" oder "11.05.".`,
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
-    `- VERBOTEN: Formulierungen wie "laut PKV-Verband" oder pauschale Quellen-Claims.`,
+    `- QUELLEN: Keine pauschalen oder erfundenen Quellen-Claims. Im PKV-Kontext darf genau ein vorsichtig formulierter Zahlenanker nach Angaben des PKV-Verbands genannt werden; danach zurück zu den persönlichen Zahlen des Kunden.`,
     `- THEMENTRENNUNG: Begriffe wie "Rente" oder "Ruhestand" nur im PKV-/Krankenversicherungs-Kontext verwenden. Bei gewerblichen Versicherungen NIEMALS erwähnen.`,
     `- Bei Skepsis zuerst transparent beantworten, nicht kontern. Bei "kein Interesse" höchstens eine kurze Relevanzfrage ohne Druck; jedes weitere Nein beendet das Gespräch würdevoll.`,
     `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
