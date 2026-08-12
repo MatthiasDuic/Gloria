@@ -25,7 +25,7 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
 
   const system = [
     "Du bist Trainer fuer B2B-Telefonvertrieb im Versicherungsumfeld (Deutschland).",
-    "Du optimierst das Playbook von Gloria, einer digitalen Vertriebsassistentin.",
+    "Du optimierst die Topic Policy von Gloria, einer digitalen Vertriebsassistentin.",
     "Antworten immer in deutscher Sprache, hoeflich, DSGVO-konform.",
     "Keine erfundenen Fakten, keine Preise, keine Tarifempfehlungen.",
     "Du gibst ausschliesslich JSON zurueck nach dem vorgegebenen Schema.",
@@ -35,7 +35,7 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
     `Thema: ${topic}`,
     `Statistik: ${JSON.stringify(stats)}`,
     "",
-    "Aktuelles Playbook:",
+    "Aktuelle Topic Policy:",
     `Opener: ${current.opener}`,
     `Discovery: ${current.discovery}`,
     `Objection Handling: ${current.objectionHandling}`,
@@ -46,7 +46,7 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
     "",
     "Aufgabe: Optimiere opener, discovery, objectionHandling, close so,",
     "dass mehr Termine vereinbart und weniger Absagen produziert werden.",
-    "Bleibe nah am Stil des aktuellen Playbooks, aendere nur was konkrete",
+    "Bleibe nah am Stil der aktuellen Topic Policy, aendere nur was konkrete",
     "Schwaechen in den Berichten zeigen. Begruende knapp in rationale[]",
     "(max. 4 Stichpunkte).",
     "",
@@ -90,7 +90,7 @@ function heuristicOptimize(current: ScriptConfig, reports: CallReport[]): Optimi
   };
 }
 
-export async function optimizePlaybook(
+export async function optimizeTopicPolicy(
   topic: Topic,
   reports: CallReport[],
   current: ScriptConfig,

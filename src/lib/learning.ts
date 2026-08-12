@@ -128,7 +128,7 @@ export async function getLearningResponse(options?: {
   });
 
   const insights: LearningInsight[] = TOPICS.map((topic) => {
-    const script = data.playbooks.find((entry) => entry.topic === topic);
+    const script = data.topicPolicies.find((entry) => entry.topic === topic);
     const reports = data.reports.filter((report) => report.topic === topic);
     const appointments = reports.filter((report) => report.outcome === "Termin").length;
     const rejections = reports.filter((report) => report.outcome === "Absage").length;
@@ -137,7 +137,7 @@ export async function getLearningResponse(options?: {
     const appointmentRate = percentage(appointments, totalConversations);
 
     const fallbackScript: ScriptConfig =
-      script || data.playbooks[0] || {
+      script || data.topicPolicies[0] || {
         id: `fallback-${topic}`,
         topic,
         opener: "",
@@ -171,7 +171,7 @@ export async function getLearningResponse(options?: {
       callbackTopic && callbackTopic.callbacks > 0
         ? `Die meisten Wiedervorlagen liegen bei ${callbackTopic.topic}; dort hilft ein noch kürzerer und direkterer Abschluss.`
         : "Der aktuelle Fokus liegt darauf, erfolgreiche Gesprächsmuster weiter auszubauen.",
-      "Gloria kann die empfohlenen Verbesserungen pro Thema direkt ins Skript übernehmen.",
+      "Gloria kann die empfohlenen Verbesserungen pro Thema direkt in die Topic Policy übernehmen.",
     ],
   };
 }

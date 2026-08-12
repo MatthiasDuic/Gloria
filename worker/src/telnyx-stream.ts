@@ -5,7 +5,7 @@ import { newContext, type CallContext } from "./state.js";
 import { openAsr, type AsrSession } from "./asr.js";
 import { streamReply, prewarmOpenAi } from "./llm.js";
 import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
-import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./playbook.js";
+import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
 import { postReport } from "./finalize.js";
 import { classifyInboundSpeech } from "./call-classification.js";
@@ -320,7 +320,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let asr: AsrSession | null = null;
   let pendingTurn = false;
   let currentTts: TtsStreamHandle | null = null;
-  let playbookReady: Promise<void> | null = null;
+  let topicPolicyReady: Promise<void> | null = null;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
@@ -792,9 +792,9 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       // Gloria die Topic Policy noch nicht – wir warten dort nicht und sparen
       // dadurch eine spürbare Anfangs-Latenz nach dem "Hallo Müller".
       const isFirstTurn = ctx.transcript.length <= 1;
-      if (!isFirstTurn && playbookReady && !ctx.playbookPrompt) {
+      if (!isFirstTurn && topicPolicyReady && !ctx.topicPolicyPrompt) {
         await Promise.race([
-          playbookReady,
+          topicPolicyReady,
           new Promise<void>((resolve) => setTimeout(resolve, 2000)),
         ]);
       }
@@ -914,11 +914,11 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         prewarmElevenLabs();
 
         // Lade Topic Policy (Fachlichkeit & Gesprächsleitfaden) asynchron, ohne Anruf zu blockieren.
-        playbookReady = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {
+        topicPolicyReady = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((pb) => {
           if (!ctx || !pb) return;
           const promptBlock = topicPolicyToSystemPrompt(pb);
           if (promptBlock) {
-            ctx.playbookPrompt = promptBlock;
+            ctx.topicPolicyPrompt = promptBlock;
             log.info("topic_policy.applied", { topic: pb.topic });
           }
         });

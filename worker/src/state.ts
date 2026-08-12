@@ -24,8 +24,8 @@ export type CallContext = {
   topicKind: TopicKind;
   voiceProfile: VoiceProfile;
   flow: CallFlowState;
-  // Optionaler, bereits formatierter Playbook-Abschnitt (vom Vercel-Backend).
-  playbookPrompt?: string;
+  // Optionaler, bereits formatierter Topic-Policy-Abschnitt (vom Vercel-Backend).
+  topicPolicyPrompt?: string;
   // Wiedervorlage-Anruf: Zusammenfassung des vorherigen Gesprächs (vom Backend
   // beim auto-Wiederanruf mitgegeben). Wird im System-Prompt verwendet, damit
   // Gloria mit einer kurzen Recap eröffnet und direkt in Phase 7 (Termin) einsteigt.

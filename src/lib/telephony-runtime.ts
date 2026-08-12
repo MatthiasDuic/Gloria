@@ -8,7 +8,6 @@ export type RoleState = "reception" | "transfer" | "decision_maker";
 
 interface DashboardScriptsPayload {
   topicPolicies?: ScriptConfig[];
-  playbooks?: ScriptConfig[];
 }
 
 interface TelephonyRuntimeState {
@@ -187,7 +186,7 @@ async function syncScripts(baseUrl: string, userId?: string) {
   const payload = (await response.json()) as DashboardScriptsPayload;
   const byTopic: Partial<Record<Topic, ScriptConfig>> = {};
 
-  for (const script of payload.topicPolicies || payload.playbooks || []) {
+  for (const script of payload.topicPolicies || []) {
     byTopic[script.topic] = script;
   }
 

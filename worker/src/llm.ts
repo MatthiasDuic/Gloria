@@ -937,12 +937,12 @@ function buildSystemPrompt(ctx: CallContext): string {
       `STRENG: KEINE erneute Aufzeichnungs-Frage (Einwilligung gilt fort). KEINE erneute Discovery / Phase 4. KEINE erneute Vorstellung von Thema oder Konzept. KEIN erneutes "Haben Sie kurz Zeit?".`,
     );
   }
-  if (ctx.playbookPrompt) {
+  if (ctx.topicPolicyPrompt) {
     parts.push(
-      "\n\nPLAYBOOK-NUTZUNG: Verwende das Playbook als Leitplanke für Richtung, Nutzen und Compliance - NICHT als Vorlesetext. " +
+      "\n\nTOPIC-POLICY-NUTZUNG: Verwende die Topic Policy als Leitplanke für Richtung, Nutzen und Compliance - NICHT als Vorlesetext. " +
       "Formuliere jede Antwort frisch aus dem Moment, passend zum letzten Kundensatz.",
     );
-    parts.push("\n\n" + ctx.playbookPrompt);
+    parts.push("\n\n" + ctx.topicPolicyPrompt);
   }
   if (ctx.busySlotsPrompt) parts.push("\n\n" + ctx.busySlotsPrompt);
   if (ctx.freeSlotsPrompt) parts.push("\n\n" + ctx.freeSlotsPrompt);

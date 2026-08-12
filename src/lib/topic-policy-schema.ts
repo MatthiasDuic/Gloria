@@ -3,15 +3,11 @@ import { TOPICS } from "@/lib/types";
 
 const TopicSchema = z.string().trim().min(2);
 
-export const PlaybookPayloadSchema = z
+export const TopicPolicyPayloadSchema = z
   .object({
-    // id kommt aus dem UI-Draft (PlaybookConfig.id). Der Server vergibt
-    // die finale Id selbst in saveScript, akzeptiert das Feld aber, damit
-    // .strict() keinen kompletten Save blockiert.
     id: z.string().optional(),
     topic: TopicSchema.optional(),
     callObjective: z.string().optional(),
-    // Vereinfachtes Modell (3 Felder)
     behavior: z.string().optional(),
     conversationGuardrails: z.string().optional(),
     requiredData: z.string().optional(),
@@ -19,7 +15,6 @@ export const PlaybookPayloadSchema = z
     objectionResponses: z.string().optional(),
     proofPoints: z.string().optional(),
     transferHandling: z.string().optional(),
-    // Legacy-Felder (werden nicht mehr im UI editiert, aber für Rückwärtskompatibilität weiter akzeptiert)
     opener: z.string().optional(),
     discovery: z.string().optional(),
     objectionHandling: z.string().optional(),
@@ -42,16 +37,16 @@ export const PlaybookPayloadSchema = z
   })
   .strict();
 
-export const PLAYBOOK_JSON_SCHEMA_V1 = {
+export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  title: "Gloria Playbook v1",
+  title: "Gloria Topic Policy v1",
   type: "object",
   additionalProperties: false,
   required: ["topic"],
   properties: {
     topic: {
       type: "string",
-      description: "Thema, für das das Playbook gilt.",
+      description: "Thema, für das die Topic Policy gilt.",
       examples: [...TOPICS],
     },
     callObjective: {
@@ -164,6 +159,3 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
     },
   },
 } as const;
-
-export const TopicPolicyPayloadSchema = PlaybookPayloadSchema;
-export const TOPIC_POLICY_JSON_SCHEMA_V1 = PLAYBOOK_JSON_SCHEMA_V1;

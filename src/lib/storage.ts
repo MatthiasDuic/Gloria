@@ -44,7 +44,7 @@ const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const REPORTS_FILE = path.join(DATA_DIR, "reports.json");
 const REPORT_DB_FILE = path.join(DATA_DIR, "report-database.json");
 const EVENTS_FILE = path.join(DATA_DIR, "conversation-events.json");
-const SCRIPTS_FILE = path.join(DATA_DIR, "playbooks.json");
+const SCRIPTS_FILE = path.join(DATA_DIR, "topic-policies.json");
 const LEGACY_SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 const CAMPAIGN_STATE_FILE = path.join(DATA_DIR, "campaign-state.json");
 
@@ -779,11 +779,9 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
     leads,
     reports,
     topicPolicies: scriptsState.data,
-    playbooks: scriptsState.data,
     metrics: buildMetrics(leads, reports, events),
     reportStorageMode: reportState.mode,
     topicPoliciesStorageMode: scriptsState.mode,
-    playbooksStorageMode: scriptsState.mode,
   };
 }
 

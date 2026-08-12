@@ -97,9 +97,6 @@ export interface TopicPolicyConfig {
   availableAppointmentSlots?: string;
 }
 
-/** @deprecated Internal compatibility alias while Topic Policy replaces Playbook terminology. */
-export type PlaybookConfig = TopicPolicyConfig;
-
 /** @deprecated Use TopicPolicyConfig. Retained as alias during the Skript → Playbook migration. */
 export type ScriptConfig = TopicPolicyConfig;
 
@@ -168,9 +165,7 @@ export interface DashboardData {
   leads: Lead[];
   reports: CallReport[];
   topicPolicies: TopicPolicyConfig[];
-  playbooks: PlaybookConfig[];
   metrics: MetricSummary;
   reportStorageMode: "postgres" | "file";
   topicPoliciesStorageMode: "postgres" | "file";
-  playbooksStorageMode: "postgres" | "file";
 }

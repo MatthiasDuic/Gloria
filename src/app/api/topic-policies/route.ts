@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDashboardData, saveScript } from "@/lib/storage";
 import type { TopicPolicyConfig } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { TopicPolicyPayloadSchema } from "@/lib/playbook-schema";
+import { TopicPolicyPayloadSchema } from "@/lib/topic-policy-schema";
 
 export async function GET(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);
@@ -24,8 +24,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     topicPolicies: data.topicPolicies,
     topicPoliciesStorageMode: data.topicPoliciesStorageMode,
-    playbooks: data.playbooks,
-    playbooksStorageMode: data.playbooksStorageMode,
   });
 }
 
@@ -68,7 +66,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       topicPolicy: result.script,
-      playbook: result.script,
       storageMode: result.storageMode,
     });
   } catch (error) {

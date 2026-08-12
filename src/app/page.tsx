@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DashboardData, LearningResponse, PlaybookConfig, Topic } from "@/lib/types";
+import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -12,10 +12,8 @@ const EMPTY_DATA: DashboardData = {
   leads: [],
   reports: [],
   topicPolicies: [],
-  playbooks: [],
   reportStorageMode: "file",
   topicPoliciesStorageMode: "file",
-  playbooksStorageMode: "file",
   metrics: {
     dialAttempts: 0,
     conversations: 0,
@@ -347,7 +345,7 @@ function pickText(value: string | undefined, fallback?: string) {
   return fallback ?? "";
 }
 
-const PLAYBOOK_EDITABLE_FIELDS: Array<keyof PlaybookConfig> = [
+const PLAYBOOK_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
   "callObjective",
   "behavior",
   "conversationGuardrails",
@@ -358,7 +356,7 @@ const PLAYBOOK_EDITABLE_FIELDS: Array<keyof PlaybookConfig> = [
   "transferHandling",
 ];
 
-function countFilledPlaybookFields(config?: PlaybookConfig) {
+function countFilledPlaybookFields(config?: TopicPolicyConfig) {
   if (!config) {
     return 0;
   }
@@ -376,7 +374,7 @@ function normalizeLineCount(value?: string) {
     .filter(Boolean).length;
 }
 
-function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
+function getRecommendedPlaybookPreset(topic: Topic): Partial<TopicPolicyConfig> {
   const normalized = topic.trim().toLowerCase();
 
   const commonTransfer = [
@@ -411,7 +409,7 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
         "VERBOTEN:",
         "- Garantierte Einspar- oder Stabilitätsversprechen.",
         "- Medizinische, steuerliche oder rechtliche Einzelfallberatung.",
-        "- Quellen nennen, die nicht im Playbook stehen.",
+        "- Quellen nennen, die nicht in der Topic Policy freigegeben sind.",
       ].join("\n"),
       proofPoints: [
         "Wenn heute 600 Euro PKV-Beitrag laufen und der Beitrag nur mit vier Prozent pro Jahr steigt, dann liegen wir in zehn Jahren bei rund 890 Euro und in zwanzig Jahren bei rund 1.315 Euro.",
@@ -575,7 +573,7 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
       ].join("\n"),
       conversationGuardrails: [
         "Keine rechtlich verbindlichen Leistungszusagen am Telefon.",
-        "Nur Informationen verwenden, die in der Wissensbasis oder den Playbooks freigegeben sind.",
+        "Nur Informationen verwenden, die in der Wissensbasis oder den Topic Policies freigegeben sind.",
         "Bei sensiblen Faellen Rueckruf-Task mit Prioritaet setzen statt zu spekulieren.",
       ].join("\n"),
       requiredData: [
@@ -613,7 +611,7 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<PlaybookConfig> {
   };
 }
 
-function buildDraftFromPreset(topic: Topic, existing?: Partial<PlaybookConfig>): PlaybookConfig {
+function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig>): TopicPolicyConfig {
   const preset = getRecommendedPlaybookPreset(topic);
 
   return {
@@ -655,7 +653,7 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<PlaybookConfig>):
   };
 }
 
-function buildRecommendedAccountDraft(topic: Topic, existing?: PlaybookConfig): PlaybookConfig {
+function buildRecommendedAccountDraft(topic: Topic, existing?: TopicPolicyConfig): TopicPolicyConfig {
   const baseline = buildDraftFromPreset(topic, existing);
   const preset = getRecommendedPlaybookPreset(topic);
 
@@ -930,7 +928,7 @@ export default function HomePage() {
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [draftScripts, setDraftScripts] = useState<Record<string, PlaybookConfig>>({});
+  const [draftScripts, setDraftScripts] = useState<Record<string, TopicPolicyConfig>>({});
   const [newTopicInput, setNewTopicInput] = useState("");
   const [showNewTopicForm, setShowNewTopicForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
@@ -1286,7 +1284,7 @@ export default function HomePage() {
 
     setData(payload);
     setLearning(learningPayload);
-    const nextDrafts = payload.playbooks.reduce<Record<string, PlaybookConfig>>((acc, script) => {
+    const nextDrafts = payload.topicPolicies.reduce<Record<string, TopicPolicyConfig>>((acc, script) => {
       acc[script.topic] = buildDraftFromPreset(script.topic, script);
       return acc;
     }, {});
@@ -1713,7 +1711,7 @@ export default function HomePage() {
     }
   }
 
-  async function persistPlaybookDraft(draft: PlaybookConfig) {
+  async function persistPlaybookDraft(draft: TopicPolicyConfig) {
     const response = await fetch("/api/topic-policies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2377,8 +2375,8 @@ export default function HomePage() {
               Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
             </span>
             <span className="status-pill">
-              <span className={`status-dot ${(data.topicPoliciesStorageMode || data.playbooksStorageMode) === "postgres" ? "ok" : "warn"}`} />
-              Topic Policies: {(data.topicPoliciesStorageMode || data.playbooksStorageMode) === "postgres" ? "PostgreSQL" : "Datei"}
+              <span className={`status-dot ${data.topicPoliciesStorageMode === "postgres" ? "ok" : "warn"}`} />
+              Topic Policies: {data.topicPoliciesStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
             </span>
             {currentUser ? (
               <span className="user-chip">
@@ -2956,7 +2954,7 @@ export default function HomePage() {
                 <p className="subtle top-gap"><strong>5.1 Speicherort</strong></p>
                 <ul>
                   <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
-                  <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, playbooks.json, report-database.json, conversation-events.json).</li>
+                  <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, topic-policies.json, report-database.json, conversation-events.json).</li>
                   <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
                 </ul>
 
@@ -3508,7 +3506,7 @@ export default function HomePage() {
                                           </select>
                                         </div>
                                         <div className="full-row">
-                                          <label>Erlaubte Playbook-Themen (Checkbox-Auswahl; keine Auswahl = alle)</label>
+                                          <label>Erlaubte Topic-Policy-Themen (Checkbox-Auswahl; keine Auswahl = alle)</label>
                                           <div
                                             className="top-gap"
                                             style={{

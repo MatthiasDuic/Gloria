@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { getDashboardData } from "@/lib/storage";
 import { listUsers } from "@/lib/report-db";
-import { optimizePlaybook } from "@/lib/playbook-optimizer";
+import { optimizeTopicPolicy } from "@/lib/topic-policy-optimizer";
 import { sendOperationalEmail } from "@/lib/mailer";
 import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
-import type { OptimizerResult } from "@/lib/playbook-optimizer";
+import type { OptimizerResult } from "@/lib/topic-policy-optimizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +16,8 @@ export const dynamic = "force-dynamic";
  * Strategie BEWUSST nicht "auto-apply": Wir generieren pro (User × Topic)
  * einen Optimizer-Vorschlag aus den letzten Reports und sammeln daraus
  * einen MASTER-DIGEST per E-Mail. Geschrieben wird NICHTS – die Master-Admin
- * entscheidet, ob ein Vorschlag in das Playbook übernommen wird (UI:
- * Playbook-Optimierung manuell ausführen mit `apply=1`).
+ * entscheidet, ob ein Vorschlag in die Topic Policy übernommen wird (UI:
+ * Topic-Policy-Optimierung manuell ausführen mit `apply=1`).
  *
  * Auth: Bearer ${CRON_SECRET}. Vercel Cron sendet diesen Header automatisch,
  * wenn der Secret in den Environment Variables hinterlegt ist.
@@ -85,7 +85,7 @@ async function handle(request: Request) {
     }
 
     for (const topic of TOPICS as readonly Topic[]) {
-      const current = data.playbooks.find((p) => p.topic === topic);
+      const current = data.topicPolicies.find((p) => p.topic === topic);
       if (!current) continue;
 
       const reports = data.reports.filter((r) => r.topic === topic);
@@ -94,7 +94,7 @@ async function handle(request: Request) {
 
       analysed += 1;
       try {
-        const optimized = await optimizePlaybook(topic, reports, current);
+        const optimized = await optimizeTopicPolicy(topic, reports, current);
         const changed =
           optimized.opener.trim() !== (current.opener || "").trim() ||
           optimized.discovery.trim() !== (current.discovery || "").trim() ||
@@ -144,13 +144,13 @@ async function handle(request: Request) {
   }
 
   const lines: string[] = [];
-  lines.push(`Wöchentlicher Lernzyklus – Vorschläge zur Playbook-Optimierung`);
+  lines.push(`Wöchentlicher Lernzyklus – Vorschläge zur Topic-Policy-Optimierung`);
   lines.push("");
-  lines.push(`Analysierte Playbooks: ${analysed}`);
+  lines.push(`Analysierte Topic Policies: ${analysed}`);
   lines.push(`Vorschläge mit echten Änderungen: ${suggestions.length}`);
   lines.push("");
   lines.push(
-    `WICHTIG: Es wurde NICHTS automatisch in die Playbooks geschrieben. Bewerte die Vorschläge und übernimm sie ggf. im Dashboard (Playbook-Optimierung > Anwenden).`,
+    `WICHTIG: Es wurde NICHTS automatisch in die Topic Policies geschrieben. Bewerte die Vorschläge und übernimm sie ggf. im Dashboard (Topic-Policy-Optimierung > Anwenden).`,
   );
   lines.push("");
   for (const s of suggestions) {
@@ -174,7 +174,7 @@ async function handle(request: Request) {
   if (masterEmail) {
     try {
       mailResult = await sendOperationalEmail({
-        subject: `Gloria Lernzyklus: ${suggestions.length} Playbook-Vorschläge`,
+        subject: `Gloria Lernzyklus: ${suggestions.length} Topic-Policy-Vorschläge`,
         body: lines.join("\n"),
         to: masterEmail,
       });

@@ -51,8 +51,6 @@ export async function GET(request: Request) {
       {
         topicPolicies: data.topicPolicies,
         topicPoliciesStorageMode: data.topicPoliciesStorageMode,
-        playbooks: data.playbooks,
-        playbooksStorageMode: data.playbooksStorageMode,
       },
       {
         headers: {

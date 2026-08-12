@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { TOPIC_POLICY_JSON_SCHEMA_V1 } from "@/lib/playbook-schema";
+import { TOPIC_POLICY_JSON_SCHEMA_V1 } from "@/lib/topic-policy-schema";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 export async function GET(request: Request) {
