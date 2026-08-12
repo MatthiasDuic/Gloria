@@ -11,8 +11,10 @@ Sprockhoevel Energieberatung,Frau Peters,+49 2324 555200,peters@se-beratung.de,E
 const EMPTY_DATA: DashboardData = {
   leads: [],
   reports: [],
+  topicPolicies: [],
   playbooks: [],
   reportStorageMode: "file",
+  topicPoliciesStorageMode: "file",
   playbooksStorageMode: "file",
   metrics: {
     dialAttempts: 0,
@@ -1658,7 +1660,7 @@ export default function HomePage() {
         throw new Error(payload.error || "Optimierung konnte nicht angewendet werden.");
       }
 
-      setNotice(`Gloria hat das Playbook für ${topic} anhand der Gesprächsreports optimiert.`);
+      setNotice(`Gloria hat die Topic Policy für ${topic} anhand der Gesprächsreports optimiert.`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
@@ -1689,7 +1691,7 @@ export default function HomePage() {
           `Opener: ${opt.opener.slice(0, 180)}${opt.opener.length > 180 ? "..." : ""}\n\n` +
           `Close: ${opt.close.slice(0, 180)}${opt.close.length > 180 ? "..." : ""}` +
           rationale +
-          "\n\nIns Playbook uebernehmen?",
+          "\n\nIn die Topic Policy uebernehmen?",
       );
       if (!confirmed) {
         setNotice("Optimierung verworfen.");
@@ -1702,7 +1704,7 @@ export default function HomePage() {
       });
       const applied = (await applyRes.json()) as { error?: string };
       if (!applyRes.ok) throw new Error(applied.error || "Uebernahme fehlgeschlagen.");
-      setNotice(`KI-optimiertes Playbook fuer ${topic} gespeichert (${opt.source}).`);
+      setNotice(`KI-optimierte Topic Policy fuer ${topic} gespeichert (${opt.source}).`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "KI-Optimierung fehlgeschlagen.");
@@ -1712,7 +1714,7 @@ export default function HomePage() {
   }
 
   async function persistPlaybookDraft(draft: PlaybookConfig) {
-    const response = await fetch("/api/playbooks", {
+    const response = await fetch("/api/topic-policies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(draft),
@@ -1723,7 +1725,7 @@ export default function HomePage() {
     };
 
     if (!response.ok) {
-      throw new Error(payload.error || "Playbook konnte nicht gespeichert werden.");
+      throw new Error(payload.error || "Topic Policy konnte nicht gespeichert werden.");
     }
 
     return payload;
@@ -1742,7 +1744,7 @@ export default function HomePage() {
     try {
       const payload = await persistPlaybookDraft(draft);
       setNotice(
-        `Playbook für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
+        `Topic Policy für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
       );
       setSaveStatus({
         type: "success",
@@ -1750,7 +1752,7 @@ export default function HomePage() {
       });
       await loadDashboard();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Playbook speichern fehlgeschlagen.";
+      const errorMessage = error instanceof Error ? error.message : "Topic Policy speichern fehlgeschlagen.";
       setNotice(errorMessage);
       setSaveStatus({ type: "error", message: errorMessage });
     } finally {
@@ -1770,7 +1772,7 @@ export default function HomePage() {
     );
 
     if (availableTopics.length === 0) {
-      setNotice("Es wurden keine Playbook-Themen für dieses Konto gefunden.");
+      setNotice("Es wurden keine Topic-Policy-Themen für dieses Konto gefunden.");
       return;
     }
 
@@ -2375,8 +2377,8 @@ export default function HomePage() {
               Reports: {data.reportStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
             </span>
             <span className="status-pill">
-              <span className={`status-dot ${data.playbooksStorageMode === "postgres" ? "ok" : "warn"}`} />
-              Playbooks: {data.playbooksStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
+              <span className={`status-dot ${(data.topicPoliciesStorageMode || data.playbooksStorageMode) === "postgres" ? "ok" : "warn"}`} />
+              Topic Policies: {(data.topicPoliciesStorageMode || data.playbooksStorageMode) === "postgres" ? "PostgreSQL" : "Datei"}
             </span>
             {currentUser ? (
               <span className="user-chip">
@@ -2915,7 +2917,7 @@ export default function HomePage() {
                 <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
                 <ul>
                   <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
-                  <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Playbooks für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+                  <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Topic Policies für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
                   <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
                   <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
                   <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
@@ -2945,7 +2947,7 @@ export default function HomePage() {
                   <li>Start des Gesprächs über die Telnyx-Call-APIs.</li>
                   <li>Telnyx media streaming: inbound + outbound audio über WebSocket nach /telnyx-stream auf Worker.</li>
                   <li>Die Rollenlogik (Empfang vs. Entscheider) wird kontinuierlich bewertet.</li>
-                  <li>Playbook-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
+                  <li>Topic-Policy-Fortschritt und Zustände werden signiert im Call-State geführt.</li>
                   <li>Nach Gesprächsende schreibt Gloria den vollständigen Report über /api/calls/webhook zurück ins System.</li>
                   <li>Kalender- und Report-Ansichten beziehen Termine direkt aus den gespeicherten Gesprächsreports.</li>
                 </ul>
@@ -3014,7 +3016,7 @@ export default function HomePage() {
                       <li>Gloria soll führen wie eine starke Vertriebsassistentin: warm, präzise, reaktiv und ohne Callcenter-Ton.</li>
                       <li>Keine erfundenen Zahlen, keine leeren Metaphern, keine unklaren Versprechen. Relevanz zuerst, danach der nächste Schritt.</li>
                       <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung, dann mit sauberer Rückfallzusage zu Jutta Brost.</li>
-                      <li>Die Batch-Übernahme schreibt diese Standards direkt in die persistenten Playbooks Ihres Kontos.</li>
+                      <li>Die Batch-Übernahme schreibt diese Standards direkt in die persistenten Topic Policies Ihres Kontos.</li>
                     </ul>
                     <p className="subtle top-gap">
                       Diese Ebene ist bewusst härter formuliert als einzelne Themen-Prompts: Sie setzt die Grundhaltung,
@@ -3072,9 +3074,9 @@ export default function HomePage() {
                 </div>
               </CollapsiblePanel>
 
-              <CollapsiblePanel title="Themen-Playbook" defaultOpen>
+              <CollapsiblePanel title="Themen-Topic-Policy" defaultOpen>
                 <div className="row spread">
-                  <h2>Themen-Playbook</h2>
+                  <h2>Themen-Topic-Policy</h2>
                   <div className="row">
                     <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
                       {visiblePlaybookTopicGroups.map((group) => (
@@ -3145,7 +3147,7 @@ export default function HomePage() {
                   <>
                     <div className="playbook-overview top-gap">
                       <div className="playbook-overview-card primary">
-                        <span className="playbook-kicker">Playbook-Cockpit</span>
+                        <span className="playbook-kicker">Topic-Policy-Cockpit</span>
                         <h3>{detailTopic}</h3>
                         <div className="playbook-topic-meta">
                           <span className="playbook-topic-chip">{detailTopicCategory}</span>
@@ -3280,8 +3282,8 @@ export default function HomePage() {
                     </div>
 
                     <div className="row top-gap">
-                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Playbook speichern</button>
-                      <span className="subtle">Das Playbook wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
+                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Topic Policy speichern</button>
+                      <span className="subtle">Die Topic Policy wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
                     </div>
                     {saveStatus ? (
                       <p
@@ -3298,7 +3300,7 @@ export default function HomePage() {
                     ) : null}
                   </>
                 ) : (
-                  <p className="subtle">Für dieses Thema ist noch kein Playbook geladen.</p>
+                  <p className="subtle">Für dieses Thema ist noch keine Topic Policy geladen.</p>
                 )}
               </CollapsiblePanel>
 
@@ -3316,8 +3318,8 @@ export default function HomePage() {
                   <div className="mini-panel settings-callout">
                     <h3>Technische Hinweise</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
-                      <li>Playbooks steuern den Gespraechsinhalt, nicht aber Telnyx-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
-                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Telnyx umgesetzt; das Playbook steuert nur das Wann und Wie der Ansage.</li>
+                      <li>Topic Policies steuern den Gespraechsinhalt, nicht aber Telnyx-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
+                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Telnyx umgesetzt; die Topic Policy steuert nur das Wann und Wie der Ansage.</li>
                       <li>Globale Compliance- und Ablaufregeln bleiben separat dokumentiert und sollten nicht in Themenfelder kopiert werden.</li>
                     </ul>
                     <p className="subtle top-gap">Fuer die vollstaendige Dokumentation siehe den Bereich „Compliance & Ablauf“ in der linken Navigation.</p>

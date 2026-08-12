@@ -1,7 +1,7 @@
 import { fetch } from "undici";
 import { log } from "./log.js";
 
-export type PlaybookFields = {
+export type TopicPolicyFields = {
   topic?: string;
   callObjective?: string;
   behavior?: string;
@@ -37,10 +37,10 @@ export type PlaybookFields = {
  * Lädt das Playbook für (userId, topic) vom Vercel-Backend über den
  * internen Token-Endpoint /api/telnyx/playbooks.
  */
-export async function loadPlaybook(opts: {
+export async function loadTopicPolicy(opts: {
   userId?: string;
   topic?: string;
-}): Promise<PlaybookFields | null> {
+}): Promise<TopicPolicyFields | null> {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN?.trim();
   if (!baseUrl || !token) {
@@ -55,7 +55,7 @@ export async function loadPlaybook(opts: {
   const params = new URLSearchParams();
   if (opts.userId) params.set("userId", opts.userId);
 
-  const url = `${baseUrl}/api/telnyx/playbooks${params.toString() ? `?${params.toString()}` : ""}`;
+  const url = `${baseUrl}/api/telnyx/topic-policies${params.toString() ? `?${params.toString()}` : ""}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -69,8 +69,12 @@ export async function loadPlaybook(opts: {
       log.warn("playbook.http_error", { status: res.status });
       return null;
     }
-    const json = (await res.json()) as { playbooks?: PlaybookFields[] };
-    const list = Array.isArray(json.playbooks) ? json.playbooks : [];
+    const json = (await res.json()) as { topicPolicies?: TopicPolicyFields[]; playbooks?: TopicPolicyFields[] };
+    const list = Array.isArray(json.topicPolicies)
+      ? json.topicPolicies
+      : Array.isArray(json.playbooks)
+        ? json.playbooks
+        : [];
     const match =
       list.find((p) => (p.topic || "").toLowerCase() === opts.topic!.toLowerCase()) ||
       list[0] ||
@@ -92,7 +96,7 @@ export async function loadPlaybook(opts: {
 }
 
 /** Rendert das vereinfachte 3-Felder-Playbook in einen Systemprompt-Block. */
-export function playbookToSystemPrompt(pb: PlaybookFields): string {
+export function topicPolicyToSystemPrompt(pb: TopicPolicyFields): string {
   const topic = (pb.topic || "").trim();
   const callObjective = (pb.callObjective || "").trim();
   const behavior = (pb.behavior || "").trim();
@@ -183,3 +187,7 @@ export function playbookToSystemPrompt(pb: PlaybookFields): string {
 
   return parts.join("\n");
 }
+
+export type PlaybookFields = TopicPolicyFields;
+export const loadPlaybook = loadTopicPolicy;
+export const playbookToSystemPrompt = topicPolicyToSystemPrompt;

@@ -778,9 +778,11 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
   return {
     leads,
     reports,
+    topicPolicies: scriptsState.data,
     playbooks: scriptsState.data,
     metrics: buildMetrics(leads, reports, events),
     reportStorageMode: reportState.mode,
+    topicPoliciesStorageMode: scriptsState.mode,
     playbooksStorageMode: scriptsState.mode,
   };
 }

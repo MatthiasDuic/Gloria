@@ -164,3 +164,6 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
     },
   },
 } as const;
+
+export const TopicPolicyPayloadSchema = PlaybookPayloadSchema;
+export const TOPIC_POLICY_JSON_SCHEMA_V1 = PLAYBOOK_JSON_SCHEMA_V1;

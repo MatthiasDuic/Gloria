@@ -7,6 +7,7 @@ import { buildInternalHeaders } from "@/lib/internal-auth";
 export type RoleState = "reception" | "transfer" | "decision_maker";
 
 interface DashboardScriptsPayload {
+  topicPolicies?: ScriptConfig[];
   playbooks?: ScriptConfig[];
 }
 
@@ -158,7 +159,7 @@ async function syncScripts(baseUrl: string, userId?: string) {
   const cacheKey = getRuntimeCacheKey(userId);
   const internalHeaders = buildInternalHeaders();
 
-  const scriptsUrl = new URL(`${baseUrl}/api/telnyx/playbooks`);
+  const scriptsUrl = new URL(`${baseUrl}/api/telnyx/topic-policies`);
   if (userId) {
     scriptsUrl.searchParams.set("userId", userId);
   }
@@ -186,7 +187,7 @@ async function syncScripts(baseUrl: string, userId?: string) {
   const payload = (await response.json()) as DashboardScriptsPayload;
   const byTopic: Partial<Record<Topic, ScriptConfig>> = {};
 
-  for (const script of payload.playbooks || []) {
+  for (const script of payload.topicPolicies || payload.playbooks || []) {
     byTopic[script.topic] = script;
   }
 

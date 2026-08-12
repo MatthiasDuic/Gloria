@@ -32,7 +32,7 @@ export interface Lead {
   attempts: number;
 }
 
-export interface PlaybookConfig {
+export interface TopicPolicyConfig {
   id: string;
   topic: Topic;
   /**
@@ -97,8 +97,11 @@ export interface PlaybookConfig {
   availableAppointmentSlots?: string;
 }
 
-/** @deprecated Use PlaybookConfig. Retained as alias during the Skript → Playbook migration. */
-export type ScriptConfig = PlaybookConfig;
+/** @deprecated Internal compatibility alias while Topic Policy replaces Playbook terminology. */
+export type PlaybookConfig = TopicPolicyConfig;
+
+/** @deprecated Use TopicPolicyConfig. Retained as alias during the Skript → Playbook migration. */
+export type ScriptConfig = TopicPolicyConfig;
 
 export interface CallReport {
   id: string;
@@ -153,7 +156,7 @@ export interface LearningInsight {
   appointmentRate: number;
   signals: string[];
   recommendations: string[];
-  optimizedPlaybook: PlaybookConfig;
+  optimizedPlaybook: TopicPolicyConfig;
 }
 
 export interface LearningResponse {
@@ -164,8 +167,10 @@ export interface LearningResponse {
 export interface DashboardData {
   leads: Lead[];
   reports: CallReport[];
+  topicPolicies: TopicPolicyConfig[];
   playbooks: PlaybookConfig[];
   metrics: MetricSummary;
   reportStorageMode: "postgres" | "file";
+  topicPoliciesStorageMode: "postgres" | "file";
   playbooksStorageMode: "postgres" | "file";
 }

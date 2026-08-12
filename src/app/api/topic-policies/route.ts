@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       .slice(0, 5);
     return NextResponse.json(
       {
-        error: `Playbook-Payload ist ungültig: ${details.join("; ")}`,
+        error: `Topic-Policy-Payload ist ungültig: ${details.join("; ")}`,
         details,
       },
       { status: 400 },

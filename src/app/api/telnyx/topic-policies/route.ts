@@ -66,7 +66,7 @@ export async function GET(request: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Playbooks konnten nicht geladen werden.",
+            : "Topic Policies konnten nicht geladen werden.",
       },
       { status: 500 },
     );
