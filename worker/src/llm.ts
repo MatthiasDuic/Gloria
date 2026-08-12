@@ -662,15 +662,18 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   }
 
   const isDiscoveryObjection = /was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich|wie\s+will\s+herr|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten/.test(text);
-  if (!isDiscoveryObjection && !hasInsuranceSignal(`${assistantHistory} ${text}`) && !/wie\s+(?:sehr\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
+  const customerInsuranceStatusKnown = ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .some((turn) => hasInsuranceSignal(turn.text));
+  if (!isDiscoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
     return {
-      reply: "Danke. Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr, und gerade für Unternehmer und Selbstständige wird damit Planbarkeit immer wichtiger. Wie sehr spüren Sie diese Entwicklung bei sich?",
+      reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist damit Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
       hangup: false,
       transfer: false,
     };
   }
 
-  if (!isDiscoveryObjection && /wie\s+(?:sehr\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
+  if (!isDiscoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
       reply: "Das ist nachvollziehbar. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?",
       hangup: false,
@@ -1572,7 +1575,7 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
   if (askedBriefPermission && shortAssent && phase <= 4) {
     return {
       reply: isPkv
-        ? "Danke. Viele halten diese Steigerungen erst einmal fuer normal, bis die eigene Zahl wirklich spuerbar wird. Wie erleben Sie das bei sich - eher nebenbei oder schon laenger im Kopf?"
+        ? "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Wie stark spüren Sie diese Entwicklung bei sich?"
         : "Danke. Was ist bei diesem Thema für Sie aktuell der wichtigste Punkt?",
       hangup: false,
       transfer: false,

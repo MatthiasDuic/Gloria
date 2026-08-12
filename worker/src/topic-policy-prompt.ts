@@ -103,5 +103,14 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     );
   }
 
+  if (/private\s+krankenversicherung|pkv/i.test(topic)) {
+    parts.push(
+      "",
+      "VERBINDLICHE PKV-GESPRÄCHSSTRUKTUR:",
+      "Halte diese Reihenfolge in jedem Erstgespräch ein: (1) Anlass erklären: Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr; nach Angaben des PKV-Verbands liegen jährliche Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. (2) Unternehmer und Selbstständige auf Planbarkeit ansprechen und fragen, wie stark sie diese Entwicklung bei sich spüren. (3) Fragen, mit welchem Beitrag der Kunde ursprünglich angefangen hat. (4) Das Konzept erklären: Herr Duic zeigt anhand der eigenen Zahlen, wohin sich der Beitrag entwickeln kann und welche Handlungsmöglichkeiten bestehen. Fragen, ob der Kunde das schon einmal detailliert angeschaut hat. (5) Erst danach Versicherungsstatus und aktuellen Monatsbeitrag erfragen. (6) Nach dem genannten Monatsbeitrag unmittelbar eine konkrete Zehn-Jahres-Hochrechnung geben. Niemals direkt nach der Erlaubnisfrage mit \"privat oder gesetzlich\" beginnen.",
+      "Nutze ausschließlich die Umlaute ä, ö und ü. Schreibe niemals ae, oe oder ue.",
+    );
+  }
+
   return parts.join("\n");
 }

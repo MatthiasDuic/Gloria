@@ -243,6 +243,8 @@ test("builds PKV relevance before asking insurance questions", () => {
   let reply = buildDeterministicPkvFlowReply(ctx, "Ja, das dürfen Sie.");
   assert.ok(reply);
   assert.match(reply.reply, /Beiträge in der Gesundheitsversorgung/);
+  assert.match(reply.reply, /PKV-Verbands/);
+  assert.match(reply.reply, /drei bis fünf Prozent/);
   assert.match(reply.reply, /Unternehmer und Selbstständige/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
   ctx.transcript.push({ role: "user", text: "Ja, das dürfen Sie.", at: 2 }, { role: "assistant", text: reply.reply, at: 3 });
