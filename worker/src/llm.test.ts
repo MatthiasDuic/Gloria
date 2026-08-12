@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDeterministicPostBookingReply, type TurnOutput } from "./llm.js";
+import {
+  buildDeterministicPkvFlowReply,
+  buildDeterministicPostBookingReply,
+  buildTenYearProjectionLine,
+  parseGermanEuroAmount,
+  type TurnOutput,
+} from "./llm.js";
 import { newContext, type CallContext } from "./state.js";
 import { extractConfirmedSlot } from "./telnyx-stream.js";
 
@@ -206,4 +212,42 @@ test("skips the PKV catalog for other campaign topics", () => {
   const reply = nextReply(ctx);
   assert.match(reply.reply, /E-Mail-Adresse/);
   assert.doesNotMatch(reply.reply, /einige kurze Fragen|Geburtsdatum|Medikamente/);
+});
+
+test("parses spoken euro amounts deterministically", () => {
+  assert.equal(parseGermanEuroAmount("Tausendzweihundertachtzig Euro."), 1280);
+  assert.equal(parseGermanEuroAmount("980 Euro"), 980);
+  assert.equal(parseGermanEuroAmount("zweitausendeinhundert euro"), 2100);
+});
+
+test("builds a concrete ten year projection line", () => {
+  const line = buildTenYearProjectionLine(1280);
+  assert.match(line, /1280 Euro/);
+  assert.match(line, /zehn Jahren/);
+  assert.match(line, /rund 1900 Euro/);
+  assert.match(line, /etwa 620 Euro mehr/);
+});
+
+test("uses concrete projection after captured PKV contribution", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-projection",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.stage = "need_projection";
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell eher privat oder gesetzlich versichert?", at: 1 },
+    { role: "user", text: "Ich bin gesetzlich versichert.", at: 2 },
+    { role: "assistant", text: "In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?", at: 3 },
+    { role: "user", text: "Tausendzweihundertachtzig Euro.", at: 4 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Tausendzweihundertachtzig Euro.");
+  assert.ok(reply);
+  assert.match(reply.reply, /1280 Euro/);
+  assert.match(reply.reply, /rund 1900 Euro/);
+  assert.match(reply.reply, /Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich\?/);
 });

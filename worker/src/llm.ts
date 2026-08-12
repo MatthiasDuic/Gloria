@@ -427,12 +427,12 @@ function rewriteRepeatedPkvDiscoveryQuestion(ctx: CallContext, userText: string,
 
   if (/\b(privat|gesetzlich)\b[^.?!]*\bversichert\b|\bprivat\s+oder\s+gesetzlich\b/i.test(out) && insuranceKnown) {
     return contributionKnown
-      ? "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?"
+      ? buildProjectionInterestReply(ctx)
       : "Danke für die Einordnung. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?";
   }
 
   if (/monatsbeitrag|gr[öo]ßenordnung[^.?!]*beitrag|wie\s+hoch[^.?!]*beitrag/i.test(out) && contributionKnown) {
-    return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+    return buildProjectionInterestReply(ctx);
   }
 
   return out;
@@ -486,7 +486,145 @@ function extractLatestContributionPhrase(text: string): string | undefined {
   return undefined;
 }
 
-function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
+export function parseGermanEuroAmount(text: string): number | undefined {
+  const directMatch = text.match(/\b(\d{2,5})(?:[.,:]\d{1,2})?\s*(?:euro|€)\b/i);
+  if (directMatch) {
+    return Number.parseInt(directMatch[1], 10);
+  }
+
+  const spokenMatch = text.match(/\b([a-zäöüß-]+(?:\s+[a-zäöüß-]+){0,4})\s+euro\b/i);
+  if (!spokenMatch) return undefined;
+
+  return parseGermanNumberWords(spokenMatch[1]);
+}
+
+function parseGermanNumberWords(input: string): number | undefined {
+  const normalized = input
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/-/g, "")
+    .replace(/\s+/g, "");
+
+  if (!normalized) return undefined;
+
+  const units: Record<string, number> = {
+    null: 0,
+    ein: 1,
+    eins: 1,
+    eine: 1,
+    einen: 1,
+    zwei: 2,
+    drei: 3,
+    vier: 4,
+    fuenf: 5,
+    sechs: 6,
+    sieben: 7,
+    acht: 8,
+    neun: 9,
+  };
+  const teens: Record<string, number> = {
+    zehn: 10,
+    elf: 11,
+    zwoelf: 12,
+    dreizehn: 13,
+    vierzehn: 14,
+    fuenfzehn: 15,
+    sechzehn: 16,
+    siebzehn: 17,
+    achtzehn: 18,
+    neunzehn: 19,
+  };
+  const tens: Record<string, number> = {
+    zwanzig: 20,
+    dreissig: 30,
+    vierzig: 40,
+    fuenfzig: 50,
+    sechzig: 60,
+    siebzig: 70,
+    achtzig: 80,
+    neunzig: 90,
+  };
+
+  const parseUnderHundred = (value: string): number | undefined => {
+    if (value in units) return units[value];
+    if (value in teens) return teens[value];
+    if (value in tens) return tens[value];
+    const undIndex = value.indexOf("und");
+    if (undIndex > 0) {
+      const left = value.slice(0, undIndex);
+      const right = value.slice(undIndex + 3);
+      if (left in units && right in tens) {
+        return units[left] + tens[right];
+      }
+    }
+    return undefined;
+  };
+
+  const parseRecursive = (value: string): number | undefined => {
+    if (!value) return 0;
+    if (/^\d+$/.test(value)) return Number.parseInt(value, 10);
+
+    const thousandIndex = value.indexOf("tausend");
+    if (thousandIndex >= 0) {
+      const left = value.slice(0, thousandIndex) || "ein";
+      const right = value.slice(thousandIndex + "tausend".length);
+      const leftParsed = parseRecursive(left);
+      const rightParsed = parseRecursive(right);
+      if (leftParsed === undefined || rightParsed === undefined) return undefined;
+      return leftParsed * 1000 + rightParsed;
+    }
+
+    const hundredIndex = value.indexOf("hundert");
+    if (hundredIndex >= 0) {
+      const left = value.slice(0, hundredIndex) || "ein";
+      const right = value.slice(hundredIndex + "hundert".length);
+      const leftParsed = parseRecursive(left);
+      const rightParsed = parseRecursive(right);
+      if (leftParsed === undefined || rightParsed === undefined) return undefined;
+      return leftParsed * 100 + rightParsed;
+    }
+
+    return parseUnderHundred(value);
+  };
+
+  return parseRecursive(normalized);
+}
+
+export function buildTenYearProjectionLine(amount: number): string {
+  const annualGrowth = 1.04;
+  const futureMonthly = Math.round(amount * annualGrowth ** 10);
+  const monthlyIncrease = futureMonthly - amount;
+  const roundedFuture = roundToNearest(futureMonthly, 10);
+  const roundedIncrease = roundToNearest(monthlyIncrease, 10);
+  return `Wenn man von rund vier Prozent pro Jahr ausgeht, lägen ${amount} Euro in zehn Jahren bei rund ${roundedFuture} Euro im Monat - also etwa ${roundedIncrease} Euro mehr pro Monat.`;
+}
+
+function roundToNearest(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function buildProjectionInterestReply(ctx: CallContext): string {
+  const amount = extractLatestContributionAmount(ctx);
+  if (amount !== undefined) {
+    return `${buildTenYearProjectionLine(amount)} Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?`;
+  }
+  return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+}
+
+function extractLatestContributionAmount(ctx: CallContext): number | undefined {
+  const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
+  for (let index = userTurns.length - 1; index >= 0; index -= 1) {
+    const parsed = parseGermanEuroAmount(userTurns[index].text);
+    if (parsed !== undefined) return parsed;
+  }
+  const pkvAmount = ctx.topicKind === "pkv" ? parseGermanEuroAmount(collectPkvData(ctx).values.Monatsbeitrag || "") : undefined;
+  return pkvAmount;
+}
+
+export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
   const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
   if (ctx.confirmedSlotPhrase) return null;
@@ -544,13 +682,9 @@ function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): Tur
   }
 
   if (state === "need_projection") {
-    const allUserText = ctx.transcript
-      .filter((turn) => turn.role === "user")
-      .map((turn) => turn.text)
-      .join(" ");
-    const contribution = extractLatestContributionPhrase(allUserText);
-    const line = contribution
-      ? `Danke, bei rund ${contribution} kann über zehn Jahre ein spürbarer Mehrbetrag entstehen, wenn die Entwicklung so weiterläuft.`
+    const amount = extractLatestContributionAmount(ctx);
+    const line = amount !== undefined
+      ? buildTenYearProjectionLine(amount)
       : "Danke, in dieser Größenordnung entsteht über zehn Jahre oft ein spürbarer Mehrbetrag.";
     return {
       reply: `${line} Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?`,
@@ -630,7 +764,7 @@ function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {
     }
     return "Danke, das ist ein wichtiger Punkt. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?";
   }
-  return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+  return buildProjectionInterestReply(ctx);
 }
 
 function hasInsuranceSignal(text: string): boolean {
