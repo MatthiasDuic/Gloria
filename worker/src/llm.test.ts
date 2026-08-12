@@ -56,7 +56,7 @@ test("runs qualification once, requires email, and closes with the locked slot",
   const answers: Array<[RegExp, string]> = [
     [/Geburtsdatum/, "Zweiter Mai neunzehnhundertsiebenundachtzig."],
     [/Wie groß/, "Ein Meter achtundachtzig."],
-    [/Gewicht/, "Zweiundneunzig Kilogramm."],
+    [/Verraten Sie mir noch Ihr aktuelles Gewicht/, "Zweiundneunzig Kilogramm."],
     [/Krankenversicherer/, "Bei der Barmenia."],
     [/Monatsbeitrag/, "Tausenddreihundert Euro."],
     [/Diagnosen/, "Nein."],
@@ -226,6 +226,37 @@ test("builds a concrete ten year projection line", () => {
   assert.match(line, /zehn Jahren/);
   assert.match(line, /rund 1900 Euro/);
   assert.match(line, /etwa 620 Euro mehr/);
+});
+
+test("builds PKV relevance before asking insurance questions", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-discovery-order",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?",
+    at: 1,
+  });
+
+  let reply = buildDeterministicPkvFlowReply(ctx, "Ja, das dürfen Sie.");
+  assert.ok(reply);
+  assert.match(reply.reply, /Beiträge in der Gesundheitsversorgung/);
+  assert.match(reply.reply, /Unternehmer und Selbstständige/);
+  assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
+  ctx.transcript.push({ role: "user", text: "Ja, das dürfen Sie.", at: 2 }, { role: "assistant", text: reply.reply, at: 3 });
+
+  reply = buildDeterministicPkvFlowReply(ctx, "Das merkt man schon.");
+  assert.ok(reply);
+  assert.match(reply.reply, /mit welchem Beitrag Sie einmal angefangen haben/);
+  ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
+
+  reply = buildDeterministicPkvFlowReply(ctx, "Das weiß ich nicht mehr.");
+  assert.ok(reply);
+  assert.match(reply.reply, /wo die Reise hingeht/);
+  assert.match(reply.reply, /detailliert angeschaut/);
+  assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
 test("uses concrete projection after captured PKV contribution", () => {

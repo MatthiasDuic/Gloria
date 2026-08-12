@@ -640,6 +640,10 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const emailOfferOpen = /kurze\s+uebersicht\s+per\s+e-?mail|kurze\s+u[üu]bersicht\s+per\s+e-?mail|per\s+e-?mail\s+senden/.test(
     latestAssistant,
   );
+  const assistantHistory = ctx.transcript
+    .filter((turn) => turn.role === "assistant")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" \n ");
 
   if (/per\s+mail|e-?mail|schicken\s+sie\s+mir|senden\s+sie\s+mir|einfach\s+was\s+per\s+mail/i.test(text)) {
     return {
@@ -657,6 +661,31 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
+  const isDiscoveryObjection = /was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich|wie\s+will\s+herr|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten/.test(text);
+  if (!isDiscoveryObjection && !hasInsuranceSignal(`${assistantHistory} ${text}`) && !/wie\s+(?:sehr\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
+    return {
+      reply: "Danke. Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr, und gerade für Unternehmer und Selbstständige wird damit Planbarkeit immer wichtiger. Wie sehr spüren Sie diese Entwicklung bei sich?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!isDiscoveryObjection && /wie\s+(?:sehr\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
+    return {
+      reply: "Das ist nachvollziehbar. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!isDiscoveryObjection && /erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory) && !/schon einmal.*(?:detailliert|detailiert).*angeschaut|wo\s+die\s+reise\s+hingeht/.test(assistantHistory)) {
+    return {
+      reply: `${owner} schaut sich Ihre Zahlen an und zeigt Ihnen, wo die Reise hingeht, wenn sich die Entwicklung so fortsetzt wie bisher. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
   if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
     return {
       reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell eher privat oder gesetzlich versichert?",
@@ -668,13 +697,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (/was\s+soll\s+bei\s+diesem\s+termin|was\s+wird\s+gemacht|wof[üu]r\s+ist\s+der\s+termin/.test(text)) {
     if (state === "need_contribution") {
       return {
-        reply: `Gute Frage: ${owner} macht mit Ihnen eine persönliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Stellschrauben bekommen. Wenn Sie möchten: In welcher Größenordnung liegt Ihr Monatsbeitrag aktuell?`,
+        reply: `Gute Frage: ${owner} macht mit Ihnen eine persönliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Handlungsmöglichkeiten bekommen. Wenn Sie möchten: In welcher Größenordnung liegt Ihr Monatsbeitrag aktuell?`,
         hangup: false,
         transfer: false,
       };
     }
     return {
-      reply: `Gute Frage: ${owner} zeigt Ihnen im Termin die persönliche Beitragsprognose bis in zehn Jahre und konkrete Stellschrauben für mehr Planbarkeit. Wäre so eine klare Einordnung für Sie hilfreich?`,
+      reply: `Gute Frage: ${owner} zeigt Ihnen im Termin die persönliche Beitragsprognose bis in zehn Jahre und konkrete Handlungsmöglichkeiten für mehr Planbarkeit. Wäre so eine klare Einordnung für Sie hilfreich?`,
       hangup: false,
       transfer: false,
     };
@@ -682,7 +711,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir\s+(?:dieser\s+)?termin|warum\s+sollte\s+ich\s+einen\s+termin\s+machen/.test(text)) {
     return {
-      reply: `Sie bekommen vor allem drei Dinge: erstens eine konkrete Hochrechnung auf Ihre eigenen Beiträge, zweitens Klarheit, ob überhaupt Handlungsbedarf besteht, und drittens konkrete Stellschrauben statt nur allgemeiner Aussagen. Wäre so eine nüchterne Einordnung für Sie grundsätzlich hilfreich?`,
+      reply: `Sie bekommen vor allem drei Dinge: erstens eine konkrete Hochrechnung auf Ihre eigenen Beiträge, zweitens Klarheit, ob überhaupt Handlungsbedarf besteht, und drittens konkrete Handlungsmöglichkeiten statt nur allgemeiner Aussagen. Wäre so eine nüchterne Einordnung für Sie grundsätzlich hilfreich?`,
       hangup: false,
       transfer: false,
     };
@@ -690,7 +719,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (/wie\s+will\s+herr\s+dui?tsch?\s+das\s+machen|wie\s+will\s+herr\s+duic\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
     return {
-      reply: `${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Stellschrauben wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Wäre so eine klare Einordnung für Sie hilfreich?`,
+      reply: `${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Wäre so eine klare Einordnung für Sie hilfreich?`,
       hangup: false,
       transfer: false,
     };
@@ -698,7 +727,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (/normal|ist\s+ja\s+auch\s+normal/.test(text) && state === "need_interest") {
     return {
-      reply: "Genau das sagen viele. Normal klingt harmlos, aber auf die eigene Zahl gerechnet wird es oft erst richtig greifbar. Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      reply: "Genau das sagen viele. Normal klingt harmlos, aber auf die eigene Zahl gerechnet wird es oft erst richtig greifbar. Wie sehr spüren Sie diese Entwicklung bei sich?",
       hangup: false,
       transfer: false,
     };
@@ -720,7 +749,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     return {
       reply: contributionQuestionAsked
         ? "Danke. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
-        : "Danke, das ist ein wichtiger Punkt. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?",
+        : "Danke, das ist ein wichtiger Punkt. Wenn Sie die Größenordnung nennen möchten, kann ich Ihnen direkt zeigen, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Welche Größenordnung liegt bei Ihnen aktuell vor?",
       hangup: false,
       transfer: false,
     };
@@ -1034,7 +1063,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Krankenversicherungsbeiträge steigen seit Jahrzehnten — im Schnitt 3–5% jährlich. Wer heute 800 Euro zahlt, landet in zehn Jahren oft bei 1.100 oder mehr. Das ist kein Ausnahmefall, das ist der Regelfall.`,
       `Jede Gesundheitsreform kostet Geld. Dieses Geld landet am Ende fast immer beim Beitragszahler — nicht beim Staat, nicht bei der Kasse.`,
       `Die meisten Menschen ahnen das irgendwie — aber sie haben es noch nie jemand mit ihren eigenen Zahlen ehrlich vorgerechnet. Genau das ist die Lücke, in die du gehst.`,
-      `${owner} macht genau das: persönliche Vertragsanalyse, realistische Beitragsprognose bis zum Ruhestand, konkrete Stellschrauben — Altersrückstellungen, Entlastungsbausteine, Tarifoptimierung. Schwarz auf weiß, keine Schönfärberei.`,
+      `${owner} macht genau das: persönliche Vertragsanalyse, realistische Beitragsprognose bis zum Ruhestand, konkrete Handlungsmöglichkeiten — Altersrückstellungen, Entlastungsbausteine, Tarifoptimierung. Schwarz auf weiß, keine Schönfärberei.`,
       `Deine Aufgabe im Gespräch: nicht erklären, nicht pitchen. Bewusstsein wecken, echte Neugier erzeugen, Vertrauen aufbauen. Der Anrufende soll nach dem Gespräch denken: "Das hätte ich früher wissen sollen."`,
     );
   }
@@ -1148,7 +1177,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     }
   } else if (phase === 6) {
     lines.push(
-      `KONZEPT-BRIDGE: Knüpfe ausdrücklich an die letzte Aussage des Kunden an und erkläre in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Stellschrauben, kein Verkaufsdruck.`,
+      `KONZEPT-BRIDGE: Knüpfe ausdrücklich an die letzte Aussage des Kunden an und erkläre in 1-2 Sätzen, was ${ownerDative} konkret liefert: persönliche Analyse, realistische Prognose, konkrete Handlungsmöglichkeiten, kein Verkaufsdruck.`,
       isCommercialInsurance
         ? `Bei gewerblichen Versicherungen muss klar sein: Termin 1 = Datenaufnahme und Vergleichsgrundlage, Termin 2 = Ergebnisvorstellung mit konkreten Optionen und Empfehlung.`
         : ``,
@@ -1196,7 +1225,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `ABSOLUT VERBOTEN: Keine neue Sensibilisierung mehr, keine Reform- oder Kostendiskussion mehr, kein Nachschub an Argumenten.`,
       `Schreibe 3–4 Sätze:`,
       `(1) Termin: VERWENDE WORT FÜR WORT die eingefrorene Slot-Phrase aus dem System-Prompt. Kein anderes Datum, kein anderer Wochentag. Formuliere ihn als persönlichen Vor-Ort-Termin beim Interessenten mit Herrn Duic - niemals als Telefontermin.`,
-      `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Stellschrauben.`,
+      `(2) Was passiert beim Termin: kurze persönliche Vertragsanalyse, Beitragsprognose, konkrete Handlungsmöglichkeiten.`,
       `(3) Hinweis auf Terminbestätigung per E-Mail.`,
       `(4) Freundliche Vor-Verabschiedung im Namen des Owners OHNE Abschlussformel, z. B. "Herr Duic freut sich auf das Gespräch. Vielen Dank für Ihre Zeit." — NICHT "Ich freue mich".`,
       `(5) hangup=false in DIESER Antwort. Wenn der Kunde sich danach verabschiedet, antworte im nächsten Turn ausschließlich mit "Auf Wiederhören!" und setze dann hangup=true.`,
@@ -1328,7 +1357,7 @@ const PKV_FIELDS: PkvField[] = [
 const PKV_QUESTIONS: Record<PkvField, string> = {
   Geburtsdatum: "Wie lautet Ihr Geburtsdatum?",
   Körpergröße: "Wie groß sind Sie?",
-  Gewicht: "Wie hoch ist Ihr aktuelles Gewicht?",
+  Gewicht: "Verraten Sie mir noch Ihr aktuelles Gewicht?",
   Versicherer: "Bei welchem Krankenversicherer sind Sie aktuell versichert?",
   Monatsbeitrag: "Wie hoch ist Ihr aktueller Monatsbeitrag?",
   "Diagnosen/Behandlungen": "Gibt es aktuell bekannte Diagnosen oder laufende Behandlungen?",
@@ -1560,7 +1589,7 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
 
   if (isPkv && /was\s+soll\s+bei\s+diesem\s+termin|was\s+wird\s+gemacht|wof[üu]r\s+ist\s+der\s+termin/.test(text)) {
     return {
-      reply: `Gute Frage: ${owner} macht mit Ihnen eine persoenliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Stellschrauben bekommen. Wenn Sie moechten: In welcher Groessenordnung liegt Ihr Monatsbeitrag aktuell?`,
+      reply: `Gute Frage: ${owner} macht mit Ihnen eine persoenliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Handlungsmöglichkeiten bekommen. Wenn Sie moechten: In welcher Groessenordnung liegt Ihr Monatsbeitrag aktuell?`,
       hangup: false,
       transfer: false,
     };
