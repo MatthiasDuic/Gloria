@@ -636,6 +636,27 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const owner = ctx.ownerRealName?.trim() || "Herr Duic";
   const state = canScheduleFromFlow(ctx.flow) ? "ready_for_schedule" : detectPkvFlowState(ctx, userText);
 
+  const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
+  const emailOfferOpen = /kurze\s+uebersicht\s+per\s+e-?mail|kurze\s+u[üu]bersicht\s+per\s+e-?mail|per\s+e-?mail\s+senden/.test(
+    latestAssistant,
+  );
+
+  if (/per\s+mail|e-?mail|schicken\s+sie\s+mir|senden\s+sie\s+mir|einfach\s+was\s+per\s+mail/i.test(text)) {
+    return {
+      reply: "Gerne. Ich kann Ihnen eine kurze Übersicht per E-Mail senden. Welche E-Mail-Adresse darf ich dafür notieren?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (emailOfferOpen && /^(?:ja\b|ja,?\s*das\s+d[üu]rfen\s+sie|gern(?:e)?\b|okay\b|ok\b|passt\b)/i.test(text.trim())) {
+    return {
+      reply: "Gerne. Welche E-Mail-Adresse darf ich dafür notieren?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
   if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
     return {
       reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell eher privat oder gesetzlich versichert?",
@@ -654,6 +675,30 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     }
     return {
       reply: `Gute Frage: ${owner} zeigt Ihnen im Termin die persönliche Beitragsprognose bis in zehn Jahre und konkrete Stellschrauben für mehr Planbarkeit. Wäre so eine klare Einordnung für Sie hilfreich?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir\s+(?:dieser\s+)?termin|warum\s+sollte\s+ich\s+einen\s+termin\s+machen/.test(text)) {
+    return {
+      reply: `Sie bekommen vor allem drei Dinge: erstens eine konkrete Hochrechnung auf Ihre eigenen Beiträge, zweitens Klarheit, ob überhaupt Handlungsbedarf besteht, und drittens konkrete Stellschrauben statt nur allgemeiner Aussagen. Wäre so eine nüchterne Einordnung für Sie grundsätzlich hilfreich?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (/wie\s+will\s+herr\s+dui?tsch?\s+das\s+machen|wie\s+will\s+herr\s+duic\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
+    return {
+      reply: `${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Stellschrauben wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Wäre so eine klare Einordnung für Sie hilfreich?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (/normal|ist\s+ja\s+auch\s+normal/.test(text) && state === "need_relevance") {
+    return {
+      reply: "Genau das sagen viele. Normal klingt harmlos, aber auf die eigene Zahl gerechnet wird es oft erst richtig greifbar. Sind Sie aktuell eher privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };
@@ -1498,7 +1543,7 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
   if (askedBriefPermission && shortAssent && phase <= 4) {
     return {
       reply: isPkv
-        ? "Danke. Wie haben Sie die Beitragsentwicklung bisher erlebt - eher auffällig oder eher nebenbei?"
+        ? "Danke. Viele halten diese Steigerungen erst einmal fuer normal, bis die eigene Zahl wirklich spuerbar wird. Wie erleben Sie das bei sich - eher nebenbei oder schon laenger im Kopf?"
         : "Danke. Was ist bei diesem Thema für Sie aktuell der wichtigste Punkt?",
       hangup: false,
       transfer: false,
@@ -1507,7 +1552,7 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
 
   if (isPkv && /beitr[aä]g(?:e)?\s+steig|steig(?:en|t)\s+.*beitr[aä]g/.test(text) && phase <= 6) {
     return {
-      reply: "Genau das hoere ich sehr oft. Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      reply: "Genau das hoere ich sehr oft. Kritisch wird es meist erst, wenn man die Entwicklung einmal auf die eigene Zahl rechnet. Sind Sie aktuell eher privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };

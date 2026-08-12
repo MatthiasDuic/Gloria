@@ -251,3 +251,54 @@ test("uses concrete projection after captured PKV contribution", () => {
   assert.match(reply.reply, /rund 1900 Euro/);
   assert.match(reply.reply, /Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich\?/);
 });
+
+test("answers PKV value objection with concrete benefit before scheduling", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-value",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.projectionDelivered = true;
+  ctx.flow.stage = "need_interest";
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Was hab ich davon?");
+  assert.ok(reply);
+  assert.match(reply.reply, /drei Dinge/);
+  assert.match(reply.reply, /Hochrechnung/);
+  assert.doesNotMatch(reply.reply, /Vormittag|Nachmittag|Termin am/);
+});
+
+test("prefers email path when customer asks for information by mail", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-mail",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Schicken Sie mir einfach was per Mail.");
+  assert.ok(reply);
+  assert.match(reply.reply, /E-Mail/);
+  assert.doesNotMatch(reply.reply, /privat oder gesetzlich|Vormittag|Nachmittag/);
+});
+
+test("asks directly for email after user accepts email offer", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-mail-accept",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Gerne. Ich kann Ihnen eine kurze Übersicht per E-Mail senden.",
+    at: 1,
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Ja, das dürfen Sie.");
+  assert.ok(reply);
+  assert.match(reply.reply, /Welche E-Mail-Adresse/);
+  assert.doesNotMatch(reply.reply, /Vor-Ort-Termin|privat oder gesetzlich/);
+});

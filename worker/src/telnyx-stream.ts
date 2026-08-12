@@ -1079,6 +1079,12 @@ function updateConversationMemory(ctx: CallContext, userText: string): void {
   if (/beitrag|kosten|teuer|steiger|erh[öo]h/.test(lower)) {
     pushUnique(ctx.memory.concerns, "Sorge um steigende Beiträge/Kosten", 8);
   }
+  if (/ist\s+ja\s+auch\s+normal|ist\s+normal|hoechstbeitrag|höchstbeitrag/.test(lower)) {
+    pushUnique(ctx.memory.concerns, "normalisiert Beitragssteigerungen bisher als gegeben", 8);
+  }
+  if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich\s+einen\s+termin\s+machen/.test(lower)) {
+    pushUnique(ctx.memory.concerns, "fragt nach konkretem persönlichem Nutzen des Termins", 8);
+  }
   if (/keine\s+glaskugel|unsicher|unklar|weiß\s+nicht|weiss\s+nicht/.test(lower)) {
     pushUnique(ctx.memory.concerns, "Unsicherheit über die zukünftige Entwicklung", 8);
   }

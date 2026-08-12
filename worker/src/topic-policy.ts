@@ -14,6 +14,7 @@ export type CallFlowState = {
   topicKind: TopicKind;
   stage:
     | "opener"
+    | "need_relevance"
     | "need_insurance"
     | "need_contribution"
     | "need_projection"
@@ -43,7 +44,7 @@ export function createInitialFlowState(topic?: string): CallFlowState {
   if (topicKind === "pkv") {
     return {
       topicKind,
-      stage: "need_insurance",
+      stage: "need_relevance",
       insuranceKnown: false,
       contributionKnown: false,
       projectionDelivered: false,
@@ -136,9 +137,22 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
   const text = userText.toLowerCase();
   const next = { ...state };
 
+  if (/\b(normal|schon normal|ist ja auch normal|hoechstbeitrag|höchstbeitrag)\b/i.test(text)) {
+    next.lastUserSignal = "normalized_risk";
+    if (next.topicKind === "pkv" && next.stage === "need_relevance") next.stage = "need_insurance";
+  }
+
+  if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich\s+einen\s+termin\s+machen|welchen\s+vorteil/i.test(text)) {
+    next.lastUserSignal = "value_request";
+  }
+
+  if (/per\s+mail|e-?mail|schicken\s+sie\s+mir|senden\s+sie\s+mir|uebersicht\s+per\s+mail|übersicht\s+per\s+mail/i.test(text)) {
+    next.lastUserSignal = "email_request";
+  }
+
   if (/\b(privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(text)) {
     next.insuranceKnown = true;
-    if (next.topicKind === "pkv" && next.stage === "need_insurance") next.stage = "need_contribution";
+    if (next.topicKind === "pkv" && (next.stage === "need_relevance" || next.stage === "need_insurance")) next.stage = "need_contribution";
     next.lastUserSignal = "insurance";
   }
 
