@@ -461,18 +461,20 @@ function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
   const contributionKnown = hasCurrentContributionSignal(ctx, userText);
   if (!contributionKnown) return "need_contribution";
 
-  const projectionGiven =
-    /zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|vier\s+prozent\s+pro\s+jahr|4\s*%\s+pro\s+jahr/.test(
-      assistantHistory,
-    );
+  const projectionGiven = hasCurrentProjection(ctx);
   if (!projectionGiven) return "need_projection";
 
   const interestAsked = /w[äa]re\s+.*(?:hilfreich|hilfreich)|sinnvoll\s+f[üu]r\s+sie|sollen\s+wir\s+uns\s+das\s+anschauen/.test(
     assistantHistory,
   );
-  const interestConfirmed = ctx.transcript
-    .filter((turn) => turn.role === "user")
-    .some((turn) => /\b(ja|gern|gerne|macht\s+sinn|hilfreich|interessant|klingt\s+gut|okay|ok)\b/i.test(turn.text));
+  const interestQuestionIndex = [...ctx.transcript]
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "assistant" && /w[äa]re\s+.*(?:hilfreich|interessant)|sinnvoll\s+f[üu]r\s+sie/.test(turn.text.toLowerCase()))
+    .at(-1)?.index;
+  const interestAnswer = interestQuestionIndex === undefined
+    ? ""
+    : ctx.transcript.slice(interestQuestionIndex + 1).find((turn) => turn.role === "user")?.text || "";
+  const interestConfirmed = /\b(ja|gern|gerne|macht\s+sinn|hilfreich|interessant|klingt\s+gut|okay|ok|passt)\b/i.test(interestAnswer);
 
   if (interestAsked && !interestConfirmed) return "need_interest";
   return "ready_for_schedule";
@@ -629,12 +631,9 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (!isPkv) return null;
   if (ctx.confirmedSlotPhrase) return null;
 
-  const phase = inferConversationPhase(ctx);
-  if (phase >= 7) return null;
-
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herr Duic";
-  const state = canScheduleFromFlow(ctx.flow) ? "ready_for_schedule" : detectPkvFlowState(ctx, userText);
+  const state = detectPkvFlowState(ctx, userText);
 
   const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
   const emailOfferOpen = /kurze\s+uebersicht\s+per\s+e-?mail|kurze\s+u[üu]bersicht\s+per\s+e-?mail|per\s+e-?mail\s+senden/.test(
@@ -771,6 +770,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   }
 
   if (state === "need_interest") {
+    if (/^(?:nein|ne|nö|nö\?|nein\?|kein\s+interesse|eher\s+nicht)\b/i.test(text.trim())) {
+      return {
+        reply: "Verstanden, dann möchte ich Sie nicht weiter aufhalten. Vielen Dank für Ihre Zeit und einen angenehmen Tag.",
+        hangup: true,
+        transfer: false,
+      };
+    }
     return {
       reply: `Mir geht es um Klarheit statt Verkauf: Wäre so eine persönliche Einordnung mit ${owner} grundsätzlich hilfreich für Sie?`,
       hangup: false,
@@ -778,7 +784,85 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
+  if (state === "ready_for_schedule") {
+    const offeredSlots = extractFreeSlotPhrases(ctx.freeSlotsPrompt);
+    const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
+    if (offeredSlots.length >= 2 && /oder/.test(latestAssistant.toLowerCase())) {
+      const selected = selectOfferedSlot(latestAssistant, userText, offeredSlots);
+      if (selected) {
+        return {
+          reply: `Perfekt, ich notiere ${selected} für Sie.`,
+          hangup: false,
+          transfer: false,
+        };
+      }
+      return {
+        reply: "Welcher der beiden Termine passt Ihnen besser?",
+        hangup: false,
+        transfer: false,
+      };
+    }
+
+    const preference = /vormittag|morgens|fr[üu]h/i.test(text)
+      ? "morning"
+      : /nachmittag|mittags|sp[äa]ter/i.test(text)
+        ? "afternoon"
+        : undefined;
+    if (!preference) {
+      return {
+        reply: "Passt für Sie eher ein Termin am Vormittag oder am Nachmittag?",
+        hangup: false,
+        transfer: false,
+      };
+    }
+
+    const matchingSlots = offeredSlots.filter((slot) => {
+      const hour = extractSlotHour(slot);
+      return hour !== undefined && (preference === "morning" ? hour < 12 : hour >= 12);
+    });
+    const slots = (matchingSlots.length >= 2 ? matchingSlots : offeredSlots).slice(0, 2);
+    if (slots.length >= 2) {
+      return {
+        reply: `Wie wäre es mit ${slots[0]} oder ${slots[1]}?`,
+        hangup: false,
+        transfer: false,
+      };
+    }
+  }
+
   return null;
+}
+
+function extractFreeSlotPhrases(prompt?: string): string[] {
+  if (!prompt) return [];
+  return prompt
+    .split("\n")
+    .map((line) => line.match(/^\s*-\s+(.+?)\s*$/)?.[1]?.trim() || "")
+    .filter(Boolean);
+}
+
+function extractSlotHour(slot: string): number | undefined {
+  const numeric = slot.match(/\b(\d{1,2})(?::\d{2})?\s*uhr\b/i);
+  if (numeric) return Number.parseInt(numeric[1], 10);
+  const words: Record<string, number> = {
+    neun: 9, zehn: 10, elf: 11, zwölf: 12, zwoelf: 12, dreizehn: 13, vierzehn: 14,
+    fünfzehn: 15, fuenfzehn: 15, sechzehn: 16, siebzehn: 17, achtzehn: 18,
+  };
+  const match = slot.match(/\b(neun|zehn|elf|zw[öo]lf|dreizehn|vierzehn|f[üu]nfzehn|sechzehn|siebzehn|achtzehn)\s+uhr\b/i);
+  if (!match) return undefined;
+  return words[match[1].toLowerCase()];
+}
+
+function selectOfferedSlot(latestAssistant: string, userText: string, offeredSlots: string[]): string | undefined {
+  const lowerUser = userText.toLowerCase();
+  const offered = offeredSlots.filter((slot) => latestAssistant.includes(slot));
+  if (offered.length < 2) return undefined;
+  if (/\b(?:der|den)\s+erste[nr]?\b|\berste[nr]?\b/i.test(lowerUser)) return offered[0];
+  if (/\b(?:der|den)\s+zweite[nr]?\b|\bzweite[nr]?\b/i.test(lowerUser)) return offered[1];
+  return offered.find((slot) => {
+    const hour = extractSlotHour(slot);
+    return hour !== undefined && new RegExp(`\\b${hour}\\b`).test(lowerUser);
+  });
 }
 
 function isDanglingContinuation(text: string): boolean {
@@ -880,6 +964,24 @@ function hasCurrentContributionSignal(ctx: CallContext, userText: string): boole
     if (parseGermanEuroAmount(answer) !== undefined) return true;
   }
 
+  return false;
+}
+
+function hasCurrentProjection(ctx: CallContext): boolean {
+  const turns = ctx.transcript;
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (turn.role !== "assistant" || !isCurrentContributionQuestion(turn.text)) continue;
+
+    const answerIndex = turns.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate.role === "user");
+    if (answerIndex < 0) continue;
+    const followingAssistant = turns
+      .slice(answerIndex + 1)
+      .find((candidate) => candidate.role === "assistant")?.text || "";
+    if (/zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|läge[n]?\s+.*beitrag|beitrag.*steigen|pro\s+jahr/.test(followingAssistant.toLowerCase())) {
+      return true;
+    }
+  }
   return false;
 }
 

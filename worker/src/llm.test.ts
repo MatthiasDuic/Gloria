@@ -9,6 +9,7 @@ import {
   type TurnOutput,
 } from "./llm.js";
 import { newContext, type CallContext } from "./state.js";
+import { createInitialFlowState, observeAssistantFlowState, observeUserFlowState } from "./topic-policy.js";
 import { extractConfirmedSlot } from "./telnyx-stream.js";
 
 const LOCKED_SLOT = "Donnerstag, den dreiundzwanzigsten Juli um zehn Uhr dreißig";
@@ -312,6 +313,72 @@ test("does not treat the remembered starting contribution as current", () => {
   assert.ok(currentContributionQuestion);
   assert.match(currentContributionQuestion.reply, /aktueller Monatsbeitrag/);
   assert.doesNotMatch(currentContributionQuestion.reply, /Zehn-Jahres-Prognose/);
+});
+
+test("ends a clear PKV rejection without transferring", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-rejection",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell eher privat oder gesetzlich versichert?", at: 1 },
+    { role: "user", text: "Gesetzlich.", at: 2 },
+    { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
+    { role: "user", text: "Tausendzweihundert Euro.", at: 4 },
+    { role: "assistant", text: "Bei 1200 Euro liegen Sie in zehn Jahren voraussichtlich höher. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?", at: 5 },
+    { role: "user", text: "Nein?", at: 6 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Nein?");
+  assert.ok(reply);
+  assert.equal(reply.hangup, true);
+  assert.equal(reply.transfer, false);
+  assert.doesNotMatch(reply.reply, /verbinden|durchstellen/);
+});
+
+test("flow state records only the current contribution", () => {
+  let state = createInitialFlowState("private Krankenversicherung");
+  state = observeAssistantFlowState(state, "Mit welchem Beitrag haben Sie einmal angefangen?");
+  state = observeUserFlowState(state, "Sechshundert Euro.");
+  assert.equal(state.contributionKnown, false);
+
+  state = observeAssistantFlowState(state, "Wie hoch ist Ihr aktueller Monatsbeitrag?");
+  state = observeUserFlowState(state, "Tausendzweihundert Euro.");
+  assert.equal(state.contributionKnown, true);
+});
+
+test("offers and locks only supplied calendar slots", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-slots",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "FREIE TERMIN-VORSCHLÄGE:",
+      "- Mittwoch, den neunzehnten August um zehn Uhr",
+      "- Donnerstag, den zwanzigsten August um vierzehn Uhr",
+      "- Freitag, den einundzwanzigsten August um elf Uhr",
+    ].join("\n"),
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell eher privat oder gesetzlich versichert?", at: 1 },
+    { role: "user", text: "Gesetzlich.", at: 2 },
+    { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
+    { role: "user", text: "Tausendzweihundert Euro.", at: 4 },
+    { role: "assistant", text: "Bei 1200 Euro liegen Sie in zehn Jahren voraussichtlich höher. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?", at: 5 },
+    { role: "user", text: "Ja, gerne.", at: 6 },
+  );
+
+  let reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
+  assert.ok(reply);
+  assert.match(reply.reply, /Mittwoch, den neunzehnten August um zehn Uhr/);
+  assert.match(reply.reply, /Freitag, den einundzwanzigsten August um elf Uhr/);
+  assert.doesNotMatch(reply.reply, /Donnerstag, den zwanzigsten/);
+
+  ctx.transcript.push({ role: "assistant", text: reply.reply, at: 7 }, { role: "user", text: "Den zweiten.", at: 8 });
+  reply = buildDeterministicPkvFlowReply(ctx, "Den zweiten.");
+  assert.ok(reply);
+  assert.match(reply.reply, /Freitag, den einundzwanzigsten August um elf Uhr/);
 });
 
 test("uses concrete projection after captured PKV contribution", () => {

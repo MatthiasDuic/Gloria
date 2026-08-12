@@ -156,7 +156,7 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
     next.lastUserSignal = "insurance";
   }
 
-  if (hasContributionSignal(text)) {
+  if (hasContributionSignal(text) && next.lastAssistantSignal === "current_contribution_question") {
     next.contributionKnown = true;
     if (next.topicKind === "pkv" && (next.stage === "need_insurance" || next.stage === "need_contribution")) {
       next.stage = "need_projection";
@@ -203,6 +203,10 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
   if (/f[üu]r\s+die\s+vorbereitung|e-?mail-adresse|terminbest[äa]tigung/i.test(text)) {
     next.stage = "post_booking";
     next.lastAssistantSignal = "post_booking";
+  }
+
+  if (/(?:aktuellen?|derzeitigen?|heutigen?)\s+(?:monatlichen?\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text)) {
+    next.lastAssistantSignal = "current_contribution_question";
   }
 
   return next;
