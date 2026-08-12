@@ -107,12 +107,6 @@ export async function streamReply(
   userText: string,
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
-  const trustReply = buildDeterministicTrustReply(ctx, userText);
-  if (trustReply) {
-    onSentence(trustReply.reply);
-    return trustReply;
-  }
-
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
     onSentence(deterministicReply.reply);
@@ -123,6 +117,12 @@ export async function streamReply(
   if (deterministicPkvReply) {
     onSentence(deterministicPkvReply.reply);
     return deterministicPkvReply;
+  }
+
+  const trustReply = buildDeterministicTrustReply(ctx, userText);
+  if (trustReply) {
+    onSentence(trustReply.reply);
+    return trustReply;
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -1583,16 +1583,12 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
   }
 
   if (isPkv && /beitr[aä]g(?:e)?\s+steig|steig(?:en|t)\s+.*beitr[aä]g/.test(text) && phase <= 6) {
-    return {
-      reply: "Genau das hoere ich sehr oft. Kritisch wird es meist erst, wenn man die Entwicklung einmal auf die eigene Zahl rechnet. Sind Sie aktuell eher privat oder gesetzlich versichert?",
-      hangup: false,
-      transfer: false,
-    };
+    return null;
   }
 
   if (isPkv && /was\s+soll\s+bei\s+diesem\s+termin|was\s+wird\s+gemacht|wof[üu]r\s+ist\s+der\s+termin/.test(text)) {
     return {
-      reply: `Gute Frage: ${owner} macht mit Ihnen eine persoenliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Handlungsmöglichkeiten bekommen. Wenn Sie moechten: In welcher Groessenordnung liegt Ihr Monatsbeitrag aktuell?`,
+      reply: `Gute Frage: ${owner} macht mit Ihnen eine persönliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Handlungsmöglichkeiten bekommen. Wenn Sie möchten: In welcher Größenordnung liegt Ihr Monatsbeitrag aktuell?`,
       hangup: false,
       transfer: false,
     };

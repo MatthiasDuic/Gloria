@@ -4,6 +4,7 @@ import {
   buildDeterministicPkvFlowReply,
   buildDeterministicPostBookingReply,
   buildTenYearProjectionLine,
+  streamReply,
   parseGermanEuroAmount,
   type TurnOutput,
 } from "./llm.js";
@@ -258,6 +259,29 @@ test("builds PKV relevance before asking insurance questions", () => {
   assert.ok(reply);
   assert.match(reply.reply, /wo die Reise hingeht/);
   assert.match(reply.reply, /detailliert angeschaut/);
+  assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
+});
+
+test("stream path keeps PKV structure after contribution-rise response", async () => {
+  const ctx = newContext({
+    callSid: "test-pkv-stream-order",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?", at: 1 },
+    { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
+    {
+      role: "assistant",
+      text: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist damit Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+      at: 3,
+    },
+  );
+
+  const segments: string[] = [];
+  const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr und", (segment) => segments.push(segment));
+  assert.equal(reply.reply, "Das ist nachvollziehbar. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?");
+  assert.deepEqual(segments, [reply.reply]);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
