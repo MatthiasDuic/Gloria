@@ -381,6 +381,28 @@ test("offers and locks only supplied calendar slots", () => {
   assert.match(reply.reply, /Freitag, den einundzwanzigsten August um elf Uhr/);
 });
 
+test("never asks to choose unnamed appointment slots", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-no-slots",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell eher privat oder gesetzlich versichert?", at: 1 },
+    { role: "user", text: "Gesetzlich.", at: 2 },
+    { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
+    { role: "user", text: "Tausendzweihundert Euro.", at: 4 },
+    { role: "assistant", text: "Bei 1200 Euro liegen Sie in zehn Jahren voraussichtlich höher. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?", at: 5 },
+    { role: "user", text: "Ja, gerne.", at: 6 },
+    { role: "assistant", text: "Passt für Sie eher ein Termin am Vormittag oder am Nachmittag?", at: 7 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
+  assert.ok(reply);
+  assert.doesNotMatch(reply.reply, /welcher der beiden|welcher Termin/);
+  assert.match(reply.reply, /Kalender|Moment/);
+});
+
 test("uses concrete projection after captured PKV contribution", () => {
   const ctx = newContext({
     callSid: "test-pkv-projection",

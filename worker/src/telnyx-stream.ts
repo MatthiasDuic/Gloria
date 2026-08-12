@@ -321,6 +321,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let pendingTurn = false;
   let currentTts: TtsStreamHandle | null = null;
   let topicPolicyReady: Promise<void> | null = null;
+  let calendarSlotsReady: Promise<void> | null = null;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
@@ -814,6 +815,16 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         }
       }
 
+      // Vor der Terminantwort muss der Kalender geladen sein. Ohne diesen
+      // Schutz würde der LLM-Fallback nach der Präferenzfrage eigene, nicht
+      // belegte Termine oder eine unvollständige Auswahl formulieren.
+      if (ctx.topicKind === "pkv" && ctx.flow.stage === "ready_for_schedule" && calendarSlotsReady) {
+        await Promise.race([
+          calendarSlotsReady,
+          new Promise<void>((resolve) => setTimeout(resolve, 1800)),
+        ]);
+      }
+
       const reply = await streamAndSpeak(userText);
 
       if (reply.transfer) {
@@ -925,7 +936,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
         // Lade bereits belegte Termin-Slots parallel, damit Gloria keine
         // Doppelbelegungen vorschlägt.
-        void loadBusySlots({ userId: ctx.userId }).then((slots) => {
+        calendarSlotsReady = loadBusySlots({ userId: ctx.userId }).then((slots) => {
           if (!ctx || !slots) return;
           ctx.busySlotsPrompt = busySlotsToPrompt(slots);
           const free = computeFreeSlots(slots, { daysAhead: 14, maxCount: 8, bufferMinutes: 90, minLeadDays: 7 });
@@ -933,7 +944,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
             ctx.freeSlotsPrompt = freeSlotsToPrompt(free);
           }
           log.info("busy.applied", { count: slots.length, free: free.length });
-        });
+        }).catch(() => undefined);
 
         asr = openAsr({
           onPartial: (text) => {

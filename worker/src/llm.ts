@@ -828,6 +828,12 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
         transfer: false,
       };
     }
+
+    return {
+      reply: "Einen kurzen Moment bitte, ich gleiche die passenden freien Termine gerade mit dem Kalender ab.",
+      hangup: false,
+      transfer: false,
+    };
   }
 
   return null;
