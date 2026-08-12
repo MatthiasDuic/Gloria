@@ -96,18 +96,18 @@ async function handle(request: Request) {
       try {
         const optimized = await optimizeTopicPolicy(topic, reports, current);
         const changed =
-          optimized.opener.trim() !== (current.opener || "").trim() ||
-          optimized.discovery.trim() !== (current.discovery || "").trim() ||
-          optimized.objectionHandling.trim() !== (current.objectionHandling || "").trim() ||
-          optimized.close.trim() !== (current.close || "").trim();
+          optimized.topicSummary.trim() !== (current.topicSummary || "").trim() ||
+          optimized.behavior.trim() !== (current.behavior || "").trim() ||
+          optimized.conversationGuardrails.trim() !== (current.conversationGuardrails || "").trim() ||
+          optimized.requiredQuestions.trim() !== (current.requiredQuestions || "").trim();
 
         if (!changed) continue;
 
         const diff = [
-          diffSummary("Opener", current.opener || "", optimized.opener),
-          diffSummary("Discovery", current.discovery || "", optimized.discovery),
-          diffSummary("Einwand", current.objectionHandling || "", optimized.objectionHandling),
-          diffSummary("Close", current.close || "", optimized.close),
+          diffSummary("Thema & Nutzen", current.topicSummary || "", optimized.topicSummary),
+          diffSummary("Verhalten & Ton", current.behavior || "", optimized.behavior),
+          diffSummary("Grenzen & Leitplanken", current.conversationGuardrails || "", optimized.conversationGuardrails),
+          diffSummary("Pflichtfragen", current.requiredQuestions || "", optimized.requiredQuestions),
         ].join("\n");
 
         suggestions.push({

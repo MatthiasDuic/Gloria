@@ -2,10 +2,10 @@ import { AI_CONFIG } from "./ai-config";
 import type { CallReport, ScriptConfig, Topic } from "./types";
 
 export interface OptimizerResult {
-  opener: string;
-  discovery: string;
-  objectionHandling: string;
-  close: string;
+  topicSummary: string;
+  behavior: string;
+  conversationGuardrails: string;
+  requiredQuestions: string;
   rationale: string[];
   source: "openai" | "heuristic";
 }
@@ -36,22 +36,22 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
     `Statistik: ${JSON.stringify(stats)}`,
     "",
     "Aktuelle Topic Policy:",
-    `Opener: ${current.opener}`,
-    `Discovery: ${current.discovery}`,
-    `Objection Handling: ${current.objectionHandling}`,
-    `Close: ${current.close}`,
+    `Topic Summary: ${current.topicSummary || ""}`,
+    `Behavior: ${current.behavior || ""}`,
+    `Conversation Guardrails: ${current.conversationGuardrails || ""}`,
+    `Required Questions: ${current.requiredQuestions || ""}`,
     "",
     "Gespraechsberichte (Auszug):",
     condensed || "(noch keine Berichte)",
     "",
-    "Aufgabe: Optimiere opener, discovery, objectionHandling, close so,",
+    "Aufgabe: Optimiere topicSummary, behavior, conversationGuardrails, requiredQuestions so,",
     "dass mehr Termine vereinbart und weniger Absagen produziert werden.",
     "Bleibe nah am Stil der aktuellen Topic Policy, aendere nur was konkrete",
     "Schwaechen in den Berichten zeigen. Begruende knapp in rationale[]",
     "(max. 4 Stichpunkte).",
     "",
     "Antworte AUSSCHLIESSLICH als JSON mit den Keys:",
-    `{"opener":string,"discovery":string,"objectionHandling":string,"close":string,"rationale":string[]}`,
+    `{"topicSummary":string,"behavior":string,"conversationGuardrails":string,"requiredQuestions":string,"rationale":string[]}`,
   ].join("\n");
 
   return { system, user };
@@ -61,26 +61,29 @@ function heuristicOptimize(current: ScriptConfig, reports: CallReport[]): Optimi
   const callbacks = reports.filter((r) => r.outcome === "Wiedervorlage").length;
   const appointments = reports.filter((r) => r.outcome === "Termin").length;
 
-  const opener = current.opener.includes("15-Minuten")
-    ? current.opener
-    : `${current.opener} Es geht wirklich nur um eine kurze Einordnung von etwa 15 Minuten.`;
-  const discovery = current.discovery.includes("Was waere fuer Sie")
-    ? current.discovery
-    : `${current.discovery} Was waere fuer Sie dabei aktuell am interessantesten?`;
-  const objectionHandling =
-    callbacks > 0 && !current.objectionHandling.includes("wenig Zeit")
-      ? `${current.objectionHandling} Falls es zeitlich eng ist: der Termin ist bewusst kurz und unverbindlich.`
-      : current.objectionHandling;
-  const close =
-    appointments > 0 && !current.close.includes("Dienstagvormittag")
-      ? `${current.close} Waere eher Dienstagvormittag oder Donnerstagnachmittag passend?`
-      : `${current.close} Wenn Sie moechten, schlage ich direkt zwei kurze Zeitfenster vor.`;
+  const topicSummary = (current.topicSummary || "").trim();
+  const behavior = (current.behavior || "").trim();
+  const conversationGuardrails = (current.conversationGuardrails || "").trim();
+  const requiredQuestions = (current.requiredQuestions || "").trim();
+
+  const nextTopicSummary = topicSummary.includes("15")
+    ? topicSummary
+    : `${topicSummary}${topicSummary ? " " : ""}Nutzenversprechen frueh und konkret machen, dann auf einen kurzen 10-15-Minuten-Termin fuehren.`;
+  const nextBehavior = callbacks > 0 && !behavior.toLowerCase().includes("kurz")
+    ? `${behavior}${behavior ? "\n" : ""}Bei Zeitdruck extra kurz bleiben: maximal zwei kurze Saetze, dann eine klare Frage.`
+    : behavior;
+  const nextGuardrails = appointments > 0 && !conversationGuardrails.toLowerCase().includes("auswahl")
+    ? `${conversationGuardrails}${conversationGuardrails ? "\n" : ""}Terminfragen als Auswahl formulieren (zwei konkrete Fenster statt offene Kalenderfrage).`
+    : conversationGuardrails;
+  const nextRequiredQuestions = requiredQuestions
+    ? requiredQuestions
+    : "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?";
 
   return {
-    opener,
-    discovery,
-    objectionHandling,
-    close,
+    topicSummary: nextTopicSummary,
+    behavior: nextBehavior,
+    conversationGuardrails: nextGuardrails,
+    requiredQuestions: nextRequiredQuestions,
     rationale: [
       "Heuristische Optimierung basierend auf Report-Zaehlern.",
       callbacks > 0 ? "Wiedervorlagen deuten auf Zeitdruck -> Laenge reduzieren." : "Keine nennenswerten Wiedervorlagen.",
@@ -135,19 +138,19 @@ export async function optimizeTopicPolicy(
 
     const parsed = JSON.parse(content) as Partial<OptimizerResult>;
     if (
-      typeof parsed.opener !== "string" ||
-      typeof parsed.discovery !== "string" ||
-      typeof parsed.objectionHandling !== "string" ||
-      typeof parsed.close !== "string"
+      typeof parsed.topicSummary !== "string" ||
+      typeof parsed.behavior !== "string" ||
+      typeof parsed.conversationGuardrails !== "string" ||
+      typeof parsed.requiredQuestions !== "string"
     ) {
       return heuristicOptimize(current, reports);
     }
 
     return {
-      opener: parsed.opener,
-      discovery: parsed.discovery,
-      objectionHandling: parsed.objectionHandling,
-      close: parsed.close,
+      topicSummary: parsed.topicSummary,
+      behavior: parsed.behavior,
+      conversationGuardrails: parsed.conversationGuardrails,
+      requiredQuestions: parsed.requiredQuestions,
       rationale: Array.isArray(parsed.rationale) ? parsed.rationale.slice(0, 6) : [],
       source: "openai",
     };

@@ -73,43 +73,14 @@ interface StoredConversationEvent extends ConversationEvent {
   userId?: string;
 }
 
-const LEGACY_STANDARD_OPENERS: Record<Topic, string[]> = {
-  "betriebliche Krankenversicherung": [
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Krankenversicherung, weil viele Unternehmen damit Mitarbeiterbindung und Arbeitgeberattraktivität deutlich verbessern. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich hoffe, ich störe Sie gerade nicht. Viele Unternehmen nutzen die betriebliche Krankenversicherung inzwischen gezielt, um Fachkräfte leichter zu gewinnen und zu binden. Bevor wir starten: Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-  ],
-  "betriebliche Altersvorsorge": [
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich zum Thema betriebliche Altersvorsorge, weil viele Arbeitgeber ihre bAV aktuell verständlicher und attraktiver für Mitarbeitende aufstellen möchten. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema betriebliche Altersvorsorge, weil viele Arbeitgeber hier nach verständlichen und attraktiven Lösungen suchen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-  ],
-  "gewerbliche Versicherungen": [
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Hintergrund ist, dass viele Unternehmen ihre gewerblichen Versicherungen gerade neu bewerten, um Preis, Leistung und Risikoschutz sauber abzugleichen. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an, weil viele Unternehmen ihre gewerblichen Versicherungen momentan neu vergleichen, um Preis und Leistung sauber abzugleichen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-  ],
-  "private Krankenversicherung": [
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Es geht um das Thema Beitragsentwicklung und Stabilität in der Krankenversicherung, weil für viele Menschen vor allem die langfristige Planbarkeit im Alter immer wichtiger wird. Vorab, dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an. Wir haben ein Konzept entwickelt, mit dem sich Krankenversicherungsbeiträge im Alter planbarer und stabiler aufstellen lassen. Denn egal ob gesetzlich oder privat versichert: Die Beiträge steigen meist Jahr für Jahr. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-  ],
-  Energie: [
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic. Ich rufe im Auftrag von Herrn Matthias Duic an. Ich melde mich kurz zum Thema gewerbliche Strom- und Gasoptimierung, weil sich dort oft schnell Einsparpotenziale und bessere Konditionen aufzeigen lassen. Dürfte ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-    "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin. Ich rufe im Auftrag von Herrn Matthias Duic an und melde mich kurz zum Thema gewerbliche Strom- und Gasoptimierung, weil sich dort häufig schnell Einsparpotenziale zeigen. Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen?",
-  ],
-};
-
-function normalizeLegacyScriptOpeners(scripts: ScriptConfig[]): ScriptConfig[] {
-  return scripts.map((script) => {
-    const currentDefault = defaultScripts.find((entry) => entry.topic === script.topic)?.opener;
-    const legacyValues = LEGACY_STANDARD_OPENERS[script.topic];
-
-    if (!currentDefault || !legacyValues.includes(script.opener)) {
-      return script;
-    }
-
-    return {
-      ...script,
-      opener: currentDefault,
-    };
-  });
+function normalizeTopicPolicies(scripts: ScriptConfig[]): ScriptConfig[] {
+  return scripts.map((script) => ({
+    ...script,
+    topicSummary: script.topicSummary || script.callObjective || "",
+    behavior: script.behavior || "",
+    conversationGuardrails: script.conversationGuardrails || "",
+    requiredQuestions: script.requiredQuestions || script.requiredData || "",
+  }));
 }
 
 async function readLegacyPlaybooksFile(): Promise<ScriptConfig[]> {
@@ -512,7 +483,7 @@ async function readScriptsWithMode(userId?: string): Promise<{
 
     if (userScripts && userScripts.length > 0) {
       return {
-        data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(userScripts), userId),
+        data: await filterScriptsByUserAccess(normalizeTopicPolicies(userScripts), userId),
         mode: "postgres",
       };
     }
@@ -522,7 +493,7 @@ async function readScriptsWithMode(userId?: string): Promise<{
       const afterBootstrap = await readUserScriptsFromPostgres(userId);
       if (afterBootstrap && afterBootstrap.length > 0) {
         return {
-          data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(afterBootstrap), userId),
+          data: await filterScriptsByUserAccess(normalizeTopicPolicies(afterBootstrap), userId),
           mode: "postgres",
         };
       }
@@ -533,7 +504,7 @@ async function readScriptsWithMode(userId?: string): Promise<{
 
   if (postgresData) {
     return {
-      data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(postgresData), userId),
+      data: await filterScriptsByUserAccess(normalizeTopicPolicies(postgresData), userId),
       mode: "postgres",
     };
   }
@@ -542,11 +513,11 @@ async function readScriptsWithMode(userId?: string): Promise<{
   const bootstrappedToPostgres = await writeScriptsToPostgres(fallbackScripts);
 
   if (bootstrappedToPostgres) {
-    return { data: normalizeLegacyScriptOpeners(fallbackScripts), mode: "postgres" };
+    return { data: normalizeTopicPolicies(fallbackScripts), mode: "postgres" };
   }
 
   return {
-    data: await filterScriptsByUserAccess(normalizeLegacyScriptOpeners(fallbackScripts), userId),
+    data: await filterScriptsByUserAccess(normalizeTopicPolicies(fallbackScripts), userId),
     mode: "file",
   };
 }
@@ -878,33 +849,14 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
   const updatedScript: ScriptConfig = {
     id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
     topic,
-    callObjective: existing?.callObjective || "",
+    topicSummary: existing?.topicSummary || "",
     behavior: existing?.behavior || "",
     conversationGuardrails: existing?.conversationGuardrails || "",
-    requiredData: existing?.requiredData || "",
-    knowledge: existing?.knowledge || "",
-    objectionResponses: existing?.objectionResponses || "",
-    proofPoints: existing?.proofPoints || "",
-    transferHandling: existing?.transferHandling || "",
+    requiredQuestions: existing?.requiredQuestions || "",
     opener: existing?.opener || "",
     discovery: existing?.discovery || "",
     objectionHandling: existing?.objectionHandling || "",
     close: existing?.close || "",
-    aiKeyInfo: existing?.aiKeyInfo || "",
-    consentPrompt: existing?.consentPrompt || "",
-    pkvHealthIntro: existing?.pkvHealthIntro || "",
-    pkvHealthQuestions: existing?.pkvHealthQuestions || "",
-    gatekeeperTask: existing?.gatekeeperTask || "",
-    gatekeeperBehavior: existing?.gatekeeperBehavior || "",
-    decisionMakerTask: existing?.decisionMakerTask || "",
-    decisionMakerBehavior: existing?.decisionMakerBehavior || "",
-    decisionMakerContext: existing?.decisionMakerContext || "",
-    appointmentGoal: existing?.appointmentGoal || "",
-    receptionTopicReason: existing?.receptionTopicReason || "",
-    problemBuildup: existing?.problemBuildup || "",
-    conceptTransition: existing?.conceptTransition || "",
-    appointmentConfirmation: existing?.appointmentConfirmation || "",
-    availableAppointmentSlots: existing?.availableAppointmentSlots || "",
     ...payload,
   };
 

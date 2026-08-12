@@ -93,28 +93,33 @@ function buildOptimizedScript(script: ScriptConfig, reports: CallReport[]): Scri
   const callbacks = reports.filter((report) => report.outcome === "Wiedervorlage").length;
   const appointments = reports.filter((report) => report.outcome === "Termin").length;
 
-  const opener = script.opener.includes("15-Minuten")
-    ? script.opener
-    : `${script.opener} Es geht wirklich nur um eine kurze Einordnung von etwa 15 Minuten.`;
+  const topicSummary = (script.topicSummary || "").trim();
+  const behavior = (script.behavior || "").trim();
+  const conversationGuardrails = (script.conversationGuardrails || "").trim();
+  const requiredQuestions = (script.requiredQuestions || "").trim();
 
-  const discovery = script.discovery.includes("Was wäre für Sie")
-    ? script.discovery
-    : `${script.discovery} Was wäre für Sie dabei aktuell am interessantesten – Mitarbeitervorteile, Kosten oder Absicherung?`;
+  const nextTopicSummary = topicSummary.includes("15")
+    ? topicSummary
+    : `${topicSummary}${topicSummary ? " " : ""}Fuehre frueh auf einen kurzen 10-15-Minuten-Termin mit klarem Nutzen.`;
 
-  const objectionHandling = callbacks > 0 && !script.objectionHandling.includes("wenig Zeit")
-    ? `${script.objectionHandling} Falls es gerade zeitlich eng ist: Genau dafür ist der Termin bewusst kurz und unkompliziert gehalten.`
-    : script.objectionHandling;
+  const nextBehavior = callbacks > 0 && !behavior.toLowerCase().includes("kurz")
+    ? `${behavior}${behavior ? "\n" : ""}Bei Zeitdruck maximal zwei kurze Saetze und dann direkt eine klare Frage.`
+    : behavior;
 
-  const close = appointments > 0 && !script.close.includes("Dienstagvormittag")
-    ? `${script.close} Ich mache es Ihnen gern einfach: Wäre eher Dienstagvormittag oder Donnerstagnachmittag passend?`
-    : `${script.close} Wenn Sie möchten, schlage ich Ihnen direkt zwei kurze Zeitfenster vor.`;
+  const nextGuardrails = appointments > 0 && !conversationGuardrails.toLowerCase().includes("auswahl")
+    ? `${conversationGuardrails}${conversationGuardrails ? "\n" : ""}Terminabfrage als Auswahlfrage mit zwei konkreten Zeitfenstern formulieren.`
+    : conversationGuardrails;
+
+  const nextRequiredQuestions = requiredQuestions
+    ? requiredQuestions
+    : "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?";
 
   return {
     ...script,
-    opener,
-    discovery,
-    objectionHandling,
-    close,
+    topicSummary: nextTopicSummary,
+    behavior: nextBehavior,
+    conversationGuardrails: nextGuardrails,
+    requiredQuestions: nextRequiredQuestions,
   };
 }
 

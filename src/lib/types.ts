@@ -36,44 +36,30 @@ export interface TopicPolicyConfig {
   id: string;
   topic: Topic;
   /**
-   * NEU: Klarer Zielzustand des Gesprächs für dieses Thema.
+   * Worum es im Thema fachlich geht, welchen Nutzen der Interessent davon hat
+   * und wie Gloria das Thema inhaltlich einordnet.
    */
-  callObjective?: string;
+  topicSummary?: string;
   /**
-   * NEU (vereinfachtes Modell – ersetzt die 21 Legacy-Felder):
-   * Wie Gloria zum Thema spricht: Argumentationslinie, Empathie-Anker,
-   * Einwandbehandlung, Tonalität, Ziel des Calls.
+   * Wie Gloria zum Thema spricht: Haltung, Ton, Reaktionsstil, Führung.
    */
   behavior?: string;
   /**
-   * NEU: Harte Leitplanken und Verbote für dieses Thema.
+   * Harte Leitplanken und Verbote für dieses Thema.
    */
   conversationGuardrails?: string;
   /**
-   * NEU: Pflichtfragen für die Basisdaten-Phase, die im Call abgefragt
-   * werden müssen (z. B. Geburtsdatum, Versicherer, Beschwerden ...).
+   * Pflichtfragen, die in der Terminierungs-/Vorbereitungsphase gestellt
+   * werden müssen oder in die Terminbestätigungsmail gehören.
    * Eine Frage pro Zeile.
    */
+  requiredQuestions?: string;
+  // Legacy-/Kompatibilitätsfelder ------------------------------------------------
+  callObjective?: string;
   requiredData?: string;
-  /**
-   * NEU: Faktenpool, auf den Gloria zurückgreifen darf (Zahlen,
-   * Rahmenbedingungen, erlaubte Aussagen, verbotene Aussagen).
-   */
   knowledge?: string;
-  /**
-   * NEU: Einwand-Bibliothek. Eine Zeile pro "Einwand: Konter-Linie". Gloria
-   * nutzt diese Einträge als verbindliche Konter, statt Floskeln zu erfinden.
-   */
   objectionResponses?: string;
-  /**
-   * NEU: Konkrete Zahlen / Social-Proof-Punkte (eine pro Zeile). Gloria muss in
-   * Phase 5 (Problem-Aufbau) mindestens einen davon nennen, bevor sie in Phase 6
-   * überleitet.
-   */
   proofPoints?: string;
-  /**
-   * NEU: Regeln für menschliche Übergabe / Weiterleitung.
-   */
   transferHandling?: string;
   // --- Legacy-Felder (werden nicht mehr im UI editiert) ----------------
   opener: string;

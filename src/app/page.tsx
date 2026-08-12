@@ -345,23 +345,19 @@ function pickText(value: string | undefined, fallback?: string) {
   return fallback ?? "";
 }
 
-const PLAYBOOK_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
-  "callObjective",
+const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
+  "topicSummary",
   "behavior",
   "conversationGuardrails",
-  "requiredData",
-  "proofPoints",
-  "objectionResponses",
-  "knowledge",
-  "transferHandling",
+  "requiredQuestions",
 ];
 
-function countFilledPlaybookFields(config?: TopicPolicyConfig) {
+function countFilledTopicPolicyFields(config?: TopicPolicyConfig) {
   if (!config) {
     return 0;
   }
 
-  return PLAYBOOK_EDITABLE_FIELDS.reduce((count, field) => {
+  return TOPIC_POLICY_EDITABLE_FIELDS.reduce((count, field) => {
     const value = config[field];
     return typeof value === "string" && value.trim().length > 0 ? count + 1 : count;
   }, 0);
@@ -374,7 +370,7 @@ function normalizeLineCount(value?: string) {
     .filter(Boolean).length;
 }
 
-function getRecommendedPlaybookPreset(topic: Topic): Partial<TopicPolicyConfig> {
+function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfig> {
   const normalized = topic.trim().toLowerCase();
 
   const commonTransfer = [
@@ -385,98 +381,100 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<TopicPolicyConfig> 
 
   if (normalized === "private krankenversicherung") {
     return {
-      callObjective: "Einen festen Orientierungstermin mit Herrn Duic vereinbaren und danach die relevanten Basisdaten sauber, einzeln und ohne Doppelfragen aufnehmen.",
+      topicSummary: [
+        "Es geht darum, dem Interessenten greifbar zu machen, wie sich seine Krankenversicherungsbeitraege in den naechsten Jahren entwickeln koennen und welche Stellschrauben es fuer mehr Planbarkeit gibt.",
+        "Der Nutzen des Termins ist keine Produktshow, sondern eine persoenliche Einordnung mit eigener Zahl, Zehn-Jahres-Blick und klaren Handlungsoptionen.",
+      ].join("\n"),
       behavior: [
         "Warm, direkt und wie eine starke Vertriebsassistentin am Telefon sprechen - nicht wie ein Sprachcomputer.",
-        "Schnell persönliche Verbindung aufbauen, dann sauber in die Relevanz wechseln.",
-        "Keine Floskeln wie absolut, glaskugel oder landkarte. Lieber konkrete Bilder aus dem echten Alltag des Kunden.",
-        "Wenn der Interessent ein Problem andeutet, kurz aufgreifen und sofort führend weitergehen.",
+        "Erst kurz Relevanz und persoenlichen Nutzen erklaeren, dann fragen - nicht sofort in einen Fragenkatalog kippen.",
+        "Gesagtes des Kunden aktiv aufgreifen und daran anschliessen, statt den naechsten Skriptpunkt abzuspulen.",
+        "Kurz, charmant, professionell und auf Augenhoehe. Kein Callcenter-Ton.",
       ].join("\n"),
       conversationGuardrails: [
         "Kurze Dialogzüge: maximal zwei kurze Sätze und dann eine klare Frage.",
-        "Keine Doppelfragen in der Basisdaten-Phase.",
-        "Vor einer echten Aufnahme immer erst Einwilligung einholen.",
-        "In der Problem-Aufbau-Phase mindestens eine konkrete Zahl aktiv nennen, bevor in den Termin übergeleitet wird.",
-        "Keine erfundenen Quellen, keine garantierten Einsparungen und keine Aussagen wie immer günstiger oder garantiert stabil.",
-        "Wenn Basisdaten abgelehnt werden, nicht diskutieren, sondern sauber zur Terminbestätigungs-Mail übergehen.",
+        "Keine direkte Terminierung, bevor Relevanz, Nutzen und persoenlicher Mehrwert fuer den Kunden klar ausgesprochen wurden.",
+        "Keine erfundenen Quellen, keine garantierten Einsparungen und keine Aussagen wie immer guenstiger oder garantiert stabil.",
+        "Wenn Pflichtfragen nicht direkt beantwortet werden, nicht druecken, sondern sauber in die Terminbestaetigungsmail uebernehmen.",
       ].join("\n"),
-      knowledge: [
-        "ERLAUBT:",
-        "- Beitragsentwicklung mit konkreten Rechenbeispielen greifbar machen.",
-        "- Tarifstruktur, Selbstbehalt und Entlastungsbausteine als Stellschrauben benennen.",
-        "- Den Termin als Analyse- und Klarheitsgespräch positionieren, nicht als Abschlussdruck.",
-        "",
-        "VERBOTEN:",
-        "- Garantierte Einspar- oder Stabilitätsversprechen.",
-        "- Medizinische, steuerliche oder rechtliche Einzelfallberatung.",
-        "- Quellen nennen, die nicht in der Topic Policy freigegeben sind.",
+      requiredQuestions: [
+        "Sind Sie aktuell privat oder gesetzlich versichert?",
+        "In welcher Groessenordnung liegt Ihr aktueller Monatsbeitrag?",
+        "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
+        "Gibt es einen Punkt, den Herr Duic fuer den Termin besonders vorbereiten soll?",
       ].join("\n"),
-      proofPoints: [
-        "Wenn heute 600 Euro PKV-Beitrag laufen und der Beitrag nur mit vier Prozent pro Jahr steigt, dann liegen wir in zehn Jahren bei rund 890 Euro und in zwanzig Jahren bei rund 1.315 Euro.",
-        "Wenn heute 850 Euro GKV-Beitrag anfallen und die Entwicklung bei fünf Prozent pro Jahr liegt, dann sind das in zehn Jahren rund 1.385 Euro und in zwanzig Jahren rund 2.255 Euro.",
-        "Der durchschnittliche Zusatzbeitrag in der GKV ist von 1,1 Prozent in 2020 auf rund 2,5 Prozent in 2025 gestiegen - das ist für viele erst sichtbar, wenn die Abbuchung schon höher ist.",
-        "Viele Bestandskunden haben seit Jahren keinen sauberen Tarif-Check mehr bekommen. Genau dadurch bleiben schwache Altersrückstellungen oder unpassende Tariflogiken oft unbemerkt.",
-      ].join("\n"),
-      objectionResponses: [
-        "Kein Interesse: Genau deshalb lohnt sich die Einordnung. Die meisten reagieren erst, wenn der nächste Bescheid kommt und die Zahl plötzlich wieder höher ist.",
-        "Schon versorgt: Gut - dann schauen wir nicht, ob Sie versichert sind, sondern ob Ihr heutiger Tarif auf Dauer sauber kalkuliert ist.",
-        "Zu teuer: Genau darum geht es. Nicht der heutige Beitrag ist der Knackpunkt, sondern was daraus in zehn oder zwanzig Jahren wird.",
-        "Keine Zeit: Verstehe ich. Deshalb sind es auch nur 15 Minuten mit einer klaren Zahl und einem sauberen Blick auf die Entwicklung.",
-        "Nur per Mail: Gern per Mail bestätigen. Die eigentliche Einordnung macht Herr Duic aber kurz persönlich, damit Sie direkt Rückfragen stellen können.",
-      ].join("\n"),
-      transferHandling: commonTransfer,
     };
   }
 
   if (normalized === "betriebliche krankenversicherung") {
     return {
-      callObjective: "Einen kurzen Orientierungstermin vereinbaren, in dem Herr Duic den Nutzen von bKV für Arbeitgeberattraktivität, Bindung und Umsetzbarkeit einordnet.",
+      topicSummary: "Es geht darum, dem Unternehmen kurz und klar zu zeigen, wie bKV bei Arbeitgeberattraktivitaet, Bindung und Mitarbeiterwert schaft. Der Termin dient als erste Einordnung, nicht als Produktverkauf.",
+      behavior: "Klar, unternehmerisch und nutzenorientiert sprechen. Recruiting, Bindung und Mitarbeiterwahrnehmung frueh greifbar machen.",
       conversationGuardrails: [
         "Nicht in Tarifdetails oder Leistungsversprechen abrutschen.",
         "Keine Produktshow, sondern Relevanz für Recruiting, Bindung und Wahrnehmung als Arbeitgeber herausarbeiten.",
         "Einwände kurz, konkret und ohne Callcenter-Floskeln beantworten.",
         "Immer nur eine Hauptfrage gleichzeitig stellen.",
       ].join("\n"),
-      transferHandling: commonTransfer,
+      requiredQuestions: [
+        "Wie viele Mitarbeitende beschaeftigen Sie aktuell?",
+        "Gibt es bei Ihnen aktuell eher Recruiting- oder Bindungsthemen?",
+        "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
+      ].join("\n"),
     };
   }
 
   if (normalized === "betriebliche altersvorsorge") {
     return {
-      callObjective: "Einen Orientierungstermin sichern, in dem Herr Duic Verständlichkeit, Nutzung und Arbeitgebernutzen der bAV einordnet.",
+      topicSummary: "Es geht um eine verstaendliche Einordnung, wie bAV fuer Arbeitgeber und Mitarbeitende sinnvoll genutzt werden kann und wo heute oft ungenutztes Potenzial liegt.",
+      behavior: "Ruhig, verstaendlich und beratungsnah sprechen. Erst Nutzen und Klarheit, dann naechsten Schritt.",
       conversationGuardrails: [
         "Keine Steuer- oder Rechtsberatung im Einzelfall.",
         "Nicht in Fachchinesisch kippen; immer erst Nutzen und Verständlichkeit erklären.",
         "Keine Renditeversprechen.",
         "Kurze, führende Dialogschritte statt langer Erklärbären.",
       ].join("\n"),
-      transferHandling: commonTransfer,
+      requiredQuestions: [
+        "Gibt es bei Ihnen bereits eine bAV-Struktur oder ist das Thema noch offen?",
+        "Geht es Ihnen eher um Arbeitgeberattraktivitaet oder um bestehende Vertragsanpassungen?",
+        "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
+      ].join("\n"),
     };
   }
 
   if (normalized === "gewerbliche versicherungen") {
     return {
-      callObjective: "Einen strukturierten Risiko- und Deckungs-Check mit Herrn Duic terminieren, ohne Wechselzwang aufzubauen.",
+      topicSummary: "Es geht um einen strukturierten Risiko- und Deckungscheck, damit der Interessent Klarheit ueber Aktualitaet, Luecken und moegliche Optimierung bekommt - ohne Wechselzwang.",
+      behavior: "Unternehmerisch, ruhig und sehr konkret sprechen. Den Termin als Einordnung und Vergleich positionieren, nicht als Verkaufsdruck.",
       conversationGuardrails: [
         "Keine Angstkommunikation und keine Panikbilder.",
         "Den Termin als Einordnung und Vergleich positionieren, nicht als Verkaufsabschluss.",
         "Keine Deckungs- oder Beitragszusagen ohne Vertragsdaten.",
         "Auch bei Einwänden ruhig und unternehmerisch bleiben.",
       ].join("\n"),
-      transferHandling: commonTransfer,
+      requiredQuestions: [
+        "Wann wurde Ihre Absicherung zuletzt insgesamt geprueft?",
+        "Geht es bei Ihnen eher um Beitrag, Leistung oder moegliche Luecken?",
+        "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
+      ].join("\n"),
     };
   }
 
   if (normalized === "energie") {
     return {
-      callObjective: "Einen kurzen Termin vereinbaren, in dem Herr Duic bestehende Energiekonditionen wirtschaftlich einordnet und nächste Schritte ableitet.",
+      topicSummary: "Es geht um eine wirtschaftliche Einordnung bestehender Energiekonditionen, damit der Interessent Transparenz ueber Kosten, Laufzeiten und moegliche Handlungsfenster bekommt.",
+      behavior: "Sachlich, wirtschaftlich und kurz fuehren. Keine Tarifshow, sondern Klarheit ueber Beschaffung und Konditionen.",
       conversationGuardrails: [
         "Keine pauschalen Sparversprechen.",
         "Nicht spekulieren, wenn Lastprofil, Laufzeit oder Vertragsdetails fehlen.",
         "Immer wirtschaftlich, sachlich und knapp argumentieren.",
         "Kein Preisdruck, sondern Transparenz über Konditionen und Beschaffungszeitpunkt schaffen.",
       ].join("\n"),
-      transferHandling: commonTransfer,
+      requiredQuestions: [
+        "Wann laeuft Ihr aktueller Vertrag ungefaehr aus?",
+        "Geht es aktuell eher um Strom, Gas oder beides?",
+        "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
+      ].join("\n"),
     };
   }
 
@@ -605,26 +603,23 @@ function getRecommendedPlaybookPreset(topic: Topic): Partial<TopicPolicyConfig> 
   }
 
   return {
-    callObjective: "Einen klaren nächsten Schritt sichern: idealerweise ein Termin, alternativ eine saubere Wiedervorlage mit klarer Zuständigkeit.",
+    topicSummary: "Es geht um eine saubere Einordnung des Themas und einen klaren naechsten Schritt fuer den Interessenten.",
+    behavior: "Kurz, professionell, charmant und fuehrend sprechen.",
     conversationGuardrails: "Kurze Dialogzüge, keine Monologe, keine erfundenen Fakten, immer nur eine Hauptfrage zur Zeit.",
-    transferHandling: commonTransfer,
+    requiredQuestions: "Welche E-Mail-Adresse sollen wir fuer die Terminbestaetigung nutzen?",
   };
 }
 
 function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig>): TopicPolicyConfig {
-  const preset = getRecommendedPlaybookPreset(topic);
+  const preset = getRecommendedTopicPolicyPreset(topic);
 
   return {
-    id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+    id: existing?.id || `topic-policy-${topic.toLowerCase().replace(/\s+/g, "-")}`,
     topic,
-    callObjective: pickText(existing?.callObjective, preset.callObjective),
+    topicSummary: pickText(existing?.topicSummary, preset.topicSummary),
     behavior: pickText(existing?.behavior, preset.behavior),
     conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
-    requiredData: pickText(existing?.requiredData, preset.requiredData),
-    knowledge: pickText(existing?.knowledge, preset.knowledge),
-    objectionResponses: pickText(existing?.objectionResponses, preset.objectionResponses),
-    proofPoints: pickText(existing?.proofPoints, preset.proofPoints),
-    transferHandling: pickText(existing?.transferHandling, preset.transferHandling),
+    requiredQuestions: pickText(existing?.requiredQuestions, preset.requiredQuestions),
     opener: pickText(existing?.opener, ""),
     discovery: pickText(existing?.discovery, ""),
     objectionHandling: pickText(existing?.objectionHandling, ""),
@@ -655,18 +650,14 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
 
 function buildRecommendedAccountDraft(topic: Topic, existing?: TopicPolicyConfig): TopicPolicyConfig {
   const baseline = buildDraftFromPreset(topic, existing);
-  const preset = getRecommendedPlaybookPreset(topic);
+  const preset = getRecommendedTopicPolicyPreset(topic);
 
   return {
     ...baseline,
-    callObjective: pickText(preset.callObjective, baseline.callObjective),
+    topicSummary: pickText(preset.topicSummary, baseline.topicSummary),
     behavior: pickText(preset.behavior, baseline.behavior),
     conversationGuardrails: pickText(preset.conversationGuardrails, baseline.conversationGuardrails),
-    requiredData: pickText(preset.requiredData, baseline.requiredData),
-    knowledge: pickText(preset.knowledge, baseline.knowledge),
-    objectionResponses: pickText(preset.objectionResponses, baseline.objectionResponses),
-    proofPoints: pickText(preset.proofPoints, baseline.proofPoints),
-    transferHandling: pickText(preset.transferHandling, baseline.transferHandling),
+    requiredQuestions: pickText(preset.requiredQuestions, baseline.requiredQuestions),
   };
 }
 
@@ -1677,7 +1668,14 @@ export default function HomePage() {
       });
       const preview = (await previewRes.json()) as {
         error?: string;
-        optimized?: { opener: string; discovery: string; objectionHandling: string; close: string; rationale: string[]; source: string };
+        optimized?: {
+          topicSummary: string;
+          behavior: string;
+          conversationGuardrails: string;
+          requiredQuestions: string;
+          rationale: string[];
+          source: string;
+        };
       };
       if (!previewRes.ok || !preview.optimized) {
         throw new Error(preview.error || "Vorschau fehlgeschlagen.");
@@ -1686,8 +1684,8 @@ export default function HomePage() {
       const rationale = opt.rationale.length ? `\n\nBegruendung:\n- ${opt.rationale.join("\n- ")}` : "";
       const confirmed = confirm(
         `KI-Optimierung fuer "${topic}" (${opt.source}):\n\n` +
-          `Opener: ${opt.opener.slice(0, 180)}${opt.opener.length > 180 ? "..." : ""}\n\n` +
-          `Close: ${opt.close.slice(0, 180)}${opt.close.length > 180 ? "..." : ""}` +
+          `Thema & Nutzen: ${opt.topicSummary.slice(0, 180)}${opt.topicSummary.length > 180 ? "..." : ""}\n\n` +
+          `Verhalten & Ton: ${opt.behavior.slice(0, 180)}${opt.behavior.length > 180 ? "..." : ""}` +
           rationale +
           "\n\nIn die Topic Policy uebernehmen?",
       );
@@ -1712,10 +1710,19 @@ export default function HomePage() {
   }
 
   async function persistPlaybookDraft(draft: TopicPolicyConfig) {
+    const requestPayload = {
+      id: draft.id,
+      topic: draft.topic,
+      topicSummary: draft.topicSummary || "",
+      behavior: draft.behavior || "",
+      conversationGuardrails: draft.conversationGuardrails || "",
+      requiredQuestions: draft.requiredQuestions || "",
+    };
+
     const response = await fetch("/api/topic-policies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(draft),
+      body: JSON.stringify(requestPayload),
     });
     const payload = (await response.json()) as {
       error?: string;
@@ -3157,18 +3164,18 @@ export default function HomePage() {
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Konfiguration</span>
-                        <strong>{countFilledPlaybookFields(activeDraft)}/{PLAYBOOK_EDITABLE_FIELDS.length}</strong>
+                        <strong>{countFilledTopicPolicyFields(activeDraft)}/{TOPIC_POLICY_EDITABLE_FIELDS.length}</strong>
                         <p>aktive Bereiche für dieses Thema</p>
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Pflichtfragen</span>
-                        <strong>{normalizeLineCount(activeDraft.requiredData)}</strong>
-                        <p>einzeln zu stellende Basisdaten-Fragen</p>
+                        <strong>{normalizeLineCount(activeDraft.requiredQuestions)}</strong>
+                        <p>in Terminierung oder Mail zu sichernde Fragen</p>
                       </div>
                       <div className="playbook-overview-card stat">
-                        <span className="playbook-kicker">Einwaende & Fakten</span>
-                        <strong>{normalizeLineCount(activeDraft.objectionResponses) + normalizeLineCount(activeDraft.proofPoints)}</strong>
-                        <p>verfügbare Konter- und Beweisanker</p>
+                        <span className="playbook-kicker">Modell</span>
+                        <strong>4</strong>
+                        <p>klare Steuerfelder pro Thema</p>
                       </div>
                     </div>
 
@@ -3179,22 +3186,22 @@ export default function HomePage() {
 
                     <div className="playbook-grid top-gap">
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>1. Zielbild des Calls</strong> <span className="subtle">(worauf Gloria hinarbeitet)</span></h3>
+                        <h3 className="sub-heading"><strong>1. Worum es bei dem Thema geht</strong> <span className="subtle">(Nutzen und Einordnung)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Definieren Sie den sauberen Erfolgszustand für dieses Thema: Termin, Wiedervorlage,
-                          Qualifizierung oder ein klarer nächster Schritt.
+                          Hier beschreiben Sie fachlich, worum es im Thema geht, welchen Nutzen der Interessent davon hat
+                          und wie Gloria das Thema inhaltlich erklären soll.
                         </p>
                         <textarea
-                          value={activeDraft.callObjective ?? ""}
-                          rows={5}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], callObjective: event.target.value } }))}
+                          value={activeDraft.topicSummary ?? ""}
+                          rows={8}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], topicSummary: event.target.value } }))}
                         />
                       </div>
 
                       <div className="mini-panel playbook-card">
                         <h3 className="sub-heading"><strong>2. Verhalten & Tonalität</strong> <span className="subtle">(wie Gloria führt)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Argumentationslinie, Empathie-Anker, Dramatologie, Sprachstil, Tempo und was sie aktiv betonen soll.
+                          Beschreiben Sie, wie Gloria sprechen, führen und auf den Kunden reagieren soll.
                         </p>
                         <textarea
                           value={activeDraft.behavior ?? ""}
@@ -3206,8 +3213,7 @@ export default function HomePage() {
                       <div className="mini-panel playbook-card">
                         <h3 className="sub-heading"><strong>3. Harte Regeln & Verbote</strong> <span className="subtle">(was Gloria immer oder nie tun darf)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Hier kommen die wirklich relevanten Guardrails hinein: keine Doppelfragen, keine erfundenen Zahlen,
-                          Reihenfolgen, Pflichtformulierungen und Verbotsmuster.
+                          Hier definieren Sie Reihenfolgen, No-Gos, Pflichtverhalten und Grenzen für dieses Thema.
                         </p>
                         <textarea
                           value={activeDraft.conversationGuardrails ?? ""}
@@ -3217,64 +3223,15 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>4. Basisdaten / Pflichtfragen</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
+                        <h3 className="sub-heading"><strong>4. Pflichtfragen in der Terminierungsphase</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Diese Punkte fragt Gloria in der Basisdaten-Phase einzeln ab. Nutzen Sie kurze, klar trennbare Fragen statt Blöcke.
+                          Diese Fragen muss Gloria in der Terminierungs- oder Vorbereitungsphase stellen. Wenn der Kunde sie nicht direkt beantworten möchte,
+                          werden sie in die Terminbestätigungsmail übernommen.
                         </p>
                         <textarea
-                          value={activeDraft.requiredData ?? ""}
+                          value={activeDraft.requiredQuestions ?? ""}
                           rows={10}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredData: event.target.value } }))}
-                        />
-                      </div>
-
-                      <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>5. Zahlen & Fakten</strong> <span className="subtle">(harte Beweisanker)</span></h3>
-                        <p className="subtle" style={{ marginTop: 0 }}>
-                          Ein Beleg pro Zeile. Gloria soll mindestens einen belastbaren Punkt daraus aktiv nutzen, bevor sie in den Termin geht.
-                        </p>
-                        <textarea
-                          value={activeDraft.proofPoints ?? ""}
-                          rows={8}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], proofPoints: event.target.value } }))}
-                        />
-                      </div>
-
-                      <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>6. Einwand-Bibliothek</strong> <span className="subtle">(klare Konter statt Floskeln)</span></h3>
-                        <p className="subtle" style={{ marginTop: 0 }}>
-                          Format pro Zeile: Einwand: Konter-Linie. Kurz, konkret und in echter Vertriebssprache.
-                        </p>
-                        <textarea
-                          value={activeDraft.objectionResponses ?? ""}
-                          rows={9}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))}
-                        />
-                      </div>
-
-                      <div className="mini-panel playbook-card playbook-card-wide">
-                        <h3 className="sub-heading"><strong>7. Fachwissen & Freigaben</strong> <span className="subtle">(welche Aussagen Gloria belastbar nutzen darf)</span></h3>
-                        <p className="subtle" style={{ marginTop: 0 }}>
-                          Hier landen Zahlen-Kontext, erlaubte Aussagen, verbotene Aussagen, Produktlogik und thematische Fakten,
-                          bevor Gloria ins Allgemeine kippt.
-                        </p>
-                        <textarea
-                          value={activeDraft.knowledge ?? ""}
-                          rows={12}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))}
-                        />
-                      </div>
-
-                      <div className="mini-panel playbook-card playbook-card-wide">
-                        <h3 className="sub-heading"><strong>8. Menschliche Übergabe / Transfer</strong> <span className="subtle">(wann Gloria verbinden oder Rückruf zusagen soll)</span></h3>
-                        <p className="subtle" style={{ marginTop: 0 }}>
-                          Regeln für Eskalation zu einem Menschen: wann angeboten wird, welche Formulierung Gloria nutzt,
-                          und was bei fehlgeschlagener Weiterleitung gesagt wird.
-                        </p>
-                        <textarea
-                          value={activeDraft.transferHandling ?? ""}
-                          rows={7}
-                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], transferHandling: event.target.value } }))}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredQuestions: event.target.value } }))}
                         />
                       </div>
                     </div>

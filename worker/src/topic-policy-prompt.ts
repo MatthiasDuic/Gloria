@@ -3,33 +3,10 @@ import { log } from "./log.js";
 
 export type TopicPolicyFields = {
   topic?: string;
-  callObjective?: string;
+  topicSummary?: string;
   behavior?: string;
   conversationGuardrails?: string;
-  requiredData?: string;
-  knowledge?: string;
-  objectionResponses?: string;
-  proofPoints?: string;
-  transferHandling?: string;
-  opener?: string;
-  discovery?: string;
-  objectionHandling?: string;
-  close?: string;
-  aiKeyInfo?: string;
-  consentPrompt?: string;
-  pkvHealthIntro?: string;
-  pkvHealthQuestions?: string;
-  gatekeeperTask?: string;
-  gatekeeperBehavior?: string;
-  decisionMakerTask?: string;
-  decisionMakerBehavior?: string;
-  decisionMakerContext?: string;
-  appointmentGoal?: string;
-  receptionTopicReason?: string;
-  problemBuildup?: string;
-  conceptTransition?: string;
-  appointmentConfirmation?: string;
-  availableAppointmentSlots?: string;
+  requiredQuestions?: string;
 };
 
 export async function loadTopicPolicy(opts: {
@@ -88,24 +65,16 @@ export async function loadTopicPolicy(opts: {
 
 export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topic = (policy.topic || "").trim();
-  const callObjective = (policy.callObjective || "").trim();
+  const topicSummary = (policy.topicSummary || "").trim();
   const behavior = (policy.behavior || "").trim();
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
-  const requiredData = (policy.requiredData || "").trim();
-  const knowledge = (policy.knowledge || "").trim();
-  const objectionResponses = (policy.objectionResponses || "").trim();
-  const proofPoints = (policy.proofPoints || "").trim();
-  const transferHandling = (policy.transferHandling || "").trim();
+  const requiredQuestions = (policy.requiredQuestions || "").trim();
 
   if (
-    !callObjective &&
+    !topicSummary &&
     !behavior &&
     !conversationGuardrails &&
-    !requiredData &&
-    !knowledge &&
-    !objectionResponses &&
-    !proofPoints &&
-    !transferHandling
+    !requiredQuestions
   ) {
     return topic ? `THEMA DIESES CALLS: ${topic}` : "";
   }
@@ -116,8 +85,8 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über dieser Topic Policy. Nutze die Topic Policy als Orientierung für Inhalt und Richtung, aber antworte immer situativ auf die letzte Kundenaussage und nicht als Skript.",
   );
   if (topic) parts.push(`THEMA: ${topic}`);
-  if (callObjective) {
-    parts.push("", "ZIELBILD / ERFOLG DIESES CALLS:", callObjective);
+  if (topicSummary) {
+    parts.push("", "WORUM ES BEI DIESEM THEMA GEHT UND WELCHEN NUTZEN DER INTERESSENT DAVON HAT:", topicSummary);
   }
   if (behavior) {
     parts.push("", "VERHALTEN & TONALITÄT (themenspezifisch):", behavior);
@@ -125,20 +94,13 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   if (conversationGuardrails) {
     parts.push("", "THEMENSPEZIFISCHE GRENZEN & HINWEISE (nicht als Skript vorlesen):", conversationGuardrails);
   }
-  if (requiredData) {
-    parts.push("", "MÖGLICHE VORBEREITUNGSDATEN (freiwillig, erst nach Termin und ausdrücklichem Opt-in; bei Zurückhaltung per Mail anbieten, nie als Terminbedingung darstellen):", requiredData);
-  }
-  if (proofPoints) {
-    parts.push("", "ZAHLEN & FAKTEN (als optionaler inhaltlicher Anker, nur wenn sie zur Kundenaussage passen):", proofPoints);
-  }
-  if (objectionResponses) {
-    parts.push("", "EINWAND-BIBLIOTHEK (nur als fachlicher Hintergrund, nicht wortgetreu und nie als Druckmittel. Bei Skepsis transparent antworten; bei erstem Nein höchstens eine kurze Relevanzfrage, jedes weitere Nein akzeptieren):", objectionResponses);
-  }
-  if (knowledge) {
-    parts.push("", "FACHWISSEN (nutze diese konkreten Fakten, BEVOR du auf Bilder/Metaphern ausweichst):", knowledge);
-  }
-  if (transferHandling) {
-    parts.push("", "UEBERGABE / MENSCHLICHE WEITERLEITUNG:", transferHandling);
+  if (requiredQuestions) {
+    parts.push(
+      "",
+      "PFLICHTFRAGEN IN TERMINIERUNGS-/VORBEREITUNGSPHASE:",
+      "Diese Fragen muessen in der Terminierungs- oder Vorbereitungsphase gestellt werden. Wenn der Kunde sie nicht direkt beantworten moechte oder der Call vorher endet, muessen sie in die Terminbestaetigungsmail aufgenommen werden:",
+      requiredQuestions,
+    );
   }
 
   return parts.join("\n");

@@ -45,11 +45,11 @@ export async function POST(request: Request) {
   const saved = await saveScript(
     body.topic,
     {
-      ...current,
-      opener: result.opener,
-      discovery: result.discovery,
-      objectionHandling: result.objectionHandling,
-      close: result.close,
+      topic: body.topic,
+      topicSummary: result.topicSummary,
+      behavior: result.behavior,
+      conversationGuardrails: result.conversationGuardrails,
+      requiredQuestions: result.requiredQuestions,
     },
     { userId: resolvedUserId },
   );

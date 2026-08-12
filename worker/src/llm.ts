@@ -696,7 +696,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (/normal|ist\s+ja\s+auch\s+normal/.test(text) && state === "need_relevance") {
+  if (/normal|ist\s+ja\s+auch\s+normal/.test(text) && state === "need_interest") {
     return {
       reply: "Genau das sagen viele. Normal klingt harmlos, aber auf die eigene Zahl gerechnet wird es oft erst richtig greifbar. Sind Sie aktuell eher privat oder gesetzlich versichert?",
       hangup: false,
