@@ -1240,9 +1240,17 @@ export function extractConfirmedSlot(text: string): string | null {
   // Uhrzeiten kommen als Wörter ODER als Ziffern ("10:30 Uhr" / "zehn Uhr dreißig").
   // Trailing-Wort nach "Uhr" nur wenn es eine Minutenangabe ist ("dreißig", "fünfzehn" etc.) —
   // NICHT "für", "das", "mit" o.ä.
-  const re = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+(?:fünf|zehn|fünfzehn|zwanzig|fünfundzwanzig|dreißig|fünfunddreißig|vierzig|fünfundvierzig|fünfzig))?)/i;
-  const m = re.exec(text);
-  if (!m) return null;
-  return m[1].trim().replace(/\s+/g, " ");
+  const reWeekday = /\b(?:am\s+)?((?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+(?:fünf|zehn|fünfzehn|zwanzig|fünfundzwanzig|dreißig|fünfunddreißig|vierzig|fünfundvierzig|fünfzig))?)/i;
+  const weekdayMatch = reWeekday.exec(text);
+  if (weekdayMatch) {
+    return weekdayMatch[1].trim().replace(/\s+/g, " ");
+  }
+
+  // Fallback für Formulierungen ohne Wochentag, z. B.
+  // "... den 20. August um 17:30 Uhr ..."
+  const reDateOnly = /\b(((?:(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),?\s+)?)?(?:den\s+)?\d{1,2}\.\s*[A-Za-zÄÖÜäöüß]+[^.?!]*?\bum\s+(?:[a-zäöüß]+|\d{1,2}(?::\d{2})?)\s+Uhr(?:\s+(?:fünf|zehn|fünfzehn|zwanzig|fünfundzwanzig|dreißig|fünfunddreißig|vierzig|fünfundvierzig|fünfzig))?)/i;
+  const dateOnlyMatch = reDateOnly.exec(text);
+  if (!dateOnlyMatch) return null;
+  return dateOnlyMatch[1].trim().replace(/\s+/g, " ");
 }
 

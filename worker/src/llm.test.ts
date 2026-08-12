@@ -26,6 +26,15 @@ test("locks the selected slot from the real confirmation wording", () => {
   );
 });
 
+test("locks slot from 'ich trage ... ein' phrasing", () => {
+  assert.equal(
+    extractConfirmedSlot(
+      "Super, ich trage Donnerstag, den 20. August um 17:30 Uhr für Sie ein.",
+    ),
+    "Donnerstag, den 20. August um 17:30 Uhr",
+  );
+});
+
 test("runs qualification once, requires email, and closes with the locked slot", () => {
   const ctx = newContext({
     callSid: "test-call",

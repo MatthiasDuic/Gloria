@@ -362,6 +362,8 @@ export async function streamReply(
 function sanitizeReplyText(text: string): string {
   let out = text || "";
   out = out.replace(/\blaut\s+pkv-?verband\b/gi, "Erfahrungsgemäß");
+  out = out.replace(/einverst[äa]ndniserkl[äa]rung\s+zur\s+aufzeichnung\s+des\s+termins/gi, "Terminbestätigung");
+  out = out.replace(/aufzeichnung\s+des\s+termins/gi, "Terminbestätigung");
   out = out.replace(/\s+/g, " ").trim();
   return out;
 }
@@ -713,6 +715,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
       `Reihenfolge der noch offenen Fragen: ${pkvData?.missing.join(" → ") || "keine"}.`,
       `KATALOG-SPERRE: Ausschließlich die erste noch offene Frage aus dieser Reihenfolge stellen. Keine Beitragsprognose, keine Sensibilisierung, keine Konzept-Erklärung, keine Terminfrage und keine Wiederholung bereits erfasster oder übersprungener Felder.`,
       `Gesundheitsdaten ruhig und neutral abfragen. Die einmalige Zustimmung gilt für den gesamten Katalog; keine erneute Erlaubnis vor jeder Gesundheitsfrage einholen.`,
+      `In Phase 8 NIEMALS nach einer Aufzeichnung des Termins oder nach einer Einverständniserklärung fragen. Es geht nur um Vorbereitung und anschließend Terminbestätigung per E-Mail.`,
       `ABSOLUT VERBOTEN in Phase 8: Gespräch zusammenfassen, sich verabschieden, hangup=true setzen oder sagen, Herr Duic kläre alles erst im Termin. Solange Angaben offen sind und der Kunde sie nicht auf Mail verschoben hat, bleibst du in diesem Fragenblock.`,
       `WICHTIG: Bei den Gesundheitsfragen (Diagnosen/Behandlungen, Medikamente, stationäre Aufenthalte, psychische Behandlungen, Zähne/Zahnersatz, Allergien) gilt ein "Nein" als VOLLSTÄNDIGE und gültige Antwort. Kein Nachhaken, keine Umformulierung derselben Frage - sofort zur nächsten Frage übergehen.`,
       `Körpergröße und Gewicht als getrennte Fragen stellen. Nennt der Kunde freiwillig beides in einer Antwort, beide übernehmen und Gewicht NICHT erneut fragen.`,
@@ -1063,6 +1066,8 @@ function collectPkvData(ctx: CallContext): {
 function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnOutput | null {
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herrn Duic";
+  const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  const phase = inferConversationPhase(ctx);
   const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
 
   const askedBriefPermission =
@@ -1070,6 +1075,17 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
       latestAssistant,
     );
   const hadOwnerIntro = /ich\s+rufe\s+im\s+auftrag\s+von/.test(ctx.transcript.map((turn) => turn.text.toLowerCase()).join(" "));
+
+  const shortAssent = /^(?:gut|ok(?:ay)?|ja|gern(?:e)?|passt|in\s+ordnung|mhm|joa?)\.?\s*$/i.test(userText.trim());
+  if (askedBriefPermission && shortAssent && phase <= 4) {
+    return {
+      reply: isPkv
+        ? "Danke. Wie haben Sie die Beitragsentwicklung bisher erlebt - eher auffällig oder eher nebenbei?"
+        : "Danke. Was ist bei diesem Thema für Sie aktuell der wichtigste Punkt?",
+      hangup: false,
+      transfer: false,
+    };
+  }
 
   const confirmsConversation = /\b(k[öo]nnen\s+gerne\s+miteinander\s+sprechen|wir\s+k[öo]nnen\s+gerne\s+miteinander\s+sprechen|ja\s*,?\s*gerne|gern\b|nat[üu]rlich\b|klar\b)\b/i.test(text);
   if (confirmsConversation && askedBriefPermission) {
