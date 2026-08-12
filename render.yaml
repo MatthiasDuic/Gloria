@@ -30,7 +30,7 @@ services:
       - key: LLM_FIRST_TOKEN_TIMEOUT_MS
         value: 1600
       - key: LLM_EARLY_FLUSH_CHARS
-        value: 100
+        value: 160
       - key: LLM_COMPACT_PROMPT
         value: 1
       - key: TURN_FIRST_AUDIO_SLO_MS
@@ -44,15 +44,15 @@ services:
       - key: ELEVENLABS_MODEL
         value: eleven_multilingual_v2
       - key: ELEVENLABS_STABILITY
-        value: 0.5
+        value: 0.42
       - key: ELEVENLABS_SIMILARITY
         value: 0.9
       - key: ELEVENLABS_STYLE
-        value: 0.25
+        value: 0.38
       - key: ELEVENLABS_SPEED
-        value: 0.94
+        value: 0.92
       - key: ELEVENLABS_SPEAKER_BOOST
-        value: false
+        value: true
       - key: ELEVENLABS_LATENCY_MODE
         value: 1
       - key: DEEPGRAM_MODEL

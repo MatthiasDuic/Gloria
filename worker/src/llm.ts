@@ -132,7 +132,7 @@ export async function streamReply(
   const maxTokens = parseEnvInt("LLM_MAX_TOKENS", 105, 60, 220);
   const timeoutMs = parseEnvInt("LLM_TIMEOUT_MS", 7000, 3500, 20000);
   const firstTokenTimeoutMs = parseEnvInt("LLM_FIRST_TOKEN_TIMEOUT_MS", 1600, 700, 5000);
-  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 100, 24, 400);
+  const earlyFlushChars = parseEnvInt("LLM_EARLY_FLUSH_CHARS", 160, 24, 400);
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: buildSystemPrompt(ctx) },
@@ -176,8 +176,10 @@ export async function streamReply(
     const out = pendingFlush.trim();
     pendingFlush = "";
     if (out.length > 0) {
+      const filtered = enforceRealtimeReplyPolicy(ctx, userText, sanitizeReplyText(out));
+      if (!filtered) return;
       try {
-        onSentence(out);
+        onSentence(filtered);
       } catch (err) {
         log.error("llm.onSentence_failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -303,7 +305,8 @@ export async function streamReply(
     }
 
     let reply = replyText.trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
-    reply = sanitizeReplyText(reply);
+    reply = enforceRealtimeReplyPolicy(ctx, userText, sanitizeReplyText(reply)) ||
+      "Entschuldigung, könnten Sie das bitte wiederholen?";
     if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(reply)) {
       reply = stripConsentQuestion(reply);
     }
@@ -324,12 +327,19 @@ export async function streamReply(
       if (recovered) {
         if (recovered.reply?.trim()) {
           try {
-            onSentence(sanitizeReplyText(recovered.reply.trim()));
+            const recoveredFiltered = enforceRealtimeReplyPolicy(
+              ctx,
+              userText,
+              sanitizeReplyText(recovered.reply.trim()),
+            );
+            if (recoveredFiltered) onSentence(recoveredFiltered);
           } catch {
             // ignore callback issues in fallback path
           }
         }
-        recovered.reply = sanitizeReplyText(recovered.reply);
+        recovered.reply =
+          enforceRealtimeReplyPolicy(ctx, userText, sanitizeReplyText(recovered.reply)) ||
+          "Einen kurzen Moment bitte. Worum geht es Ihnen genau?";
         if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(recovered.reply)) {
           recovered.reply = stripConsentQuestion(recovered.reply);
         }
@@ -337,9 +347,12 @@ export async function streamReply(
       }
     }
 
-    const fallbackReply = sanitizeReplyText(
-      replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?",
-    );
+    const fallbackReply =
+      enforceRealtimeReplyPolicy(
+        ctx,
+        userText,
+        sanitizeReplyText(replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?"),
+      ) || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?";
     if (fallbackReply) {
       try {
         onSentence(fallbackReply);
@@ -366,6 +379,67 @@ function sanitizeReplyText(text: string): string {
   out = out.replace(/aufzeichnung\s+des\s+termins/gi, "Terminbestätigung");
   out = out.replace(/\s+/g, " ").trim();
   return out;
+}
+
+function enforceRealtimeReplyPolicy(ctx: CallContext, userText: string, text: string): string {
+  let out = text.trim();
+  if (!out) return "";
+
+  const phase = inferConversationPhase(ctx);
+  const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  if (isPkv && phase <= 6 && containsEarlySchedulingQuestion(out) && !isPkvSchedulingReady(ctx)) {
+    out = buildPkvDiscoveryQuestion(ctx, userText);
+  }
+  return out;
+}
+
+function containsEarlySchedulingQuestion(text: string): boolean {
+  return /\b(termin|vormittag|nachmittag|welcher\s+tag|wann\s+passt|w[üu]rde\s+.*\stermin|h[äa]tten\s+sie\s+interesse\s+an\s+einem\s+termin)\b/i.test(
+    text,
+  );
+}
+
+function isPkvSchedulingReady(ctx: CallContext): boolean {
+  const userText = ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" \n ");
+  const assistantText = ctx.transcript
+    .filter((turn) => turn.role === "assistant")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" \n ");
+
+  const insuranceKnown = /\b(privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/.test(
+    userText,
+  );
+  const contributionKnown =
+    /\b(?:\d{2,4}(?:[.,:]\d{1,2})?)\b[^\n.?!]{0,16}\b(?:euro|€)\b/.test(userText) ||
+    /\b(?:beitrag|kosten)\b[^\n.?!]{0,24}\b(?:euro|€|tausend|hundert)\b/.test(userText);
+  const projectionGiven =
+    /zehn\s+jahr|10\s+jahr|bis\s+zum\s+ruhend?stand|hochrechn|projektion|beitragsprognose/.test(
+      assistantText,
+    );
+  return insuranceKnown && contributionKnown && projectionGiven;
+}
+
+function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {
+  const userHistory = `${ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text)
+    .join(" ")} ${userText}`.toLowerCase();
+
+  const insuranceKnown = /\b(privat|pkv|gesetzlich|gkv)\b/.test(userHistory);
+  const contributionKnown =
+    /\b(?:\d{2,4}(?:[.,:]\d{1,2})?)\b[^\n.?!]{0,16}\b(?:euro|€)\b/.test(userHistory) ||
+    /\b(beitrag|kosten)\b[^\n.?!]{0,24}\b(?:tausend|hundert)\b/.test(userHistory);
+
+  if (!insuranceKnown) {
+    return "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell eher privat oder gesetzlich versichert?";
+  }
+  if (!contributionKnown) {
+    return "Danke, das ist ein wichtiger Punkt. Wenn Sie möchten: In welcher Größenordnung liegt Ihr aktueller Monatsbeitrag?";
+  }
+  return "Danke. Wenn Sie mir die Zahl grob nennen, rechne ich Ihnen direkt vor, wie das in zehn Jahren aussehen kann.";
 }
 
 function consentAlreadyGranted(ctx: CallContext): boolean {
@@ -1082,6 +1156,22 @@ function buildDeterministicTrustReply(ctx: CallContext, userText: string): TurnO
       reply: isPkv
         ? "Danke. Wie haben Sie die Beitragsentwicklung bisher erlebt - eher auffällig oder eher nebenbei?"
         : "Danke. Was ist bei diesem Thema für Sie aktuell der wichtigste Punkt?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (isPkv && /beitr[aä]g(?:e)?\s+steig|steig(?:en|t)\s+.*beitr[aä]g/.test(text) && phase <= 6) {
+    return {
+      reply: "Genau das hoere ich sehr oft. Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (isPkv && /was\s+soll\s+bei\s+diesem\s+termin|was\s+wird\s+gemacht|wof[üu]r\s+ist\s+der\s+termin/.test(text)) {
+    return {
+      reply: `Gute Frage: ${owner} macht mit Ihnen eine persoenliche Vertragsanalyse und eine realistische Zehn-Jahres-Prognose, damit Sie Klarheit und konkrete Stellschrauben bekommen. Wenn Sie moechten: In welcher Groessenordnung liegt Ihr Monatsbeitrag aktuell?`,
       hangup: false,
       transfer: false,
     };
