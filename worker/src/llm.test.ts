@@ -364,11 +364,10 @@ test("does not repeat the starting-contribution bridge after a partial answer", 
 
   const reply = buildDeterministicPkvFlowReply(ctx, "Jahr und man merkt das schon.");
   assert.ok(reply);
-  assert.match(reply.reply, /Bei welchem Beitrag liegen Sie aktuell/);
-  assert.doesNotMatch(reply.reply, /Herr Duic setzt genau da an/);
+  assert.match(reply.reply, /detailliert angeschaut/);
 });
 
-test("treats the current contribution follow-up as the current contribution", () => {
+test("does not ask for the current contribution before the insurance question", () => {
   const ctx = newContext({
     callSid: "test-pkv-current-follow-up",
     streamSid: "test-stream",
@@ -379,12 +378,12 @@ test("treats the current contribution follow-up as the current contribution", ()
     { role: "user", text: "Die Beiträge steigen jedes Jahr.", at: 2 },
     { role: "assistant", text: "Mit welchem Beitrag haben Sie angefangen?", at: 3 },
     { role: "user", text: "Das weiß ich nicht mehr.", at: 4 },
-    { role: "assistant", text: "Bei welchem Beitrag liegen Sie aktuell ungefähr?", at: 5 },
+    { role: "assistant", text: "Haben Sie sich das schon einmal detailliert angeschaut?", at: 5 },
   );
 
-  const reply = buildDeterministicPkvFlowReply(ctx, "Neunhundert Euro.");
+  const reply = buildDeterministicPkvFlowReply(ctx, "Nein, bisher.");
   assert.ok(reply);
-  assert.match(reply.reply, /privat oder gesetzlich|zehn Jahren|Prognose/i);
+  assert.match(reply.reply, /privat oder gesetzlich/);
   assert.doesNotMatch(reply.reply, /Bei welchem Beitrag liegen Sie aktuell/);
 });
 
