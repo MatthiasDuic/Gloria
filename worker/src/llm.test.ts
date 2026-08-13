@@ -98,6 +98,47 @@ test("runs qualification once, requires email, and closes with the locked slot",
   assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
+test("asks a health detail question after an affirmative allergy answer", () => {
+  const ctx = newContext({
+    callSid: "test-health-follow-up",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Für die Vorbereitung würde ich Ihnen jetzt noch einige kurze Fragen stellen.", at: 1 },
+    { role: "user", text: "Ja.", at: 2 },
+  );
+
+  const questions = [
+    "Wie lautet Ihr Geburtsdatum?",
+    "Wie groß sind Sie?",
+    "Verraten Sie mir noch Ihr aktuelles Gewicht?",
+    "Bei welchem Krankenversicherer sind Sie aktuell versichert?",
+    "Wie hoch ist Ihr aktueller Monatsbeitrag?",
+    "Gibt es aktuell bekannte Diagnosen oder laufende Behandlungen?",
+    "Nehmen Sie aktuell regelmäßig Medikamente ein?",
+    "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
+    "Gab es in den letzten zehn Jahren psychische Behandlungen oder entsprechende Diagnosen?",
+    "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
+    "Sind bei Ihnen Allergien bekannt?",
+  ];
+
+  for (const question of questions) {
+    const reply = buildDeterministicPostBookingReply(ctx);
+    assert.ok(reply);
+    assert.equal(reply.reply, question);
+    ctx.transcript.push(
+      { role: "assistant", text: reply.reply, at: Date.now() },
+      { role: "user", text: question.includes("Allergien") ? "Ja." : "Nein.", at: Date.now() },
+    );
+  }
+
+  const allergyFollowUp = buildDeterministicPostBookingReply(ctx);
+  assert.ok(allergyFollowUp);
+  assert.equal(allergyFollowUp.reply, "Welche Allergien sind bei Ihnen bekannt?");
+});
+
 test("continues with the first preparation question without consent reply", () => {
   const ctx = newContext({
     callSid: "test-post-booking-no-consent-reply",

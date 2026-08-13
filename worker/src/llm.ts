@@ -1658,6 +1658,15 @@ const PKV_QUESTIONS: Record<PkvField, string> = {
   Allergien: "Sind bei Ihnen Allergien bekannt?",
 };
 
+const PKV_FOLLOW_UP_QUESTIONS: Partial<Record<PkvField, string>> = {
+  "Diagnosen/Behandlungen": "Welche Diagnosen oder laufenden Behandlungen liegen aktuell vor?",
+  Medikamente: "Welche Medikamente nehmen Sie regelmäßig ein?",
+  "stationäre Aufenthalte": "Weshalb waren Sie stationär im Krankenhaus und wann war das?",
+  "psychische Behandlungen": "Um welche Behandlung oder Diagnose ging es dabei und wann war das?",
+  "Zähne/Zahnersatz": "Welche Zähne oder welcher Zahnersatz sind konkret betroffen?",
+  Allergien: "Welche Allergien sind bei Ihnen bekannt?",
+};
+
 export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput | null {
   if (!ctx.confirmedSlotPhrase) return null;
 
@@ -1691,12 +1700,23 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
       };
     }
 
-    if (basisDataConsent === "granted" && pkvData.missing.length > 0) {
-      return {
-        reply: PKV_QUESTIONS[pkvData.missing[0]],
-        hangup: false,
-        transfer: false,
-      };
+    if (basisDataConsent === "granted") {
+      const followUpQuestion = getPkvHealthFollowUpQuestion(ctx);
+      if (followUpQuestion) {
+        return {
+          reply: followUpQuestion,
+          hangup: false,
+          transfer: false,
+        };
+      }
+
+      if (pkvData.missing.length > 0) {
+        return {
+          reply: PKV_QUESTIONS[pkvData.missing[0]],
+          hangup: false,
+          transfer: false,
+        };
+      }
     }
   }
 
@@ -1764,6 +1784,44 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     hangup: false,
     transfer: false,
   };
+}
+
+function getPkvHealthFollowUpQuestion(ctx: CallContext): string | undefined {
+  const healthFields = new Set<PkvField>([
+    "Diagnosen/Behandlungen",
+    "Medikamente",
+    "stationäre Aufenthalte",
+    "psychische Behandlungen",
+    "Zähne/Zahnersatz",
+    "Allergien",
+  ]);
+
+  for (let index = ctx.transcript.length - 1; index >= 0; index -= 1) {
+    const turn = ctx.transcript[index];
+    if (turn.role !== "assistant") continue;
+
+    const field = detectAskedPkvField(turn.text.toLowerCase());
+    if (!field || !healthFields.has(field)) continue;
+
+    const answer = ctx.transcript
+      .slice(index + 1)
+      .find((entry) => entry.role === "user")?.text.trim() || "";
+    if (!answer || !isAffirmativeHealthAnswer(answer)) return undefined;
+
+    const followUp = PKV_FOLLOW_UP_QUESTIONS[field];
+    if (!followUp) return undefined;
+
+    const followUpAlreadyAsked = ctx.transcript
+      .slice(index + 1)
+      .some((entry) => entry.role === "assistant" && entry.text.includes(followUp));
+    return followUpAlreadyAsked ? undefined : followUp;
+  }
+
+  return undefined;
+}
+
+function isAffirmativeHealthAnswer(answer: string): boolean {
+  return /^(?:ja|jawohl|ja[,!\s]|doch|leider\s+ja|einige|mehrere|ein paar)\b/i.test(answer.trim());
 }
 
 function isSuspiciousSpokenEmail(email: string): boolean {
