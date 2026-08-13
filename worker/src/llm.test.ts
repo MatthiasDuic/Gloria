@@ -224,10 +224,10 @@ test("parses spoken euro amounts deterministically", () => {
 
 test("builds a concrete ten year projection line", () => {
   const line = buildTenYearProjectionLine(1280);
-  assert.match(line, /1280 Euro/);
+  assert.match(line, /eintausendzweihundertachtzig Euro/);
   assert.match(line, /zehn Jahren/);
-  assert.match(line, /rund 1900 Euro/);
-  assert.match(line, /etwa 620 Euro mehr/);
+  assert.match(line, /rund eintausendneunhundert Euro/);
+  assert.match(line, /etwa sechshundertzwanzig Euro mehr/);
 });
 
 test("builds PKV relevance before asking insurance questions", () => {
@@ -253,12 +253,12 @@ test("builds PKV relevance before asking insurance questions", () => {
 
   reply = buildDeterministicPkvFlowReply(ctx, "Das merkt man schon.");
   assert.ok(reply);
-  assert.match(reply.reply, /mit welchem Beitrag Sie einmal angefangen haben/);
+  assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
   ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
 
   reply = buildDeterministicPkvFlowReply(ctx, "Das weiß ich nicht mehr.");
   assert.ok(reply);
-  assert.match(reply.reply, /wo die Reise hingeht/);
+  assert.match(reply.reply, /prognostiziert/);
   assert.match(reply.reply, /detailliert angeschaut/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
@@ -281,7 +281,7 @@ test("stream path keeps PKV structure after contribution-rise response", async (
 
   const segments: string[] = [];
   const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr und", (segment) => segments.push(segment));
-  assert.equal(reply.reply, "Das ist nachvollziehbar. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?");
+  assert.match(reply.reply, /Wenn Sie zurückblicken/);
   assert.deepEqual(segments, [reply.reply]);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
@@ -374,14 +374,45 @@ test("offers and locks only supplied calendar slots", () => {
 
   let reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
   assert.ok(reply);
+  assert.match(reply.reply, /echter Mehrwert/);
+  ctx.transcript.push({ role: "assistant", text: reply.reply, at: 7 }, { role: "user", text: "Ja, gerne.", at: 8 });
+  reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
+  assert.ok(reply);
   assert.match(reply.reply, /Mittwoch, den neunzehnten August um zehn Uhr/);
   assert.match(reply.reply, /Freitag, den einundzwanzigsten August um elf Uhr/);
   assert.doesNotMatch(reply.reply, /Donnerstag, den zwanzigsten/);
 
-  ctx.transcript.push({ role: "assistant", text: reply.reply, at: 7 }, { role: "user", text: "Den zweiten.", at: 8 });
+  ctx.transcript.push({ role: "assistant", text: reply.reply, at: 9 }, { role: "user", text: "Den zweiten.", at: 10 });
   reply = buildDeterministicPkvFlowReply(ctx, "Den zweiten.");
   assert.ok(reply);
   assert.match(reply.reply, /Freitag, den einundzwanzigsten August um elf Uhr/);
+
+});
+
+test("selects a supplied slot from spoken weekday and time", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-spoken-slot",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "- Donnerstag, den zwanzigsten August um zwölf Uhr dreißig",
+      "- Donnerstag, den zwanzigsten August um vierzehn Uhr",
+    ].join("\n"),
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell privat oder gesetzlich versichert?", at: 0 },
+    { role: "user", text: "Privat.", at: 0.5 },
+    { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 0.75 },
+    { role: "user", text: "Neunhundertsiebzig Euro.", at: 0.9 },
+    { role: "assistant", text: "Bei neunhundertsiebzig Euro liegt der Beitrag in zehn Jahren voraussichtlich höher. Stellen Sie sich vor: Sie und Herr Duic sitzen nächste Woche zusammen. Wäre diese Klarheit für Sie ein echter Mehrwert?", at: 1 },
+    { role: "user", text: "Ja, gerne.", at: 1.5 },
+    { role: "assistant", text: "Wie wäre es mit Donnerstag, den zwanzigsten August um zwölf Uhr dreißig oder Donnerstag, den zwanzigsten August um vierzehn Uhr?", at: 2 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Vierzehn Uhr am Donnerstag geht.");
+  assert.ok(reply);
+  assert.match(reply.reply, /notiere/);
+  assert.match(reply.reply, /vierzehn Uhr/);
 });
 
 test("never asks to choose unnamed appointment slots", () => {
@@ -432,7 +463,7 @@ test("runs a complete PKV acquisition scenario through structured state", async 
   assert.match(await turn("Mit sechshundert Euro."), /detailliert angeschaut/);
   assert.match(await turn("Nein."), /privat oder gesetzlich/);
   assert.match(await turn("Gesetzlich."), /aktueller Monatsbeitrag/);
-  assert.match(await turn("Tausendzweihundertachtzig Euro."), /1280 Euro/);
+  assert.match(await turn("Tausendzweihundertachtzig Euro."), /eintausendzweihundertachtzig Euro/);
   assert.equal(ctx.flow.pkvData.currentContribution, 1280);
   assert.equal(ctx.flow.projectionDelivered, true);
   assert.equal(ctx.flow.awaiting, "projection_interest");
@@ -467,9 +498,10 @@ test("uses concrete projection after captured PKV contribution", () => {
 
   const reply = buildDeterministicPkvFlowReply(ctx, "Tausendzweihundertachtzig Euro.");
   assert.ok(reply);
-  assert.match(reply.reply, /1280 Euro/);
-  assert.match(reply.reply, /rund 1900 Euro/);
-  assert.match(reply.reply, /Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich\?/);
+  assert.match(reply.reply, /eintausendzweihundertachtzig Euro/);
+  assert.match(reply.reply, /rund eintausendneunhundert Euro/);
+  assert.match(reply.reply, /drei aufeinander aufbauende Gespräche/);
+  assert.match(reply.reply, /echter Mehrwert/);
 });
 
 test("answers PKV value objection with concrete benefit before scheduling", () => {

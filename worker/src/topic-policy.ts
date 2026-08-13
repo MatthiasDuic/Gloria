@@ -256,7 +256,7 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
       next.awaiting = "insurance_status";
     } else if (/aktuellen? Monatsbeitrag|derzeitigen? Monatsbeitrag|wie hoch.*Beitrag/i.test(text)) {
       next.awaiting = "current_contribution";
-    } else if (/Zehn-Jahres-Prognose.*hilfreich|Beitragsprognose.*hilfreich/i.test(text)) {
+    } else if (/Zehn-Jahres-Prognose.*hilfreich|Beitragsprognose.*hilfreich|echter\s+Mehrwert|diese\s+Klarheit/i.test(text)) {
       next.awaiting = "projection_interest";
     } else if (/Vormittag.*oder.*Nachmittag/i.test(text)) {
       next.awaiting = "appointment_preference";
@@ -272,7 +272,7 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
     next.lastAssistantSignal = "projection";
   }
 
-  if (/w[äa]re\s+.*hilfreich|sinnvoll\s+f[üu]r\s+sie|grunds[äa]tzlich\s+hilfreich/i.test(text)) {
+  if (/w[äa]re\s+.*hilfreich|sinnvoll\s+f[üu]r\s+sie|grunds[äa]tzlich\s+hilfreich|echter\s+Mehrwert|diese\s+Klarheit/i.test(text)) {
     if (next.topicKind === "pkv" && next.stage === "need_projection") next.stage = "need_interest";
     next.lastAssistantSignal = "interest_question";
   }

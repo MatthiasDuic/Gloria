@@ -473,12 +473,12 @@ function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
   const projectionGiven = hasCurrentProjection(ctx);
   if (!projectionGiven) return "need_projection";
 
-  const interestAsked = /w[äa]re\s+.*(?:hilfreich|hilfreich)|sinnvoll\s+f[üu]r\s+sie|sollen\s+wir\s+uns\s+das\s+anschauen/.test(
+  const interestAsked = /w[äa]re\s+.*(?:hilfreich|interessant|mehrwert)|sinnvoll\s+f[üu]r\s+sie|sollen\s+wir\s+uns\s+das\s+anschauen|echter\s+mehrwert|diese\s+klarheit/.test(
     assistantHistory,
   );
   const interestQuestionIndex = [...ctx.transcript]
     .map((turn, index) => ({ turn, index }))
-    .filter(({ turn }) => turn.role === "assistant" && /w[äa]re\s+.*(?:hilfreich|interessant)|sinnvoll\s+f[üu]r\s+sie/.test(turn.text.toLowerCase()))
+    .filter(({ turn }) => turn.role === "assistant" && /w[äa]re\s+.*(?:hilfreich|interessant)|sinnvoll\s+f[üu]r\s+sie|echter\s+mehrwert|diese\s+klarheit/.test(turn.text.toLowerCase()))
     .at(-1)?.index;
   const interestAnswer = interestQuestionIndex === undefined
     ? ""
@@ -610,7 +610,29 @@ export function buildTenYearProjectionLine(amount: number): string {
   const monthlyIncrease = futureMonthly - amount;
   const roundedFuture = roundToNearest(futureMonthly, 10);
   const roundedIncrease = roundToNearest(monthlyIncrease, 10);
-  return `Wenn man von rund vier Prozent pro Jahr ausgeht, lägen ${amount} Euro in zehn Jahren bei rund ${roundedFuture} Euro im Monat - also etwa ${roundedIncrease} Euro mehr pro Monat.`;
+  return `Wenn man von rund vier Prozent pro Jahr ausgeht, lägen ${numberToGermanWords(amount)} Euro in zehn Jahren bei rund ${numberToGermanWords(roundedFuture)} Euro im Monat - also etwa ${numberToGermanWords(roundedIncrease)} Euro mehr pro Monat.`;
+}
+
+function numberToGermanWords(value: number): string {
+  const units = ["null", "ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"];
+  const teens = ["zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn"];
+  const tens = ["", "", "zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig", "siebzig", "achtzig", "neunzig"];
+  const underHundred = (number: number): string => {
+    if (number < 10) return units[number];
+    if (number < 20) return teens[number - 10];
+    const ten = Math.floor(number / 10);
+    const unit = number % 10;
+    return unit ? `${units[unit]}und${tens[ten]}` : tens[ten];
+  };
+  if (value < 100) return underHundred(value);
+  if (value < 1000) {
+    const hundreds = Math.floor(value / 100);
+    const rest = value % 100;
+    return `${hundreds === 1 ? "ein" : units[hundreds]}hundert${rest ? underHundred(rest) : ""}`;
+  }
+  const thousands = Math.floor(value / 1000);
+  const rest = value % 1000;
+  return `${thousands === 1 ? "ein" : numberToGermanWords(thousands)}tausend${rest ? numberToGermanWords(rest) : ""}`;
 }
 
 function roundToNearest(value: number, step: number): number {
@@ -683,7 +705,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!isDiscoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
-      reply: "Das ist nachvollziehbar. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?",
+      reply: "Das ist nachvollziehbar. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind.",
       hangup: false,
       transfer: false,
     };
@@ -691,7 +713,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!isDiscoveryObjection && /erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory) && !/schon einmal.*(?:detailliert|detailiert).*angeschaut|wo\s+die\s+reise\s+hingeht/.test(assistantHistory)) {
     return {
-      reply: `${owner} schaut sich Ihre Zahlen an und zeigt Ihnen, wo die Reise hingeht, wenn sich die Entwicklung so fortsetzt wie bisher. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
       transfer: false,
     };
@@ -746,7 +768,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (state === "need_insurance") {
     return {
-      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };
@@ -760,7 +782,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     return {
       reply: contributionQuestionAsked
         ? "Danke. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
-        : "Danke, das ist ein wichtiger Punkt. Wenn Sie die Größenordnung nennen möchten, kann ich Ihnen direkt zeigen, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Wie hoch ist Ihr aktueller Monatsbeitrag?",
+        : "Danke, das ist ein wichtiger Punkt. Wenn Sie mir Ihren aktuellen Beitrag nennen, kann ich Ihnen direkt prognostizieren, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Wie hoch ist Ihr aktueller Monatsbeitrag?",
       hangup: false,
       transfer: false,
     };
@@ -772,7 +794,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
       ? buildTenYearProjectionLine(amount)
       : "Danke, in dieser Größenordnung entsteht über zehn Jahre oft ein spürbarer Mehrbetrag.";
     return {
-      reply: `${line} Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?`,
+      reply: `${line} Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des individuellen Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
       hangup: false,
       transfer: false,
     };
@@ -796,6 +818,16 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (state === "ready_for_schedule") {
     const offeredSlots = extractFreeSlotPhrases(ctx.freeSlotsPrompt);
     const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
+    const hasAppointmentBridge = ctx.transcript.some(
+      (turn) => turn.role === "assistant" && /kein(?:en)?\s+schnellabschluss|drei\s+(?:termine|gespräche)|ersten?\s+termin.*analyse/i.test(turn.text),
+    );
+    if (!hasAppointmentBridge && /zehn\s+jahr|prognose|hochrechn/i.test(latestAssistant.toLowerCase())) {
+      return {
+        reply: `Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht dabei ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
+        hangup: false,
+        transfer: false,
+      };
+    }
     const offeredInLatestReply = offeredSlots.filter((slot) => latestAssistant.includes(slot));
     if (offeredInLatestReply.length >= 2) {
       const selected = selectOfferedSlot(latestAssistant, userText, offeredSlots);
@@ -853,8 +885,16 @@ function extractFreeSlotPhrases(prompt?: string): string[] {
   if (!prompt) return [];
   return prompt
     .split("\n")
-    .map((line) => line.match(/^\s*-\s+(.+?)\s*$/)?.[1]?.trim() || "")
+    .map((line) => normalizeSpokenSlot(line.match(/^\s*-\s+(.+?)\s*$/)?.[1]?.trim() || ""))
     .filter(Boolean);
+}
+
+function normalizeSpokenSlot(slot: string): string {
+  return slot
+    .replace(/\b(\d{1,2})\.\s+([A-Za-zÄÖÜäöü]+)\b/g, (_, day, month) => `${numberToGermanWords(Number(day))}. ${month}`)
+    .replace(/\b(\d{1,2}):([0-5]\d)\s*uhr\b/gi, (_, hour, minute) => `${numberToGermanWords(Number(hour))} Uhr ${numberToGermanWords(Number(minute))}`)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractSlotHour(slot: string): number | undefined {
@@ -875,9 +915,10 @@ function selectOfferedSlot(latestAssistant: string, userText: string, offeredSlo
   if (offered.length < 2) return undefined;
   if (/\b(?:der|den)\s+erste[nr]?\b|\berste[nr]?\b/i.test(lowerUser)) return offered[0];
   if (/\b(?:der|den)\s+zweite[nr]?\b|\bzweite[nr]?\b/i.test(lowerUser)) return offered[1];
+  if (/der\s+sp[äa]tere|sp[äa]tere[nr]?\b/i.test(lowerUser)) return offered[1];
   return offered.find((slot) => {
     const hour = extractSlotHour(slot);
-    return hour !== undefined && new RegExp(`\\b${hour}\\b`).test(lowerUser);
+    return hour !== undefined && (new RegExp(`\\b${hour}\\b`).test(lowerUser) || lowerUser.includes(numberToGermanWords(hour)));
   });
 }
 

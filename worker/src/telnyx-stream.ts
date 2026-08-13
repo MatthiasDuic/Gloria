@@ -1197,17 +1197,17 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   const topic = (ctx.topic || "").toLowerCase();
   let topicLine: string;
   if (/krank|pkv|gkv|beitr/i.test(topic)) {
-    topicLine = `Kurzer Anlass: Es geht um eine kurze Einordnung zur privaten Krankenversicherung. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `Es geht um die langfristige Entwicklung Ihrer Krankenversicherungsbeiträge. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/bav|altersvorsorge|rente|pension/i.test(topic)) {
-    topicLine = `Kurzer Anlass: Es geht um Ihre betriebliche Altersvorsorge. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `Es geht um Ihre betriebliche Altersvorsorge. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/cyber|haftpflicht|gewerbe|inhalt/i.test(topic)) {
-    topicLine = `Kurzer Anlass: Es geht um einen kurzen Abgleich Ihrer gewerblichen Absicherung. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `Es geht um einen kurzen Abgleich Ihrer gewerblichen Absicherung. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (/strom|gas|energie/i.test(topic)) {
-    topicLine = `Kurzer Anlass: Es geht um Ihre Energiekosten. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `Es geht um Ihre Energiekosten. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else if (ctx.topic && ctx.topic.trim().length > 0) {
-    topicLine = `Kurzer Anlass: Es geht um ${ctx.topic.trim()}. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `Es geht um ${ctx.topic.trim()}. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   } else {
-    topicLine = `Kurzer Anlass: ${owner} hat eine kurze fachliche Einordnung für Sie. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
+    topicLine = `${owner} hat eine kurze fachliche Einordnung für Sie. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?`;
   }
 
   // Kurze, natürliche Begrüßung mit offener Abschlussfrage.
