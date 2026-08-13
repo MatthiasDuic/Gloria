@@ -509,7 +509,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
    * deutlich zu senken. Segmentgrenzen werden durch kurze Rampen geglättet,
    * um Klick-Artefakte beim Wechsel zu minimieren.
    */
-  const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean }> => {
+  const streamAndSpeak = async (userText: string): Promise<{ reply: string; hangup: boolean; transfer: boolean; confirmedSlot?: boolean }> => {
     if (!ctx) return { reply: "", hangup: false, transfer: false };
     const callSidForTurn = ctx.callSid;
     const slotWasConfirmedBeforeTurn = Boolean(ctx.confirmedSlotPhrase);
@@ -524,7 +524,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     const collectedSegments: string[] = [];
     const segmentQueue: string[] = [];
-    let result: { reply: string; hangup: boolean; transfer: boolean } = {
+    let result: { reply: string; hangup: boolean; transfer: boolean; confirmedSlot?: boolean } = {
       reply: "",
       hangup: false,
       transfer: false,
@@ -731,7 +731,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
 
     const confirmedSlotThisTurn = !slotWasConfirmedBeforeTurn && Boolean(ctx.confirmedSlotPhrase);
     clearTimeout(audioSloTimer);
-    return confirmedSlotThisTurn ? { ...result, hangup: false } : result;
+    return confirmedSlotThisTurn ? { ...result, hangup: false, confirmedSlot: true } : result;
   };
 
   const handleUserUtterance = async (userText: string) => {
@@ -826,6 +826,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       }
 
       const reply = await streamAndSpeak(userText);
+
+      // Nach der Terminbestätigung braucht die kurze Vorbereitungsankündigung
+      // keine Kundenantwort. Direkt danach folgt die erste Basisfrage.
+      if (reply.confirmedSlot && ws.readyState === ws.OPEN) {
+        await streamAndSpeak("");
+      }
 
       if (reply.transfer) {
         log.info("turn.transfer", { callSid: ctx.callSid });

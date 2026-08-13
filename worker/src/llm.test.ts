@@ -98,6 +98,22 @@ test("runs qualification once, requires email, and closes with the locked slot",
   assert.match(reply.reply, /Auf Wiederhören!/);
 });
 
+test("continues with the first preparation question without consent reply", () => {
+  const ctx = newContext({
+    callSid: "test-post-booking-no-consent-reply",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "private Krankenversicherung",
+  });
+
+  const preparation = nextReply(ctx);
+  assert.match(preparation.reply, /einige kurze Fragen/);
+  appendExchange(ctx, preparation, "");
+
+  const firstQuestion = nextReply(ctx);
+  assert.match(firstQuestion.reply, /Geburtsdatum/);
+});
+
 test("does not end after an unusable email answer", () => {
   const ctx = newContext({
     callSid: "test-email",

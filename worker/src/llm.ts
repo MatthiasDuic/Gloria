@@ -1781,7 +1781,9 @@ function getBasisDataConsentState(ctx: CallContext): "not-asked" | "pending" | "
   if (askIndex < 0) return "not-asked";
 
   const answer = turns.slice(askIndex + 1).find((turn) => turn.role === "user")?.text.trim().toLowerCase();
-  if (!answer) return "pending";
+  // Die kurze Vorbereitungsankündigung ist keine Zustimmungsschranke. Wenn
+  // der Kunde dazu nichts sagt, geht Gloria direkt mit der ersten Frage weiter.
+  if (!answer) return "granted";
   if (/^(?:ja\b|jawohl|gerne\b|klar\b|okay\b|ok\b|(?:das\s+)?ist(?:\s+f[üu]r mich)?\s+in ordnung|passt\b|k[öo]nnen wir|machen wir|von mir aus)/i.test(answer)) {
     return "granted";
   }
