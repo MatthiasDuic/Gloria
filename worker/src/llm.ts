@@ -738,6 +738,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const affirmativeShortReply = /^(?:ja|ja,?\s*(?:das\s+)?(?:stimmt|klar|gerne|okay|ok)|klar|stimmt|genau|okay|ok)\s*$/i.test(userText.trim());
 
   if (!discoveryObjection && typeof latestAssistant === "string" && contributionQuestionInHistory && (affirmsMentally(userText) || forgetsStartingContribution)) {
+    if (affirmsMentally(userText) && !forgetsStartingContribution) {
+      return {
+        reply: "Genau. Bei welchem Beitrag liegen Sie aktuell ungefähr?",
+        hangup: false,
+        transfer: false,
+      };
+    }
     return {
       reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
@@ -745,9 +752,27 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (!discoveryObjection && /mit\s+welchem\s+beitrag.*angefangen/i.test(latestAssistant)) {
+  if (
+    !discoveryObjection
+    && /mit\s+welchem\s+beitrag.*(?:angefangen|gestartet)/i.test(latestAssistant)
+  ) {
+    const startingContribution = extractLatestContributionPhrase(userText);
+    if (startingContribution) {
+      return {
+        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+        hangup: false,
+        transfer: false,
+      };
+    }
+    if (forgetsStartingContribution) {
+      return {
+        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+        hangup: false,
+        transfer: false,
+      };
+    }
     return {
-      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: "Verstanden. Bei welchem Beitrag liegen Sie aktuell ungefähr?",
       hangup: false,
       transfer: false,
     };

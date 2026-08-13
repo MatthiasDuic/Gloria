@@ -305,6 +305,28 @@ test("stream path keeps PKV structure after contribution-rise response", async (
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
+test("does not repeat the starting-contribution bridge after a partial answer", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-no-discovery-loop",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Wie stark spüren Sie diese Entwicklung bei sich?", at: 1 },
+    { role: "user", text: "Die Beiträge steigen jedes", at: 2 },
+    {
+      role: "assistant",
+      text: "Das ist nachvollziehbar. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind.",
+      at: 3,
+    },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Jahr und man merkt das schon.");
+  assert.ok(reply);
+  assert.match(reply.reply, /Bei welchem Beitrag liegen Sie aktuell/);
+  assert.doesNotMatch(reply.reply, /Herr Duic setzt genau da an/);
+});
+
 test("does not treat the remembered starting contribution as current", () => {
   const ctx = newContext({
     callSid: "test-pkv-starting-contribution",
