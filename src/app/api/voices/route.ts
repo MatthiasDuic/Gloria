@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import {
-  getDefaultDeepgramVoiceId,
+  getDefaultElevenLabsVoiceId,
   getProjectVoicePresets,
-  type DeepgramVoiceOption,
-} from "@/lib/deepgram-tts";
+  listElevenLabsVoices,
+  type ElevenLabsVoiceOption,
+} from "@/lib/elevenlabs";
 import { ensureMasterAdmin, findUserById } from "@/lib/report-db";
 
 export const runtime = "nodejs";
 
-function dedupeVoices(voices: DeepgramVoiceOption[]): DeepgramVoiceOption[] {
+function dedupeVoices(voices: ElevenLabsVoiceOption[]): ElevenLabsVoiceOption[] {
   const seen = new Set<string>();
-  const out: DeepgramVoiceOption[] = [];
+  const out: ElevenLabsVoiceOption[] = [];
   for (const voice of voices) {
     if (!voice.id || seen.has(voice.id)) {
       continue;
@@ -20,6 +21,23 @@ function dedupeVoices(voices: DeepgramVoiceOption[]): DeepgramVoiceOption[] {
     out.push(voice);
   }
   return out;
+}
+
+function mergeCuratedVoices(
+  curated: ElevenLabsVoiceOption[],
+  fromApi: ElevenLabsVoiceOption[],
+): ElevenLabsVoiceOption[] {
+  const apiById = new Map(fromApi.map((voice) => [voice.id, voice] as const));
+  return curated.map((preset) => {
+    const apiVoice = apiById.get(preset.id);
+    if (!apiVoice) {
+      return preset;
+    }
+    return {
+      ...apiVoice,
+      name: preset.name,
+    };
+  });
 }
 
 export async function GET(request: Request) {
@@ -32,19 +50,36 @@ export async function GET(request: Request) {
     }
 
     const userRecord = await findUserById(sessionUser.id);
-    const fallback = getDefaultDeepgramVoiceId();
-    const selectedVoiceId = userRecord?.selectedVoiceId || fallback;
+    const selectedVoiceId = userRecord?.selectedVoiceId || getDefaultElevenLabsVoiceId();
 
-    const voices = dedupeVoices([
-      ...(fallback ? [{ id: fallback, name: "Gloria Standard (Aurelia)", category: "default" }] : []),
-      ...getProjectVoicePresets(),
+    const voicesFromApi = await listElevenLabsVoices();
+    const curatedVoices = mergeCuratedVoices(getProjectVoicePresets(), voicesFromApi);
+    const fallback = getDefaultElevenLabsVoiceId();
+
+    const merged = dedupeVoices([
+      ...(fallback
+        ? [
+            {
+              id: fallback,
+              name: "Gloria Standard",
+              category: "default",
+            },
+          ]
+        : []),
+      ...curatedVoices,
       ...(selectedVoiceId && selectedVoiceId !== fallback
-        ? [{ id: selectedVoiceId, name: "Ausgewählte Benutzerstimme", category: "user" }]
+        ? [
+            {
+              id: selectedVoiceId,
+              name: "Ausgewählte Benutzerstimme",
+              category: "user",
+            },
+          ]
         : []),
     ]);
 
     return NextResponse.json({
-      voices,
+      voices: merged,
       selectedVoiceId,
       defaultVoiceId: fallback,
     });

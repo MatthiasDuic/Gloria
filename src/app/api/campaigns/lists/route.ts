@@ -144,7 +144,7 @@ export async function POST(request: Request) {
         contactName: lead.contactName,
         topic: lead.topic,
         summary: `Kampagnenanruf gestartet (${new Date().toISOString()}).`,
-        outcome: "Kein Kontakt",
+        outcome: "Nicht erreicht / kein Kontakt",
         attempts: lead.attempts,
         userId: sessionUser.id,
       });

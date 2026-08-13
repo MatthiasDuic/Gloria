@@ -254,12 +254,14 @@ test("builds PKV relevance before asking insurance questions", () => {
   reply = buildDeterministicPkvFlowReply(ctx, "Das merkt man schon.");
   assert.ok(reply);
   assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
+  assert.match(reply.reply, /Herr Duic setzt genau da an/);
+  assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
   ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
 
   reply = buildDeterministicPkvFlowReply(ctx, "Das weiß ich nicht mehr.");
   assert.ok(reply);
   assert.match(reply.reply, /prognostiziert/);
-  assert.match(reply.reply, /detailliert angeschaut/);
+  assert.match(reply.reply, /Herr Duic setzt genau da an/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
@@ -282,7 +284,8 @@ test("stream path keeps PKV structure after contribution-rise response", async (
   const segments: string[] = [];
   const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr und", (segment) => segments.push(segment));
   assert.match(reply.reply, /Wenn Sie zurückblicken/);
-  assert.deepEqual(segments, [reply.reply]);
+  assert.equal(segments.length, 2);
+  assert.equal(segments.join(" "), reply.reply);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 

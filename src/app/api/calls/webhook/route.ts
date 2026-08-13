@@ -256,7 +256,7 @@ async function persistTranscriptArray(
   }
 }
 
-async function handlePost(request: Request) {
+export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as {
     userId?: string;
     phoneNumberId?: string;
@@ -280,14 +280,7 @@ async function handlePost(request: Request) {
   // Persistiere das vollständige Wort-für-Wort-Protokoll IMMER, sobald es vom
   // Worker mitkommt – unabhängig davon, ob der Anrufer der Aufnahme zugestimmt
   // hat. Damit ist das Gespräch im Report-Detail auswertbar, auch ohne Audio.
-  try {
-    await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
-  } catch (error) {
-    console.error("calls.webhook.transcript_persist_failed", {
-      callSid: payload.callSid,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
     // Recovery path for incomplete finalize payloads: if leadId/callSid is present,
@@ -434,23 +427,7 @@ async function handlePost(request: Request) {
     recordingUrl: payload.recordingUrl,
   });
 
-  let emailResult:
-    | { delivered: boolean; to?: string | string[]; reason?: string; messageId?: string }
-    | { delivered: false; reason: string }
-    | undefined;
-  try {
-    emailResult = await sendReportEmail(report);
-  } catch (error) {
-    emailResult = {
-      delivered: false,
-      reason: error instanceof Error ? error.message : String(error),
-    };
-    console.error("calls.webhook.report_mail_failed", {
-      callSid: report.callSid,
-      reportId: report.id,
-      error: emailResult.reason,
-    });
-  }
+  const emailResult = await sendReportEmail(report);
 
   let inviteResult:
     | { delivered: boolean; to?: string | string[]; reason?: string; messageId?: string }
@@ -467,24 +444,12 @@ async function handlePost(request: Request) {
     const missingBasisQuestions = collectMissingBasisQuestions(transcriptEvents);
     const transcriptEmail = inferAttendeeEmailFromTranscript(transcriptEvents);
 
-    try {
-      inviteResult = await sendAppointmentInvite({
-        report,
-        attendeeEmail: lead?.email || transcriptEmail,
-        organizerName: user?.realName || user?.companyName,
-        missingBasisQuestions,
-      });
-    } catch (error) {
-      inviteResult = {
-        delivered: false,
-        reason: error instanceof Error ? error.message : String(error),
-      };
-      console.error("calls.webhook.invite_mail_failed", {
-        callSid: report.callSid,
-        reportId: report.id,
-        error: inviteResult.reason,
-      });
-    }
+    inviteResult = await sendAppointmentInvite({
+      report,
+      attendeeEmail: lead?.email || transcriptEmail,
+      organizerName: user?.realName || user?.companyName,
+      missingBasisQuestions,
+    });
   }
 
   return NextResponse.json({
@@ -493,14 +458,4 @@ async function handlePost(request: Request) {
     emailResult,
     inviteResult,
   });
-}
-
-export async function POST(request: Request) {
-  try {
-    return await handlePost(request);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("calls.webhook.unhandled", { error: message });
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
-  }
 }

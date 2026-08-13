@@ -12,7 +12,12 @@ export const TOPICS = [
 // Dynamische Themen sind erlaubt: TOPICS sind nur die Standard-Vorgaben.
 export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
-export type ReportOutcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt";
+export type ReportOutcome =
+  | "Termin"
+  | "Absage"
+  | "Wiedervorlage"
+  | "Nicht erreicht / kein Kontakt"
+  | "Gespräch abgebrochen";
 
 export interface Lead {
   id: string;

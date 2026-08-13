@@ -149,6 +149,26 @@ function phoneLooksEqual(a?: string, b?: string) {
   return shortLeft === shortRight;
 }
 
+function formatOutcomeLabel(value?: string): string {
+  const normalized = (value || "").trim();
+  if (!normalized) return "–";
+  if (/^termin$/i.test(normalized)) return "Termin";
+  if (/^absage$/i.test(normalized)) return "Absage";
+  if (/^wiedervorlage$/i.test(normalized)) return "Wiedervorlage";
+  if (/kein\s*kontakt|nicht\s*erreicht|erreicht.*nicht/i.test(normalized)) return "Nicht erreicht / kein Kontakt";
+  if (/gespraech\s*abgebrochen|abgebrochen/i.test(normalized)) return "Gespräch abgebrochen";
+  return normalized;
+}
+
+function reportOutcomeBucket(report: DashboardData["reports"][number]): "no_contact" | "aborted" | "callback" | "appointment" | "rejection" {
+  const outcome = (report.outcome || "").trim();
+  if (/termin/i.test(outcome)) return "appointment";
+  if (/wiedervorlage/i.test(outcome)) return "callback";
+  if (/absage/i.test(outcome)) return "rejection";
+  if (/gespraech\s*abgebrochen|abgebrochen/i.test(`${outcome} ${report.summary || ""}`)) return "aborted";
+  return "no_contact";
+}
+
 function reportMatchesLead(
   report: DashboardData["reports"][number],
   lead: DashboardData["leads"][number],
@@ -307,7 +327,7 @@ function reportHasRealConversation(report: DashboardData["reports"][number]): bo
     }
   }
 
-  if (report.outcome !== "Kein Kontakt") {
+  if (report.outcome !== "Nicht erreicht / kein Kontakt") {
     return true;
   }
 
@@ -330,9 +350,6 @@ function detectLostStage(summary: string): string {
   }
   if (t.includes("discovery") || t.includes("wie zufrieden") || t.includes("was wäre für sie")) {
     return "Bedarfsermittlung – kein Interesse nach Bedarfsabfrage";
-  }
-  if (t.includes("aufzeichnung") || t.includes("consent")) {
-    return "Einwilligung – Gespräch nach Aufnahme-Abfrage abgebrochen";
   }
   return "Gesprächseinstieg – Entscheider nicht oder kaum erreicht";
 }
@@ -1092,15 +1109,16 @@ export default function HomePage() {
     const reports = data.reports;
     const total = reports.length;
     const realConversations = reports.filter((report) => reportHasRealConversation(report)).length;
-    const appointments = reports.filter((r) => r.outcome === "Termin").length;
-    const rejections = reports.filter((r) => r.outcome === "Absage").length;
-    const callbacks = reports.filter((r) => r.outcome === "Wiedervorlage").length;
-    const noContact = reports.filter((r) => r.outcome === "Kein Kontakt").length;
+    const appointments = reports.filter((r) => reportOutcomeBucket(r) === "appointment").length;
+    const rejections = reports.filter((r) => reportOutcomeBucket(r) === "rejection").length;
+    const callbacks = reports.filter((r) => reportOutcomeBucket(r) === "callback").length;
+    const aborted = reports.filter((r) => reportOutcomeBucket(r) === "aborted").length;
+    const noContact = reports.filter((r) => reportOutcomeBucket(r) === "no_contact").length;
     const noContactWithConversation = reports.filter(
-      (r) => r.outcome === "Kein Kontakt" && reportHasRealConversation(r),
+      (r) => reportOutcomeBucket(r) === "no_contact" && reportHasRealConversation(r),
     ).length;
     const noConversation = total - realConversations;
-    const contacts = total - noContact;
+    const contacts = total - noContact - aborted;
     const contactRate = total > 0 ? Math.round((contacts / total) * 100) : 0;
     const appointmentRate = contacts > 0 ? Math.round((appointments / contacts) * 100) : 0;
     const rejectionRate = contacts > 0 ? Math.round((rejections / contacts) * 100) : 0;
@@ -1112,7 +1130,7 @@ export default function HomePage() {
       if (r.outcome === "Termin") entry.termin++;
       else if (r.outcome === "Absage") entry.absage++;
       else if (r.outcome === "Wiedervorlage") entry.wiedervorlage++;
-      else if (r.outcome === "Kein Kontakt") entry.keinKontakt++;
+      else if (r.outcome === "Nicht erreicht / kein Kontakt") entry.keinKontakt++;
       byTopic.set(r.topic, entry);
     }
     const topicStats = Array.from(byTopic.entries())
@@ -1183,6 +1201,7 @@ export default function HomePage() {
       appointments,
       rejections,
       callbacks,
+      aborted,
       noContact,
       contactRate,
       appointmentRate,
@@ -1917,37 +1936,8 @@ export default function HomePage() {
     }
   }
 
-  async function deleteRecording(reportId: string) {
-    if (!confirm("Aufnahme wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const response = await fetch(
-        `/api/reports/recording?reportId=${encodeURIComponent(reportId)}`,
-        { method: "DELETE" },
-      );
-
-      if (!response.ok) {
-        throw new Error("Aufnahme konnte nicht gelöscht werden.");
-      }
-
-      setNotice("Aufnahme erfolgreich gelöscht.");
-      setSelectedReport((current) =>
-        current?.id === reportId ? { ...current, recordingUrl: undefined } : current,
-      );
-      await loadDashboard();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function deleteReport(reportId: string) {
-    if (!confirm("Report und Aufnahme wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
+    if (!confirm("Report wirklich komplett löschen? Diese Aktion kann nicht rückgängig gemacht werden.")) {
       return;
     }
 
@@ -1976,7 +1966,7 @@ export default function HomePage() {
   async function deleteAllReports() {
     if (
       !confirm(
-        "Wirklich ALLE Gesprächsreports und zugehörigen Aufnahmen unwiderruflich löschen?",
+        "Wirklich ALLE Gesprächsreports unwiderruflich löschen?",
       )
     ) {
       return;
@@ -1996,7 +1986,6 @@ export default function HomePage() {
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         deletedReports?: number;
-        deletedRecordings?: number;
       };
 
       if (!response.ok) {
@@ -2004,9 +1993,7 @@ export default function HomePage() {
       }
 
       setSelectedReport(null);
-      setNotice(
-        `Alle Gesprächsreports gelöscht (${payload.deletedReports ?? 0} Reports, ${payload.deletedRecordings ?? 0} Aufnahmen entfernt).`,
-      );
+      setNotice(`Alle Gesprächsreports gelöscht (${payload.deletedReports ?? 0} Reports entfernt).`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
@@ -2442,13 +2429,13 @@ export default function HomePage() {
       <CollapsiblePanel title="Kennzahlen" defaultOpen>
         <section className="stats-grid">
           <article className="stat-card"><span>Wählversuche</span><strong>{data.metrics.dialAttempts}</strong></article>
+          <article className="stat-card"><span>Termine</span><strong>{reportingInsights.appointments}</strong></article>
+          <article className="stat-card"><span>Wiedervorlagen</span><strong>{reportingInsights.callbacks}</strong></article>
+          <article className="stat-card"><span>Absagen</span><strong>{reportingInsights.rejections}</strong></article>
+          <article className="stat-card"><span>Nicht erreicht / kein Kontakt</span><strong>{reportingInsights.noContact}</strong></article>
+          <article className="stat-card"><span>Gespräch abgebrochen</span><strong>{reportingInsights.aborted}</strong></article>
           <article className="stat-card"><span>Echte Gespräche</span><strong>{reportingInsights.realConversations}</strong></article>
           <article className="stat-card"><span>Ohne Gespräch</span><strong>{reportingInsights.noConversation}</strong></article>
-          <article className="stat-card"><span>Termine</span><strong>{data.metrics.appointments}</strong></article>
-          <article className="stat-card"><span>Absagen</span><strong>{data.metrics.rejections}</strong></article>
-          <article className="stat-card"><span>Wiedervorlagen offen</span><strong>{data.metrics.callbacksOpen}</strong></article>
-          <article className="stat-card"><span>Empfangs-Loop-Breaks</span><strong>{data.metrics.gatekeeperLoops}</strong></article>
-          <article className="stat-card"><span>Durchstellquote</span><strong>{data.metrics.transferSuccessRate}%</strong></article>
         </section>
       </CollapsiblePanel>
 
@@ -2466,7 +2453,8 @@ export default function HomePage() {
                 <article className="stat-card"><span>Termine</span><strong>{reportingInsights.appointments}<small className="subtle"> ({reportingInsights.appointmentRate}% v. Kontakte)</small></strong></article>
                 <article className="stat-card"><span>Wiedervorlagen</span><strong>{reportingInsights.callbacks}</strong></article>
                 <article className="stat-card"><span>Absagen</span><strong>{reportingInsights.rejections}<small className="subtle"> ({reportingInsights.rejectionRate}% v. Kontakte)</small></strong></article>
-                <article className="stat-card"><span>Kein Kontakt</span><strong>{reportingInsights.noContact}</strong></article>
+                <article className="stat-card"><span>Nicht erreicht / kein Kontakt</span><strong>{reportingInsights.noContact}</strong></article>
+                <article className="stat-card"><span>Gespräch abgebrochen</span><strong>{reportingInsights.aborted}</strong></article>
                 <article className="stat-card"><span>Kein Kontakt trotz Gespräch</span><strong>{reportingInsights.noContactWithConversation}</strong></article>
               </section>
             </div>
@@ -2482,7 +2470,8 @@ export default function HomePage() {
                       <th style={{ textAlign: "right" }}>Termine</th>
                       <th style={{ textAlign: "right" }}>Absagen</th>
                       <th style={{ textAlign: "right" }}>Wiedervorlage</th>
-                      <th style={{ textAlign: "right" }}>Kein Kontakt</th>
+                      <th style={{ textAlign: "right" }}>Nicht erreicht</th>
+                      <th style={{ textAlign: "right" }}>Abgebrochen</th>
                       <th style={{ textAlign: "right" }}>Termin-Rate</th>
                     </tr>
                   </thead>
@@ -2495,6 +2484,7 @@ export default function HomePage() {
                         <td style={{ textAlign: "right" }}>{row.absage}</td>
                         <td style={{ textAlign: "right" }}>{row.wiedervorlage}</td>
                         <td style={{ textAlign: "right" }}>{row.keinKontakt}</td>
+                        <td style={{ textAlign: "right" }}>{Math.max(0, Math.min(100, row.keinKontakt || 0))}</td>
                         <td style={{ textAlign: "right" }}><strong>{row.terminRate}%</strong></td>
                       </tr>
                     ))}
@@ -2609,23 +2599,23 @@ export default function HomePage() {
 
         <LiveMonitorPanel />
 
-        <CollapsiblePanel title="Gesprächsreports & Aufnahmen" defaultOpen>
+        <CollapsiblePanel title="Gesprächsreports" defaultOpen>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <span className="subtle">
-              Reports und zugehörige Aufnahmen werden automatisch nach 30 Tagen gelöscht.
+              Für jeden Anruf wird genau ein Report geführt. Veraltete Einträge werden automatisch verworfen.
             </span>
             <button
               className="btn danger"
               onClick={() => void deleteAllReports()}
               disabled={busy || reportRows.length === 0}
-              title="Alle Gesprächsreports & Aufnahmen löschen"
+              title="Alle Gesprächsreports löschen"
             >
               Alle Reports löschen
             </button>
           </div>
           <table>
             <thead>
-              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th>Aufnahme</th><th></th></tr>
+              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th></th></tr>
             </thead>
             <tbody>
               {reportRows.map((report) => (
@@ -2634,29 +2624,10 @@ export default function HomePage() {
                   <td>{report.topic}</td>
                   <td>
                     <span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
-                      {report.outcome}
+                      {formatOutcomeLabel(report.outcome)}
                     </span>
                   </td>
                   <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
-                  <td>
-                    {report.recordingConsent ? (
-                      report.recordingUrl ? (
-                        <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}`} target="_blank" rel="noreferrer">Abspielen</a>
-                          <a href={`/api/reports/recording?url=${encodeURIComponent(report.recordingUrl)}&download=1`} download>↓</a>
-                          <button
-                            className="btn danger"
-                            style={{ fontSize: "0.78rem", padding: "3px 9px" }}
-                            onClick={() => void deleteRecording(report.id)}
-                            disabled={busy}
-                            title="Aufnahme löschen"
-                          >✕</button>
-                        </div>
-                      ) : "Zugestimmt"
-                    ) : (
-                      "Keine Freigabe"
-                    )}
-                  </td>
                   <td>
                     <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
                       <button
@@ -2892,7 +2863,7 @@ export default function HomePage() {
                     >
                       <strong>{formatDate(report.appointmentAt)}</strong>
                       <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
-                      <small>{report.topic} · {report.recordingUrl ? "mit Aufnahme" : "ohne Aufnahme"}</small>
+                      <small>{report.topic}</small>
                     </button>
                   ))}
                 </div>
@@ -2903,7 +2874,7 @@ export default function HomePage() {
             <div className="mini-panel">
               <h3>Automatische Einträge</h3>
               <p className="subtle top-gap">
-                Gloria trägt Termine automatisch nach dem Telefonat ein. Gesprächsreport und Aufnahmen werden direkt mit dem Termin verknüpft und sind per Klick im Detaildialog einsehbar.
+                Gloria trägt Termine automatisch nach dem Telefonat ein. Der Gesprächsreport wird direkt mit dem Termin verknüpft und ist per Klick im Detaildialog einsehbar.
               </p>
               <p className="subtle top-gap">
                 Quelle: Telefonie-Webhook und Abschlussreport.
@@ -2939,14 +2910,11 @@ export default function HomePage() {
                   <li>Bei Terminierung bietet Gloria konkrete Zeitoptionen an; passen diese nicht, kann der Gesprächspartner eigene Vorschläge machen.</li>
                 </ul>
 
-                <p className="subtle top-gap"><strong>3) Einwilligung und Aufzeichnung (DSGVO-konform)</strong></p>
+                <p className="subtle top-gap"><strong>3) Gesprächsdokumentation (DSGVO-konform)</strong></p>
                 <ul>
-                  <li>Eine Aufzeichnung erfolgt ausschließlich nach ausdrücklicher Einwilligung des Entscheiders.</li>
-                  <li>Die Einwilligung wird vor Beginn der Aufzeichnung abgefragt und protokolliert.</li>
-                  <li>Ohne Einwilligung wird keine Aufnahme gestartet.</li>
-                  <li>Der Einwilligungsstatus wird im Report gespeichert und im Dashboard angezeigt.</li>
-                  <li>Bei vorhandener Aufnahme wird nur die URL-Referenz gespeichert; die Datei selbst verbleibt beim Telefonieanbieter.</li>
-                  <li>Der Nutzer kann über das Dashboard Aufnahmen löschen, was die gespeicherten Referenzen unmittelbar entfernt.</li>
+                  <li>Gesprächsergebnis, Zusammenfassung und textbasierter Gesprächsverlauf werden im Report dokumentiert.</li>
+                  <li>Die Reportdaten werden ausschließlich für Nachbearbeitung, Terminverwaltung und Qualitätskontrolle verwendet.</li>
+                  <li>Das Dashboard zeigt keine Tonaufnahmen oder Wiedergabefunktionen an.</li>
                 </ul>
 
                 <p className="subtle top-gap"><strong>4) Technischer Prozessablauf</strong></p>
@@ -2964,7 +2932,7 @@ export default function HomePage() {
                 <ul>
                   <li>Primäre Speicherung erfolgt in PostgreSQL, sobald DATABASE_URL gesetzt ist.</li>
                   <li>Fallback ohne Datenbank: lokale JSON-Dateien unter /data/ (z. B. leads.json, reports.json, topic-policies.json, report-database.json, conversation-events.json).</li>
-                  <li>Aufnahmen werden nicht als Datei gespeichert, sondern ausschließlich als URL-Referenz.</li>
+                  <li>Es werden keine Tonaufnahmen im Dashboard verarbeitet oder bereitgestellt.</li>
                 </ul>
 
                 <p className="subtle top-gap"><strong>5.2 Verarbeitete Daten</strong></p>
@@ -2984,7 +2952,7 @@ export default function HomePage() {
                 <ul>
                   <li>Alle Gesprächsdaten werden maximal 30 Tage gespeichert, sofern keine gesetzliche Pflicht zur längeren Aufbewahrung besteht.</li>
                   <li>Nach Ablauf der 30 Tage werden die Daten automatisch gelöscht.</li>
-                  <li>Aufnahmen (URL-Referenzen) werden ebenfalls nach 30 Tagen gelöscht oder sofort, wenn der Nutzer dies verlangt.</li>
+                  <li>Gesprächsreports werden ebenfalls nach 30 Tagen gelöscht oder sofort, wenn der Nutzer dies verlangt.</li>
                 </ul>
 
                 <p className="subtle top-gap"><strong>5.4 Rechte der Betroffenen</strong></p>
@@ -2994,12 +2962,12 @@ export default function HomePage() {
                   <li>Berichtigung verlangen</li>
                   <li>Löschung verlangen</li>
                   <li>Widerspruch gegen Verarbeitung einlegen</li>
-                  <li>Löschfunktionen für Reports und Aufnahmen sind im Dashboard integriert und wirken sofort auf die gespeicherten Datensätze.</li>
+                  <li>Die Löschfunktion für Reports ist im Dashboard integriert und wirkt sofort auf die gespeicherten Datensätze.</li>
                 </ul>
 
                 <p className="subtle top-gap"><strong>6) Externe Dienstleister im Laufzeitpfad</strong></p>
                 <ul>
-                  <li>Telnyx: Telefonie, Verbindungsstatus, Recording-Referenzen</li>
+                  <li>Telnyx: Telefonie und Verbindungsstatus</li>
                   <li>OpenAI: Gesprächslogik in freien Dialogphasen</li>
                   <li>ElevenLabs (optional): Sprachsynthese</li>
                 </ul>
@@ -3279,7 +3247,6 @@ export default function HomePage() {
                     <h3>Fest im System verdrahtet</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
                       <li>Technische Audio- und Pausenmeldungen waehrend Streaming oder Fehlerfaellen.</li>
-                      <li>Die globale Aufzeichnungslogik inklusive expliziter Einwilligung vor einer echten Aufnahme.</li>
                       <li>Das eigentliche Telnyx-Transferziel und die technische Weiterleitung an Jutta Brost.</li>
                       <li>Globale Phasenlogik wie Terminbestaetigung, Websocket-Handling und feste Sicherheitsregeln.</li>
                     </ul>
@@ -3287,7 +3254,7 @@ export default function HomePage() {
                   <div className="mini-panel settings-callout">
                     <h3>Technische Hinweise</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
-                      <li>Topic Policies steuern den Gespraechsinhalt, nicht aber Telnyx-REST, Websocket-Lifecycle oder Recording-Callbacks.</li>
+                      <li>Topic Policies steuern den Gespraechsinhalt, nicht aber Telnyx-REST oder den Websocket-Lifecycle.</li>
                       <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Telnyx umgesetzt; die Topic Policy steuert nur das Wann und Wie der Ansage.</li>
                       <li>Globale Compliance- und Ablaufregeln bleiben separat dokumentiert und sollten nicht in Themenfelder kopiert werden.</li>
                     </ul>
@@ -3780,11 +3747,6 @@ export default function HomePage() {
                   <label>Gesprächsversuche</label>
                   <p>{selectedReport.attempts}</p>
                 </div>
-                <div className="report-detail-field">
-                  <label>Aufnahme-Einwilligung</label>
-                  <p>{selectedReport.recordingConsent ? "Ja" : "Nein"}</p>
-                </div>
-
                 {/* Outcome analysis */}
                 <div className="report-detail-field report-detail-full">
                   <label>Gesprächsergebnis</label>
@@ -3800,9 +3762,13 @@ export default function HomePage() {
                     <p className="summary-box" style={{ background: "rgba(194,77,77,0.1)", borderColor: "rgba(194,77,77,0.3)" }}>
                       ✗ Absage — verloren bei: <strong>{lostStage}</strong>
                     </p>
+                  ) : selectedReport.summary.toLowerCase().includes("abgebrochen") ? (
+                    <p className="summary-box" style={{ background: "rgba(130,100,160,0.08)", borderColor: "rgba(130,100,160,0.2)" }}>
+                      – Gespräch abgebrochen — verloren bei: <strong>{lostStage}</strong>
+                    </p>
                   ) : (
                     <p className="summary-box" style={{ background: "rgba(100,120,160,0.08)", borderColor: "rgba(100,120,160,0.2)" }}>
-                      – Kein Kontakt — verloren bei: <strong>{lostStage}</strong>
+                      – Nicht erreicht / kein Kontakt — verloren bei: <strong>{lostStage}</strong>
                     </p>
                   )}
                 </div>
@@ -3835,10 +3801,9 @@ export default function HomePage() {
                 )}
 
                 <div className="report-detail-field report-detail-full">
-                  <label>Wort-für-Wort-Mitschnitt (Reaktionszeit pro Gloria-Antwort)</label>
+                  <label>Gesprächsprotokoll (Reaktionszeit pro Gloria-Antwort)</label>
                   <p className="subtle" style={{ marginTop: 0, marginBottom: 8 }}>
-                    Vollständiger Verlauf aus der Live-Transkription. Wird unabhängig von der Aufnahme-Einwilligung gespeichert,
-                    damit du auch ohne Audio-Datei nachvollziehen kannst, was gesprochen wurde.
+                    Vollständiger textbasierter Verlauf aus der Live-Transkription, damit nachvollziehbar bleibt, was gesprochen wurde.
                   </p>
                   {transcriptLoading ? (
                     <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
@@ -3930,35 +3895,6 @@ export default function HomePage() {
                   <label>E-Mail-Report an</label>
                   <p>{selectedReport.emailedTo || "–"}</p>
                 </div>
-
-                {/* Recording */}
-                {selectedReport.recordingConsent && (
-                  <div className="report-detail-field report-detail-full">
-                    <label>Aufnahme</label>
-                    {selectedReport.recordingUrl ? (
-                      <div className="row top-gap">
-                        <a
-                          href={`/api/reports/recording?url=${encodeURIComponent(selectedReport.recordingUrl)}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn ghost"
-                        >Abspielen</a>
-                        <a
-                          href={`/api/reports/recording?url=${encodeURIComponent(selectedReport.recordingUrl)}&download=1`}
-                          download
-                          className="btn ghost"
-                        >↓ Herunterladen</a>
-                        <button
-                          className="btn danger"
-                          onClick={() => void deleteRecording(selectedReport.id)}
-                          disabled={busy}
-                        >Aufnahme löschen</button>
-                      </div>
-                    ) : (
-                      <p className="subtle" style={{ marginTop: 6 }}>Keine Aufnahme vorhanden.</p>
-                    )}
-                  </div>
-                )}
 
                 {/* Delete whole report */}
                 <div className="report-detail-field report-detail-full" style={{ borderTop: "1px solid var(--mist-200)", paddingTop: 14, marginTop: 4 }}>

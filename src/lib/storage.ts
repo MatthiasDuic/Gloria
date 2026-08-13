@@ -731,6 +731,33 @@ function buildMetrics(
   };
 }
 
+function deduplicateReports(reports: CallReport[]): CallReport[] {
+  const byKey = new Map<string, CallReport>();
+
+  for (const report of reports) {
+    const key = report.callSid?.trim() || report.leadId?.trim() || `${report.company}::${report.topic}::${report.conversationDate}`;
+    if (!key) continue;
+
+    const previous = byKey.get(key);
+    if (!previous) {
+      byKey.set(key, report);
+      continue;
+    }
+
+    const previousTimestamp = Date.parse(previous.conversationDate || "") || 0;
+    const incomingTimestamp = Date.parse(report.conversationDate || "") || 0;
+    if (incomingTimestamp > previousTimestamp) {
+      byKey.set(key, report);
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const aTime = Date.parse(a.conversationDate || "") || 0;
+    const bTime = Date.parse(b.conversationDate || "") || 0;
+    return bTime - aTime;
+  });
+}
+
 export async function getDashboardData(options?: { userId?: string; role?: "master" | "user" }): Promise<DashboardData> {
   const userId = options?.userId;
   // Tenant isolation: sobald ein userId-Kontext vorhanden ist, werden
@@ -744,7 +771,7 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
     readConversationEvents(scopedUserId),
   ]);
 
-  const reports = reportState.data.reports;
+  const reports = deduplicateReports(reportState.data.reports);
 
   return {
     leads,
@@ -994,7 +1021,7 @@ export async function storeCallReport(payload: {
     contactName: payload.contactName || existingReport?.contactName,
     topic: payload.topic,
     summary: mergedSummary,
-    outcome: payload.outcome || existingReport?.outcome || "Kein Kontakt",
+    outcome: payload.outcome || existingReport?.outcome || "Nicht erreicht / kein Kontakt",
     conversationDate: existingReport?.conversationDate || new Date().toISOString(),
     appointmentAt: payload.appointmentAt || existingReport?.appointmentAt,
     nextCallAt: payload.nextCallAt || existingReport?.nextCallAt,
@@ -1047,7 +1074,7 @@ export async function storeCallReport(payload: {
     // bereits existierte (= Update von Twilio-Status oder finalizeCall), um
     // den Initial-Platzhalter beim Kampagnen-Start nicht zu ueberschreiben.
     const isRetryable =
-      payload.outcome === "Kein Kontakt" &&
+      payload.outcome === "Nicht erreicht / kein Kontakt" &&
       existingIndex >= 0 &&
       !payload.nextCallAt;
 
@@ -1070,6 +1097,8 @@ export async function storeCallReport(payload: {
       resolvedStatus = "absage";
     } else if (payload.outcome === "Wiedervorlage") {
       resolvedStatus = "wiedervorlage";
+    } else if (payload.outcome === "Gespräch abgebrochen") {
+      resolvedStatus = "angerufen";
     } else {
       resolvedStatus = "angerufen";
     }
@@ -1095,7 +1124,8 @@ export async function storeCallReport(payload: {
       Termin: "appointment_booked",
       Absage: "rejection_final",
       Wiedervorlage: "callback_scheduled",
-      "Kein Kontakt": "call_completed",
+      "Nicht erreicht / kein Kontakt": "call_completed",
+      "Gespräch abgebrochen": "call_completed",
     };
     await appendConversationEvent(
       {

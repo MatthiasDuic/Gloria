@@ -167,11 +167,22 @@ function synthesizeNewFieldsFromLegacy(script: Partial<ScriptConfig>): Partial<S
 }
 
 function normalizeOutcome(value: string): ReportOutcome {
-  if (value === "Termin" || value === "Absage" || value === "Wiedervorlage") {
-    return value;
+  const normalized = value.trim();
+
+  if (normalized === "Termin") return "Termin";
+  if (normalized === "Absage") return "Absage";
+  if (normalized === "Wiedervorlage") return "Wiedervorlage";
+  if (normalized === "Gespräch abgebrochen") return "Gespräch abgebrochen";
+  if (
+    normalized === "Nicht erreicht / kein Kontakt"
+    || normalized === "Kein Kontakt"
+    || normalized === "nicht erreicht / kein Kontakt"
+    || normalized === "nicht erreicht"
+  ) {
+    return "Nicht erreicht / kein Kontakt";
   }
 
-  return "Kein Kontakt";
+  return "Nicht erreicht / kein Kontakt";
 }
 
 function toIso(value?: string | Date | null) {

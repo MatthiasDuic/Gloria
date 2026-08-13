@@ -81,9 +81,7 @@ async function recoverAbortedStream(params: {
 }
 
 /**
- * Pre-warmt den TLS/HTTP-Pool zu OpenAI, damit die ALLERERSTE LLM-Antwort
- * nicht ~300–600 ms Handshake-Latenz hat. Wird beim "start"-Event eines
- * Calls aufgerufen, blockiert NICHT den Call. Fehler werden geschluckt.
+ * Pre-warmt die OpenAI-Verbindung für den ersten Live-Turn.
  */
 export function prewarmOpenAi(): void {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -109,14 +107,12 @@ export async function streamReply(
 ): Promise<TurnOutput> {
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
-    onSentence(deterministicReply.reply);
-    return deterministicReply;
+    return emitDeterministicReply(deterministicReply, onSentence);
   }
 
   const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
   if (deterministicPkvReply) {
-    onSentence(deterministicPkvReply.reply);
-    return deterministicPkvReply;
+    return emitDeterministicReply(deterministicPkvReply, onSentence);
   }
 
   const trustReply = buildDeterministicTrustReply(ctx, userText);
@@ -390,6 +386,12 @@ export async function streamReply(
     clearTimeout(timeout);
     clearTimeout(firstTokenTimer);
   }
+}
+
+function emitDeterministicReply(reply: TurnOutput, onSentence: (sentence: string) => void): TurnOutput {
+  const segments = reply.reply.split(" [PAUSE] ").map((segment) => segment.trim()).filter(Boolean);
+  for (const segment of segments) onSentence(segment);
+  return { ...reply, reply: segments.join(" ") };
 }
 
 function sanitizeReplyText(text: string): string {
@@ -667,6 +669,16 @@ function extractLatestContributionAmount(ctx: CallContext): number | undefined {
   return pkvAmount;
 }
 
+function isDiscoveryObjection(ctx: CallContext, userText: string): boolean {
+  const historyText = `${ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text)
+    .join(" ")} ${userText}`.toLowerCase();
+
+  return /(?:was\s+hab\s+ich\s+davon|was\s+bringt\s+mir(?:\s+dieser)?\s+termin|warum\s+sollte\s+ich\s+(?:einen\s+)?termin\s+machen|warum\s+sollte\s+ich\s+das|kein\s+interesse|nicht\s+interessiert|nicht\s+relevant|ich\s+will\s+das\s+nicht|ich\s+brauche\s+keine\s+hilfe|ich\s+halte\s+das\s+f[üu]r\s+nicht\s+notwendig|ich\s+habe\s+keine\s+zeit)/i.test(historyText) ||
+    /(?:kein|keine|nicht)\s+(?:nutzen|mehrwert|sinn|interesse|notwendig|hilfe|zeit)/i.test(historyText);
+}
+
 export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
   const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
@@ -675,8 +687,17 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const text = userText.toLowerCase();
   const owner = ctx.ownerRealName?.trim() || "Herr Duic";
   const state = detectPkvFlowState(ctx, userText);
-
+  const discoveryObjection = isDiscoveryObjection(ctx, userText);
   const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
+  const discoveryConsent = /(?:^|\s)(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?)/i.test(userText.trim());
+
+  if (isPkv && /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+konkret\s+geht\?|darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+geht\?/i.test(latestAssistant) && discoveryConsent) {
+    return {
+      reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+      hangup: false,
+      transfer: false,
+    };
+  }
   const emailOfferOpen = /kurze\s+uebersicht\s+per\s+e-?mail|kurze\s+u[üu]bersicht\s+per\s+e-?mail|per\s+e-?mail\s+senden/.test(
     latestAssistant,
   );
@@ -701,28 +722,22 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  const isDiscoveryObjection = /was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich|wie\s+will\s+herr|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten/.test(text);
   const explicitAwaitingInsurance = ctx.flow.awaiting === "insurance_status";
   const customerInsuranceStatusKnown = ctx.transcript
     .filter((turn) => turn.role === "user")
     .some((turn) => hasInsuranceSignal(turn.text));
-  if (!explicitAwaitingInsurance && !isDiscoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
-      return {
-        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
-        hangup: false,
-        transfer: false,
-      };
-  }
 
-  if (!isDiscoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
-    return {
-      reply: "Das ist nachvollziehbar. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind.",
-      hangup: false,
-      transfer: false,
-    };
-  }
+  const startingQuestionIndex = ctx.transcript.map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "assistant" && /mit\s+welchem\s+beitrag.*(?:angefangen|gestartet)/i.test(turn.text))
+    .at(-1)?.index;
+  const startingQuestionAnswered = startingQuestionIndex !== undefined && ctx.transcript
+    .slice(startingQuestionIndex + 1)
+    .some((turn) => turn.role === "user");
+  const contributionQuestionInHistory = /erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory);
+  const forgetsStartingContribution = /\b(?:ich\s+weiß\s+es\s+nicht\s+mehr|weiß\s+ich\s+nicht\s+mehr|keine\s+ahnung|nicht\s+mehr)\b/i.test(text);
+  const affirmativeShortReply = /^(?:ja|ja,?\s*(?:das\s+)?(?:stimmt|klar|gerne|okay|ok)|klar|stimmt|genau|okay|ok)\s*$/i.test(userText.trim());
 
-  if (!isDiscoveryObjection && /erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory) && !/schon einmal.*(?:detailliert|detailiert).*angeschaut|wo\s+die\s+reise\s+hingeht/.test(assistantHistory)) {
+  if (!discoveryObjection && typeof latestAssistant === "string" && contributionQuestionInHistory && (affirmsMentally(userText) || forgetsStartingContribution)) {
     return {
       reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
@@ -730,7 +745,47 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
+  if (!discoveryObjection && /mit\s+welchem\s+beitrag.*angefangen/i.test(latestAssistant)) {
+    return {
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!discoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
+    return {
+      reply: "Das ist nachvollziehbar. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind. [PAUSE] Herr Duic setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!discoveryObjection && /detailliert.*angeschaut|prognostiziert/.test(assistantHistory) && /^(?:nein|ne|nö|nö\?|kein\s+interesse|eher\s+nicht|nicht)\b/i.test(text.trim())) {
+    return {
+      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!discoveryObjection && (startingQuestionAnswered || /mit\s+welchem\s+beitrag.*angefangen/i.test(latestAssistant)) && contributionQuestionInHistory && forgetsStartingContribution) {
+    return {
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (!explicitAwaitingInsurance && !discoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
+      return {
+        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+        hangup: false,
+        transfer: false,
+      };
+  }
+
+  if (/^(?:also|hm+|mhm|na\s*ja|ja|okay|ok)\s*$/i.test(userText.trim())) {
     return {
       reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
@@ -1589,7 +1644,7 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
   );
   if (summarySentWithoutFinalFarewell) {
     const latestUserTurn = [...ctx.transcript].reverse().find((turn) => turn.role === "user");
-    if (latestUserTurn && /\b(auf wiederh[öo]ren|auf wiedersehen|tsch[üu]ss|tsch[üu]s|ciao|bis dann|bis bald|einen sch[öo]nen tag)\b/i.test(latestUserTurn.text)) {
+    if (latestUserTurn && /\b(auf wiederh[öo]ren|wiederh[öo]ren|auf wiedersehen|tsch[üu]ss|tsch[üu]s|ciao|bis dann|bis bald|einen sch[öo]nen tag)\b/i.test(latestUserTurn.text)) {
       return {
         reply: "Auf Wiederhören!",
         hangup: true,
@@ -1645,10 +1700,32 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     .map((turn) => turn.text)
     .join(" ");
   const resolvedEmail = extractSpokenEmail(emailTurnsSinceQuestion) || pkvData.email;
+  const emailConfirmationAsked = ctx.transcript
+    .slice(emailQuestionIndex + 1)
+    .some((turn) => turn.role === "assistant" && /ist diese.*(?:richtig|korrekt)|habe ich sie richtig verstanden/i.test(turn.text));
+  const emailConfirmationAnswer = emailConfirmationAsked
+    ? [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || ""
+    : "";
   const emailDeclined = /^(?:nein\b|keine e-?mail|ohne e-?mail|m[öo]chte ich nicht|lieber nicht)/i.test(emailAnswer);
   if (!resolvedEmail && !emailDeclined) {
     return {
       reply: "Ich habe die E-Mail-Adresse noch nicht vollständig verstanden. Bitte nennen Sie sie noch einmal, gern mit At und Punkt.",
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (resolvedEmail && isSuspiciousSpokenEmail(resolvedEmail) && !emailConfirmationAsked) {
+    return {
+      reply: `Ich habe ${resolvedEmail} verstanden. Ist diese E-Mail-Adresse korrekt?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (resolvedEmail && isSuspiciousSpokenEmail(resolvedEmail) && emailConfirmationAsked && !/^(?:ja|ja,?\s*(?:das\s+)?stimmt|korrekt|richtig|genau|passt|okay|ok)\b/i.test(emailConfirmationAnswer.trim())) {
+    return {
+      reply: "Dann nennen Sie mir die E-Mail-Adresse bitte noch einmal vollständig.",
       hangup: false,
       transfer: false,
     };
@@ -1662,6 +1739,21 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     hangup: false,
     transfer: false,
   };
+}
+
+function isSuspiciousSpokenEmail(email: string): boolean {
+  const [local, domain] = email.toLowerCase().split("@");
+  if (!local || !domain) return true;
+  const labels = domain.split(".").filter(Boolean);
+  if (labels.length < 2) return true;
+  if (labels.some((label) => label.length <= 1 && !/^xn--/.test(label))) return true;
+  // Repeated spoken fragments commonly create addresses such as
+  // neumann@musterbau.d.neumann. Do not send those without confirmation.
+  return labels.at(-1) === local || labels.some((label) => label === local);
+}
+
+function affirmsMentally(text: string): boolean {
+  return /^(?:ja|ja,?\s*(?:das\s+)?(?:stimmt|klar|gerne|okay|ok)|klar|stimmt|genau|okay|ok)\s*$/i.test(text.trim());
 }
 
 function recordingConsentResolved(ctx: CallContext): boolean {
@@ -1889,6 +1981,13 @@ function extractSpokenEmail(text: string): string | undefined {
     .replace(/[<>()[\],;:"']/g, "")
     .replace(/\s+/g, "");
   const fallbackEmail = normalizedAcrossTurns.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g)?.at(-1);
+  if (!fallbackEmail) return undefined;
+
+  const [local, domain] = fallbackEmail.split("@");
+  const labels = domain.split(".").filter(Boolean);
+  if (!local || !domain || labels.length < 2 || labels.some((label) => label.length <= 1 && !/^xn--/.test(label))) {
+    return undefined;
+  }
   return fallbackEmail;
 }
 

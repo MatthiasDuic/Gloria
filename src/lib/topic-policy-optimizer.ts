@@ -20,7 +20,7 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
     termin: reports.filter((r) => r.outcome === "Termin").length,
     absage: reports.filter((r) => r.outcome === "Absage").length,
     wiedervorlage: reports.filter((r) => r.outcome === "Wiedervorlage").length,
-    keinKontakt: reports.filter((r) => r.outcome === "Kein Kontakt").length,
+    keinKontakt: reports.filter((r) => r.outcome === "Nicht erreicht / kein Kontakt").length,
   };
 
   const system = [

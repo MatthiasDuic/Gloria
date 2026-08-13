@@ -116,7 +116,7 @@ async function handle(request: Request) {
         contactName: lead.contactName,
         topic: lead.topic,
         summary: `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
-        outcome: "Kein Kontakt",
+        outcome: "Nicht erreicht / kein Kontakt",
         attempts: (lead.attempts || 0) + 1,
         userId: lead.userId,
       });

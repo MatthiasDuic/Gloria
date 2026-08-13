@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateDeepgramPreview, isDeepgramConfigured } from "@/lib/deepgram-tts";
+import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
 import { buildSystemPrompt, buildVoicePreview } from "@/lib/gloria";
 import { getDashboardData } from "@/lib/storage";
 import type { Topic } from "@/lib/types";
@@ -117,7 +117,7 @@ async function buildVoicePayload(request: Request, topic?: Topic, voiceId?: stri
   }
 
   const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
-  const script = data.topicPolicies.find((entry) => entry.topic === topic) || data.topicPolicies[0];
+  const script = data.playbooks.find((entry) => entry.topic === topic) || data.playbooks[0];
   const systemPrompt = buildSystemPrompt(script);
   
   // Generate LLM response with full system prompt for realistic preview
@@ -132,19 +132,19 @@ async function buildVoicePayload(request: Request, topic?: Topic, voiceId?: stri
 
   const latestUser = await findUserById(sessionUser.id);
   const resolvedVoiceId = String(voiceId || latestUser?.selectedVoiceId || "").trim() || undefined;
-  const voiceResult = await generateDeepgramPreview(preview, resolvedVoiceId);
+  const voiceResult = await generateElevenLabsPreview(preview, resolvedVoiceId);
 
   return {
     preview,
     systemPrompt,
     provider: voiceResult.provider,
-    deepgramConfigured: isDeepgramConfigured(),
+    elevenLabsConfigured: isElevenLabsConfigured(),
     audioBase64: voiceResult.audioBase64,
     audioMimeType: voiceResult.audioMimeType,
     voiceId: resolvedVoiceId,
     message:
-      voiceResult.provider === "deepgram"
-        ? "Deepgram Aura-Stimme geladen (LLM-generiert)."
+      voiceResult.provider === "elevenlabs"
+        ? "ElevenLabs-Stimme mit erhöhter Qualität geladen (LLM-generiert)."
         : voiceResult.error || "Browser-Stimme wird als Fallback verwendet.",
   };
 }

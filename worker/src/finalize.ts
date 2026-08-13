@@ -7,7 +7,7 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-type Outcome = "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt";
+type Outcome = "Termin" | "Absage" | "Wiedervorlage" | "Nicht erreicht / kein Kontakt" | "Gespräch abgebrochen";
 
 type ExtractedReport = {
   outcome: Outcome;
@@ -27,7 +27,7 @@ type ReportDocumentation = {
 
 const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das Transkript unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit folgenden Feldern:
 {
-  "outcome": "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt",
+  "outcome": "Termin" | "Absage" | "Wiedervorlage" | "Nicht erreicht / kein Kontakt" | "Gespräch abgebrochen",
   "appointmentAt": "ISO-8601 mit Zeitzone (z. B. 2026-04-30T15:00:00+02:00) oder null",
   "contactEmail": "vom Kunden bestätigte Mailadresse oder null",
   "nextCallAt": "ISO-8601 mit Zeitzone für den vereinbarten Rückruf-Zeitpunkt (NUR bei Wiedervorlage), sonst null",
@@ -38,7 +38,8 @@ Regeln:
 - "Termin" nur, wenn ein konkreter Termin (Datum + Uhrzeit) bestätigt wurde.
 - "Absage" wenn der Anrufende ablehnt.
 - "Wiedervorlage" wenn auf später verschoben wurde, ohne festen Termin – insbesondere wenn der Anrufende keinen Kalender-Zugriff hatte und einen Rückruf-Zeitpunkt + (idealerweise) Direktdurchwahl genannt hat.
-- "Kein Kontakt" sonst (kein Entscheider erreicht, abgebrochen).
+- "Nicht erreicht / kein Kontakt" wenn kein Kontakt zustande kam.
+- "Gespräch abgebrochen" wenn jemand kurz angerufen wurde, aber das Gespräch nach dem Einstieg abgebrochen wurde.
 - appointmentAt: nutze die LETZTE im Transkript bestätigte Termin-Aussage. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" sagt, nimm das Datum exakt so.
 - nextCallAt + directDial: NUR füllen, wenn outcome="Wiedervorlage" UND der Anrufende explizit Tag/Uhrzeit für den Rückruf bzw. eine Durchwahl/Nummer genannt UND bestätigt hat.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
@@ -106,7 +107,9 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
     const outcome: Outcome =
       parsed.outcome === "Termin" || parsed.outcome === "Absage" || parsed.outcome === "Wiedervorlage"
         ? parsed.outcome
-        : "Kein Kontakt";
+        : parsed.outcome === "Gespräch abgebrochen"
+          ? "Gespräch abgebrochen"
+          : "Nicht erreicht / kein Kontakt";
 
     const appointmentAt =
       typeof parsed.appointmentAt === "string"
@@ -167,8 +170,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
   // Deterministischer Override: Wenn der Worker bereits eine bestätigte
   // Slot-Phrase erkannt hat (Phase-7-Termin-Bestätigung), ist outcome=Termin
   // und das Datum lässt sich aus der Phrase ableiten – unabhängig vom LLM.
-  let outcome: "Termin" | "Absage" | "Wiedervorlage" | "Kein Kontakt" =
-    extracted?.outcome || "Kein Kontakt";
+  let outcome: Outcome = extracted?.outcome || "Nicht erreicht / kein Kontakt";
   let appointmentAt: string | undefined = extracted?.appointmentAt;
   let summary: string =
     extracted?.summary ||
