@@ -447,6 +447,16 @@ type PkvFlowState =
 
 function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
   const structured = ctx.flow.pkvData;
+  if (ctx.flow.awaiting === "insurance_status") return "need_insurance";
+  if (ctx.flow.awaiting === "current_contribution") return "need_contribution";
+  if (ctx.flow.awaiting === "projection_interest") {
+    if (!ctx.flow.projectionDelivered) return "need_projection";
+    if (structured.interest === "positive") return "ready_for_schedule";
+    return "need_interest";
+  }
+  if (ctx.flow.awaiting === "appointment_preference" || ctx.flow.awaiting === "appointment_selection") {
+    return "ready_for_schedule";
+  }
   if (ctx.topicKind === "pkv" && (structured.insuranceStatus || structured.currentContribution !== undefined || structured.interest)) {
     if (!structured.insuranceStatus) return "need_insurance";
     if (structured.currentContribution === undefined) return "need_contribution";
@@ -692,12 +702,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   }
 
   const isDiscoveryObjection = /was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich|wie\s+will\s+herr|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten/.test(text);
+  const explicitAwaitingInsurance = ctx.flow.awaiting === "insurance_status";
   const customerInsuranceStatusKnown = ctx.transcript
     .filter((turn) => turn.role === "user")
     .some((turn) => hasInsuranceSignal(turn.text));
-  if (!isDiscoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
+  if (!explicitAwaitingInsurance && !isDiscoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
       return {
-        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist damit Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
         hangup: false,
         transfer: false,
       };
@@ -721,7 +732,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (/\b(also|hm+|mhm|na\s*ja)\b/i.test(userText.trim())) {
     return {
-      reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell eher privat oder gesetzlich versichert?",
+      reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };
@@ -767,6 +778,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   }
 
   if (state === "need_insurance") {
+    if (/^ich\s+bin(?:\s+da)?\.?$/i.test(text.trim())) {
+      return {
+        reply: "Sprechen Sie den Satz gern noch kurz zu Ende: Sind Sie privat oder gesetzlich versichert?",
+        hangup: false,
+        transfer: false,
+      };
+    }
     return {
       reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
@@ -792,7 +810,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     const amount = extractLatestContributionAmount(ctx);
     const line = amount !== undefined
       ? buildTenYearProjectionLine(amount)
-      : "Danke, in dieser Größenordnung entsteht über zehn Jahre oft ein spürbarer Mehrbetrag.";
+      : "Danke, bei Ihrem aktuellen Beitrag entsteht über zehn Jahre voraussichtlich ein spürbarer Mehrbetrag.";
     return {
       reply: `${line} Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des individuellen Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
       hangup: false,
@@ -890,9 +908,13 @@ function extractFreeSlotPhrases(prompt?: string): string[] {
 }
 
 function normalizeSpokenSlot(slot: string): string {
+  const ordinal: Record<number, string> = {
+    1: "ersten", 2: "zweiten", 3: "dritten", 4: "vierten", 5: "fünften", 6: "sechsten", 7: "siebten", 8: "achten", 9: "neunten", 10: "zehnten", 11: "elften", 12: "zwölften", 13: "dreizehnten", 14: "vierzehnten", 15: "fünfzehnten", 16: "sechzehnten", 17: "siebzehnten", 18: "achtzehnten", 19: "neunzehnten", 20: "zwanzigsten", 21: "einundzwanzigsten", 22: "zweiundzwanzigsten", 23: "dreiundzwanzigsten", 24: "vierundzwanzigsten", 25: "fünfundzwanzigsten", 26: "sechsundzwanzigsten", 27: "siebenundzwanzigsten", 28: "achtundzwanzigsten", 29: "neunundzwanzigsten", 30: "dreißigsten", 31: "einunddreißigsten",
+  };
   return slot
-    .replace(/\b(\d{1,2})\.\s+([A-Za-zÄÖÜäöü]+)\b/g, (_, day, month) => `${numberToGermanWords(Number(day))}. ${month}`)
-    .replace(/\b(\d{1,2}):([0-5]\d)\s*uhr\b/gi, (_, hour, minute) => `${numberToGermanWords(Number(hour))} Uhr ${numberToGermanWords(Number(minute))}`)
+    .replace(/\b(\d{1,2})\.\s+([A-Za-zÄÖÜäöü]+)\b/g, (_, day, month) => `den ${ordinal[Number(day)] || numberToGermanWords(Number(day))} ${month}`)
+    .replace(/\b(\d{1,2}):([0-5]\d)\s*uhr\b/gi, (_, hour, minute) => Number(minute) === 0 ? `${numberToGermanWords(Number(hour))} Uhr` : `${numberToGermanWords(Number(hour))} Uhr ${numberToGermanWords(Number(minute))}`)
+    .replace(/\bUhr\s+null\b/gi, "Uhr")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -974,7 +996,7 @@ function buildPkvDiscoveryQuestion(ctx: CallContext, userText: string): string {
   );
 
   if (!insuranceKnown) {
-    return "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell eher privat oder gesetzlich versichert?";
+    return "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?";
   }
   if (!contributionKnown) {
     if (contributionQuestionAsked) {

@@ -415,6 +415,22 @@ test("selects a supplied slot from spoken weekday and time", () => {
   assert.match(reply.reply, /vierzehn Uhr/);
 });
 
+test("handles incomplete insurance ASR without advancing the flow", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-incomplete-insurance",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.flow.stage = "need_insurance";
+  ctx.flow.awaiting = "insurance_status";
+  ctx.transcript.push({ role: "assistant", text: "Sind Sie aktuell privat oder gesetzlich versichert?", at: 1 });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Ich bin");
+  assert.ok(reply);
+  assert.match(reply.reply, /Satz gern noch kurz zu Ende/);
+  assert.doesNotMatch(reply.reply, /Monatsbeitrag|Termin/);
+});
+
 test("never asks to choose unnamed appointment slots", () => {
   const ctx = newContext({
     callSid: "test-pkv-no-slots",

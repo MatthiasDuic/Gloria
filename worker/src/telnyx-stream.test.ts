@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { shouldInterruptOnPartialSpeech } from "./telnyx-stream.js";
+import { extractConfirmedSlot, shouldInterruptOnPartialSpeech } from "./telnyx-stream.js";
 
 test("does not interrupt on short acknowledgements or rejections", () => {
   assert.equal(shouldInterruptOnPartialSpeech("Ja."), false);
@@ -11,4 +11,13 @@ test("does not interrupt on short acknowledgements or rejections", () => {
 test("interrupts on meaningful follow-up speech", () => {
   assert.equal(shouldInterruptOnPartialSpeech("Ich habe noch eine Frage"), true);
   assert.equal(shouldInterruptOnPartialSpeech("Können Sie das bitte noch einmal erklären?"), true);
+});
+
+test("locks slot from spoken ordinal date confirmation", () => {
+  assert.equal(
+    extractConfirmedSlot(
+      "Perfekt, ich notiere Donnerstag, den zwanzigsten August um achtzehn Uhr dreißig für Sie.",
+    ),
+    "Donnerstag, den zwanzigsten August um achtzehn Uhr dreißig",
+  );
 });

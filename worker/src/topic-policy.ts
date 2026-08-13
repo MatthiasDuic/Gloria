@@ -175,10 +175,15 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
       if (/\b(?:privat|pkv)\b/i.test(text)) {
         next.pkvData = { ...next.pkvData, insuranceStatus: "pkv" };
         next.insuranceKnown = true;
+        next.awaiting = "current_contribution";
       } else if (/\b(?:gesetzlich|gkv)\b/i.test(text)) {
         next.pkvData = { ...next.pkvData, insuranceStatus: "gkv" };
         next.insuranceKnown = true;
+        next.awaiting = "current_contribution";
       }
+    }
+    if (next.awaiting === "current_contribution" && amount !== undefined) {
+      next.awaiting = "projection_interest";
     }
     if (next.awaiting === "projection_interest") {
       if (/\b(?:ja|gern|gerne|hilfreich|interessant|passt|okay|ok)\b/i.test(text)) {
