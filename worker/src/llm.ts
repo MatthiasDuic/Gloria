@@ -773,7 +773,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
-      reply: "Das ist nachvollziehbar. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind. [PAUSE] Herr Duic setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?",
+      reply: "Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind. [PAUSE] Herr Duic setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?",
       hangup: false,
       transfer: false,
     };
@@ -790,6 +790,14 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (!discoveryObjection && (startingQuestionAnswered || /mit\s+welchem\s+beitrag.*angefangen/i.test(latestAssistant)) && contributionQuestionInHistory && forgetsStartingContribution) {
     return {
       reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      hangup: false,
+      transfer: false,
+    };
+  }
+
+  if (/wie\s+will\s+herr\s+dui(?:c|ch|tsch)\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
+    return {
+      reply: `Ja, genau darum geht es: ${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Im Termin sehen Sie also anhand Ihrer eigenen Zahlen, wie die Prognose entsteht und welche Optionen überhaupt zu Ihrer Situation passen.`,
       hangup: false,
       transfer: false,
     };
@@ -829,14 +837,6 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir\s+(?:dieser\s+)?termin|warum\s+sollte\s+ich\s+einen\s+termin\s+machen/.test(text)) {
     return {
       reply: `Sie bekommen vor allem drei Dinge: erstens eine konkrete Hochrechnung auf Ihre eigenen Beiträge, zweitens Klarheit, ob überhaupt Handlungsbedarf besteht, und drittens konkrete Handlungsmöglichkeiten statt nur allgemeiner Aussagen. Wäre so eine nüchterne Einordnung für Sie grundsätzlich hilfreich?`,
-      hangup: false,
-      transfer: false,
-    };
-  }
-
-  if (/wie\s+will\s+herr\s+dui?tsch?\s+das\s+machen|wie\s+will\s+herr\s+duic\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
-    return {
-      reply: `${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Wäre so eine klare Einordnung für Sie hilfreich?`,
       hangup: false,
       transfer: false,
     };

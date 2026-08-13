@@ -322,6 +322,28 @@ test("builds PKV relevance before asking insurance questions", () => {
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });
 
+test("acknowledges the PKV how-question with a concrete answer", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-how-question",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.flow.stage = "need_interest";
+  ctx.flow.awaiting = "projection_interest";
+  ctx.flow.projectionDelivered = true;
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Wäre diese Klarheit für Sie ein echter Mehrwert?",
+    at: 1,
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Ich denke schon, aber wie will Herr Duich das machen?");
+  assert.ok(reply);
+  assert.match(reply.reply, /Ja, genau darum geht es/);
+  assert.match(reply.reply, /eigenen Zahlen/);
+  assert.doesNotMatch(reply.reply, /grundsätzlich hilfreich/);
+});
+
 test("stream path keeps PKV structure after contribution-rise response", async () => {
   const ctx = newContext({
     callSid: "test-pkv-stream-order",
