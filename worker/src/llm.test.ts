@@ -368,6 +368,51 @@ test("does not repeat the starting-contribution bridge after a partial answer", 
   assert.doesNotMatch(reply.reply, /Herr Duic setzt genau da an/);
 });
 
+test("treats the current contribution follow-up as the current contribution", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-current-follow-up",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Wie stark spüren Sie diese Entwicklung bei sich?", at: 1 },
+    { role: "user", text: "Die Beiträge steigen jedes Jahr.", at: 2 },
+    { role: "assistant", text: "Mit welchem Beitrag haben Sie angefangen?", at: 3 },
+    { role: "user", text: "Das weiß ich nicht mehr.", at: 4 },
+    { role: "assistant", text: "Bei welchem Beitrag liegen Sie aktuell ungefähr?", at: 5 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Neunhundert Euro.");
+  assert.ok(reply);
+  assert.match(reply.reply, /privat oder gesetzlich|zehn Jahren|Prognose/i);
+  assert.doesNotMatch(reply.reply, /Bei welchem Beitrag liegen Sie aktuell/);
+});
+
+test("does not merge repeated email corrections into a malformed address", () => {
+  const ctx = newContext({
+    callSid: "test-email-correction-retry",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen.", at: 1 },
+    { role: "user", text: "Nein.", at: 2 },
+    { role: "assistant", text: "Welche E-Mail-Adresse darf ich für die Terminbestätigung notieren?", at: 3 },
+    { role: "user", text: "Neumann at Musterbau Punkt d.", at: 4 },
+    { role: "assistant", text: "Ich habe die E-Mail-Adresse noch nicht vollständig verstanden.", at: 5 },
+    { role: "user", text: "Neumann at Musterbau Punkt", at: 6 },
+    { role: "assistant", text: "Ich habe neumann@musterbau.d.neumann verstanden. Ist diese E-Mail-Adresse korrekt?", at: 7 },
+    { role: "user", text: "d e.", at: 8 },
+  );
+
+  const reply = buildDeterministicPostBookingReply(ctx);
+  assert.ok(reply);
+  assert.match(reply.reply, /neumann@musterbau\.de/);
+  assert.doesNotMatch(reply.reply, /Terminbestätigung erfolgt wie besprochen ohne E-Mail/);
+  assert.doesNotMatch(reply.reply, /d\.neumann|musterbau\.d\.neumann/);
+});
+
 test("does not treat the remembered starting contribution as current", () => {
   const ctx = newContext({
     callSid: "test-pkv-starting-contribution",
@@ -495,6 +540,41 @@ test("selects a supplied slot from spoken weekday and time", () => {
   assert.ok(reply);
   assert.match(reply.reply, /notiere/);
   assert.match(reply.reply, /vierzehn Uhr/);
+});
+
+test("keeps the offered slots after an unclear time answer", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-slot-retry",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "- Freitag, den einundzwanzigsten August um zwölf Uhr",
+      "- Freitag, den einundzwanzigsten August um dreizehn Uhr dreißig",
+    ].join("\n"),
+  });
+  ctx.flow.stage = "scheduling";
+  ctx.flow.awaiting = "appointment_selection";
+  ctx.flow.pkvData = {
+    insuranceStatus: "gkv",
+    currentContribution: 900,
+    interest: "positive",
+  };
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.projectionDelivered = true;
+  ctx.flow.interestConfirmed = true;
+  const offered = "Wie wäre es mit Freitag, den einundzwanzigsten August um zwölf Uhr oder Freitag, den einundzwanzigsten August um dreizehn Uhr dreißig?";
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell privat oder gesetzlich versichert?", at: 0 },
+    { role: "user", text: "Gesetzlich.", at: 0.5 },
+    { role: "assistant", text: offered, at: 1 },
+    { role: "user", text: "Drei Uhr dreißig klingt gut.", at: 2 },
+    { role: "assistant", text: "Welcher der beiden Termine passt Ihnen besser?", at: 3 },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Den zweiten.");
+  assert.ok(reply);
+  assert.match(reply.reply, /notiere Freitag.*dreizehn Uhr dreißig/);
 });
 
 test("handles incomplete insurance ASR without advancing the flow", () => {

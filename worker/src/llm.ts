@@ -916,6 +916,10 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (state === "ready_for_schedule") {
     const offeredSlots = extractFreeSlotPhrases(ctx.freeSlotsPrompt);
     const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
+    const latestOfferedReply = [...ctx.transcript]
+      .reverse()
+      .find((turn) => turn.role === "assistant" && offeredSlots.filter((slot) => turn.text.includes(slot)).length >= 2)
+      ?.text || latestAssistant;
     const hasAppointmentBridge = ctx.transcript.some(
       (turn) => turn.role === "assistant" && /kein(?:en)?\s+schnellabschluss|drei\s+(?:termine|gespräche)|ersten?\s+termin.*analyse/i.test(turn.text),
     );
@@ -926,9 +930,9 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
         transfer: false,
       };
     }
-    const offeredInLatestReply = offeredSlots.filter((slot) => latestAssistant.includes(slot));
+    const offeredInLatestReply = offeredSlots.filter((slot) => latestOfferedReply.includes(slot));
     if (offeredInLatestReply.length >= 2) {
-      const selected = selectOfferedSlot(latestAssistant, userText, offeredSlots);
+      const selected = selectOfferedSlot(latestOfferedReply, userText, offeredSlots);
       if (selected) {
         return {
           reply: `Perfekt, ich notiere ${selected} für Sie.`,
@@ -1145,7 +1149,7 @@ function hasCurrentProjection(ctx: CallContext): boolean {
 }
 
 function isCurrentContributionQuestion(text: string): boolean {
-  return /(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(
+  return /(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|bei\s+welchem\s+beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(
     text,
   );
 }
@@ -1742,9 +1746,8 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
   const emailTurnsSinceQuestion = ctx.transcript
     .slice(emailQuestionIndex + 1)
     .filter((turn) => turn.role === "user")
-    .map((turn) => turn.text)
-    .join(" ");
-  const resolvedEmail = extractSpokenEmail(emailTurnsSinceQuestion) || pkvData.email;
+    .map((turn) => turn.text);
+  const resolvedEmail = resolveSpokenEmailTurns(emailTurnsSinceQuestion) || pkvData.email;
   const emailConfirmationAsked = ctx.transcript
     .slice(emailQuestionIndex + 1)
     .some((turn) => turn.role === "assistant" && /ist diese.*(?:richtig|korrekt)|habe ich sie richtig verstanden/i.test(turn.text));
@@ -2074,6 +2077,27 @@ function extractSpokenEmail(text: string): string | undefined {
     return undefined;
   }
   return fallbackEmail;
+}
+
+function resolveSpokenEmailTurns(turns: string[]): string | undefined {
+  const normalizedTurns = turns.map((turn) => turn.trim()).filter(Boolean);
+
+  // A complete address in a newer answer replaces an earlier correction.
+  for (let index = normalizedTurns.length - 1; index >= 0; index -= 1) {
+    const candidate = extractSpokenEmail(normalizedTurns[index]);
+    if (candidate) return candidate;
+  }
+
+  // ASR may deliver only a suffix such as "d e." in a separate turn. Append
+  // it only to the immediately preceding answer, never to the full history.
+  const latest = normalizedTurns.at(-1) || "";
+  const previous = normalizedTurns.at(-2) || "";
+  if (previous && latest && !/\b(?:at|ät|klammeraffe)\b|@/i.test(latest)) {
+    const combined = extractSpokenEmail(`${previous} ${latest}`);
+    if (combined) return combined;
+  }
+
+  return undefined;
 }
 
 function buildMemoryBlock(ctx: CallContext): string {
