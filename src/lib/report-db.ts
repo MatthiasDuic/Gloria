@@ -482,6 +482,26 @@ async function ensureSchema() {
     ON gloria_reports (call_sid);
   `);
 
+  // Alte Installationen konnten wegen des bisherigen nicht-eindeutigen
+  // Indexes mehrere Reports für dieselbe Call-SID enthalten. Vor dem Unique-
+  // Index bleibt jeweils der zuletzt aktualisierte Datensatz erhalten.
+  await db.query(`
+    DELETE FROM gloria_reports older
+    USING gloria_reports newer
+    WHERE older.call_sid IS NOT NULL
+      AND older.call_sid = newer.call_sid
+      AND (
+        older.updated_at < newer.updated_at
+        OR (older.updated_at = newer.updated_at AND older.id < newer.id)
+      );
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS gloria_reports_call_sid_unique_idx
+    ON gloria_reports (call_sid)
+    WHERE call_sid IS NOT NULL;
+  `);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS gloria_recordings (
       id TEXT PRIMARY KEY,
@@ -1200,7 +1220,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
           )
-          ON CONFLICT (id)
+          ON CONFLICT (call_sid) WHERE call_sid IS NOT NULL
           DO UPDATE SET
             user_id = EXCLUDED.user_id,
             phone_number_id = EXCLUDED.phone_number_id,

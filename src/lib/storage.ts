@@ -961,9 +961,10 @@ export async function storeCallReport(payload: {
 
   const reportDb = await readReportDatabase();
   const reports = reportDb.reports;
+  const callSid = payload.callSid?.trim() || undefined;
 
-  const existingIndex = payload.callSid
-    ? reports.findIndex((report) => report.callSid === payload.callSid)
+  const existingIndex = callSid
+    ? reports.findIndex((report) => report.callSid?.trim() === callSid)
     : -1;
   const existingReport = existingIndex >= 0 ? reports[existingIndex] : undefined;
 
@@ -1014,7 +1015,7 @@ export async function storeCallReport(payload: {
     id: existingReport?.id || `report-${Date.now()}`,
     userId: resolvedUserId || existingReport?.userId,
     phoneNumberId: payload.phoneNumberId || existingReport?.phoneNumberId,
-    callSid: payload.callSid || existingReport?.callSid,
+    callSid: callSid || existingReport?.callSid,
     leadId: payload.leadId || existingReport?.leadId,
     directDial: payload.directDial || existingReport?.directDial,
     company: payload.company,
@@ -1034,10 +1035,15 @@ export async function storeCallReport(payload: {
       process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
   };
 
-  const updatedReports = [...reports];
+  const updatedReports = callSid
+    ? reports.filter((report, index) => index === existingIndex || report.callSid?.trim() !== callSid)
+    : [...reports];
+  const updatedIndex = callSid
+    ? updatedReports.findIndex((report) => report.callSid?.trim() === callSid)
+    : existingIndex;
 
-  if (existingIndex >= 0) {
-    updatedReports[existingIndex] = report;
+  if (updatedIndex >= 0) {
+    updatedReports[updatedIndex] = report;
   } else {
     updatedReports.unshift(report);
   }
