@@ -7,6 +7,7 @@ export type TopicPolicyFields = {
   behavior?: string;
   conversationGuardrails?: string;
   requiredQuestions?: string;
+  exampleSentences?: string;
 };
 
 export async function loadTopicPolicy(opts: {
@@ -69,6 +70,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const behavior = (policy.behavior || "").trim();
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
   const requiredQuestions = (policy.requiredQuestions || "").trim();
+  const exampleSentences = (policy.exampleSentences || "").trim();
 
   if (
     !topicSummary &&
@@ -100,6 +102,13 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
       "PFLICHTFRAGEN IN TERMINIERUNGS-/VORBEREITUNGSPHASE:",
       "Diese Fragen muessen in der Terminierungs- oder Vorbereitungsphase gestellt werden. Wenn der Kunde sie nicht direkt beantworten moechte oder der Call vorher endet, muessen sie in die Terminbestaetigungsmail aufgenommen werden:",
       requiredQuestions,
+    );
+  }
+  if (exampleSentences) {
+    parts.push(
+      "",
+      "BEISPIELFORMULIERUNGEN (nur sinngemäß verwenden, nicht mechanisch wiederholen):",
+      exampleSentences,
     );
   }
 

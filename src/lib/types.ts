@@ -54,6 +54,8 @@ export interface TopicPolicyConfig {
    * Eine Frage pro Zeile.
    */
   requiredQuestions?: string;
+  /** Beispielantworten und Formulierungen, die Gloria als Stilvorlage nutzen darf. */
+  exampleSentences?: string;
   // Legacy-/Kompatibilitätsfelder ------------------------------------------------
   callObjective?: string;
   requiredData?: string;

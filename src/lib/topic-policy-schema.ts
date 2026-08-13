@@ -11,6 +11,7 @@ export const TopicPolicyPayloadSchema = z
     behavior: z.string().optional(),
     conversationGuardrails: z.string().optional(),
     requiredQuestions: z.string().optional(),
+    exampleSentences: z.string().optional(),
   })
   .strict();
 

@@ -1858,6 +1858,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
             : typeof data.requiredData === "string"
               ? data.requiredData
               : undefined,
+        exampleSentences: typeof data.exampleSentences === "string" ? data.exampleSentences : undefined,
         // Legacy-Felder bleiben für bestehende Datensätze verfügbar.
         requiredData: typeof data.requiredData === "string" ? data.requiredData : undefined,
         knowledge: typeof data.knowledge === "string" ? data.knowledge : undefined,

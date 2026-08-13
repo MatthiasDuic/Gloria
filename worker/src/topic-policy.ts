@@ -92,12 +92,12 @@ export function createVoiceProfile(topic?: string): VoiceProfile {
   const base: Record<TopicKind, VoiceProfile> = {
     pkv: {
       profileName: "warm_consultative",
-      stability: 0.4,
+      stability: 0.34,
       similarity: 0.9,
-      style: 0.42,
-      speed: 0.91,
+      style: 0.5,
+      speed: 0.93,
       speakerBoost: true,
-      segmentPauseMs: 90,
+      segmentPauseMs: 130,
     },
     commercial: {
       profileName: "confident_structured",

@@ -350,6 +350,7 @@ const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
   "behavior",
   "conversationGuardrails",
   "requiredQuestions",
+  "exampleSentences",
 ];
 
 function countFilledTopicPolicyFields(config?: TopicPolicyConfig) {
@@ -1717,6 +1718,7 @@ export default function HomePage() {
       behavior: draft.behavior || "",
       conversationGuardrails: draft.conversationGuardrails || "",
       requiredQuestions: draft.requiredQuestions || "",
+      exampleSentences: draft.exampleSentences || "",
     };
 
     const response = await fetch("/api/topic-policies", {
@@ -3174,7 +3176,7 @@ export default function HomePage() {
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Modell</span>
-                        <strong>4</strong>
+                        <strong>5</strong>
                         <p>klare Steuerfelder pro Thema</p>
                       </div>
                     </div>
@@ -3232,6 +3234,18 @@ export default function HomePage() {
                           value={activeDraft.requiredQuestions ?? ""}
                           rows={10}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredQuestions: event.target.value } }))}
+                        />
+                      </div>
+
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>5. Beispielantworten</strong> <span className="subtle">(eine Formulierung pro Zeile)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Diese Sätze sind Stilvorlagen für natürliche Antworten. Gloria soll sie sinngemäß nutzen und nicht mechanisch wiederholen.
+                        </p>
+                        <textarea
+                          value={activeDraft.exampleSentences ?? ""}
+                          rows={10}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], exampleSentences: event.target.value } }))}
                         />
                       </div>
                     </div>
