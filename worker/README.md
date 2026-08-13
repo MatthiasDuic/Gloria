@@ -5,7 +5,7 @@ Pipeline: **Telnyx (μ-law 8 kHz) → Deepgram ASR → OpenAI GPT-4.1 → Eleven
 
 Vercel kann keine langlebigen WebSocket-Server hosten, deshalb läuft dieser
 Worker separat auf Render. Vercel liefert weiterhin Dashboard, REST-API,
-Reports und das TwiML, das den Anruf via `<Connect><Stream>` an diesen Worker
+Reports und die Call-Control-Konfiguration, die den Anruf via WebSocket-Stream an diesen Worker
 übergibt.
 
 ## Architektur
@@ -59,12 +59,6 @@ Auf Vercel folgende Env-Var setzen (Production + Preview):
 
 ```
 TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
-```
-
-Optional als Legacy-Fallback (falls bereits genutzt):
-
-```
-MEDIA_STREAM_WSS_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
 ```
 
 ## Status

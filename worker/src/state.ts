@@ -10,7 +10,7 @@ export type CallContext = {
   callSid: string;
   streamSid: string;
   startedAt: number;
-  // Custom params set via <Parameter name="..."/> in TwiML.
+  // Custom parameters passed through the Telnyx stream client state.
   userId?: string;
   leadId?: string;
   company?: string;
