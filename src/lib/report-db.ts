@@ -1841,8 +1841,24 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
       return {
         id: String(data.id || `playbook-${topic}`),
         topic,
-        // Neues vereinfachtes Modell (3 Felder)
+        // Topic-Policy-Felder: explizite Werte aus PostgreSQL behalten,
+        // alte Playbook-Inhalte nur als Rückwärtskompatibilitätsfallback nutzen.
+        topicSummary:
+          typeof data.topicSummary === "string"
+            ? data.topicSummary
+            : typeof data.callObjective === "string"
+              ? data.callObjective
+              : undefined,
         behavior: typeof data.behavior === "string" ? data.behavior : undefined,
+        conversationGuardrails:
+          typeof data.conversationGuardrails === "string" ? data.conversationGuardrails : undefined,
+        requiredQuestions:
+          typeof data.requiredQuestions === "string"
+            ? data.requiredQuestions
+            : typeof data.requiredData === "string"
+              ? data.requiredData
+              : undefined,
+        // Legacy-Felder bleiben für bestehende Datensätze verfügbar.
         requiredData: typeof data.requiredData === "string" ? data.requiredData : undefined,
         knowledge: typeof data.knowledge === "string" ? data.knowledge : undefined,
         objectionResponses:
