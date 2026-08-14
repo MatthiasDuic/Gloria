@@ -689,6 +689,9 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const state = detectPkvFlowState(ctx, userText);
   const discoveryObjection = isDiscoveryObjection(ctx, userText);
   const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text.toLowerCase() || "";
+  const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
+  const currentAlreadyInTranscript = userTurns.at(-1)?.text.trim() === userText.trim();
+  const previousUserText = (currentAlreadyInTranscript ? userTurns.at(-2) : userTurns.at(-1))?.text.toLowerCase() || "";
   const discoveryConsent = /(?:^|\s)(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?)/i.test(userText.trim());
 
   if (isPkv && /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+konkret\s+geht\?|darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+geht\?/i.test(latestAssistant) && discoveryConsent) {
@@ -795,7 +798,9 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (/wie\s+(?:will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\s+das\s+machen|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
+  const isSplitHowQuestion = /wie\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\b/.test(previousUserText)
+    && /^das\s+machen\s+m[öo]chte\b/.test(text);
+  if (/wie\s+(?:will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\s+das\s+machen|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text) || isSplitHowQuestion) {
     return {
       reply: `Ja, genau darum geht es: ${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Im Termin sehen Sie also anhand Ihrer eigenen Zahlen, wie die Prognose entsteht und welche Optionen überhaupt zu Ihrer Situation passen.`,
       hangup: false,
@@ -883,7 +888,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     const amount = extractLatestContributionAmount(ctx);
     const line = amount !== undefined
       ? buildTenYearProjectionLine(amount)
-      : "Danke, bei Ihrem aktuellen Beitrag entsteht über zehn Jahre voraussichtlich ein spürbarer Mehrbetrag.";
+      : "Bei Ihrem aktuellen Beitrag entsteht über zehn Jahre voraussichtlich ein spürbarer Mehrbetrag.";
     return {
       reply: `${line} Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des individuellen Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
       hangup: false,

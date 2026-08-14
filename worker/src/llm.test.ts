@@ -367,6 +367,23 @@ test("acknowledges the PKV how-question with a concrete answer", () => {
   assert.match(asrVariant.reply, /Ja, genau darum geht es/);
 });
 
+test("answers a split how-question after the ASR continuation arrives", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-split-how-question",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.flow.stage = "need_interest";
+  ctx.flow.awaiting = "projection_interest";
+  ctx.flow.projectionDelivered = true;
+  ctx.transcript.push({ role: "user", text: "Ja, ich kann mir nur nicht vorstellen, wie Herr Duitsch", at: 1 });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "das machen möchte.");
+  assert.ok(reply);
+  assert.match(reply.reply, /Ja, genau darum geht es/);
+  assert.doesNotMatch(reply.reply, /spürbarer Mehrbetrag/);
+});
+
 test("stream path keeps PKV structure after contribution-rise response", async () => {
   const ctx = newContext({
     callSid: "test-pkv-stream-order",

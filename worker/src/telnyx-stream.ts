@@ -322,7 +322,7 @@ function likelyIncompleteUserSpeech(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return false;
-  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$)/i.test(normalized);
+  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$|\bwie\s+(?:herr\s+)?[a-zäöüß-]+\s*$)/i.test(normalized);
 }
 
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
@@ -393,7 +393,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // Antworten, ohne normale vollständige Sätze auszubremsen.
     const graceMs =
       likelyIncompleteUserSpeech(merged)
-        ? Math.max(utteranceEndGraceMs, 1100)
+        ? Math.max(utteranceEndGraceMs, 1800)
         : wordCount <= 2
         ? Math.max(utteranceEndGraceMs, 520)
         : wordCount <= 5
