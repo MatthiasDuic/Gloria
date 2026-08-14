@@ -113,6 +113,13 @@ export async function streamReply(
     return emitDeterministicReply(deterministicReply, onSentence);
   }
 
+  const factualCorrection = buildDeterministicFactualCorrection(ctx, userText);
+  if (factualCorrection) {
+    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_factual_correction" });
+    onSentence(factualCorrection.reply);
+    return factualCorrection;
+  }
+
   const trustReply = buildDeterministicTrustReply(ctx, userText);
   if (trustReply) {
     log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_trust" });
@@ -432,6 +439,14 @@ function enforceRealtimeReplyPolicy(ctx: CallContext, userText: string, text: st
 
   const phase = inferConversationPhase(ctx);
   const isPkv = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  if (isPkv) {
+    const knownInsurance = ctx.transcript
+      .filter((turn) => turn.role === "user")
+      .some((turn) => hasInsuranceSignal(turn.text));
+    if (!knownInsurance) {
+      out = out.replace(/\bprivate(?:n|r|m|s)?\s+krankenversicherung\b/gi, "Krankenversicherung");
+    }
+  }
   if (isPkv && phase <= 6) {
     out = rewriteRepeatedPkvDiscoveryQuestion(ctx, userText, out);
   }
@@ -439,6 +454,19 @@ function enforceRealtimeReplyPolicy(ctx: CallContext, userText: string, text: st
     out = buildPkvDiscoveryQuestion(ctx, userText);
   }
   return out;
+}
+
+function buildDeterministicFactualCorrection(ctx: CallContext, userText: string): TurnOutput | null {
+  const text = userText.toLowerCase();
+  if (!/(?:wie\s+kommst|woher|wie\s+kommt|quelle|warum).*(?:prozent|30\s*%|beitragssteiger|durchschnitt)/i.test(text)) {
+    return null;
+  }
+
+  return {
+    reply: "Die feste Prozentzahl war zu pauschal formuliert. Für Ihre persönliche Situation lässt sich das seriös nur anhand Ihrer eigenen Beitragsentwicklung prüfen; genau das würde Herr Duic im Termin mit Ihnen durchrechnen.",
+    hangup: false,
+    transfer: false,
+  };
 }
 
 function rewriteRepeatedPkvDiscoveryQuestion(ctx: CallContext, userText: string, out: string): string {

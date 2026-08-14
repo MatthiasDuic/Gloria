@@ -367,6 +367,17 @@ test("acknowledges the PKV how-question with a concrete answer", () => {
   assert.match(asrVariant.reply, /Ja, genau darum geht es/);
 });
 
+test("corrects an unsupported percentage claim before OpenAI", async () => {
+  const ctx = newContext({
+    callSid: "test-pkv-factual-correction",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  const reply = await streamReply(ctx, "Wie kommst du auf die 30 Prozent?", () => undefined);
+  assert.match(reply.reply, /zu pauschal formuliert/);
+  assert.match(reply.reply, /eigenen Beitragsentwicklung/);
+});
+
 test("answers a split how-question after the ASR continuation arrives", () => {
   const ctx = newContext({
     callSid: "test-pkv-split-how-question",
