@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseWavToPcm16 } from "./tts.js";
+import { applyPronunciationFixes, parseWavToPcm16 } from "./tts.js";
 
 function buildWav(samples: number[], sampleRate = 8000): Buffer {
   const data = Buffer.alloc(samples.length * 2);
@@ -34,4 +34,10 @@ test("parses a simple mono wav payload into 16-bit pcm samples", () => {
   assert.equal(parsed.channels, 1);
   assert.equal(parsed.bitDepth, 16);
   assert.deepEqual(Array.from(parsed.samples), [0, 1000, -1000, 2000]);
+});
+
+test("speaks email addresses with German words for symbols", () => {
+  const spoken = applyPronunciationFixes("Die Bestätigung geht an muster@muster.de.");
+  assert.match(spoken, /muster at muster Punkt de/);
+  assert.doesNotMatch(spoken, /muster@muster\.de/);
 });

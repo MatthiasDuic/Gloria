@@ -339,8 +339,19 @@ function keyFingerprint(value?: string): string | undefined {
  * eine phonetisch passendere Schreibweise. Die LLM-Logik und das Log
  * bleiben unverändert – nur die hörbare Ausgabe wird korrigiert.
  */
-function applyPronunciationFixes(text: string): string {
+export function applyPronunciationFixes(text: string): string {
   let out = text;
+  // E-Mail-Adressen müssen gesprochen werden, nicht als Sonderzeichen:
+  // "muster@muster.de" -> "muster at muster Punkt de".
+  out = out.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, (email) =>
+    email
+      .replace(/@/g, " at ")
+      .replace(/\./g, " Punkt ")
+      .replace(/_/g, " Unterstrich ")
+      .replace(/-/g, " Bindestrich ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
   // "Duic" -> klingt im Deutschen wie "Du-itsch" (Bindestrich erzwingt
   // bei ElevenLabs eine deutliche Trennung der Silben, sonst wird das
   // "i" verschluckt und es klingt wie "Duc").
