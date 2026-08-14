@@ -63,6 +63,7 @@ export function streamElevenLabsToMulaw(
   const modelId = process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2";
 
   const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   const done = (async () => {
     try {
       if (!apiKey || !voiceId) {
@@ -150,11 +151,8 @@ export function streamElevenLabsToMulaw(
       log.error("tts.stream_failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      if (process.env.OPENAI_API_KEY) {
-        log.warn("tts.falling_back_to_openai", { text: text.slice(0, 80) });
-        const fallback = streamOpenAiTtsToMulaw(text, onChunk);
-        await fallback.done;
-      }
+    } finally {
+      clearTimeout(timeout);
     }
   })();
 
@@ -207,103 +205,6 @@ export function parseWavToPcm16(buffer: Buffer): ParsedWav {
     bitDepth: bitsPerSample,
     samples,
   };
-}
-
-export function buildOpenAiTtsRequest(text: string): {
-  model: string;
-  input: string;
-  voice: string;
-  response_format: string;
-} {
-  return {
-    model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
-    input: applyPronunciationFixes(text),
-    voice: process.env.OPENAI_TTS_VOICE || "alloy",
-    response_format: "wav",
-  };
-}
-
-export function streamOpenAiTtsToMulaw(text: string, onChunk: (mulaw: Buffer) => void): TtsStreamHandle {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    log.error("tts.openai_missing_config", { keyPresent: false });
-    return { done: Promise.resolve(), abort: () => undefined, aborted: false };
-  }
-
-  const controller = new AbortController();
-  const done = (async () => {
-    try {
-      const res = await fetch("https://api.openai.com/v1/audio/speech", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(buildOpenAiTtsRequest(text)),
-        signal: controller.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        const body = res.body ? await res.text() : "";
-        log.error("tts.openai_http_error", {
-          status: res.status,
-          body: body.slice(0, 200),
-        });
-        return;
-      }
-
-      const audioBytes = Buffer.from(await res.arrayBuffer());
-      const parsed = parseWavToPcm16(audioBytes);
-      const pcm = parsed.samples;
-      const mulaw = Buffer.alloc(pcm.length);
-      for (let i = 0; i < pcm.length; i += 1) {
-        mulaw[i] = pcmToMulaw(pcm[i]);
-      }
-      onChunk(mulaw);
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        log.error("tts.openai_stream_failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  })();
-
-  return {
-    done,
-    abort: () => {
-      try {
-        controller.abort();
-      } catch {
-        /* ignore */
-      }
-    },
-    get aborted() {
-      return controller.signal.aborted;
-    },
-  };
-}
-
-function pcmToMulaw(sample: number): number {
-  const BIAS = 0x84;
-  const CLIP = 32635;
-
-  let pcm = Math.max(-32768, Math.min(32767, sample));
-  let sign = 0;
-  if (pcm < 0) {
-    sign = 0x80;
-    pcm = -pcm;
-  }
-  if (pcm > CLIP) pcm = CLIP;
-
-  pcm += BIAS;
-
-  let exponent = 7;
-  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
-    exponent -= 1;
-  }
-  const mantissa = (pcm >> (exponent + 3)) & 0x0f;
-  return ~(sign | (exponent << 4) | mantissa) & 0xff;
 }
 
 function numEnv(name: string, fallback: number): number {

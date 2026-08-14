@@ -3,9 +3,8 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import {
   getDefaultElevenLabsVoiceId,
   getProjectVoicePresets,
-  listElevenLabsVoices,
   type ElevenLabsVoiceOption,
-} from "@/lib/elevenlabs";
+} from "@/lib/elevenlabs-tts";
 import { ensureMasterAdmin, findUserById } from "@/lib/report-db";
 
 export const runtime = "nodejs";
@@ -28,16 +27,7 @@ function mergeCuratedVoices(
   fromApi: ElevenLabsVoiceOption[],
 ): ElevenLabsVoiceOption[] {
   const apiById = new Map(fromApi.map((voice) => [voice.id, voice] as const));
-  return curated.map((preset) => {
-    const apiVoice = apiById.get(preset.id);
-    if (!apiVoice) {
-      return preset;
-    }
-    return {
-      ...apiVoice,
-      name: preset.name,
-    };
-  });
+  return curated.map((preset) => ({ ...apiById.get(preset.id), ...preset }));
 }
 
 export async function GET(request: Request) {
@@ -52,7 +42,7 @@ export async function GET(request: Request) {
     const userRecord = await findUserById(sessionUser.id);
     const selectedVoiceId = userRecord?.selectedVoiceId || getDefaultElevenLabsVoiceId();
 
-    const voicesFromApi = await listElevenLabsVoices();
+    const voicesFromApi: ElevenLabsVoiceOption[] = [];
     const curatedVoices = mergeCuratedVoices(getProjectVoicePresets(), voicesFromApi);
     const fallback = getDefaultElevenLabsVoiceId();
 

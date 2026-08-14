@@ -343,7 +343,7 @@ export async function streamReply(
       /* fallback: replyText was scanner-extracted, hangup defaults to false */
     }
 
-    let reply = replyText.trim() || "Entschuldigung, könnten Sie das bitte wiederholen?";
+    let reply = replyText.trim() || buildDeterministicPkvFlowReply(ctx, userText)?.reply || "Entschuldigung, könnten Sie das bitte wiederholen?";
     reply = enforceRealtimeReplyPolicy(ctx, userText, sanitizeReplyText(reply)) ||
       "Entschuldigung, könnten Sie das bitte wiederholen?";
     if (consentAlreadyGranted(ctx) && /aufzeichn|mitschneid/i.test(reply)) {
@@ -391,12 +391,17 @@ export async function streamReply(
       }
     }
 
+    const deterministicFallback = buildDeterministicPkvFlowReply(ctx, userText)?.reply;
     const fallbackReply =
       enforceRealtimeReplyPolicy(
         ctx,
         userText,
-        sanitizeReplyText(replyText.trim() || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?"),
-      ) || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?";
+        sanitizeReplyText(
+          replyText.trim() ||
+            deterministicFallback ||
+            "Einen kleinen Moment bitte. Worum geht es Ihnen genau?",
+        ),
+      ) || deterministicFallback || "Einen kleinen Moment bitte. Worum geht es Ihnen genau?";
     if (fallbackReply) {
       try {
         onSentence(fallbackReply);
@@ -913,7 +918,10 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
       };
   }
 
-  if (/^(?:also|hm+|mhm|na\s*ja|ja|okay|ok)\s*$/i.test(userText.trim())) {
+  if (
+    state === "need_insurance" &&
+    /^(?:also|hm+|mhm|na\s*ja|ja|okay|ok)\s*$/i.test(userText.trim())
+  ) {
     return {
       reply: "Verstehe. Damit ich es sauber einordnen kann: Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
@@ -987,7 +995,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
       ? buildTenYearProjectionLine(amount)
       : "Bei Ihrem aktuellen Beitrag entsteht über zehn Jahre voraussichtlich ein spürbarer Mehrbetrag.";
     return {
-      reply: `${line} Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des individuellen Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
+      reply: `${line} ${owner} zeigt Ihnen im Termin anhand Ihrer Zahlen, wie sich Ihr Beitrag entwickeln kann. Wäre diese Klarheit für Sie hilfreich?`,
       hangup: false,
       transfer: false,
     };
@@ -1018,9 +1026,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     const hasAppointmentBridge = ctx.transcript.some(
       (turn) => turn.role === "assistant" && /kein(?:en)?\s+schnellabschluss|drei\s+(?:termine|gespräche)|ersten?\s+termin.*analyse/i.test(turn.text),
     );
-    if (!hasAppointmentBridge && /zehn\s+jahr|prognose|hochrechn/i.test(latestAssistant.toLowerCase())) {
+    if (
+      !ctx.flow.interestConfirmed &&
+      !hasAppointmentBridge &&
+      /zehn\s+jahr|prognose|hochrechn/i.test(latestAssistant.toLowerCase())
+    ) {
       return {
-        reply: `Stellen Sie sich vor: Sie und ${owner} sitzen nächste Woche in Ruhe zusammen. Im ersten Termin analysiert er Ihre persönliche Situation und zeigt Ihnen anhand Ihrer Zahlen, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten Sie heute prüfen können, damit Sie später keine böse Überraschung erleben. Es geht dabei ausdrücklich nicht um einen schnellen Abschluss, sondern um drei aufeinander aufbauende Gespräche: Kennenlernen und Analyse, Vorstellung des Konzepts sowie anschließend Abschluss und offene Fragen. Wäre diese Klarheit für Sie ein echter Mehrwert?`,
+        reply: `${owner} zeigt Ihnen im Termin anhand Ihrer Zahlen, wie sich Ihr Beitrag entwickeln kann. Wäre diese Klarheit für Sie hilfreich?`,
         hangup: false,
         transfer: false,
       };

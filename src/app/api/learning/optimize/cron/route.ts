@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { getDashboardData } from "@/lib/storage";
 import { listUsers } from "@/lib/report-db";
-import { optimizePlaybook } from "@/lib/playbook-optimizer";
+import { optimizeTopicPolicy } from "@/lib/topic-policy-optimizer";
 import { sendOperationalEmail } from "@/lib/mailer";
 import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
-import type { OptimizerResult } from "@/lib/playbook-optimizer";
+import type { OptimizerResult } from "@/lib/topic-policy-optimizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,7 +85,7 @@ async function handle(request: Request) {
     }
 
     for (const topic of TOPICS as readonly Topic[]) {
-      const current = data.playbooks.find((p) => p.topic === topic);
+      const current = data.topicPolicies.find((p) => p.topic === topic);
       if (!current) continue;
 
       const reports = data.reports.filter((r) => r.topic === topic);
@@ -94,20 +94,20 @@ async function handle(request: Request) {
 
       analysed += 1;
       try {
-        const optimized = await optimizePlaybook(topic, reports, current);
+        const optimized = await optimizeTopicPolicy(topic, reports, current);
         const changed =
-          optimized.opener.trim() !== (current.opener || "").trim() ||
-          optimized.discovery.trim() !== (current.discovery || "").trim() ||
-          optimized.objectionHandling.trim() !== (current.objectionHandling || "").trim() ||
-          optimized.close.trim() !== (current.close || "").trim();
+          optimized.topicSummary.trim() !== (current.topicSummary || "").trim() ||
+          optimized.behavior.trim() !== (current.behavior || "").trim() ||
+          optimized.conversationGuardrails.trim() !== (current.conversationGuardrails || "").trim() ||
+          optimized.requiredQuestions.trim() !== (current.requiredQuestions || "").trim();
 
         if (!changed) continue;
 
         const diff = [
-          diffSummary("Opener", current.opener || "", optimized.opener),
-          diffSummary("Discovery", current.discovery || "", optimized.discovery),
-          diffSummary("Einwand", current.objectionHandling || "", optimized.objectionHandling),
-          diffSummary("Close", current.close || "", optimized.close),
+          diffSummary("Thema & Nutzen", current.topicSummary || "", optimized.topicSummary),
+          diffSummary("Verhalten & Ton", current.behavior || "", optimized.behavior),
+          diffSummary("Harte Regeln", current.conversationGuardrails || "", optimized.conversationGuardrails),
+          diffSummary("Pflichtfragen", current.requiredQuestions || "", optimized.requiredQuestions),
         ].join("\n");
 
         suggestions.push({

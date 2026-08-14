@@ -626,7 +626,7 @@ test("offers and locks only supplied calendar slots", () => {
 
   let reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
   assert.ok(reply);
-  assert.match(reply.reply, /echter Mehrwert/);
+  assert.match(reply.reply, /anhand Ihrer Zahlen|diese Klarheit/);
   ctx.transcript.push({ role: "assistant", text: reply.reply, at: 7 }, { role: "user", text: "Ja, gerne.", at: 8 });
   reply = buildDeterministicPkvFlowReply(ctx, "Vormittag");
   assert.ok(reply);
@@ -803,8 +803,9 @@ test("uses concrete projection after captured PKV contribution", () => {
   assert.ok(reply);
   assert.match(reply.reply, /eintausendzweihundertachtzig Euro/);
   assert.match(reply.reply, /rund eintausendneunhundert Euro/);
-  assert.match(reply.reply, /drei aufeinander aufbauende Gespräche/);
-  assert.match(reply.reply, /echter Mehrwert/);
+  assert.match(reply.reply, /anhand Ihrer Zahlen/);
+  assert.doesNotMatch(reply.reply, /drei aufeinander aufbauende Gespräche/);
+  assert.match(reply.reply, /anhand Ihrer Zahlen|diese Klarheit/);
 });
 
 test("answers PKV value objection with concrete benefit before scheduling", () => {
@@ -824,6 +825,44 @@ test("answers PKV value objection with concrete benefit before scheduling", () =
   assert.match(reply.reply, /drei Dinge/);
   assert.match(reply.reply, /Hochrechnung/);
   assert.doesNotMatch(reply.reply, /Vormittag|Nachmittag|Termin am/);
+});
+
+test("does not restart PKV discovery after interest or during scheduling", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-no-discovery-restart",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: "- Dienstag, den fünfundzwanzigsten August um neun Uhr\n- Dienstag, den fünfundzwanzigsten August um zehn Uhr",
+  });
+
+  ctx.flow.stage = "need_interest";
+  ctx.flow.awaiting = "projection_interest";
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.projectionDelivered = true;
+  ctx.flow.pkvData = {
+    insuranceStatus: "gkv",
+    currentContribution: 1000,
+  };
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Wäre diese Klarheit für Sie ein echter Mehrwert?",
+    at: 1,
+  });
+
+  const afterInterest = buildDeterministicPkvFlowReply(ctx, "Ja.");
+  ctx.flow.pkvData.interest = "positive";
+  ctx.flow.interestConfirmed = true;
+  ctx.flow.stage = "scheduling";
+  ctx.flow.awaiting = "appointment_preference";
+  assert.ok(afterInterest);
+  assert.doesNotMatch(afterInterest.reply, /privat oder gesetzlich/);
+
+  ctx.transcript.push({ role: "assistant", text: afterInterest.reply, at: 2 });
+
+  const duringScheduling = buildDeterministicPkvFlowReply(ctx, "Ja.");
+  assert.ok(duringScheduling);
+  assert.doesNotMatch(duringScheduling.reply, /privat oder gesetzlich/);
 });
 
 test("prefers email path when customer asks for information by mail", () => {

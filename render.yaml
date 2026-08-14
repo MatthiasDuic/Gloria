@@ -35,8 +35,6 @@ services:
         value: 1
       - key: TURN_FIRST_AUDIO_SLO_MS
         value: 2400
-      - key: DEEPGRAM_API_KEY
-        sync: true
       - key: ELEVENLABS_API_KEY
         sync: true
       - key: ELEVENLABS_VOICE_ID
@@ -57,12 +55,12 @@ services:
         value: true
       - key: ELEVENLABS_LATENCY_MODE
         value: 1
-      - key: DEEPGRAM_MODEL
-        value: nova-3
-      - key: DEEPGRAM_LANGUAGE
+      - key: OPENAI_REALTIME_ASR_MODEL
+        value: gpt-4o-realtime-preview
+      - key: OPENAI_TRANSCRIBE_LANGUAGE
         value: de
-      - key: DEEPGRAM_ENDPOINTING_MS
-        value: 420
+      - key: OPENAI_ASR_SILENCE_MS
+        value: 520
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: ASR_FINAL_COALESCE_MS

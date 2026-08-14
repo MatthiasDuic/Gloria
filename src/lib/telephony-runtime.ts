@@ -1,4 +1,3 @@
-import { isDeepgramConfigured, maybeWarmupDeepgram } from "./deepgram-tts";
 import { TOPICS } from "./types";
 import type { ScriptConfig, Topic } from "./types";
 import type { ContactRole } from "@/lib/call-state-token";
@@ -87,18 +86,9 @@ async function initAudioPipeline() {
   void new TextDecoder();
   runtimeState.audioPipelineReady = true;
 
-  if (!isDeepgramConfigured()) {
-    runtimeState.elevenLabsWarm = true;
-    return;
-  }
-
-  void maybeWarmupDeepgram(true)
-    .then(() => {
-      runtimeState.elevenLabsWarm = true;
-    })
-    .catch(() => {
-      runtimeState.elevenLabsWarm = false;
-    });
+  runtimeState.elevenLabsWarm = Boolean(
+    process.env.ELEVENLABS_API_KEY?.trim() && process.env.ELEVENLABS_VOICE_ID?.trim(),
+  );
 }
 
 function initRoleMachine() {
@@ -145,7 +135,7 @@ function buildTopicProfileKey(script: ScriptConfig): string {
 
 // Stub kept for compatibility with older call sites. Gloria never uses the
 // OpenAI Realtime audio API — the voice output is always produced by the
-// Deepgram Aura TTS service through /api/telnyx/audio.
+// ElevenLabs is the only Gloria voice provider; OpenAI supplies text only.
 async function ensureOpenAiRealtimeSessions(
   _baseUrl: string,
   _topics: readonly Topic[] = TOPICS,
@@ -336,13 +326,6 @@ async function preflightWorkerAndCalendar(baseUrl: string, userId?: string): Pro
       })(),
     );
   }
-
-  // 3) Deepgram TTS-Verbindung vorwärmen (best-effort).
-  tasks.push(
-    maybeWarmupDeepgram(false)
-      .then(() => undefined)
-      .catch(() => undefined),
-  );
 
   // Wir blockieren prepareCall NICHT auf diese Aufgaben (Twilio toleriert die
   // erste halbe Sekunde Stille). Sie laufen parallel zur TwiML-Antwort.

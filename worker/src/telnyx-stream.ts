@@ -235,7 +235,7 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
   }
   // Defensive fallback: when Telnyx omits/changes encoding labels,
   // prefer telephone-safe assumption (8 kHz mu-law) over returning
-  // undecoded bytes into Deepgram.
+  // undecoded bytes into OpenAI Realtime ASR.
   if (!sampleRate || sampleRate <= 8000) {
     return mulaw8kToPcm16k(audio);
   }
@@ -340,6 +340,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let pendingUserFinals: string[] = [];
   let pendingUtterancesDuringTurn: string[] = [];
   let userFinalCoalesceTimer: NodeJS.Timeout | null = null;
+  let reportFinalized = false;
 
   const userFinalCoalesceMs = Math.max(
     140,
@@ -406,23 +407,29 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     if (!ctx || ws.readyState !== ws.OPEN) return;
     const encoded = normalizeOutboundAudio(audio, outboundEncoding);
     const payload = encoded.toString("base64");
-    ws.send(
-      JSON.stringify({
-        event: "media",
-        stream_id: ctx.streamSid,
-        media: { payload },
-      }),
-    );
+    try {
+      ws.send(JSON.stringify({ event: "media", stream_id: ctx.streamSid, media: { payload } }));
+    } catch (error) {
+      log.warn("ws.media_send_failed", { callSid: ctx.callSid, error: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   const sendMark = (name: string) => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ event: "mark", stream_id: ctx.streamSid, mark: { name } }));
+    try {
+      ws.send(JSON.stringify({ event: "mark", stream_id: ctx.streamSid, mark: { name } }));
+    } catch (error) {
+      log.warn("ws.mark_send_failed", { callSid: ctx.callSid, error: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   const clearOutboundAudio = () => {
     if (!ctx || ws.readyState !== ws.OPEN) return;
-    ws.send(JSON.stringify({ event: "clear", stream_id: ctx.streamSid }));
+    try {
+      ws.send(JSON.stringify({ event: "clear", stream_id: ctx.streamSid }));
+    } catch (error) {
+      log.warn("ws.clear_send_failed", { callSid: ctx.callSid, error: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   const speak = async (text: string) => {
@@ -676,19 +683,34 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       }
     })();
 
-    result = await streamReply(ctx, userText, (sentence) => {
-      const trimmed = sentence.trim();
-      if (!trimmed || stopPlayback) return;
+    try {
+      result = await streamReply(ctx, userText, (sentence) => {
+        const trimmed = sentence.trim();
+        if (!trimmed || stopPlayback) return;
+        queuedSentenceCount += 1;
+        if (!firstSentenceQueuedAt) {
+          firstSentenceQueuedAt = Date.now();
+        }
+        segmentQueue.push(trimmed);
+        wakeQueue();
+      });
+    } catch (error) {
+      log.error("turn.reply_failed", {
+        callSid: callSidForTurn,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      result = {
+        reply: "Einen kurzen Moment bitte, ich versuche es gleich noch einmal.",
+        hangup: false,
+        transfer: false,
+      };
+      segmentQueue.push(result.reply);
       queuedSentenceCount += 1;
-      if (!firstSentenceQueuedAt) {
-        firstSentenceQueuedAt = Date.now();
-      }
-      segmentQueue.push(trimmed);
+      firstSentenceQueuedAt ??= Date.now();
+    } finally {
+      llmDone = true;
       wakeQueue();
-    });
-
-    llmDone = true;
-    wakeQueue();
+    }
     await playbackPump;
 
     const spokenText = collectedSegments.join(" ").replace(/\s+/g, " ").trim() || result.reply.trim();
@@ -1073,7 +1095,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     } catch {
       /* ignore */
     }
-    if (ctx) {
+    if (ctx && !reportFinalized) {
+      reportFinalized = true;
       try {
         await postReport(ctx);
       } catch (error) {

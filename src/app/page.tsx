@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import Image from "next/image";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 
@@ -1285,66 +1286,78 @@ export default function HomePage() {
   }, [managedPhoneNumbers, anrufEinzelfirmaFromOptions, blockedOutboundNumbers]);
 
   async function loadDashboard() {
-    const [dashboardResponse, learningResponse] = await Promise.all([
-      fetch("/api/reports", { cache: "no-store" }),
-      fetch("/api/learning", { cache: "no-store" }),
-    ]);
+    try {
+      const [dashboardResponse, learningResponse] = await Promise.all([
+        fetch("/api/reports", { cache: "no-store" }),
+        fetch("/api/learning", { cache: "no-store" }),
+      ]);
+      if (!dashboardResponse.ok) throw new Error(`Reports konnten nicht geladen werden (HTTP ${dashboardResponse.status}).`);
+      if (!learningResponse.ok) throw new Error(`Learning konnte nicht geladen werden (HTTP ${learningResponse.status}).`);
 
-    const payload = (await dashboardResponse.json()) as DashboardData;
-    const learningPayload = (await learningResponse.json()) as LearningResponse;
+      const payload = (await dashboardResponse.json()) as DashboardData;
+      const learningPayload = (await learningResponse.json()) as LearningResponse;
 
-    setData(payload);
-    setLearning(learningPayload);
-    const nextDrafts = payload.topicPolicies.reduce<Record<string, TopicPolicyConfig>>((acc, script) => {
-      acc[script.topic] = buildDraftFromPreset(script.topic, script);
-      return acc;
-    }, {});
+      setData(payload);
+      setLearning(learningPayload);
+      const nextDrafts = payload.topicPolicies.reduce<Record<string, TopicPolicyConfig>>((acc, script) => {
+        acc[script.topic] = buildDraftFromPreset(script.topic, script);
+        return acc;
+      }, {});
 
-    // Keep the settings area available even if one topic has no persisted script yet.
-    for (const topic of TOPICS) {
-      if (!nextDrafts[topic]) {
-        nextDrafts[topic] = buildDraftFromPreset(topic);
+      // Keep the settings area available even if one topic has no persisted script yet.
+      for (const topic of TOPICS) {
+        if (!nextDrafts[topic]) {
+          nextDrafts[topic] = buildDraftFromPreset(topic);
+        }
       }
-    }
 
-    setDraftScripts(nextDrafts);
-    setNotice(
-      `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
-    );
-    setLoading(false);
-  }
-
-  async function loadCampaignLists() {
-    const response = await fetch("/api/campaigns/lists", { cache: "no-store" });
-    const payload = (await response.json()) as { lists?: CampaignListSummary[] };
-    if (response.ok) {
-      const lists = payload.lists || [];
-      setCampaignLists(lists);
-      setRunningListIds((current) => {
-        const next = new Set(current);
-        for (const list of lists) {
-          if (list.active) {
-            next.add(list.listId);
-          }
-        }
-        for (const listId of [...next]) {
-          if (!lists.some((entry) => entry.listId === listId)) {
-            next.delete(listId);
-          }
-        }
-        return [...next];
-      });
+      setDraftScripts(nextDrafts);
+      setNotice(
+        `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Dashboard konnte nicht geladen werden.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function loadSessionAndAdminData() {
-    const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
-    const mePayload = (await meResponse.json().catch(() => ({}))) as { user?: SessionUser };
-    if (!meResponse.ok || !mePayload.user) {
-      return;
+  const loadCampaignLists = useCallback(async () => {
+    try {
+      const response = await fetch("/api/campaigns/lists", { cache: "no-store" });
+      const payload = (await response.json()) as { lists?: CampaignListSummary[] };
+      if (response.ok) {
+        const lists = payload.lists || [];
+        setCampaignLists(lists);
+        setRunningListIds((current) => {
+          const next = new Set(current);
+          for (const list of lists) {
+            if (list.active) {
+              next.add(list.listId);
+            }
+          }
+          for (const listId of [...next]) {
+            if (!lists.some((entry) => entry.listId === listId)) {
+              next.delete(listId);
+            }
+          }
+          return [...next];
+        });
+      } else {
+        setNotice(`Kampagnenlisten konnten nicht geladen werden (HTTP ${response.status}).`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Kampagnenlisten konnten nicht geladen werden.");
     }
+  }, []);
 
-    setCurrentUser(mePayload.user);
+  const loadSessionAndAdminData = useCallback(async () => {
+    try {
+      const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
+      const mePayload = (await meResponse.json().catch(() => ({}))) as { user?: SessionUser };
+      if (!meResponse.ok || !mePayload.user) return;
+
+      setCurrentUser(mePayload.user);
 
     const voicesResponse = await fetch("/api/voices", { cache: "no-store" });
     const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
@@ -1364,20 +1377,23 @@ export default function HomePage() {
       setManagedPhoneNumbers(phonePayload.phoneNumbers || []);
     }
 
-    if (mePayload.user.role === "master") {
-      const usersResponse = await fetch("/api/admin/users", { cache: "no-store" });
-      const usersPayload = (await usersResponse.json().catch(() => ({}))) as { users?: AdminUser[] };
-      if (usersResponse.ok) {
-        setAdminUsers(usersPayload.users || []);
+      if (mePayload.user.role === "master") {
+        const usersResponse = await fetch("/api/admin/users", { cache: "no-store" });
+        const usersPayload = (await usersResponse.json().catch(() => ({}))) as { users?: AdminUser[] };
+        if (usersResponse.ok) {
+          setAdminUsers(usersPayload.users || []);
+        }
       }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Kontodaten konnten nicht geladen werden.");
     }
-  }
+  }, []);
 
   useEffect(() => {
     void loadDashboard();
     void loadCampaignLists();
     void loadSessionAndAdminData();
-  }, []);
+  }, [loadCampaignLists, loadSessionAndAdminData]);
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "master") return;
@@ -1644,7 +1660,7 @@ export default function HomePage() {
     }, 15000);
 
     return () => clearInterval(timer);
-  }, [campaignLists]);
+  }, [campaignLists, loadCampaignLists]);
 
   async function applyLearning(topic: Topic) {
     const confirmed = confirm(
@@ -1861,7 +1877,7 @@ export default function HomePage() {
 
       const payload = (await response.json()) as {
         preview?: string;
-        provider?: "elevenlabs" | "browser";
+        provider?: "elevenlabs";
         audioBase64?: string;
         audioMimeType?: string;
         message?: string;
@@ -2293,7 +2309,7 @@ export default function HomePage() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <img src="/Gloria.png" alt="Gloria" className="brand-logo" />
+          <Image src="/Gloria.png" alt="Gloria" width={38} height={38} className="brand-logo" priority />
           <div>
             <div className="brand-title">Gloria</div>
             <div className="brand-sub">Agentur Duic</div>

@@ -1,4 +1,4 @@
-// Gloria spricht über Deepgram Aura TTS. OpenAI liefert den Text
+// Gloria spricht über ElevenLabs TTS. OpenAI liefert den Text
 // via Chat Completions — kein Realtime-Audio, keine OpenAI-Stimme.
 const configuredChatModel = process.env.OPENAI_MODEL?.trim();
 

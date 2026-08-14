@@ -1,7 +1,7 @@
 # Gloria Stream Worker (Render)
 
 Persistenter WebSocket-Server, der Telnyx Media Streams für Gloria verarbeitet.
-Pipeline: **Telnyx (μ-law 8 kHz) → Deepgram ASR → OpenAI GPT-4.1 → ElevenLabs TTS (μ-law 8 kHz) → Telnyx**.
+Pipeline: **Telnyx (μ-law 8 kHz) → OpenAI Realtime ASR/LLM → ElevenLabs TTS (μ-law 8 kHz) → Telnyx**.
 
 Vercel kann keine langlebigen WebSocket-Server hosten, deshalb läuft dieser
 Worker separat auf Render. Vercel liefert weiterhin Dashboard, REST-API,
@@ -15,8 +15,7 @@ Telnyx  ───►  Vercel /api/telnyx/call  (Call-Control + WebSocket-Stream)
    │
    └── Audio (μ-law 8 kHz, 20 ms Frames)
       └────►  Render-Worker  ws://…/telnyx-stream
-                ├─ Deepgram (ASR, mulaw 8000 native)
-                ├─ OpenAI Chat Completions (Antwortgenerator)
+                ├─ OpenAI Realtime (ASR, PCM16 16 kHz) + Chat Completions (Antwortgenerator)
                 └─ ElevenLabs (TTS, output_format=ulaw_8000)
 ```
 
@@ -45,7 +44,6 @@ ngrok http 8080
 2. Render erkennt `render.yaml` im Root und legt den Service `gloria-stream-worker` automatisch an.
 3. **Secrets eintragen** (Render → Service → Environment):
    - `OPENAI_API_KEY`
-   - `DEEPGRAM_API_KEY`
    - `ELEVENLABS_API_KEY`
    - `ELEVENLABS_VOICE_ID`
    - `STREAM_SHARED_SECRET` (z. B. `openssl rand -hex 32`)
@@ -64,10 +62,10 @@ TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
 ## Status
 
 - [x] WebSocket-Server, Telnyx-Frame-Parser
-- [x] Deepgram Streaming-ASR (μ-law 8 kHz nativ, Endpointing 300 ms)
+- [x] OpenAI Realtime ASR mit Server-VAD (PCM16 16 kHz)
 - [x] OpenAI Turn-Handler (JSON-Antwort, max. 25 Wörter)
 - [x] ElevenLabs Streaming-TTS direkt in μ-law 8 kHz (kein Resampling nötig)
-- [x] Barge-in (Aborts laufende TTS, sobald Deepgram-Partials beim sprechenden
+- [x] Barge-in (Aborts laufende TTS, sobald OpenAI-Partials beim sprechenden
       Zustand eintreffen)
 - [x] Opener-Begrüßung beim `start`-Event
 - [x] Telnyx Stream-Switch in `src/app/api/telnyx/call/route.ts`
@@ -81,9 +79,9 @@ TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
       Kontakt) — heute übernimmt das LLM nur `hangup`.
 - [ ] Telnyx Event-Signatur prüfen (HMAC mit
       `STREAM_SHARED_SECRET` auf eingehenden Event-Requests).
-- [ ] Reconnect-/Retry-Logik bei Deepgram-Drop (~1 % der Fälle).
+- [ ] Reconnect-/Retry-Logik bei OpenAI-Realtime-Drop.
 - [ ] Aufnahme/Recording (Telnyx Recording-Flow parallel zum Stream).
-- [ ] Healthcheck mit Provider-Pings (Deepgram/OpenAI/ElevenLabs).
+- [ ] Healthcheck mit Provider-Pings (OpenAI/ElevenLabs).
 
 ## Operatives
 

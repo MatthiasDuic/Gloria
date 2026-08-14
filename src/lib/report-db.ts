@@ -54,6 +54,7 @@ export interface UserPhoneNumber {
 
 let pool: Pool | null = null;
 let schemaReady = false;
+let schemaInitialization: Promise<void> | null = null;
 let lastPostgresFailureReason = "";
 
 function getDatabaseUrl() {
@@ -203,7 +204,7 @@ function parseJsonTextArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-async function ensureSchema() {
+async function initializeSchema() {
   if (schemaReady || !shouldUsePostgres()) {
     return;
   }
@@ -621,6 +622,16 @@ async function ensureSchema() {
   `);
 
   schemaReady = true;
+}
+
+async function ensureSchema(): Promise<void> {
+  if (schemaReady || !shouldUsePostgres()) return;
+  if (!schemaInitialization) {
+    schemaInitialization = initializeSchema().finally(() => {
+      schemaInitialization = null;
+    });
+  }
+  await schemaInitialization;
 }
 
 function makeId(prefix: string): string {

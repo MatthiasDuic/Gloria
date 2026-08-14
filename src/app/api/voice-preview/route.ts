@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs";
+import { generateElevenLabsPreview, isElevenLabsConfigured } from "@/lib/elevenlabs-tts";
 import { buildSystemPrompt, buildVoicePreview } from "@/lib/gloria";
 import { getDashboardData } from "@/lib/storage";
 import type { Topic } from "@/lib/types";
@@ -117,7 +117,8 @@ async function buildVoicePayload(request: Request, topic?: Topic, voiceId?: stri
   }
 
   const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
-  const script = data.playbooks.find((entry) => entry.topic === topic) || data.playbooks[0];
+  const script = data.topicPolicies.find((entry) => entry.topic === topic) || data.topicPolicies[0];
+  if (!script) throw new Error("Keine Topic Policy für die Stimmvorschau verfügbar.");
   const systemPrompt = buildSystemPrompt(script);
   
   // Generate LLM response with full system prompt for realistic preview
@@ -143,9 +144,9 @@ async function buildVoicePayload(request: Request, topic?: Topic, voiceId?: stri
     audioMimeType: voiceResult.audioMimeType,
     voiceId: resolvedVoiceId,
     message:
-      voiceResult.provider === "elevenlabs"
-        ? "ElevenLabs-Stimme mit erhöhter Qualität geladen (LLM-generiert)."
-        : voiceResult.error || "Browser-Stimme wird als Fallback verwendet.",
+      voiceResult.audioBase64
+        ? "ElevenLabs-Stimme geladen (LLM-generiert)."
+        : voiceResult.error || "ElevenLabs-Audio konnte nicht geladen werden.",
   };
 }
 

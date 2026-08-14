@@ -6,8 +6,8 @@ import { log } from "./log.js";
 // IMPORTANT: The following env vars MUST be set in Render dashboard:
 // - APP_INTERNAL_TOKEN
 // - STREAM_SHARED_SECRET
-// - DEEPGRAM_MODEL (set to flux-general-multi)
-// - DEEPGRAM_LANGUAGE (set to de)
+// - OPENAI_REALTIME_ASR_MODEL (optional, defaults to gpt-4o-realtime-preview)
+// - OPENAI_TRANSCRIBE_LANGUAGE (optional, defaults to de)
 // - ELEVENLABS_API_KEY
 // - ELEVENLABS_VOICE_ID
 // Otherwise, worker will not authenticate with Vercel APIs
