@@ -418,6 +418,10 @@ function sanitizeReplyText(text: string): string {
   out = out.replace(/\blaut\s+pkv-?verband\b/gi, "Erfahrungsgemäß");
   out = out.replace(/einverst[äa]ndniserkl[äa]rung\s+zur\s+aufzeichnung\s+des\s+termins/gi, "Terminbestätigung");
   out = out.replace(/aufzeichnung\s+des\s+termins/gi, "Terminbestätigung");
+  // Remove disposable acknowledgement openers from OpenAI output while
+  // preserving the substantive response that follows.
+  out = out.replace(/^(?:Danke(?:\s+für\s+die\s+Info)?|Prima|Super|Perfekt|Verstanden|Das ist nachvollziehbar)(?:,?\s+(?:Herr\s+\w+))?[.!]\s*/i, "");
+  out = out.replace(/^Verstanden,?\s+und\s+genau\s+deshalb\s+/i, "Genau deshalb ");
   out = out.replace(/\s+/g, " ").trim();
   return out;
 }
@@ -1373,6 +1377,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `PREMIUM-OPENER (VERBINDLICH IM ERSTKONTAKT): (1) klare Vorstellung in einem Satz, (2) konkreter Anlass in einem Satz, (3) kurze Erlaubnisfrage in einem Satz. Maximal drei kurze Saetze, dann Pause.`,
     `PREMIUM-RHYTHMUS: Jede Antwort beginnt mit einem konkreten Bezug auf den letzten Kundengedanken und fuehrt dann mit genau einer klaren Frage weiter.`,
     `KUNDENFRAGE HAT VORRANG: Wenn der Kunde eine Frage, einen Einwand oder eine Erklärung zu deinem Vorgehen stellt, pausierst du den geplanten Gesprächsschritt. Beantworte zuerst genau diese Frage inhaltlich und greife mindestens ein konkretes Wort des Kunden auf. Kehre erst danach ruhig zum Gesprächsziel zurück. Niemals eine neue Termin-, Beitrags- oder Skriptfrage senden, solange die Kundenfrage unbeantwortet ist.`,
+    `FAKTENREGEL: Erfinde keine Prozentwerte, Durchschnittswerte, Quellen oder Marktbehauptungen. Verwende Zahlen nur, wenn sie im freigegebenen Gesprächskontext ausdrücklich vorgegeben oder aus den Kundenzahlen berechnet wurden. Vor einer bestätigten Versicherungsart sage nie "private Krankenversicherung" als Tatsache.`,
     `KUNDENFRAGE HAT VORRANG: Wenn der Kunde eine Frage, einen Einwand oder eine Erklärung zu deinem Vorgehen stellt, pausierst du den geplanten Gesprächsschritt. Beantworte zuerst genau diese Frage inhaltlich und greife mindestens ein konkretes Wort des Kunden auf. Kehre erst danach ruhig zum Gesprächsziel zurück. Niemals eine neue Termin-, Beitrags- oder Skriptfrage senden, solange die Kundenfrage unbeantwortet ist.`,
     `ANTWORTLAENGE (VERBINDLICH): Maximal 1 kurzer Satz als Reaktion, dann sofort 1 Frage. KEIN Daten-Pitch, KEINE Statistiken, KEINE Erklaerungen bevor nicht bekannt ist, was der Kunde konkret bezahlt oder wo er steht. Erst fragen, dann einordnen.`,
     `ZAHLEN-KONTEXT: Wenn der Kunde in einem vorherigen Satz eine Zahl begann (z.B. "tausend") und im naechsten Turn eine weitere Zahl nennt (z.B. "zweihundertachtzig"), kombiniere beides zum vollstaendigen Betrag (z.B. 1280 Euro) und bestaettige diesen kombinierten Wert.`,
@@ -1587,7 +1592,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- DATUM-FORMAT (KRITISCH): Schreibe Datum immer ausgeschrieben — "Dienstag, den elften Mai" — NIEMALS "11. Mai" oder "11.05.".`,
     `- SLOT EINGEFROREN: Sobald du einen Termin bestätigt hast, ist dieser Slot gesperrt. Nenne NUR diesen Slot. Berechne NIE neu. Erfinde KEINEN anderen Wochentag oder Datum.`,
     `- Den gewünschten Gesprächspartner nie als deinen Auftraggeber bezeichnen.`,
-    `- QUELLEN: Keine pauschalen oder erfundenen Quellen-Claims. Im PKV-Kontext darf genau ein vorsichtig formulierter Zahlenanker nach Angaben des PKV-Verbands genannt werden; danach zurück zu den persönlichen Zahlen des Kunden.`,
+    `- QUELLEN: Keine pauschalen oder erfundenen Quellen-Claims. Im PKV-Kontext darf höchstens der ausdrücklich freigegebene Zahlenanker nach Angaben des PKV-Verbands verwendet werden; keine zusätzlichen 5-%-, 30-%- oder Bestandskundenbehauptungen. Danach zurück zu den persönlichen Zahlen des Kunden.`,
     `- THEMENTRENNUNG: Begriffe wie "Rente" oder "Ruhestand" nur im PKV-/Krankenversicherungs-Kontext verwenden. Bei gewerblichen Versicherungen NIEMALS erwähnen.`,
     `- Bei Skepsis zuerst transparent beantworten, nicht kontern. Bei "kein Interesse" höchstens eine kurze Relevanzfrage ohne Druck; jedes weitere Nein beendet das Gespräch würdevoll.`,
     `- hangup=true NUR wenn du in DIESER Antwort eine Verabschiedung ("Auf Wiederhören", "Schönen Tag", "Tschüss" o.ä.) sagst — NICHT beim Zusammenfassen, NICHT beim E-Mail-Fragen.`,
