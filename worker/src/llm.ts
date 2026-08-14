@@ -693,6 +693,13 @@ function isDiscoveryObjection(ctx: CallContext, userText: string): boolean {
     /(?:kein|keine|nicht)\s+(?:nutzen|mehrwert|sinn|interesse|notwendig|hilfe|zeit)/i.test(historyText);
 }
 
+function likelyIncompleteCustomerThought(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/(?:^|\s)(?:wie|was|warum|wieso|ob)$/.test(normalized)) return true;
+  if (/(?:^|\s)(?:diese|dieser|dieses|das|seit|aber|und)$/.test(normalized)) return true;
+  return /\b(?:ich\s+bin|ich\s+habe|ich\s+kann\s+mir|ich\s+frage\s+mich)\b[^.!?]*\b(?:seit|diese|dieser|dieses|das)\s*$/i.test(normalized);
+}
+
 export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
   const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
@@ -707,6 +714,10 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const currentAlreadyInTranscript = userTurns.at(-1)?.text.trim() === userText.trim();
   const previousUserText = (currentAlreadyInTranscript ? userTurns.at(-2) : userTurns.at(-1))?.text.toLowerCase() || "";
   const discoveryConsent = /(?:^|\s)(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?)/i.test(userText.trim());
+
+  if (likelyIncompleteCustomerThought(userText)) {
+    return null;
+  }
 
   if (isPkv && /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+konkret\s+geht\?|darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+geht\?/i.test(latestAssistant) && discoveryConsent) {
     return {

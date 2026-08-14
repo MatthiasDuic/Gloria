@@ -384,6 +384,25 @@ test("answers a split how-question after the ASR continuation arrives", () => {
   assert.doesNotMatch(reply.reply, /spürbarer Mehrbetrag/);
 });
 
+test("does not schedule while the customer thought is unfinished", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-incomplete-interest",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.flow.stage = "need_interest";
+  ctx.flow.awaiting = "projection_interest";
+  ctx.flow.projectionDelivered = true;
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Wäre diese Klarheit für Sie ein echter Mehrwert?",
+    at: 1,
+  });
+
+  assert.equal(buildDeterministicPkvFlowReply(ctx, "Ja, wenn ich diese"), null);
+  assert.equal(buildDeterministicPkvFlowReply(ctx, "Klarheit bekommen würde, also ich kann mir nicht vorstellen, wie"), null);
+});
+
 test("stream path keeps PKV structure after contribution-rise response", async () => {
   const ctx = newContext({
     callSid: "test-pkv-stream-order",
@@ -401,7 +420,7 @@ test("stream path keeps PKV structure after contribution-rise response", async (
   );
 
   const segments: string[] = [];
-  const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr und", (segment) => segments.push(segment));
+  const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr.", (segment) => segments.push(segment));
   assert.match(reply.reply, /Wenn Sie zurückblicken/);
   assert.equal(segments.length, 1);
   assert.equal(segments.join(" "), reply.reply);

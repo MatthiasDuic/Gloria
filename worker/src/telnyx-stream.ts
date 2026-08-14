@@ -322,7 +322,7 @@ function likelyIncompleteUserSpeech(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return false;
-  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$|\bwie\s+(?:herr\s+)?[a-zäöüß-]+\s*$)/i.test(normalized);
+  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf|diese|dieser|dieses|das|nur|schon)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$|\b(?:wie|was|warum|wieso|ob)\s*$|\bwie\s+(?:herr\s+)?[a-zäöüß-]+\s*$)/i.test(normalized);
 }
 
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
