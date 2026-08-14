@@ -273,12 +273,12 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
   const isCurrentContributionQuestion = /(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text);
   if (!isCurrentContributionQuestion && /zehn\s+jahr|10\s+jahr|hochrechn|projektion|beitragsprognose|vier\s+prozent\s+pro\s+jahr|4\s*%\s+pro\s+jahr/i.test(text)) {
     next.projectionDelivered = true;
-    if (next.topicKind === "pkv" && next.stage === "need_projection") next.stage = "need_interest";
+    if (next.topicKind === "pkv" && next.contributionKnown) next.stage = "need_interest";
     next.lastAssistantSignal = "projection";
   }
 
   if (/w[äa]re\s+.*hilfreich|sinnvoll\s+f[üu]r\s+sie|grunds[äa]tzlich\s+hilfreich|echter\s+Mehrwert|diese\s+Klarheit/i.test(text)) {
-    if (next.topicKind === "pkv" && next.stage === "need_projection") next.stage = "need_interest";
+    if (next.topicKind === "pkv" && next.contributionKnown) next.stage = "need_interest";
     next.lastAssistantSignal = "interest_question";
   }
 

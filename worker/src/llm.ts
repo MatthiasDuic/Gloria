@@ -780,6 +780,7 @@ function isDiscoveryObjection(ctx: CallContext, userText: string): boolean {
 
 export function isLikelyIncompleteCustomerThought(text: string): boolean {
   const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/^(?:also|äh+|ähm+|hm+|mhm+)\s*[.!?…]*$/i.test(normalized)) return true;
   if (/(?:^|\s)(?:wie|was|warum|wieso|ob)$/.test(normalized)) return true;
   if (/(?:^|\s)(?:diese|dieser|dieses|das|seit|aber|und)$/.test(normalized)) return true;
   if (/(?:^|\s)(?:ich|wir|er|sie)\s*$/.test(normalized)) return true;

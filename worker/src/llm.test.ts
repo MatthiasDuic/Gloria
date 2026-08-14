@@ -57,6 +57,7 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
 test("keeps a final ASR fragment from advancing the PKV flow", () => {
   assert.equal(isLikelyIncompleteCustomerThought("Gut, ich"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ich bin"), true);
+  assert.equal(isLikelyIncompleteCustomerThought("Also..."), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ja, das dürfen Sie."), false);
 });
 
@@ -627,6 +628,25 @@ test("flow state records only the current contribution", () => {
   state = observeUserFlowState(state, "Tausendzweihundert Euro.");
   assert.equal(state.contributionKnown, true);
   assert.equal(state.pkvData.currentContribution, 1200);
+});
+
+test("moves from the concrete projection to scheduling after an affirmative answer", () => {
+  let state = createInitialFlowState("private Krankenversicherung");
+  state.insuranceKnown = true;
+  state.contributionKnown = true;
+  state.stage = "need_projection";
+  state.awaiting = "current_contribution";
+
+  state = observeAssistantFlowState(
+    state,
+    "Wenn man von rund vier Prozent pro Jahr ausgeht, lägen eintausend Euro in zehn Jahren höher. Wäre diese Klarheit für Sie hilfreich?",
+  );
+  assert.equal(state.stage, "need_interest");
+  assert.equal(state.awaiting, "projection_interest");
+
+  state = observeUserFlowState(state, "Ja.");
+  assert.equal(state.interestConfirmed, true);
+  assert.equal(state.stage, "ready_for_schedule");
 });
 
 test("offers and locks only supplied calendar slots", () => {

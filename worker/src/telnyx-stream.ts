@@ -840,8 +840,8 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       // beim allerersten Turn (Begrüßung + Aufzeichnungs-Frage) braucht
       // Gloria die Topic Policy noch nicht – wir warten dort nicht und sparen
       // dadurch eine spürbare Anfangs-Latenz nach dem "Hallo Müller".
-      const isFirstTurn = ctx.transcript.length <= 1;
-      if (!isFirstTurn && topicPolicyReady && !ctx.topicPolicyPrompt) {
+      const isFirstUserTurn = ctx.transcript.filter((turn) => turn.role === "user").length === 1;
+      if (!isFirstUserTurn && topicPolicyReady && !ctx.topicPolicyPrompt) {
         await Promise.race([
           topicPolicyReady,
           new Promise<void>((resolve) => setTimeout(resolve, 2000)),
@@ -854,7 +854,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       // ~2 s am Anfang (sonst muss gpt-4.1-mini ~280 Zeichen produzieren,
       // bevor TTS startet). Bei abweichendem Namen / Gatekeeper-Vermutung
       // fallen wir auf den LLM-Pfad zurück, damit Gatekeeper-Logik greift.
-      if (isFirstTurn) {
+      if (isFirstUserTurn) {
         const templated = buildTurn1OpenerLine(ctx, userText);
         if (templated) {
           log.info("turn.fast_opener", { callSid: ctx.callSid });
