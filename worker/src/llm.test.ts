@@ -4,6 +4,7 @@ import {
   buildDeterministicPkvFlowReply,
   buildDeterministicPostBookingReply,
   buildTenYearProjectionLine,
+  decideTurnRoute,
   streamReply,
   parseGermanEuroAmount,
   type TurnOutput,
@@ -32,6 +33,18 @@ test("locks the selected slot from the real confirmation wording", () => {
     ),
     LOCKED_SLOT,
   );
+});
+
+test("routes normal PKV turns to the worker and questions to OpenAI", () => {
+  const ctx = newContext({
+    callSid: "test-turn-router",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  assert.deepEqual(decideTurnRoute(ctx, "Schon sehr."), { route: "worker", reason: "structured_state" });
+  assert.deepEqual(decideTurnRoute(ctx, "Wie genau wird das gemacht?"), { route: "openai", reason: "customer_question" });
+  assert.deepEqual(decideTurnRoute(ctx, "Ich verstehe nicht, wie das funktionieren soll."), { route: "openai", reason: "customer_objection" });
 });
 
 test("locks slot from 'ich trage ... ein' phrasing", () => {

@@ -106,7 +106,6 @@ export async function streamReply(
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const openAiPrimary = parseEnvBool("LLM_OPENAI_PRIMARY", true);
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
     log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_post_booking" });
@@ -127,9 +126,12 @@ export async function streamReply(
     return trustReply;
   }
 
+  const route = decideTurnRoute(ctx, userText);
+  log.info("llm.turn_route", { callSid: ctx.callSid, route: route.route, reason: route.reason });
+
   // OpenAI formuliert den normalen Gesprächsverlauf. Der deterministische
   // PKV-Fallback bleibt für lokale Tests und den Fall ohne API-Key erhalten.
-  if (!openAiPrimary || !apiKey) {
+  if (route.route === "worker" || !apiKey) {
     const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
     if (deterministicPkvReply) {
       log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_pkv" });
@@ -412,6 +414,33 @@ export async function streamReply(
     clearTimeout(timeout);
     clearTimeout(firstTokenTimer);
   }
+}
+
+type TurnRoute = {
+  route: "worker" | "openai";
+  reason: "structured_state" | "customer_question" | "customer_objection" | "free_dialogue";
+};
+
+export function decideTurnRoute(ctx: CallContext, userText: string): TurnRoute {
+  const text = userText.trim().toLowerCase();
+  const question = /\?|\b(wie|warum|weshalb|wieso|was|welche|welcher|können|kann|darf|soll|woher|woraus)\b/i.test(text);
+  const objection = /ich\s+verstehe\s+nicht|kann\s+ich\s+mir\s+nicht\s+vorstellen|kein\s+interesse|keine\s+zeit|zu\s+teuer|was\s+bringt|was\s+hab\s+ich\s+davon|aber\b/i.test(text);
+
+  // Hard state ownership stays local: these answers must never be invented
+  // or reordered by OpenAI.
+  if (ctx.confirmedSlotPhrase || ctx.flow.stage === "post_booking") {
+    return { route: "worker", reason: "structured_state" };
+  }
+  if (ctx.topicKind === "pkv" && (ctx.flow.awaiting === "appointment_preference" || ctx.flow.awaiting === "appointment_selection")) {
+    if (!question && !objection) return { route: "worker", reason: "structured_state" };
+  }
+  if (ctx.topicKind === "pkv" && /e-?mail|mailadresse|allerg|medikament|diagnos|zahnersatz|krankenhaus|geburtsdatum|k[oö]rpergr[oö][sß]e|gewicht/i.test(text)) {
+    return { route: "worker", reason: "structured_state" };
+  }
+  if (objection) return { route: "openai", reason: "customer_objection" };
+  if (question) return { route: "openai", reason: "customer_question" };
+  if (ctx.topicKind === "pkv") return { route: "worker", reason: "structured_state" };
+  return { route: "openai", reason: "free_dialogue" };
 }
 
 function emitDeterministicReply(reply: TurnOutput, onSentence: (sentence: string) => void): TurnOutput {
