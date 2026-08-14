@@ -430,6 +430,7 @@ export function decideTurnRoute(ctx: CallContext, userText: string): TurnRoute {
   const text = userText.trim().toLowerCase();
   const question = /\?|\b(wie|warum|weshalb|wieso|was|welche|welcher|können|kann|darf|soll|woher|woraus)\b/i.test(text);
   const objection = /ich\s+verstehe\s+nicht|kann\s+ich\s+mir\s+nicht\s+vorstellen|kein\s+interesse|keine\s+zeit|zu\s+teuer|was\s+bringt|was\s+hab\s+ich\s+davon|aber\b/i.test(text);
+  const pkvImplementationQuestion = /\bwie\s+(?:macht|will|m[öo]chte|soll)\s+(?:(?:herr\s+)?\w+\s+)?(?:er\s+)?(?:das|es)\s+machen\b|\bwie\s+macht\s+(?:herr\s+)?\w+\s+(?:das|es)\b|\bwie\s+funktioniert\s+das\b/i.test(text);
 
   // Hard state ownership stays local: these answers must never be invented
   // or reordered by OpenAI.
@@ -440,6 +441,9 @@ export function decideTurnRoute(ctx: CallContext, userText: string): TurnRoute {
     if (!question && !objection) return { route: "worker", reason: "structured_state" };
   }
   if (ctx.topicKind === "pkv" && /e-?mail|mailadresse|allerg|medikament|diagnos|zahnersatz|krankenhaus|geburtsdatum|k[oö]rpergr[oö][sß]e|gewicht/i.test(text)) {
+    return { route: "worker", reason: "structured_state" };
+  }
+  if (ctx.topicKind === "pkv" && pkvImplementationQuestion) {
     return { route: "worker", reason: "structured_state" };
   }
   if (objection) return { route: "openai", reason: "customer_objection" };
@@ -764,10 +768,12 @@ function isDiscoveryObjection(ctx: CallContext, userText: string): boolean {
     /(?:kein|keine|nicht)\s+(?:nutzen|mehrwert|sinn|interesse|notwendig|hilfe|zeit)/i.test(historyText);
 }
 
-function likelyIncompleteCustomerThought(text: string): boolean {
+export function isLikelyIncompleteCustomerThought(text: string): boolean {
   const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
   if (/(?:^|\s)(?:wie|was|warum|wieso|ob)$/.test(normalized)) return true;
   if (/(?:^|\s)(?:diese|dieser|dieses|das|seit|aber|und)$/.test(normalized)) return true;
+  if (/(?:^|\s)(?:ich|wir|er|sie)\s*$/.test(normalized)) return true;
+  if (/\b(?:ich\s+(?:bin|habe|kann|möchte|will)|wir\s+(?:sind|haben|können|möchten|wollen))\s*$/.test(normalized)) return true;
   return /\b(?:ich\s+bin|ich\s+habe|ich\s+kann\s+mir|ich\s+frage\s+mich)\b[^.!?]*\b(?:seit|diese|dieser|dieses|das)\s*$/i.test(normalized);
 }
 
@@ -786,7 +792,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const previousUserText = (currentAlreadyInTranscript ? userTurns.at(-2) : userTurns.at(-1))?.text.toLowerCase() || "";
   const discoveryConsent = /(?:^|\s)(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?)/i.test(userText.trim());
 
-  if (likelyIncompleteCustomerThought(userText)) {
+  if (isLikelyIncompleteCustomerThought(userText)) {
     return null;
   }
 
@@ -896,7 +902,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   const isSplitHowQuestion = /wie\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\b/.test(previousUserText)
     && /^das\s+machen\s+m[öo]chte\b/.test(text);
-  if (/wie\s+(?:will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\s+das\s+machen|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text) || isSplitHowQuestion) {
+  if (/wie\s+(?:macht|will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)(?:\s+jetzt)?\s+das(?:\s+machen)?|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text) || isSplitHowQuestion) {
     return {
       reply: `Ja, genau darum geht es: ${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Im Termin sehen Sie also anhand Ihrer eigenen Zahlen, wie die Prognose entsteht und welche Optionen überhaupt zu Ihrer Situation passen.`,
       hangup: false,

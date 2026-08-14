@@ -3,7 +3,7 @@ import type { WebSocket } from "ws";
 import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { openAsr, type AsrSession } from "./asr.js";
-import { streamReply, prewarmOpenAi } from "./llm.js";
+import { isLikelyIncompleteCustomerThought, streamReply, prewarmOpenAi } from "./llm.js";
 import { streamElevenLabsToMulaw, prewarmElevenLabs, type TtsStreamHandle } from "./tts.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { loadBusySlots, busySlotsToPrompt, computeFreeSlots, freeSlotsToPrompt } from "./busy.js";
@@ -818,6 +818,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     pendingTurn = true;
     try {
       ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+      if (isLikelyIncompleteCustomerThought(userText)) {
+        log.info("turn.user_thought_incomplete", { callSid: ctx.callSid, text: userText });
+        return;
+      }
       updateConversationMemory(ctx, userText);
       ctx.flow = observeUserFlowState(ctx.flow, userText);
       ctx.lastUserFinalAt = Date.now();

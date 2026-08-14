@@ -5,6 +5,7 @@ import {
   buildDeterministicPostBookingReply,
   buildTenYearProjectionLine,
   decideTurnRoute,
+  isLikelyIncompleteCustomerThought,
   streamReply,
   parseGermanEuroAmount,
   type TurnOutput,
@@ -45,6 +46,13 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
   assert.deepEqual(decideTurnRoute(ctx, "Schon sehr."), { route: "worker", reason: "structured_state" });
   assert.deepEqual(decideTurnRoute(ctx, "Wie genau wird das gemacht?"), { route: "openai", reason: "customer_question" });
   assert.deepEqual(decideTurnRoute(ctx, "Ich verstehe nicht, wie das funktionieren soll."), { route: "openai", reason: "customer_objection" });
+  assert.deepEqual(decideTurnRoute(ctx, "Ja, aber wie macht Herr Duic das?"), { route: "worker", reason: "structured_state" });
+});
+
+test("keeps a final ASR fragment from advancing the PKV flow", () => {
+  assert.equal(isLikelyIncompleteCustomerThought("Gut, ich"), true);
+  assert.equal(isLikelyIncompleteCustomerThought("Ich bin"), true);
+  assert.equal(isLikelyIncompleteCustomerThought("Ja, das dürfen Sie."), false);
 });
 
 test("does not repeat the starting bridge after the projection question", () => {
@@ -399,6 +407,10 @@ test("acknowledges the PKV how-question with a concrete answer", () => {
   const asrVariant = buildDeterministicPkvFlowReply(ctx, "Ja, aber ich frage mich, wie er das machen möchte.");
   assert.ok(asrVariant);
   assert.match(asrVariant.reply, /Ja, genau darum geht es/);
+
+  const spokenVariant = buildDeterministicPkvFlowReply(ctx, "Ja, aber wie macht er das?");
+  assert.ok(spokenVariant);
+  assert.match(spokenVariant.reply, /Ja, genau darum geht es/);
 });
 
 test("corrects an unsupported percentage claim before OpenAI", async () => {
@@ -702,7 +714,7 @@ test("keeps the offered slots after an unclear time answer", () => {
   assert.match(reply.reply, /notiere Freitag.*dreizehn Uhr dreißig/);
 });
 
-test("handles incomplete insurance ASR without advancing the flow", () => {
+test("holds incomplete insurance ASR until the caller continues", () => {
   const ctx = newContext({
     callSid: "test-pkv-incomplete-insurance",
     streamSid: "test-stream",
@@ -713,9 +725,7 @@ test("handles incomplete insurance ASR without advancing the flow", () => {
   ctx.transcript.push({ role: "assistant", text: "Sind Sie aktuell privat oder gesetzlich versichert?", at: 1 });
 
   const reply = buildDeterministicPkvFlowReply(ctx, "Ich bin");
-  assert.ok(reply);
-  assert.match(reply.reply, /Satz gern noch kurz zu Ende/);
-  assert.doesNotMatch(reply.reply, /Monatsbeitrag|Termin/);
+  assert.equal(reply, null);
 });
 
 test("never asks to choose unnamed appointment slots", () => {
