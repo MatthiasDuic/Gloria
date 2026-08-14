@@ -437,8 +437,13 @@ export function decideTurnRoute(ctx: CallContext, userText: string): TurnRoute {
   if (ctx.confirmedSlotPhrase || ctx.flow.stage === "post_booking") {
     return { route: "worker", reason: "structured_state" };
   }
-  if (ctx.topicKind === "pkv" && (ctx.flow.awaiting === "appointment_preference" || ctx.flow.awaiting === "appointment_selection")) {
-    if (!question && !objection) return { route: "worker", reason: "structured_state" };
+  if (
+    ctx.topicKind === "pkv" &&
+    (ctx.flow.stage === "scheduling" ||
+      ctx.flow.awaiting === "appointment_preference" ||
+      ctx.flow.awaiting === "appointment_selection")
+  ) {
+    return { route: "worker", reason: "structured_state" };
   }
   if (ctx.topicKind === "pkv" && /e-?mail|mailadresse|allerg|medikament|diagnos|zahnersatz|krankenhaus|geburtsdatum|k[oö]rpergr[oö][sß]e|gewicht/i.test(text)) {
     return { route: "worker", reason: "structured_state" };
@@ -1049,6 +1054,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
       if (selected) {
         return {
           reply: `Perfekt, ich notiere ${selected} für Sie.`,
+          hangup: false,
+          transfer: false,
+        };
+      }
+      if (/\b(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b/i.test(text)) {
+        return {
+          reply: `Für den gewünschten Tag sehe ich aktuell keinen freien Termin. Ich kann Ihnen ${offeredInLatestReply[0]} oder ${offeredInLatestReply[1]} anbieten. Passt einer der beiden?`,
           hangup: false,
           transfer: false,
         };

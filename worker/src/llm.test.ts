@@ -47,6 +47,10 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
   assert.deepEqual(decideTurnRoute(ctx, "Wie genau wird das gemacht?"), { route: "openai", reason: "customer_question" });
   assert.deepEqual(decideTurnRoute(ctx, "Ich verstehe nicht, wie das funktionieren soll."), { route: "openai", reason: "customer_objection" });
   assert.deepEqual(decideTurnRoute(ctx, "Ja, aber wie macht Herr Duic das?"), { route: "worker", reason: "structured_state" });
+
+  ctx.flow.stage = "scheduling";
+  ctx.flow.awaiting = "appointment_selection";
+  assert.deepEqual(decideTurnRoute(ctx, "Können wir auch den Dienstag nehmen?"), { route: "worker", reason: "structured_state" });
 });
 
 test("keeps a final ASR fragment from advancing the PKV flow", () => {
@@ -712,6 +716,36 @@ test("keeps the offered slots after an unclear time answer", () => {
   const reply = buildDeterministicPkvFlowReply(ctx, "Den zweiten.");
   assert.ok(reply);
   assert.match(reply.reply, /notiere Freitag.*dreizehn Uhr dreißig/);
+});
+
+test("never invents a slot when the requested weekday is unavailable", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-unavailable-weekday",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "- Montag, den vierundzwanzigsten August um neun Uhr",
+      "- Montag, den vierundzwanzigsten August um zehn Uhr dreißig",
+    ].join("\n"),
+  });
+  ctx.flow.stage = "scheduling";
+  ctx.flow.awaiting = "appointment_selection";
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.projectionDelivered = true;
+  ctx.flow.interestConfirmed = true;
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Wie wäre es mit Montag, den vierundzwanzigsten August um neun Uhr oder Montag, den vierundzwanzigsten August um zehn Uhr dreißig?",
+    at: 1,
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Können wir auch den Dienstag nehmen?");
+  assert.ok(reply);
+  assert.match(reply.reply, /keinen freien Termin/);
+  assert.match(reply.reply, /Montag, den vierundzwanzigsten August um neun Uhr/);
+  assert.match(reply.reply, /Montag, den vierundzwanzigsten August um zehn Uhr dreißig/);
+  assert.doesNotMatch(reply.reply, /Dienstag, den fünfundzwanzigsten August/);
 });
 
 test("holds incomplete insurance ASR until the caller continues", () => {
