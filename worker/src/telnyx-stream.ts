@@ -1124,8 +1124,9 @@ function updateConversationMemory(ctx: CallContext, userText: string): void {
     pushUnique(ctx.memory.preferences, "möchte Infos per E-Mail bzw. fragt nach Mail-Bestätigung", 6);
   }
 
-  if (text.length >= 16 && /(wir|ich|bei uns|unsere|mein|mich|mir)/i.test(text)) {
-    pushUnique(ctx.memory.facts, text.replace(/\s+/g, " "), 10);
+  const isShortAcknowledgement = /^(?:ja|nein|okay|ok|mhm|hm|gut|danke|gerne|passt|genau|richtig)[.!?\s]*$/i.test(text);
+  if (!isShortAcknowledgement && text.length >= 12) {
+    pushUnique(ctx.memory.facts, `Kunde: ${text.replace(/\s+/g, " ")}`, 14);
   }
 }
 

@@ -2127,19 +2127,19 @@ function resolveSpokenEmailTurns(turns: string[]): string | undefined {
 function buildMemoryBlock(ctx: CallContext): string {
   const lines: string[] = [];
   if (ctx.memory.concerns.length > 0) {
-    lines.push(`- Wichtige Bedenken: ${ctx.memory.concerns.slice(-3).join(" | ")}`);
+    lines.push(`- Wichtige Bedenken: ${ctx.memory.concerns.slice(-5).join(" | ")}`);
   }
   if (ctx.memory.preferences.length > 0) {
-    lines.push(`- Präferenzen: ${ctx.memory.preferences.slice(-3).join(" | ")}`);
+    lines.push(`- Präferenzen: ${ctx.memory.preferences.slice(-5).join(" | ")}`);
   }
   if (ctx.memory.facts.length > 0) {
-    lines.push(`- Relevante Aussagen des Anrufenden: ${ctx.memory.facts.slice(-3).join(" | ")}`);
+    lines.push(`- Chronik wichtiger Kundenaussagen: ${ctx.memory.facts.slice(-6).join(" | ")}`);
   }
   if (!lines.length) return "";
   return [
     "GESPRÄCHS-MERKER (aus diesem Call):",
     ...lines,
-    "Nutze diese Punkte aktiv für Anschlussfragen und Begründungen. Erfinde nichts hinzu.",
+    "Nutze diese Chronik aktiv für Anschlussfragen und Begründungen. Greife passende frühere Aussagen natürlich auf, frage bereits beantwortete Punkte nicht erneut ab und erfinde nichts hinzu.",
   ].join("\n");
 }
 
@@ -2164,6 +2164,7 @@ function buildStyleGuard(ctx: CallContext): string {
     "- Vermeide wiederkehrende Standard-Opener. Nutze nicht zweimal hintereinander denselben Einstieg.",
     "- Nutze sparsame Höflichkeitsmarker: ein kurzes Danke ist okay, aber nicht als Pflicht in jeder Zeile.",
     "- Priorität hat Anschlussfähigkeit: zuerst kurz auf den letzten Kundengedanken eingehen, dann sauber weiterführen.",
+    "- GESPRÄCHSGEDÄCHTNIS: Behalte wichtige Aussagen, Zahlen, Fragen, Einwände, Wünsche und bereits beantwortete Punkte über den gesamten Call. Wenn der Kunde später daran anknüpft, nimm den früheren Kontext auf statt neu zu beginnen.",
     "- Verwende in Einwandmomenten kurze Dreischritt-Antworten: validieren, konkretisieren, rückfragen.",
     "- Halte den Ton charmant und auf Augenhöhe: klar führen, aber niemals belehrend.",
   ];
