@@ -427,7 +427,17 @@ export async function POST(request: Request) {
     recordingUrl: payload.recordingUrl,
   });
 
-  const emailResult = await sendReportEmail(report);
+  let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
+  try {
+    emailResult = await sendReportEmail(report);
+  } catch (error) {
+    console.error("Report email delivery failed", error);
+    emailResult = {
+      delivered: false,
+      to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
+      reason: "Report gespeichert, aber E-Mail-Versand fehlgeschlagen.",
+    };
+  }
 
   let inviteResult:
     | { delivered: boolean; to?: string | string[]; reason?: string; messageId?: string }

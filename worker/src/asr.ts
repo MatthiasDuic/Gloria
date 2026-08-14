@@ -32,7 +32,7 @@ function openOpenAIAsr(events: AsrEvents): AsrSession {
     throw new Error("OPENAI_API_KEY is not configured for OpenAI Realtime ASR");
   }
 
-  const model = process.env.OPENAI_REALTIME_ASR_MODEL?.trim() || "gpt-4o-realtime-preview";
+  const model = process.env.OPENAI_REALTIME_ASR_MODEL?.trim() || "gpt-realtime";
   const language = process.env.OPENAI_TRANSCRIBE_LANGUAGE?.trim() || "de";
   const silenceDurationMs = Math.max(
     250,
@@ -55,7 +55,6 @@ function openOpenAIAsr(events: AsrEvents): AsrSession {
   ws = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      "OpenAI-Beta": "realtime=v1",
     },
   });
 
@@ -64,13 +63,20 @@ function openOpenAIAsr(events: AsrEvents): AsrSession {
     sendEvent({
       type: "session.update",
       session: {
-        modalities: ["text"],
-        input_audio_format: "pcm16",
-        input_audio_transcription: { model: "gpt-4o-mini-transcribe", language },
-        turn_detection: {
-          type: "server_vad",
-          silence_duration_ms: silenceDurationMs,
-          prefix_padding_ms: 300,
+        type: "realtime",
+        output_modalities: ["text"],
+        audio: {
+          input: {
+            format: { type: "audio/pcm", rate: 24000 },
+            transcription: { model: "gpt-4o-mini-transcribe", language },
+            turn_detection: {
+              type: "server_vad",
+              create_response: false,
+              interrupt_response: false,
+              silence_duration_ms: silenceDurationMs,
+              prefix_padding_ms: 300,
+            },
+          },
         },
       },
     });

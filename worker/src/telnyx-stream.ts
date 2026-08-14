@@ -73,26 +73,28 @@ function decodeClientState(raw?: string): DecodedClientState {
   }
 }
 
-function mulaw8kToPcm16k(mulaw: Buffer): Buffer {
-  const output = Buffer.alloc(mulaw.length * 4);
+function mulaw8kToPcm24k(mulaw: Buffer): Buffer {
+  const output = Buffer.alloc(mulaw.length * 6);
   let offset = 0;
   for (const byte of mulaw) {
     const sample = decodeMulawSample(byte);
     output.writeInt16LE(sample, offset);
     output.writeInt16LE(sample, offset + 2);
-    offset += 4;
+    output.writeInt16LE(sample, offset + 4);
+    offset += 6;
   }
   return output;
 }
 
-function alaw8kToPcm16k(alaw: Buffer): Buffer {
-  const output = Buffer.alloc(alaw.length * 4);
+function alaw8kToPcm24k(alaw: Buffer): Buffer {
+  const output = Buffer.alloc(alaw.length * 6);
   let offset = 0;
   for (const byte of alaw) {
     const sample = decodeAlawSample(byte);
     output.writeInt16LE(sample, offset);
     output.writeInt16LE(sample, offset + 2);
-    offset += 4;
+    output.writeInt16LE(sample, offset + 4);
+    offset += 6;
   }
   return output;
 }
@@ -222,7 +224,7 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
     normalizedEncoding.includes("MULAW") ||
     normalizedEncoding.includes("G711ULAW");
   if (isMulaw) {
-    return sampleRate === 16000 ? audio : mulaw8kToPcm16k(audio);
+    return sampleRate === 16000 ? audio : mulaw8kToPcm24k(audio);
   }
   const isAlaw =
     normalizedEncoding === "PCMA" ||
@@ -231,13 +233,13 @@ function normalizeInboundAudio(audio: Buffer, encoding?: string, sampleRate?: nu
     normalizedEncoding.includes("ALAW") ||
     normalizedEncoding.includes("G711ALAW");
   if (isAlaw) {
-    return sampleRate === 16000 ? audio : alaw8kToPcm16k(audio);
+    return sampleRate === 16000 ? audio : alaw8kToPcm24k(audio);
   }
   // Defensive fallback: when Telnyx omits/changes encoding labels,
   // prefer telephone-safe assumption (8 kHz mu-law) over returning
   // undecoded bytes into OpenAI Realtime ASR.
   if (!sampleRate || sampleRate <= 8000) {
-    return mulaw8kToPcm16k(audio);
+    return mulaw8kToPcm24k(audio);
   }
   return audio;
 }
