@@ -656,7 +656,7 @@ function buildProjectionInterestReply(ctx: CallContext): string {
   if (amount !== undefined) {
     return `${buildTenYearProjectionLine(amount)} Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?`;
   }
-  return "Danke, das hilft sehr. Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
+  return "Wenn man diese Größenordnung mit rund vier Prozent pro Jahr weiterdenkt, entsteht über zehn Jahre ein spürbarer Mehrbetrag. Wäre eine kurze persönliche Zehn-Jahres-Prognose für Sie hilfreich?";
 }
 
 function extractLatestContributionAmount(ctx: CallContext): number | undefined {
@@ -693,7 +693,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (isPkv && /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+konkret\s+geht\?|darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+geht\?/i.test(latestAssistant) && discoveryConsent) {
     return {
-      reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+      reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
       hangup: false,
       transfer: false,
     };
@@ -781,7 +781,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /detailliert.*angeschaut|prognostiziert/.test(assistantHistory) && /^(?:nein|ne|nö|nö\?|kein\s+interesse|eher\s+nicht|nicht)\b/i.test(text.trim())) {
     return {
-      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
+      reply: "Genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };
@@ -805,7 +805,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!explicitAwaitingInsurance && !discoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
       return {
-        reply: "Danke. Wie Sie sicherlich gemerkt haben, steigen die Beiträge in der Gesundheitsversorgung Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+        reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
         hangup: false,
         transfer: false,
       };
@@ -859,7 +859,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
       };
     }
     return {
-      reply: "Verstanden, und genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
+      reply: "Genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?",
       hangup: false,
       transfer: false,
     };
@@ -872,8 +872,8 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     );
     return {
       reply: contributionQuestionAsked
-        ? "Danke. Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
-        : "Danke, das ist ein wichtiger Punkt. Wenn Sie mir Ihren aktuellen Beitrag nennen, kann ich Ihnen direkt prognostizieren, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Wie hoch ist Ihr aktueller Monatsbeitrag?",
+        ? "Wenn es für Sie passt, reicht eine grobe Spanne in Euro, damit ich den Zehn-Jahres-Effekt sauber einordnen kann."
+        : "Wenn Sie mir Ihren aktuellen Beitrag nennen, kann ich Ihnen direkt prognostizieren, wie sich Ihr Beitrag über zehn Jahre entwickeln könnte. Wie hoch ist Ihr aktueller Monatsbeitrag?",
       hangup: false,
       transfer: false,
     };
@@ -1338,6 +1338,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `PREMIUM-OPENER (VERBINDLICH IM ERSTKONTAKT): (1) klare Vorstellung in einem Satz, (2) konkreter Anlass in einem Satz, (3) kurze Erlaubnisfrage in einem Satz. Maximal drei kurze Saetze, dann Pause.`,
     `PREMIUM-RHYTHMUS: Jede Antwort beginnt mit einem konkreten Bezug auf den letzten Kundengedanken und fuehrt dann mit genau einer klaren Frage weiter.`,
     `KUNDENFRAGE HAT VORRANG: Wenn der Kunde eine Frage, einen Einwand oder eine Erklärung zu deinem Vorgehen stellt, pausierst du den geplanten Gesprächsschritt. Beantworte zuerst genau diese Frage inhaltlich und greife mindestens ein konkretes Wort des Kunden auf. Kehre erst danach ruhig zum Gesprächsziel zurück. Niemals eine neue Termin-, Beitrags- oder Skriptfrage senden, solange die Kundenfrage unbeantwortet ist.`,
+    `KUNDENFRAGE HAT VORRANG: Wenn der Kunde eine Frage, einen Einwand oder eine Erklärung zu deinem Vorgehen stellt, pausierst du den geplanten Gesprächsschritt. Beantworte zuerst genau diese Frage inhaltlich und greife mindestens ein konkretes Wort des Kunden auf. Kehre erst danach ruhig zum Gesprächsziel zurück. Niemals eine neue Termin-, Beitrags- oder Skriptfrage senden, solange die Kundenfrage unbeantwortet ist.`,
     `ANTWORTLAENGE (VERBINDLICH): Maximal 1 kurzer Satz als Reaktion, dann sofort 1 Frage. KEIN Daten-Pitch, KEINE Statistiken, KEINE Erklaerungen bevor nicht bekannt ist, was der Kunde konkret bezahlt oder wo er steht. Erst fragen, dann einordnen.`,
     `ZAHLEN-KONTEXT: Wenn der Kunde in einem vorherigen Satz eine Zahl begann (z.B. "tausend") und im naechsten Turn eine weitere Zahl nennt (z.B. "zweihundertachtzig"), kombiniere beides zum vollstaendigen Betrag (z.B. 1280 Euro) und bestaettige diesen kombinierten Wert.`,
     `Pro Antwort: meist 1-2 kurze Sätze, höchstens eine Hauptfrage. Dann Pause. Wirklich zuhören.`,
@@ -1531,6 +1532,7 @@ function buildConversationPrimer(ctx: CallContext, company: string, owner: strin
     `- DIALOG STATT INTERVIEW: Stelle nie mehr als zwei Informationsfragen hintereinander. Dazwischen muss eine echte Reaktion mit Bezug auf das Gesagte oder ein hilfreicher Substanzsatz stehen.`,
     `- AUSSPRECHEN-LASSEN: Unterbrich den Anrufenden nie. Reagiere erst, wenn ein Gedanke erkennbar abgeschlossen ist. Bei Fragmenten oder stockendem Satz lieber kurz warten als zu früh antworten.`,
     `- KUNDENFRAGEN SIND EIN EIGENER GESPRÄCHSSCHRITT: Eine Frage wie "Wie genau machen Sie das?" oder "Wie will Herr Duic das machen?" wird direkt beantwortet. Danach höchstens eine kurze Anschlussfrage, kein unveränderter Skriptblock.`,
+    `- FLOSKELVERBOT: Beginne nicht automatisch mit "Danke", "Verstanden", "Das ist ein guter Punkt", "Perfekt", "Super" oder "Das ist nachvollziehbar". Nutze solche Wörter nur, wenn sie im konkreten Moment wirklich passen; oft ist ein direkter, menschlicher Anschluss besser.`,
     `- Keine leeren Bestätigungen wie "prima", "perfekt", "super" oder "alles klar" in Serie. Besonders bei sensiblen Angaben neutral und respektvoll reagieren.`,
     `- Natürlicher Sprachfluss vor Skriptklang: keine starren Wiederholungen wie "Vielen Dank" in jedem Turn, keine identischen Satzanfange in Folge.`,
     `- Wenn der Kunde knapp oder in Fragmenten antwortet, erst kurz den Sinn sichern und dann weiterführen - nicht vorschnell in den nächsten Pitch springen.`,
