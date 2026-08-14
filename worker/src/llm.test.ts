@@ -361,6 +361,10 @@ test("acknowledges the PKV how-question with a concrete answer", () => {
   assert.match(reply.reply, /Ja, genau darum geht es/);
   assert.match(reply.reply, /eigenen Zahlen/);
   assert.doesNotMatch(reply.reply, /grundsätzlich hilfreich/);
+
+  const asrVariant = buildDeterministicPkvFlowReply(ctx, "Ja, aber ich frage mich, wie er das machen möchte.");
+  assert.ok(asrVariant);
+  assert.match(asrVariant.reply, /Ja, genau darum geht es/);
 });
 
 test("stream path keeps PKV structure after contribution-rise response", async () => {

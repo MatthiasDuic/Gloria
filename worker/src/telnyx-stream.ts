@@ -315,6 +315,16 @@ export function shouldInterruptOnPartialSpeech(text: string): boolean {
   return trimmed.length >= 6 || /[?]/.test(trimmed) || words.some((word) => word.length >= 4);
 }
 
+function likelyIncompleteUserSpeech(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.,!?;:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$)/i.test(normalized);
+}
+
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
   let ctx: CallContext | null = null;
   let asr: AsrSession | null = null;
@@ -382,7 +392,9 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     // ("ja, worum geht es?"). Ein wenig mehr Grace verhindert vorschnelle
     // Antworten, ohne normale vollständige Sätze auszubremsen.
     const graceMs =
-      wordCount <= 2
+      likelyIncompleteUserSpeech(merged)
+        ? Math.max(utteranceEndGraceMs, 1100)
+        : wordCount <= 2
         ? Math.max(utteranceEndGraceMs, 520)
         : wordCount <= 5
           ? Math.max(utteranceEndGraceMs, 400)
