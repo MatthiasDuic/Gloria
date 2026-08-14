@@ -91,13 +91,13 @@ export function createVoiceProfile(topic?: string): VoiceProfile {
 
   const base: Record<TopicKind, VoiceProfile> = {
     pkv: {
-      profileName: "warm_consultative",
-      stability: 0.34,
-      similarity: 0.9,
-      style: 0.5,
-      speed: 0.93,
-      speakerBoost: true,
-      segmentPauseMs: 130,
+      profileName: "human_warm_consultative",
+      stability: 0.27,
+      similarity: 0.86,
+      style: 0.62,
+      speed: 0.9,
+      speakerBoost: false,
+      segmentPauseMs: 180,
     },
     commercial: {
       profileName: "confident_structured",
@@ -139,11 +139,11 @@ export function createVoiceProfile(topic?: string): VoiceProfile {
 
   const selected = { ...base[topicKind] };
 
-  if (mode === "warm") {
+  if (mode === "warm" || mode === "human") {
     selected.stability = Math.max(0.34, selected.stability - 0.04);
-    selected.style = Math.min(0.55, selected.style + 0.06);
-    selected.speed = Math.max(0.88, selected.speed - 0.02);
-    selected.segmentPauseMs += 20;
+    selected.style = Math.min(0.72, selected.style + 0.04);
+    selected.speed = Math.max(0.86, selected.speed - 0.01);
+    selected.segmentPauseMs += 25;
     selected.profileName = `${selected.profileName}_warm`;
   } else if (mode === "crisp") {
     selected.stability = Math.min(0.52, selected.stability + 0.04);

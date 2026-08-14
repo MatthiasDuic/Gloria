@@ -74,11 +74,22 @@ export function streamElevenLabsToMulaw(
         throw new Error("elevenlabs unavailable");
       }
 
-      const stability = numEnv("ELEVENLABS_STABILITY", voiceProfile?.stability ?? 0.5);
-      const similarity = numEnv("ELEVENLABS_SIMILARITY", voiceProfile?.similarity ?? 0.9);
-      const style = numEnv("ELEVENLABS_STYLE", voiceProfile?.style ?? 0.25);
-      const speed = numEnv("ELEVENLABS_SPEED", voiceProfile?.speed ?? 0.94);
-      const speakerBoost = boolEnv("ELEVENLABS_SPEAKER_BOOST", voiceProfile?.speakerBoost ?? false);
+      const manualVoiceSettings = boolEnv("ELEVENLABS_MANUAL_VOICE_SETTINGS", false);
+      const stability = manualVoiceSettings
+        ? numEnv("ELEVENLABS_STABILITY", voiceProfile?.stability ?? 0.27)
+        : (voiceProfile?.stability ?? 0.27);
+      const similarity = manualVoiceSettings
+        ? numEnv("ELEVENLABS_SIMILARITY", voiceProfile?.similarity ?? 0.86)
+        : (voiceProfile?.similarity ?? 0.86);
+      const style = manualVoiceSettings
+        ? numEnv("ELEVENLABS_STYLE", voiceProfile?.style ?? 0.62)
+        : (voiceProfile?.style ?? 0.62);
+      const speed = manualVoiceSettings
+        ? numEnv("ELEVENLABS_SPEED", voiceProfile?.speed ?? 0.9)
+        : (voiceProfile?.speed ?? 0.9);
+      const speakerBoost = manualVoiceSettings
+        ? boolEnv("ELEVENLABS_SPEAKER_BOOST", voiceProfile?.speakerBoost ?? false)
+        : (voiceProfile?.speakerBoost ?? false);
       const latencyMode = intEnv("ELEVENLABS_LATENCY_MODE", 1, 0, 4);
       const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream`);
       url.searchParams.set("output_format", "ulaw_8000");
