@@ -107,16 +107,19 @@ export async function streamReply(
 ): Promise<TurnOutput> {
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
+    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_post_booking" });
     return emitDeterministicReply(deterministicReply, onSentence);
   }
 
   const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
   if (deterministicPkvReply) {
+    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_pkv" });
     return emitDeterministicReply(deterministicPkvReply, onSentence);
   }
 
   const trustReply = buildDeterministicTrustReply(ctx, userText);
   if (trustReply) {
+    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_trust" });
     onSentence(trustReply.reply);
     return trustReply;
   }
@@ -158,6 +161,12 @@ export async function streamReply(
     response_format: { type: "json_object" },
     stream: true,
   };
+
+  log.info("llm.reply_path", {
+    callSid: ctx.callSid,
+    path: "openai_stream",
+    model,
+  });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -341,6 +350,11 @@ export async function streamReply(
         maxTokens,
       });
       if (recovered) {
+          log.info("llm.reply_path", {
+            callSid: ctx.callSid,
+            path: "openai_recovery",
+            model,
+          });
         if (recovered.reply?.trim()) {
           try {
             const recoveredFiltered = enforceRealtimeReplyPolicy(
