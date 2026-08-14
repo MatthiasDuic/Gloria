@@ -106,6 +106,11 @@ export async function streamReply(
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (isCustomerFarewell(userText)) {
+    const farewell: TurnOutput = { reply: "Auf Wiederhören!", hangup: true, transfer: false };
+    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_farewell" });
+    return emitDeterministicReply(farewell, onSentence);
+  }
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
     log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_post_booking" });
@@ -782,6 +787,10 @@ export function isLikelyIncompleteCustomerThought(text: string): boolean {
   return /\b(?:ich\s+bin|ich\s+habe|ich\s+kann\s+mir|ich\s+frage\s+mich)\b[^.!?]*\b(?:seit|diese|dieser|dieses|das)\s*$/i.test(normalized);
 }
 
+export function isCustomerFarewell(text: string): boolean {
+  return /\b(?:auf\s+wiederh[öo]ren|wiederh[öo]ren|auf\s+wiedersehen|tsch[üu]ss|tsch[üu]s|ciao|bis\s+(?:dann|bald)|einen\s+sch[öo]nen\s+tag)\b/i.test(text);
+}
+
 export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
   const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
@@ -883,7 +892,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
-      reply: "Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben?",
+      reply: `Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und jetzt schauen Sie einmal, welchen Beitrag Sie heute zahlen. Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
       transfer: false,
     };

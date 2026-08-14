@@ -352,6 +352,10 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     90,
     Number.parseInt(process.env.ASR_UTTERANCE_END_GRACE_MS || "320", 10),
   );
+  const openQuestionGraceMs = Math.max(
+    utteranceEndGraceMs,
+    Number.parseInt(process.env.OPEN_QUESTION_FINAL_GRACE_MS || "1200", 10),
+  );
 
   const clearSilenceOpenerTimer = () => {
     if (!silenceOpenerTimer) return;
@@ -391,11 +395,15 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     clearUserFinalCoalesceTimer();
     const merged = pendingUserFinals.join(" ").trim();
     const wordCount = merged.split(/\s+/).filter(Boolean).length;
+    const latestAssistant = [...(ctx?.transcript || [])].reverse().find((turn) => turn.role === "assistant")?.text || "";
+    const waitsForOpenAnswer = /(?:wie\s+(?:stark|sehr).*sp[üu]ren\s+sie|mit\s+welchem\s+beitrag.*angefangen|haben\s+sie\s+sich\s+das.*angeschaut)\?/i.test(latestAssistant);
     // Kurze Fragmente wie "ja" werden am Telefon häufig direkt fortgesetzt
     // ("ja, worum geht es?"). Ein wenig mehr Grace verhindert vorschnelle
     // Antworten, ohne normale vollständige Sätze auszubremsen.
     const graceMs =
-      likelyIncompleteUserSpeech(merged)
+      waitsForOpenAnswer
+        ? Math.max(openQuestionGraceMs, likelyIncompleteUserSpeech(merged) ? 1800 : 0)
+        : likelyIncompleteUserSpeech(merged)
         ? Math.max(utteranceEndGraceMs, 1800)
         : wordCount <= 2
         ? Math.max(utteranceEndGraceMs, 520)
@@ -896,6 +904,19 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
         }
       } else if (reply.hangup) {
         log.info("turn.hangup", { callSid: ctx.callSid });
+        const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+        const token = process.env.APP_INTERNAL_TOKEN || "";
+        if (baseUrl && token) {
+          try {
+            await fetch(`${baseUrl}/api/telnyx/hangup`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ callControlId: ctx.callSid }),
+            });
+          } catch (error) {
+            log.error("turn.hangup_notify_failed", { callSid: ctx.callSid, error: String(error) });
+          }
+        }
         try {
           ws.close(1000, "hangup");
         } catch {

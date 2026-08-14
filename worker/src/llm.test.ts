@@ -5,6 +5,7 @@ import {
   buildDeterministicPostBookingReply,
   buildTenYearProjectionLine,
   decideTurnRoute,
+  isCustomerFarewell,
   isLikelyIncompleteCustomerThought,
   streamReply,
   parseGermanEuroAmount,
@@ -57,6 +58,12 @@ test("keeps a final ASR fragment from advancing the PKV flow", () => {
   assert.equal(isLikelyIncompleteCustomerThought("Gut, ich"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ich bin"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ja, das dürfen Sie."), false);
+});
+
+test("recognizes common caller farewells", () => {
+  assert.equal(isCustomerFarewell("Auf Wiederhören."), true);
+  assert.equal(isCustomerFarewell("Tschüss und einen schönen Tag."), true);
+  assert.equal(isCustomerFarewell("Ich habe noch eine Frage."), false);
 });
 
 test("does not repeat the starting bridge after the projection question", () => {
@@ -377,6 +384,9 @@ test("builds PKV relevance before asking insurance questions", () => {
   assert.ok(reply);
   assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
   assert.match(reply.reply, /Das höre ich oft/);
+  assert.match(reply.reply, /welchen Beitrag Sie heute zahlen/);
+  assert.match(reply.reply, /prognostiziert bei gleichbleibender Entwicklung/);
+  assert.match(reply.reply, /Haben Sie sich das schon einmal detailliert angeschaut/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
   ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
 
