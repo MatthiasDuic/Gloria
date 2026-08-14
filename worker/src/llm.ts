@@ -1105,6 +1105,9 @@ function isPkvSchedulingReady(ctx: CallContext): boolean {
   if (canScheduleFromFlow(ctx.flow)) {
     return true;
   }
+  // Structured PKV state is authoritative. Keyword heuristics must not allow
+  // a free-form OpenAI answer to schedule before the required steps are done.
+  if (ctx.topicKind === "pkv") return false;
   const userText = ctx.transcript
     .filter((turn) => turn.role === "user")
     .map((turn) => turn.text.toLowerCase())
@@ -1820,7 +1823,9 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     .slice(emailQuestionIndex + 1)
     .filter((turn) => turn.role === "user")
     .map((turn) => turn.text);
-  const resolvedEmail = resolveSpokenEmailTurns(emailTurnsSinceQuestion) || pkvData.email;
+  // Do not fall back to the complete call history here. Earlier ordinary
+  // words can otherwise be assembled into a fake email address.
+  const resolvedEmail = resolveSpokenEmailTurns(emailTurnsSinceQuestion);
   const emailConfirmationAsked = ctx.transcript
     .slice(emailQuestionIndex + 1)
     .some((turn) => turn.role === "assistant" && /ist diese.*(?:richtig|korrekt)|habe ich sie richtig verstanden/i.test(turn.text));
