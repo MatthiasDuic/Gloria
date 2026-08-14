@@ -292,7 +292,7 @@ export function observeAssistantFlowState(state: CallFlowState, assistantText: s
     next.lastAssistantSignal = "post_booking";
   }
 
-  if (/(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text)) {
+  if (/(?:aktuell\w*|derzeit\w*|heutig\w*)\s+(?:monatlich\w*\s+)?beitrag|monatsbeitrag|gr[öo]ßenordnung[^.?!]{0,30}(?:aktuell|heute|monat)|gro[ßs]e\s+spanne[^.?!]{0,30}(?:euro|beitrag)|wie\s+hoch[^.?!]{0,30}beitrag/i.test(text)) {
     next.lastAssistantSignal = "current_contribution_question";
   }
 

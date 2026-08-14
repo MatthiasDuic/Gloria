@@ -831,7 +831,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const forgetsStartingContribution = /\b(?:ich\s+weiß\s+es\s+nicht\s+mehr|weiß\s+ich\s+nicht\s+mehr|keine\s+ahnung|nicht\s+mehr)\b/i.test(text);
   const affirmativeShortReply = /^(?:ja|ja,?\s*(?:das\s+)?(?:stimmt|klar|gerne|okay|ok)|klar|stimmt|genau|okay|ok)\s*$/i.test(userText.trim());
 
-  if (!discoveryObjection && typeof latestAssistant === "string" && contributionQuestionInHistory && (affirmsMentally(userText) || forgetsStartingContribution)) {
+  if (!discoveryObjection && /mit\s+welchem\s+beitrag.*(?:angefangen|gestartet)/i.test(latestAssistant) && (affirmsMentally(userText) || forgetsStartingContribution)) {
     return {
       reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
@@ -899,7 +899,13 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (!explicitAwaitingInsurance && !discoveryObjection && !customerInsuranceStatusKnown && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)) {
+  if (
+    !explicitAwaitingInsurance
+    && !discoveryObjection
+    && !customerInsuranceStatusKnown
+    && (ctx.flow.stage === "need_relevance" || !ctx.flow.projectionDelivered)
+    && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)
+  ) {
       return {
         reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
         hangup: false,
@@ -964,7 +970,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   if (state === "need_contribution") {
     const contributionQuestionAsked = ctx.transcript.some(
       (turn) =>
-        turn.role === "assistant" && /(?:monatsbeitrag|gr[öo]ßenordnung).*(?:beitrag|euro)|wie\s+hoch.*beitrag/i.test(turn.text),
+        turn.role === "assistant" && /(?:monatsbeitrag|gr[öo]ßenordnung|gro[ßs]e\s+spanne).*(?:beitrag|euro)|wie\s+hoch.*beitrag/i.test(turn.text),
     );
     return {
       reply: contributionQuestionAsked

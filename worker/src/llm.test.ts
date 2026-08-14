@@ -47,6 +47,27 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
   assert.deepEqual(decideTurnRoute(ctx, "Ich verstehe nicht, wie das funktionieren soll."), { route: "openai", reason: "customer_objection" });
 });
 
+test("does not repeat the starting bridge after the projection question", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-no-bridge-after-projection",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.flow.stage = "need_interest";
+  ctx.flow.awaiting = "projection_interest";
+  ctx.flow.projectionDelivered = true;
+  ctx.transcript.push({
+    role: "assistant",
+    text: "Bei Ihrem aktuellen Beitrag entsteht über zehn Jahre voraussichtlich ein spürbarer Mehrbetrag. Wäre diese Klarheit für Sie ein echter Mehrwert?",
+    at: 1,
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Ja");
+  assert.ok(reply);
+  assert.doesNotMatch(reply.reply, /setzt genau da an/);
+  assert.match(reply.reply, /privat oder gesetzlich|Vormittag|Nachmittag|hilfreich/);
+});
+
 test("locks slot from 'ich trage ... ein' phrasing", () => {
   assert.equal(
     extractConfirmedSlot(
