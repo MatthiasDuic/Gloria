@@ -139,6 +139,25 @@ test("asks a health detail question after an affirmative allergy answer", () => 
   assert.equal(allergyFollowUp.reply, "Welche Allergien sind bei Ihnen bekannt?");
 });
 
+test("does not skip a health question after an incomplete answer", () => {
+  const ctx = newContext({
+    callSid: "test-health-incomplete-answer",
+    streamSid: "test-stream",
+    confirmedSlotPhrase: LOCKED_SLOT,
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Für die Vorbereitung würde ich Ihnen jetzt noch einige kurze Fragen stellen.", at: 1 },
+    { role: "user", text: "Ja.", at: 2 },
+    { role: "assistant", text: "Nehmen Sie aktuell regelmäßig Medikamente ein?", at: 3 },
+    { role: "user", text: "Nehmen Sie aktuell", at: 4 },
+  );
+
+  const reply = buildDeterministicPostBookingReply(ctx);
+  assert.ok(reply);
+  assert.equal(reply.reply, "Nehmen Sie aktuell regelmäßig Medikamente ein?");
+});
+
 test("continues with the first preparation question without consent reply", () => {
   const ctx = newContext({
     callSid: "test-post-booking-no-consent-reply",
@@ -311,7 +330,7 @@ test("builds PKV relevance before asking insurance questions", () => {
   reply = buildDeterministicPkvFlowReply(ctx, "Das merkt man schon.");
   assert.ok(reply);
   assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
-  assert.match(reply.reply, /Herr Duic setzt genau da an/);
+  assert.match(reply.reply, /Das höre ich oft/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
   ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
 
@@ -363,7 +382,7 @@ test("stream path keeps PKV structure after contribution-rise response", async (
   const segments: string[] = [];
   const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr und", (segment) => segments.push(segment));
   assert.match(reply.reply, /Wenn Sie zurückblicken/);
-  assert.equal(segments.length, 2);
+  assert.equal(segments.length, 1);
   assert.equal(segments.join(" "), reply.reply);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 });

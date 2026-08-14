@@ -773,7 +773,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
-      reply: "Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und schauen Sie einmal, bei welchem Beitrag Sie mittlerweile gelandet sind. [PAUSE] Herr Duic setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?",
+      reply: "Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben?",
       hangup: false,
       transfer: false,
     };
@@ -795,7 +795,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     };
   }
 
-  if (/wie\s+will\s+herr\s+dui(?:c|ch|tsch)\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
+  if (/wie\s+(?:will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\s+das\s+machen|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text)) {
     return {
       reply: `Ja, genau darum geht es: ${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Im Termin sehen Sie also anhand Ihrer eigenen Zahlen, wie die Prognose entsteht und welche Optionen überhaupt zu Ihrer Situation passen.`,
       hangup: false,
@@ -1698,6 +1698,14 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
     }
 
     if (basisDataConsent === "granted") {
+      const incompleteHealthQuestion = getIncompletePkvHealthQuestion(ctx);
+      if (incompleteHealthQuestion) {
+        return {
+          reply: incompleteHealthQuestion,
+          hangup: false,
+          transfer: false,
+        };
+      }
       const followUpQuestion = getPkvHealthFollowUpQuestion(ctx);
       if (followUpQuestion) {
         return {
@@ -1814,6 +1822,25 @@ function getPkvHealthFollowUpQuestion(ctx: CallContext): string | undefined {
   }
 
   return undefined;
+}
+
+function getIncompletePkvHealthQuestion(ctx: CallContext): string | undefined {
+  for (let index = ctx.transcript.length - 1; index >= 0; index -= 1) {
+    const turn = ctx.transcript[index];
+    if (turn.role !== "assistant") continue;
+    const field = detectAskedPkvField(turn.text.toLowerCase());
+    if (!field || !PKV_FOLLOW_UP_QUESTIONS[field] && !PKV_QUESTIONS[field]) continue;
+    const answer = ctx.transcript
+      .slice(index + 1)
+      .find((entry) => entry.role === "user")?.text.trim() || "";
+    if (!answer || !isIncompletePkvHealthAnswer(answer)) return undefined;
+    return PKV_QUESTIONS[field];
+  }
+  return undefined;
+}
+
+function isIncompletePkvHealthAnswer(answer: string): boolean {
+  return /^(?:nehmen\s+sie\s+aktuell|ich\s+nehme|ich\s+bin|es\s+gibt|bei\s+mir|ja,?\s+ich\s+|nein,?\s+ich\s+|seit)\b/i.test(answer.trim());
 }
 
 function isAffirmativeHealthAnswer(answer: string): boolean {
