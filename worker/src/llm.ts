@@ -105,16 +105,12 @@ export async function streamReply(
   userText: string,
   onSentence: (sentence: string) => void,
 ): Promise<TurnOutput> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const openAiPrimary = parseEnvBool("LLM_OPENAI_PRIMARY", true);
   const deterministicReply = buildDeterministicPostBookingReply(ctx);
   if (deterministicReply) {
     log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_post_booking" });
     return emitDeterministicReply(deterministicReply, onSentence);
-  }
-
-  const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
-  if (deterministicPkvReply) {
-    log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_pkv" });
-    return emitDeterministicReply(deterministicPkvReply, onSentence);
   }
 
   const trustReply = buildDeterministicTrustReply(ctx, userText);
@@ -124,7 +120,16 @@ export async function streamReply(
     return trustReply;
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  // OpenAI formuliert den normalen Gesprächsverlauf. Der deterministische
+  // PKV-Fallback bleibt für lokale Tests und den Fall ohne API-Key erhalten.
+  if (!openAiPrimary || !apiKey) {
+    const deterministicPkvReply = buildDeterministicPkvFlowReply(ctx, userText);
+    if (deterministicPkvReply) {
+      log.info("llm.reply_path", { callSid: ctx.callSid, path: "deterministic_pkv" });
+      return emitDeterministicReply(deterministicPkvReply, onSentence);
+    }
+  }
+
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
