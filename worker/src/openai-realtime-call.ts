@@ -198,7 +198,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   if (target) {
     parts.push(
-      `Gesuchter Ansprechpartner ist ${target}. Gehe zu Gesprächsbeginn von Empfang oder Zentrale aus und bitte um Verbindung. Wechsle erst zum Entscheidergespräch, wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist.`,
+      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zum Thema ${ctx.topic || "Versicherung"}." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);

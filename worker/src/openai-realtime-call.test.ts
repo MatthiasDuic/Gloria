@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canConfirmRealtimeAppointment } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, canConfirmRealtimeAppointment } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -34,4 +34,19 @@ test("allows a PKV appointment after consent to the concept question", () => {
   ctx.transcript.push({ role: "user", text: "Ja, das ist für mich sinnvoll.", at: 7 });
 
   assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
+});
+
+test("includes the required decision-maker and gatekeeper opening lines", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-opening",
+    streamSid: "test-stream",
+    contactName: "Herr Neumann",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /Guten Tag, mein Name ist Gloria/);
+  assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
+  assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
+  assert.match(instructions, /kurze Einordnung zum Thema private Krankenversicherung/);
 });
