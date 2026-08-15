@@ -126,10 +126,18 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
   const hasInsuranceStatus = /\b(?:privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(userText);
   const hasContribution = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
   const hasProjection = /(?:vier\s+prozent|4\s*%)\s+(?:pro\s+jahr)?[\s\S]{0,160}(?:zehn\s+jahr|10\s+jahr)|(?:zehn\s+jahr|10\s+jahr)[\s\S]{0,160}(?:vier\s+prozent|4\s*%)/i.test(assistantText);
-  const interestQuestionIndex = ctx.transcript
+  const conceptQuestionIndex = ctx.transcript
     .map((turn, index) => ({ turn, index }))
     .filter(({ turn }) =>
-      turn.role === "assistant" && /(?:sinnvoll|interessiert|hilfreich|termin.*(?:vereinbaren|abstimmen)|einordnung.*(?:passt|hilft))/i.test(turn.text),
+      turn.role === "assistant" && /(?:arbeitsweise|ersten termin|zweiten termin|tarifoptimierung|beitragsentlastung|altersrückstellung)/i.test(turn.text),
+    )
+    .at(-1)?.index;
+  const interestQuestionIndex = ctx.transcript
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn, index }) =>
+      turn.role === "assistant"
+      && (conceptQuestionIndex === undefined || index >= conceptQuestionIndex)
+      && /(?:sinnvoll|interessiert|hilfreich|termin.*(?:vereinbaren|abstimmen)|einordnung.*(?:passt|hilft)|klarheit)/i.test(turn.text),
     )
     .at(-1)?.index;
   const interestAnswer = interestQuestionIndex === undefined
@@ -140,6 +148,7 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
   if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
   if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
   if (!hasProjection) return { ok: false, reason: "Zeige zuerst anhand des genannten Beitrags eine konkrete Zehn-Jahres-Hochrechnung mit rund vier Prozent pro Jahr." };
+  if (conceptQuestionIndex === undefined) return { ok: false, reason: "Erkläre zuerst kurz Arbeitsweise, Konzeptphase und konkreten Kundennutzen." };
   if (!hasInterest) return { ok: false, reason: "Hole nach Hochrechnung und Konzept erst eine eindeutige Zustimmung auf die letzte Nutzen- oder Terminfrage ein." };
   return { ok: true };
 }
@@ -160,7 +169,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
-    "Sprich pro Turn höchstens zwei kurze Sätze mit zusammen höchstens etwa vierzig Wörtern und stelle höchstens eine Frage. Keine Absätze, keine Wiederholung derselben Rechnung. Nach einer Frage wartest du wirklich auf die Antwort.",
+    "Sprich pro Turn höchstens zwei kurze Sätze mit zusammen höchstens etwa fünfzig Wörtern und stelle höchstens eine Frage. Keine Absätze, keine Wiederholung derselben Rechnung. Nach einer Frage wartest du wirklich auf die Antwort.",
     "Lass den Gesprächspartner ausreden. Bei Satzfragmenten, Stocken oder kurzer Sprechpause wartest du lieber, statt den Gedanken zu vervollständigen.",
     "Topic Policies sind fachliche Leitplanken, kein Ablaufplan. Du darfst Reihenfolge, Formulierung und nächsten Schritt situativ ändern. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
     "Keine erfundene Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit und kein Callcenter-Ton.",
@@ -169,7 +178,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Nach eindeutiger Bestätigung rufst du confirm_appointment mit der gesprochenen Terminphrase auf.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
-    "Nach einem bestätigten Termin darfst du die in der Topic Policy hinterlegten Vorbereitungsfragen nutzen. Stelle sie nur einzeln und nur, solange der Kunde mitmacht; ein Nein oder Zeitdruck beendet diese Fragen sofort.",
+    "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage; bei Nein oder Zeitdruck beendest du die Fragerunde sofort und ohne Nachfassen.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
@@ -184,8 +193,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(
       "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben des PKV-Verbands liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Danach frage nach der persönlichen Erfahrung und höre zu.",
       "Wenn der Kunde seinen aktuellen Monatsbeitrag nennt, rechne sofort transparent und vorsichtig mit rund vier Prozent pro Jahr vor: nenne den heutigen Betrag, den ungefähren Betrag in zehn Jahren und den monatlichen Unterschied. Erkläre in einem kurzen Satz, warum diese Zahl für Planbarkeit relevant ist. Erst wenn der Kunde auf diese persönliche Einordnung positiv reagiert, darfst du einen Termin anbieten.",
-      "KONZEPTPHASE VOR DEM TERMIN: Sage nach der Hochrechnung zuerst den Kundennutzen: Der Kunde bekommt Klarheit statt weiter steigender, unplanbarer Kosten. Erkläre dann kurz: Im ersten Termin prüft Herr Duic Vertrag und Beitragsverlauf; im zweiten präsentiert er einen persönlichen Weg mit möglichen Stellschrauben wie Tarifoptimierung, Beitragsentlastung, Altersrückstellungen oder steuerlicher Gegenfinanzierung; erst im dritten Termin fällt eine mögliche Entscheidung. Der erste Termin ist Analyse, kein Verkauf.",
-      "NUTZEN UND COMPLIANCE: Ziel ist ein nachvollziehbarer Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Sage, dass Herr Duic Unternehmern hilft, Komplexität zu reduzieren und eine belastbare Entscheidungsgrundlage zu schaffen. Keine pauschalen Erfolgsversprechen, keine Garantie für null Euro und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Eine vertraglich garantierte Entlastung darf erst nach Prüfung des konkreten Konzepts genannt werden.",
+      "KONZEPTPHASE VOR DEM TERMIN IST EIN EIGENER GESPRÄCHSSCHRITT: Nach der Hochrechnung fragst du zuerst: 'Darf ich Ihnen kurz sagen, wie Herr Duic daraus einen planbaren Weg entwickelt?' Erst nach Zustimmung erklärst du in maximal zwei kurzen Sätzen: Ersttermin = Arbeitsweise, Vertrag und Beitragsverlauf analysieren; zweiter Termin = persönliches Konzept mit möglichen Stellschrauben wie Tarifoptimierung, Beitragsentlastung, Altersrückstellungen und möglicher steuerlicher Gegenfinanzierung; dritter Termin = offene Fragen und mögliche Entscheidung. Der erste Termin ist Analyse, kein Verkauf.",
+      "KUNDENNUTZEN: Sage ausdrücklich, was der Kunde davon hat: Klarheit über die persönliche Entwicklung, konkrete prüfbare Optionen und einen nachvollziehbaren Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Herr Duic hilft Unternehmern, Komplexität zu reduzieren und sich nicht allein auf steigende Bescheide verlassen zu müssen. Frage danach, ob genau diese Klarheit für den Kunden hilfreich wäre. Erst nach dieser Antwort darfst du einen Termin anbieten.",
+      "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für null Euro und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Eine vertraglich garantierte Entlastung darf erst nach Prüfung des konkreten Konzepts genannt werden.",
       "Versicherungsart, heutiger Beitrag, Hochrechnung und echte Zustimmung sind Voraussetzungen für einen PKV-Termin. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
       "Nach einem bestätigten Termin bedeutet ein Nein auf eine Vorbereitungsfrage: 'Kein Problem, dann lassen wir das für den Termin offen.' Stelle diese Frage nicht erneut und fahre nicht mit einem Fragenkatalog fort.",
     );
@@ -327,6 +337,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ctx.confirmedSlotPhrase = phrase;
         log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: phrase });
         sendToolResult(tool.callId, { ok: true, confirmed_slot: phrase });
+        updateSession();
       }
       sendOpenAi({ type: "response.create" });
       return;

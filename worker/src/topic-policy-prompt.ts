@@ -8,6 +8,7 @@ export type TopicPolicyFields = {
   behavior?: string;
   conversationGuardrails?: string;
   requiredQuestions?: string;
+  requiredData?: string;
   exampleSentences?: string;
 };
 
@@ -71,7 +72,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topicSummary = (policy.topicSummary || "").trim();
   const behavior = (policy.behavior || "").trim();
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
-  const requiredQuestions = (policy.requiredQuestions || "").trim();
+  const requiredQuestions = (policy.requiredQuestions || policy.requiredData || "").trim();
   const exampleSentences = (policy.exampleSentences || "").trim();
 
   if (
@@ -106,7 +107,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     parts.push(
       "",
       "FRAGEN NACH TERMINBESTÄTIGUNG:",
-      "Stelle diese Fragen erst nach einem bestätigten Termin und nur, wenn sie für die Vorbereitung sinnvoll sind. Stelle immer nur eine Frage, erkläre bei sensiblen Daten kurz den Nutzen und akzeptiere ein Nein ohne Nachfassen. Wenn der Kunde keine weiteren Angaben machen möchte oder der Call endet, vermerke die offenen Punkte für die Terminbestätigung:",
+      "Nach bestätigtem Termin führst du diese Fragen als Vorbereitung zuverlässig durch: eine Frage pro Turn, in der vorgegebenen Reihenfolge und ohne bereits beantwortete Fragen zu wiederholen. Erkläre bei sensiblen Daten kurz den Nutzen. Sagt der Kunde Nein, hat keine Zeit oder möchte keine weiteren Angaben machen, akzeptiere das sofort, beende die Fragerunde und vermerke die offenen Punkte für die Terminbestätigung:",
       requiredQuestions,
     );
   }

@@ -15,7 +15,7 @@ function buildPkvContext() {
     { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
     { role: "user", text: "1280 Euro.", at: 4 },
     { role: "assistant", text: "Bei rund vier Prozent pro Jahr lägen 1280 Euro in zehn Jahren höher.", at: 5 },
-    { role: "assistant", text: "Im ersten Termin analysiert Herr Duic Ihren Vertrag. Ist diese Einordnung für Sie sinnvoll?", at: 6 },
+    { role: "assistant", text: "Im ersten Termin erklärt Herr Duic seine Arbeitsweise und analysiert Ihren Vertrag. Ist diese Klarheit für Sie sinnvoll?", at: 6 },
   );
   return ctx;
 }
