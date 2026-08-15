@@ -86,9 +86,9 @@ OPENAI_REALTIME_VOICE=marin
 OPENAI_REALTIME_VAD_EAGERNESS=low
 ```
 
-`OPENAI_AUDIO_REALTIME=false` schaltet ohne Codeänderung auf die bisherige
-ASR/Chat/ElevenLabs-Pipeline zurück. ElevenLabs-Secrets werden nur für diesen
-Rückfallpfad benötigt.
+Audio-Realtime ist der Standard. Nur `OPENAI_AUDIO_REALTIME=false` schaltet
+ohne Codeänderung auf die bisherige ASR/Chat/ElevenLabs-Pipeline zurück.
+ElevenLabs-Secrets werden nur für diesen Rückfallpfad benötigt.
 
 ### Offen (nächste Iteration)
 

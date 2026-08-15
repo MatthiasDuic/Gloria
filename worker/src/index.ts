@@ -39,7 +39,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    const useAudioRealtime = /^(?:1|true|yes|on)$/i.test(process.env.OPENAI_AUDIO_REALTIME || "");
+    const useAudioRealtime = !/^(?:0|false|no|off)$/i.test(process.env.OPENAI_AUDIO_REALTIME || "true");
     const handler = useAudioRealtime ? handleOpenAiRealtimeTelnyxStream : handleTelnyxStream;
     handler(ws, req).catch((error) => {
       log.error("ws.handler_failed", { error: error instanceof Error ? error.message : String(error) });
