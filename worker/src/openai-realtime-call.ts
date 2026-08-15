@@ -112,6 +112,20 @@ function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu" {
     : "audio/pcmu";
 }
 
+function splitPreparationQuestions(policy: { requiredQuestions?: string; requiredData?: string } | null): string[] {
+  return (policy?.requiredQuestions || policy?.requiredData || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+    .filter((line) => line.length > 3);
+}
+
+function isPreparationConsent(text: string): "granted" | "declined" | "unknown" {
+  const normalized = text.trim().toLowerCase();
+  if (/^(?:ja\b|gerne\b|klar\b|okay\b|ok\b|passt\b|in ordnung\b|machen wir\b)/i.test(normalized)) return "granted";
+  if (/^(?:nein\b|nö\b|lieber nicht|keine zeit|nicht jetzt|später|möchte ich nicht)/i.test(normalized)) return "declined";
+  return "unknown";
+}
+
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
 
@@ -176,7 +190,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Nach eindeutiger Bestätigung rufst du confirm_appointment mit der gesprochenen Terminphrase auf.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Biete immer genau zwei Optionen an zwei verschiedenen Kalendertagen an, niemals zwei Uhrzeiten desselben Tages. Nach eindeutiger Bestätigung rufst du confirm_appointment mit der gesprochenen Terminphrase auf.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage; bei Nein oder Zeitdruck beendest du die Fragerunde sofort und ohne Nachfassen.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -249,6 +263,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let outboundAudioBytes = 0;
   let outboundAudioBuffer = Buffer.alloc(0);
   let assistantTranscript = "";
+  let preparationQuestions: string[] = [];
+  let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
+  let preparationQuestionIndex = 0;
   const queuedAudio: string[] = [];
   const handledToolCalls = new Set<string>();
   const interruptedItemIds = new Set<string>();
@@ -287,7 +304,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             turn_detection: {
               type: "semantic_vad",
               eagerness: process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim() || "low",
-              create_response: true,
+              create_response: false,
               interrupt_response: true,
             },
           },
@@ -298,6 +315,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
           },
         },
       },
+    });
+  };
+
+  const requestResponse = (instructions?: string) => {
+    sendOpenAi({
+      type: "response.create",
+      ...(instructions ? { response: { instructions } } : {}),
     });
   };
 
@@ -338,8 +362,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
         log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: phrase });
         sendToolResult(tool.callId, { ok: true, confirmed_slot: phrase });
         updateSession();
+        if (preparationQuestions.length > 0) {
+          preparationMode = "awaiting_consent";
+          requestResponse(
+            `Bestätige nur den Termin ${phrase}. Frage danach exakt: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?"`,
+          );
+          return;
+        }
       }
-      sendOpenAi({ type: "response.create" });
+      requestResponse();
       return;
     }
 
@@ -425,6 +456,31 @@ export async function handleOpenAiRealtimeTelnyxStream(
           ctx.lastUserFinalAt = Date.now();
           ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
           log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
+
+          if (preparationMode === "awaiting_consent") {
+            const consent = isPreparationConsent(transcript);
+            if (consent === "granted") {
+              preparationMode = "asking";
+              preparationQuestionIndex = 0;
+              requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${preparationQuestions[0]}"`);
+            } else if (consent === "declined") {
+              preparationMode = "complete";
+              requestResponse("Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
+            } else {
+              requestResponse("Die Antwort war unklar. Frage freundlich noch einmal nur, ob zwei Minuten für kurze Vorbereitungsfragen passen.");
+            }
+          } else if (preparationMode === "asking") {
+            preparationQuestionIndex += 1;
+            const nextQuestion = preparationQuestions[preparationQuestionIndex];
+            if (nextQuestion) {
+              requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${nextQuestion}"`);
+            } else {
+              preparationMode = "complete";
+              requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
+            }
+          } else {
+            requestResponse();
+          }
         }
         return;
       }
@@ -557,6 +613,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       void loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
+        preparationQuestions = splitPreparationQuestions(policy);
         updateSession();
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
       });
