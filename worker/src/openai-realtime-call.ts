@@ -6,7 +6,6 @@ import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { newContext, type CallContext } from "./state.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
-import { extractConfirmedSlot } from "./telnyx-stream.js";
 
 type TelnyxFrame =
   | { event: "connected" }
@@ -113,6 +112,29 @@ function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu" {
     : "audio/pcmu";
 }
 
+export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
+  if (ctx.topicKind !== "pkv") return { ok: true };
+
+  const userText = ctx.transcript
+    .filter((turn) => turn.role === "user")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" ");
+  const assistantText = ctx.transcript
+    .filter((turn) => turn.role === "assistant")
+    .map((turn) => turn.text.toLowerCase())
+    .join(" ");
+  const hasInsuranceStatus = /\b(?:privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(userText);
+  const hasContribution = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
+  const hasProjection = /(?:vier\s+prozent|4\s*%)\s+(?:pro\s+jahr)?[\s\S]{0,160}(?:zehn\s+jahr|10\s+jahr)|(?:zehn\s+jahr|10\s+jahr)[\s\S]{0,160}(?:vier\s+prozent|4\s*%)/i.test(assistantText);
+  const hasInterest = /\b(?:ja|gerne|interessant|hilfreich|macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)\b/i.test(userText);
+
+  if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
+  if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
+  if (!hasProjection) return { ok: false, reason: "Zeige zuerst anhand des genannten Beitrags eine konkrete Zehn-Jahres-Hochrechnung mit rund vier Prozent pro Jahr." };
+  if (!hasInterest) return { ok: false, reason: "Hole nach der Hochrechnung erst eine eindeutige, inhaltliche Zustimmung zum Termin ein." };
+  return { ok: true };
+}
+
 export function buildRealtimeInstructions(ctx: CallContext): string {
   const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
@@ -137,6 +159,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Nach eindeutiger Bestätigung rufst du confirm_appointment mit der gesprochenen Terminphrase auf.",
+    "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin darfst du die in der Topic Policy hinterlegten Vorbereitungsfragen nutzen. Stelle sie nur einzeln und nur, solange der Kunde mitmacht; ein Nein oder Zeitdruck beendet diese Fragen sofort.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
@@ -148,6 +171,14 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
+  if (ctx.topicKind === "pkv") {
+    parts.push(
+      "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben des PKV-Verbands liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Danach frage nach der persönlichen Erfahrung und höre zu.",
+      "Wenn der Kunde seinen aktuellen Monatsbeitrag nennt, rechne sofort transparent und vorsichtig mit rund vier Prozent pro Jahr vor: nenne den heutigen Betrag, den ungefähren Betrag in zehn Jahren und den monatlichen Unterschied. Erkläre in einem kurzen Satz, warum diese Zahl für Planbarkeit relevant ist. Erst wenn der Kunde auf diese persönliche Einordnung positiv reagiert, darfst du einen Termin anbieten.",
+      "Versicherungsart, heutiger Beitrag, Hochrechnung und echte Zustimmung sind Voraussetzungen für einen PKV-Termin. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
+      "Nach einem bestätigten Termin bedeutet ein Nein auf eine Vorbereitungsfrage: 'Kein Problem, dann lassen wir das für den Termin offen.' Stelle diese Frage nicht erneut und fahre nicht mit einem Fragenkatalog fort.",
+    );
+  }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
   if (ctx.isCallback && ctx.previousSummary?.trim()) {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
@@ -274,8 +305,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (tool.name === "confirm_appointment") {
       const phrase = typeof args.slot_phrase === "string" ? args.slot_phrase.trim() : "";
+      const eligibility = canConfirmRealtimeAppointment(ctx);
       if (!phrase) {
         sendToolResult(tool.callId, { ok: false, error: "missing_slot_phrase" });
+      } else if (!eligibility.ok) {
+        sendToolResult(tool.callId, { ok: false, error: "appointment_not_ready", instruction: eligibility.reason });
       } else {
         ctx.confirmedSlotPhrase = phrase;
         log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: phrase });
@@ -327,9 +361,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "error") {
+        const errorMessage = message.error?.message || "unknown_realtime_error";
+        if (/cancellation failed: no active response found/i.test(errorMessage)) {
+          return;
+        }
         log.error("realtime.session_error", {
           callSid: ctx?.callSid,
-          error: message.error?.message || "unknown_realtime_error",
+          error: errorMessage,
         });
         return;
       }
@@ -418,8 +456,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
-          const slot = extractConfirmedSlot(transcript);
-          if (!ctx.confirmedSlotPhrase && slot) ctx.confirmedSlotPhrase = slot;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }
         assistantTranscript = "";
