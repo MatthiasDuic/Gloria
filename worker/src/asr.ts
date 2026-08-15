@@ -36,7 +36,7 @@ function openOpenAIAsr(events: AsrEvents): AsrSession {
   const language = process.env.OPENAI_TRANSCRIBE_LANGUAGE?.trim() || "de";
   const silenceDurationMs = Math.max(
     250,
-    Number.parseInt(process.env.OPENAI_ASR_SILENCE_MS || "520", 10),
+    Number.parseInt(process.env.OPENAI_ASR_SILENCE_MS || "800", 10),
   );
 
   let ws: WebSocket | undefined;

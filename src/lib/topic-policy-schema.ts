@@ -7,6 +7,7 @@ export const TopicPolicyPayloadSchema = z
   .object({
     id: z.string().optional(),
     topic: TopicSchema.optional(),
+    callObjective: z.string().optional(),
     topicSummary: z.string().optional(),
     behavior: z.string().optional(),
     conversationGuardrails: z.string().optional(),
@@ -26,6 +27,10 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
       type: "string",
       description: "Thema, für das die Topic Policy gilt.",
       examples: [...TOPICS],
+    },
+    callObjective: {
+      type: "string",
+      description: "Das gewünschte Ergebnis des Anrufs, zum Beispiel Terminvereinbarung, Rückruf oder Serviceklärung.",
     },
     topicSummary: {
       type: "string",

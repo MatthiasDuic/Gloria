@@ -1,6 +1,7 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { handleTelnyxStream } from "./telnyx-stream.js";
+import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
 
 // IMPORTANT: The following env vars MUST be set in Render dashboard:
@@ -38,7 +39,9 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleTelnyxStream(ws, req).catch((error) => {
+    const useAudioRealtime = /^(?:1|true|yes|on)$/i.test(process.env.OPENAI_AUDIO_REALTIME || "");
+    const handler = useAudioRealtime ? handleOpenAiRealtimeTelnyxStream : handleTelnyxStream;
+    handler(ws, req).catch((error) => {
       log.error("ws.handler_failed", { error: error instanceof Error ? error.message : String(error) });
       try {
         ws.close(1011, "internal_error");

@@ -48,6 +48,7 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
   assert.deepEqual(decideTurnRoute(ctx, "Wie genau wird das gemacht?"), { route: "openai", reason: "customer_question" });
   assert.deepEqual(decideTurnRoute(ctx, "Ich verstehe nicht, wie das funktionieren soll."), { route: "openai", reason: "customer_objection" });
   assert.deepEqual(decideTurnRoute(ctx, "Ja, aber wie macht Herr Duic das?"), { route: "worker", reason: "structured_state" });
+  assert.deepEqual(decideTurnRoute(ctx, "Wie will Herr Dwitch das denn machen?"), { route: "worker", reason: "structured_state" });
 
   ctx.flow.stage = "scheduling";
   ctx.flow.awaiting = "appointment_selection";
@@ -55,6 +56,9 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
 });
 
 test("keeps a final ASR fragment from advancing the PKV flow", () => {
+  assert.equal(isLikelyIncompleteCustomerThought("I"), true);
+  assert.equal(isLikelyIncompleteCustomerThought("Ich mit der"), true);
+  assert.equal(isLikelyIncompleteCustomerThought("nein, der"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Gut, ich"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ich bin"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Also..."), true);
@@ -374,28 +378,32 @@ test("builds PKV relevance before asking insurance questions", () => {
 
   let reply = buildDeterministicPkvFlowReply(ctx, "Ja, das dürfen Sie.");
   assert.ok(reply);
-  assert.match(reply.reply, /Beiträge in der Gesundheitsversorgung/);
-  assert.match(reply.reply, /PKV-Verbands/);
+  assert.match(reply.reply, /PKV-Beiträge steigen langfristig/);
   assert.match(reply.reply, /drei bis fünf Prozent/);
-  assert.match(reply.reply, /Unternehmer und Selbstständige/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
+
+  const unclearConsent = buildDeterministicPkvFlowReply(ctx, "Gott hat ein Norja. Oh.");
+  assert.ok(unclearConsent);
+  assert.match(unclearConsent.reply, /akustisch nicht ganz verstanden/);
+  assert.doesNotMatch(unclearConsent.reply, /Beiträge in der Gesundheitsversorgung/);
   ctx.transcript.push({ role: "user", text: "Ja, das dürfen Sie.", at: 2 }, { role: "assistant", text: reply.reply, at: 3 });
 
   reply = buildDeterministicPkvFlowReply(ctx, "Das merkt man schon.");
   assert.ok(reply);
   assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
   assert.match(reply.reply, /Das höre ich oft/);
-  assert.match(reply.reply, /welchen Beitrag Sie heute zahlen/);
-  assert.match(reply.reply, /prognostiziert bei gleichbleibender Entwicklung/);
-  assert.match(reply.reply, /Haben Sie sich das schon einmal detailliert angeschaut/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
   ctx.transcript.push({ role: "user", text: "Das merkt man schon.", at: 4 }, { role: "assistant", text: reply.reply, at: 5 });
 
   reply = buildDeterministicPkvFlowReply(ctx, "Das weiß ich nicht mehr.");
   assert.ok(reply);
-  assert.match(reply.reply, /prognostiziert/);
-  assert.match(reply.reply, /Herr Duic setzt genau da an/);
-  assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
+  assert.match(reply.reply, /macht Ihre Beitragsentwicklung transparent/);
+  assert.match(reply.reply, /detailliert angeschaut/);
+  ctx.transcript.push({ role: "user", text: "Das weiß ich nicht mehr.", at: 6 }, { role: "assistant", text: reply.reply, at: 7 });
+
+  reply = buildDeterministicPkvFlowReply(ctx, "Nein, bisher nicht.");
+  assert.ok(reply);
+  assert.match(reply.reply, /privat oder gesetzlich/);
 });
 
 test("acknowledges the PKV how-question with a concrete answer", () => {
@@ -426,6 +434,10 @@ test("acknowledges the PKV how-question with a concrete answer", () => {
   const spokenVariant = buildDeterministicPkvFlowReply(ctx, "Ja, aber wie macht er das?");
   assert.ok(spokenVariant);
   assert.match(spokenVariant.reply, /Ja, genau darum geht es/);
+
+  const noisyNameVariant = buildDeterministicPkvFlowReply(ctx, "Wie will Herr Dwitch das denn machen?");
+  assert.ok(noisyNameVariant);
+  assert.match(noisyNameVariant.reply, /Ja, genau darum geht es/);
 });
 
 test("corrects an unsupported percentage claim before OpenAI", async () => {
@@ -493,7 +505,7 @@ test("stream path keeps PKV structure after contribution-rise response", async (
 
   const segments: string[] = [];
   const reply = await streamReply(ctx, "Die Beiträge steigen Jahr für Jahr.", (segment) => segments.push(segment));
-  assert.match(reply.reply, /Wenn Sie zurückblicken/);
+  assert.match(reply.reply, /mit welchem Beitrag Sie angefangen haben/);
   assert.equal(segments.length, 1);
   assert.equal(segments.join(" "), reply.reply);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
@@ -748,6 +760,44 @@ test("keeps the offered slots after an unclear time answer", () => {
   assert.match(reply.reply, /notiere Freitag.*dreizehn Uhr dreißig/);
 });
 
+test("selects a slot from a compact spoken time like 1030", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-compact-time",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+    freeSlotsPrompt: [
+      "- Montag, den vierundzwanzigsten August um neun Uhr",
+      "- Montag, den vierundzwanzigsten August um zehn Uhr dreißig",
+    ].join("\n"),
+  });
+  ctx.flow.stage = "scheduling";
+  ctx.flow.awaiting = "appointment_selection";
+  ctx.flow.insuranceKnown = true;
+  ctx.flow.contributionKnown = true;
+  ctx.flow.projectionDelivered = true;
+  ctx.flow.interestConfirmed = true;
+  ctx.transcript.push(
+    { role: "assistant", text: "Sind Sie aktuell privat oder gesetzlich versichert?", at: 0 },
+    { role: "user", text: "Gesetzlich.", at: 0.5 },
+    {
+      role: "assistant",
+      text: "Wie wäre es mit Montag, den vierundzwanzigsten August um neun Uhr oder Montag, den vierundzwanzigsten August um zehn Uhr dreißig?",
+      at: 1,
+    },
+  );
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "1030 klingt gut.");
+  assert.ok(reply);
+  assert.match(reply.reply, /notiere Montag, den vierundzwanzigsten August um zehn Uhr drei\u00dfig/);
+});
+
+test("parses a spoken contribution with filler words", () => {
+  assert.equal(parseGermanEuroAmount("Ich zahle circa tausend Euro."), 1000);
+  assert.equal(parseGermanEuroAmount("Etwa tausendzweihundert Euro."), 1200);
+  assert.equal(parseGermanEuroAmount("Ich zahle ungefähr 950 Euro."), 950);
+  assert.equal(parseGermanEuroAmount("Das kostet leider viel Euro."), undefined);
+});
+
 test("never invents a slot when the requested weekday is unavailable", () => {
   const ctx = newContext({
     callSid: "test-pkv-unavailable-weekday",
@@ -835,10 +885,10 @@ test("runs a complete PKV acquisition scenario through structured state", async 
     return reply.reply;
   };
 
-  assert.match(await turn("Ja, das dürfen Sie."), /Beiträge in der Gesundheitsversorgung/);
+  assert.match(await turn("Ja, das dürfen Sie."), /PKV-Beiträge steigen langfristig/);
   assert.match(await turn("Ja, das spüre ich."), /mit welchem Beitrag/);
   assert.match(await turn("Mit sechshundert Euro."), /detailliert angeschaut/);
-  assert.match(await turn("Nein."), /privat oder gesetzlich/);
+  assert.match(await turn("Nein, bisher nicht."), /privat oder gesetzlich/);
   assert.match(await turn("Gesetzlich."), /aktueller Monatsbeitrag/);
   assert.match(await turn("Tausendzweihundertachtzig Euro."), /eintausendzweihundertachtzig Euro/);
   assert.equal(ctx.flow.pkvData.currentContribution, 1280);

@@ -21,6 +21,16 @@ services:
         sync: true
       - key: OPENAI_MODEL
         value: gpt-4.1-mini
+      - key: OPENAI_AUDIO_REALTIME
+        value: true
+      - key: OPENAI_REALTIME_MODEL
+        value: gpt-realtime-2.1
+      - key: OPENAI_REALTIME_REASONING_EFFORT
+        value: low
+      - key: OPENAI_REALTIME_VOICE
+        value: marin
+      - key: OPENAI_REALTIME_VAD_EAGERNESS
+        value: low
       - key: LLM_TRANSCRIPT_TURNS
         value: 10
       - key: LLM_MAX_TOKENS
@@ -60,7 +70,7 @@ services:
       - key: OPENAI_TRANSCRIBE_LANGUAGE
         value: de
       - key: OPENAI_ASR_SILENCE_MS
-        value: 520
+        value: 800
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: ASR_FINAL_COALESCE_MS

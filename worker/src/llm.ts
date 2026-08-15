@@ -435,7 +435,7 @@ export function decideTurnRoute(ctx: CallContext, userText: string): TurnRoute {
   const text = userText.trim().toLowerCase();
   const question = /\?|\b(wie|warum|weshalb|wieso|was|welche|welcher|können|kann|darf|soll|woher|woraus)\b/i.test(text);
   const objection = /ich\s+verstehe\s+nicht|kann\s+ich\s+mir\s+nicht\s+vorstellen|kein\s+interesse|keine\s+zeit|zu\s+teuer|was\s+bringt|was\s+hab\s+ich\s+davon|aber\b/i.test(text);
-  const pkvImplementationQuestion = /\bwie\s+(?:macht|will|m[öo]chte|soll)\s+(?:(?:herr\s+)?\w+\s+)?(?:er\s+)?(?:das|es)\s+machen\b|\bwie\s+macht\s+(?:herr\s+)?\w+\s+(?:das|es)\b|\bwie\s+funktioniert\s+das\b/i.test(text);
+  const pkvImplementationQuestion = /\bwie\s+(?:macht|will|m[öo]chte|soll)\s+(?:(?:herr\s+)?\w+\s+)?(?:er\s+)?(?:das|es)(?:\s+denn)?\s+machen\b|\bwie\s+(?:macht|will)\s+herr\s+\w+\s+(?:das|es)(?:\s+denn)?\b|\bwie\s+funktioniert\s+das\b/i.test(text);
 
   // Hard state ownership stays local: these answers must never be invented
   // or reordered by OpenAI.
@@ -603,9 +603,39 @@ function detectPkvFlowState(ctx: CallContext, userText: string): PkvFlowState {
 function extractLatestContributionPhrase(text: string): string | undefined {
   const direct = text.match(/\b\d{2,5}(?:[.,:]\d{1,2})?\s*(?:euro|€)\b/gi);
   if (direct?.length) return direct.at(-1)?.replace(/\s+/g, " ").trim();
-  const spoken = text.match(/\b(?:[a-zäöüß-]*tausend[a-zäöüß-]*|[a-zäöüß-]*hundert[a-zäöüß-]*)(?:\s+[a-zäöüß-]+){0,4}\s+euro\b/gi);
-  if (spoken?.length) return spoken.at(-1)?.replace(/\s+/g, " ").trim();
-  return undefined;
+  const spoken = extractSpokenAmountWords(text);
+  return spoken ? `${spoken} Euro` : undefined;
+}
+
+/** Nur echte deutsche Zahlwörter – auch als Kompositum ("tausendvierhundertachtzig"). */
+const GERMAN_NUMBER_WORD =
+  /^(?:null|eins|eine[nrsm]?|ein|zwei|drei|vier|f(?:ü|ue)nf|sechs|sieben|acht|neun|zehn|elf|zw(?:ö|oe)lf|dreizehn|vierzehn|f(?:ü|ue)nfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|drei(?:ß|ss)ig|vierzig|f(?:ü|ue)nfzig|sechzig|siebzig|achtzig|neunzig|hundert|tausend|und)+$/i;
+
+/**
+ * Sammelt die Zahlwörter unmittelbar vor "Euro". Füllwörter wie "circa" oder
+ * "ich zahle" beenden die Sammlung, statt das Parsing komplett scheitern zu
+ * lassen ("Ich zahle circa tausend Euro" => "tausend").
+ */
+function extractSpokenAmountWords(text: string): string | undefined {
+  const tokens = text.toLowerCase().match(/[a-zäöüß]+|€|\d+/g);
+  if (!tokens) return undefined;
+  let euroIndex = -1;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    if (tokens[index] === "euro" || tokens[index] === "€") {
+      euroIndex = index;
+      break;
+    }
+  }
+  if (euroIndex <= 0) return undefined;
+
+  const collected: string[] = [];
+  for (let index = euroIndex - 1; index >= 0 && collected.length < 5; index -= 1) {
+    const token = tokens[index];
+    if (!GERMAN_NUMBER_WORD.test(token)) break;
+    collected.unshift(token);
+  }
+  while (collected.length > 0 && collected[0] === "und") collected.shift();
+  return collected.length > 0 ? collected.join(" ") : undefined;
 }
 
 export function parseGermanEuroAmount(text: string): number | undefined {
@@ -614,10 +644,10 @@ export function parseGermanEuroAmount(text: string): number | undefined {
     return Number.parseInt(directMatch[1], 10);
   }
 
-  const spokenMatch = text.match(/\b([a-zäöüß-]+(?:\s+[a-zäöüß-]+){0,4})\s+euro\b/i);
-  if (!spokenMatch) return undefined;
+  const spoken = extractSpokenAmountWords(text);
+  if (!spoken) return undefined;
 
-  return parseGermanNumberWords(spokenMatch[1]);
+  return parseGermanNumberWords(spoken);
 }
 
 function parseGermanNumberWords(input: string): number | undefined {
@@ -780,9 +810,10 @@ function isDiscoveryObjection(ctx: CallContext, userText: string): boolean {
 
 export function isLikelyIncompleteCustomerThought(text: string): boolean {
   const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/^[a-zäöüß][.!?…]*$/i.test(normalized)) return true;
   if (/^(?:also|äh+|ähm+|hm+|mhm+)\s*[.!?…]*$/i.test(normalized)) return true;
   if (/(?:^|\s)(?:wie|was|warum|wieso|ob)$/.test(normalized)) return true;
-  if (/(?:^|\s)(?:diese|dieser|dieses|das|seit|aber|und)$/.test(normalized)) return true;
+  if (/(?:^|\s)(?:diese|dieser|dieses|das|seit|aber|und|mit|bei|auf|von|zu|für|der|die|den|dem|des|ein|eine|einer|einem|einen)$/.test(normalized)) return true;
   if (/(?:^|\s)(?:ich|wir|er|sie)\s*$/.test(normalized)) return true;
   if (/\b(?:ich\s+(?:bin|habe|kann|möchte|will)|wir\s+(?:sind|haben|können|möchten|wollen))\s*$/.test(normalized)) return true;
   return /\b(?:ich\s+bin|ich\s+habe|ich\s+kann\s+mir|ich\s+frage\s+mich)\b[^.!?]*\b(?:seit|diese|dieser|dieses|das)\s*$/i.test(normalized);
@@ -792,7 +823,34 @@ export function isCustomerFarewell(text: string): boolean {
   return /\b(?:auf\s+wiederh[öo]ren|wiederh[öo]ren|auf\s+wiedersehen|tsch[üu]ss|tsch[üu]s|ciao|bis\s+(?:dann|bald)|einen\s+sch[öo]nen\s+tag)\b/i.test(text);
 }
 
+/**
+ * Verhindert, dass Gloria in der Discovery-Phase denselben Skript-Block
+ * zweimal spricht (z. B. den "setzt genau da an"-Absatz). Sobald der Text
+ * bereits gefallen ist, geht sie direkt einen Schritt weiter.
+ */
 export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: string): TurnOutput | null {
+  const reply = buildDeterministicPkvFlowStep(ctx, userText);
+  if (!reply) return null;
+
+  const insuranceKnown = ctx.transcript.some((turn) => turn.role === "user" && hasInsuranceSignal(turn.text));
+  if (insuranceKnown || reply.hangup || !wasAlreadySpoken(ctx, reply.reply)) return reply;
+
+  const insuranceQuestion = "Genau deshalb lohnt der Blick. Sind Sie aktuell privat oder gesetzlich versichert?";
+  if (wasAlreadySpoken(ctx, insuranceQuestion)) return null;
+  return { reply: insuranceQuestion, hangup: false, transfer: false };
+}
+
+function wasAlreadySpoken(ctx: CallContext, reply: string): boolean {
+  const key = normalizeSpokenKey(reply);
+  if (key.length < 40) return false;
+  return ctx.transcript.some((turn) => turn.role === "assistant" && normalizeSpokenKey(turn.text).includes(key));
+}
+
+function normalizeSpokenKey(text: string): string {
+  return text.toLowerCase().replace(/[^a-zäöüß0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildDeterministicPkvFlowStep(ctx: CallContext, userText: string): TurnOutput | null {
   const isPkv = ctx.topicKind === "pkv";
   if (!isPkv) return null;
   if (ctx.confirmedSlotPhrase) return null;
@@ -805,15 +863,23 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
   const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
   const currentAlreadyInTranscript = userTurns.at(-1)?.text.trim() === userText.trim();
   const previousUserText = (currentAlreadyInTranscript ? userTurns.at(-2) : userTurns.at(-1))?.text.toLowerCase() || "";
-  const discoveryConsent = /(?:^|\s)(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?)/i.test(userText.trim());
+  const discoveryConsent = /^(?:ja(?:,?\s*(?:das\s+d[üu]rfen?\s+sie|das\s+ist\s+klar|klar|gerne|okay|ok)|\s+bitte)?|klar|selbstverständlich|gern(?:e)?|okay|ok|in\s+ordnung)\s*[.!?]*$/i.test(userText.trim());
+  const awaitingDiscoveryConsent = /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es(?:\s+konkret)?\s+geht\?/i.test(latestAssistant);
 
   if (isLikelyIncompleteCustomerThought(userText)) {
     return null;
   }
 
-  if (isPkv && /darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+konkret\s+geht\?|darf\s+ich\s+ihnen?\s+in\s+20\s+sekunden\s+sagen,?\s+worum\s+es\s+geht\?/i.test(latestAssistant) && discoveryConsent) {
+  if (isPkv && awaitingDiscoveryConsent && discoveryConsent) {
     return {
-      reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+      reply: "PKV-Beiträge steigen langfristig häufig um etwa drei bis fünf Prozent pro Jahr. Wie stark spüren Sie diese Beitragsentwicklung bei sich?",
+      hangup: false,
+      transfer: false,
+    };
+  }
+  if (isPkv && awaitingDiscoveryConsent) {
+    return {
+      reply: "Entschuldigen Sie, das habe ich akustisch nicht ganz verstanden. Darf ich Ihnen in 20 Sekunden sagen, worum es konkret geht?",
       hangup: false,
       transfer: false,
     };
@@ -859,7 +925,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /mit\s+welchem\s+beitrag.*(?:angefangen|gestartet)/i.test(latestAssistant) && (affirmsMentally(userText) || forgetsStartingContribution)) {
     return {
-      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an und macht Ihre Beitragsentwicklung transparent. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
       transfer: false,
     };
@@ -872,20 +938,20 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
     const startingContribution = extractLatestContributionPhrase(userText);
     if (startingContribution) {
       return {
-        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an und macht Ihre Beitragsentwicklung transparent. Haben Sie sich das schon einmal detailliert angeschaut?`,
         hangup: false,
         transfer: false,
       };
     }
     if (forgetsStartingContribution) {
       return {
-        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+        reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an und macht Ihre Beitragsentwicklung transparent. Haben Sie sich das schon einmal detailliert angeschaut?`,
         hangup: false,
         transfer: false,
       };
     }
     return {
-      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an und macht Ihre Beitragsentwicklung transparent. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
       transfer: false,
     };
@@ -893,7 +959,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && /wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory) && !/erinnern\s+sie\s+sich.*beitrag|mit\s+welchem\s+beitrag.*angefangen/.test(assistantHistory)) {
     return {
-      reply: `Das höre ich oft. Wenn Sie zurückblicken: Erinnern Sie sich noch, mit welchem Beitrag Sie angefangen haben? Und jetzt schauen Sie einmal, welchen Beitrag Sie heute zahlen. Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: "Das höre ich oft. Wissen Sie noch, mit welchem Beitrag Sie angefangen haben?",
       hangup: false,
       transfer: false,
     };
@@ -909,7 +975,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   if (!discoveryObjection && (startingQuestionAnswered || /mit\s+welchem\s+beitrag.*angefangen/i.test(latestAssistant)) && contributionQuestionInHistory && forgetsStartingContribution) {
     return {
-      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an. Er schaut sich gemeinsam mit Ihnen die Entwicklung an und prognostiziert bei gleichbleibender Entwicklung, wie sich Ihr Beitrag in den nächsten Jahren verändern kann. Haben Sie sich das schon einmal detailliert angeschaut?`,
+      reply: `Herr ${owner.replace(/^Herrn?\s+/i, "")} setzt genau da an und macht Ihre Beitragsentwicklung transparent. Haben Sie sich das schon einmal detailliert angeschaut?`,
       hangup: false,
       transfer: false,
     };
@@ -917,7 +983,7 @@ export function buildDeterministicPkvFlowReply(ctx: CallContext, userText: strin
 
   const isSplitHowQuestion = /wie\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)\b/.test(previousUserText)
     && /^das\s+machen\s+m[öo]chte\b/.test(text);
-  if (/wie\s+(?:macht|will|m[öo]chte|soll)\s+(?:herr\s+)?(?:dui(?:c|ch|tsch)|er)(?:\s+jetzt)?\s+das(?:\s+machen)?|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text) || isSplitHowQuestion) {
+  if (/wie\s+(?:macht|will|m[öo]chte|soll)\s+(?:herr\s+(?:\w+)|er)(?:\s+jetzt)?\s+das(?:\s+denn)?(?:\s+machen)?|wie\s+er\s+das\s+machen\s+m[öo]chte|wie\s+funktioniert\s+das|welche\s+m[öo]glichkeiten\s+w[äa]ren/.test(text) || isSplitHowQuestion) {
     return {
       reply: `Ja, genau darum geht es: ${owner} schaut sich Ihren heutigen Stand an, rechnet die Entwicklung auf Ihre Zahlen durch und prüft dann konkrete Handlungsmöglichkeiten wie Tarifstruktur, Selbstbehalt oder Entlastungsbausteine. Im Termin sehen Sie also anhand Ihrer eigenen Zahlen, wie die Prognose entsteht und welche Optionen überhaupt zu Ihrer Situation passen.`,
       hangup: false,
@@ -1150,6 +1216,37 @@ function extractSlotHour(slot: string): number | undefined {
   return words[match[1].toLowerCase()];
 }
 
+function extractSlotMinute(slot: string): number {
+  const numeric = slot.match(/\b\d{1,2}:([0-5]\d)\b/);
+  if (numeric) return Number.parseInt(numeric[1], 10);
+  const words: Record<string, number> = { fünfzehn: 15, fuenfzehn: 15, dreißig: 30, dreissig: 30, fünfundvierzig: 45, fuenfundvierzig: 45 };
+  const spoken = slot.match(/\buhr\s+(f[üu]nfzehn|drei[ßs]ig|f[üu]nfundvierzig)\b/i);
+  if (!spoken) return 0;
+  return words[spoken[1].toLowerCase()] ?? 0;
+}
+
+/** Erkennt gesprochene/ASR-Zeitangaben wie "1030", "10:30", "10 Uhr 30", "halb elf". */
+function extractSpokenTimes(text: string): Array<{ hour: number; minute: number }> {
+  const lower = text.toLowerCase();
+  const times: Array<{ hour: number; minute: number }> = [];
+
+  for (const match of lower.matchAll(/\b(\d{1,2})\s*uhr\s*([0-5]\d)\b/g)) {
+    times.push({ hour: Number(match[1]), minute: Number(match[2]) });
+  }
+  for (const match of lower.matchAll(/\b(\d{1,2})[:.\s]?([0-5]\d)\b/g)) {
+    times.push({ hour: Number(match[1]), minute: Number(match[2]) });
+  }
+  for (const match of lower.matchAll(/\b(\d{1,2})\s*uhr\b/g)) {
+    times.push({ hour: Number(match[1]), minute: 0 });
+  }
+  const halfHours: Record<string, number> = { neun: 8, zehn: 9, elf: 10, zwölf: 11, zwoelf: 11, eins: 12, zwei: 13, drei: 14, vier: 15, fünf: 16, fuenf: 16, sechs: 17 };
+  for (const match of lower.matchAll(/\bhalb\s+([a-zäöü]+)\b/g)) {
+    const hour = halfHours[match[1]];
+    if (hour !== undefined) times.push({ hour, minute: 30 });
+  }
+  return times;
+}
+
 function selectOfferedSlot(latestAssistant: string, userText: string, offeredSlots: string[]): string | undefined {
   const lowerUser = userText.toLowerCase();
   const offered = offeredSlots.filter((slot) => latestAssistant.includes(slot));
@@ -1157,6 +1254,16 @@ function selectOfferedSlot(latestAssistant: string, userText: string, offeredSlo
   if (/\b(?:der|den)\s+erste[nr]?\b|\berste[nr]?\b/i.test(lowerUser)) return offered[0];
   if (/\b(?:der|den)\s+zweite[nr]?\b|\bzweite[nr]?\b/i.test(lowerUser)) return offered[1];
   if (/der\s+sp[äa]tere|sp[äa]tere[nr]?\b/i.test(lowerUser)) return offered[1];
+
+  const userTimes = extractSpokenTimes(userText);
+  const exact = offered.find((slot) => {
+    const hour = extractSlotHour(slot);
+    if (hour === undefined) return false;
+    const minute = extractSlotMinute(slot);
+    return userTimes.some((time) => time.hour === hour && time.minute === minute);
+  });
+  if (exact) return exact;
+
   return offered.find((slot) => {
     const hour = extractSlotHour(slot);
     return hour !== undefined && (new RegExp(`\\b${hour}\\b`).test(lowerUser) || lowerUser.includes(numberToGermanWords(hour)));
@@ -1837,8 +1944,8 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
 
   const pkvData = collectPkvData(ctx);
   const isPkvCall = /pkv|kranken/.test((ctx.topic || "").toLowerCase());
+  const basisDataConsent = getBasisDataConsentState(ctx);
   if (isPkvCall) {
-    const basisDataConsent = getBasisDataConsentState(ctx);
     if (basisDataConsent === "not-asked") {
       return {
         reply: "Für die Vorbereitung würde ich Ihnen jetzt noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?",
@@ -1885,7 +1992,10 @@ export function buildDeterministicPostBookingReply(ctx: CallContext): TurnOutput
   }
   if (emailQuestionIndex < 0) {
     return {
-      reply: "Welche E-Mail-Adresse darf ich für die Terminbestätigung notieren?",
+      reply:
+        basisDataConsent === "declined"
+          ? "Alles klar, dann halte ich es ganz kurz. Welche E-Mail-Adresse darf ich für die Terminbestätigung notieren?"
+          : "Welche E-Mail-Adresse darf ich für die Terminbestätigung notieren?",
       hangup: false,
       transfer: false,
     };
@@ -2046,6 +2156,10 @@ function getBasisDataConsentState(ctx: CallContext): "not-asked" | "pending" | "
     return "granted";
   }
   if (/^(?:nein\b|nö\b|lieber nicht|nicht jetzt|per mail|sp[äa]ter|ungern|(?:das\s+)?m[öo]chte ich nicht)/i.test(answer)) {
+    return "declined";
+  }
+  // Zeitdruck ist eine Absage an die Fragerunde, keine unklare Antwort.
+  if (/keine\s+zeit|muss\s+(?:jetzt\s+)?(?:los|weg|auflegen)|bin\s+(?:gerade\s+)?(?:im\s+termin|unterwegs)|es\s+eilt/i.test(answer)) {
     return "declined";
   }
   return "pending";

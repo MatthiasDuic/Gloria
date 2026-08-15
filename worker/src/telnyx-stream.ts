@@ -317,14 +317,15 @@ export function shouldInterruptOnPartialSpeech(text: string): boolean {
   return trimmed.length >= 6 || /[?]/.test(trimmed) || words.some((word) => word.length >= 4);
 }
 
-function likelyIncompleteUserSpeech(text: string): boolean {
+export function likelyIncompleteUserSpeech(text: string): boolean {
   const normalized = text
     .toLowerCase()
     .replace(/[.,!?;:]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return false;
-  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf|diese|dieser|dieses|das|nur|schon)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$|\b(?:wie|was|warum|wieso|ob)\s*$|\bwie\s+(?:herr\s+)?[a-zäöüß-]+\s*$)/i.test(normalized);
+  if (/^[a-zäöüß]$/i.test(normalized)) return true;
+  return /(?:\b(?:ich|wir|er|sie|es)\s+(?:bin|sind|habe|haben|w[äa]re|w[üu]rde|m[öo]chte|kann|k[öo]nnte|will|wollen)\s*$|\bseit\s*$|\b(?:und|aber|weil|dass|wenn|obwohl|mit|bei|auf|von|zu|f[üu]r|der|die|den|dem|des|ein(?:e[rmns]?)?|diese|dieser|dieses|das|nur|schon)\s*$|\b(?:ich\s+bin|nehmen\s+sie\s+aktuell)\s*$|\b(?:wie|was|warum|wieso|ob)\s*$|\bwie\s+(?:herr\s+)?[a-zäöüß-]+\s*$)/i.test(normalized);
 }
 
 export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): Promise<void> {
@@ -335,11 +336,13 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
   let topicPolicyReady: Promise<void> | null = null;
   let calendarSlotsReady: Promise<void> | null = null;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
+  let silenceOpenerSpoken = false;
   let inboundFrameCount = 0;
   let inboundEncoding = "PCMU";
   let outboundEncoding = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim().toUpperCase();
   let inboundSampleRate = 8000;
   let pendingUserFinals: string[] = [];
+  let pendingIncompleteUserText = "";
   let pendingUtterancesDuringTurn: string[] = [];
   let userFinalCoalesceTimer: NodeJS.Timeout | null = null;
   let reportFinalized = false;
@@ -758,6 +761,14 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       if (remaining > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, remaining));
       }
+      if (result.hangup) {
+        // Telnyx puffert Audio. Ohne stillen Nachlauf endet der Call mitten im
+        // letzten Sprach-Frame und der Kunde hört ein Knacken/Rauschen.
+        for (let index = 0; index < 12; index += 1) {
+          sendMedia(Buffer.alloc(FRAME_BYTES, MULAW_SILENCE_BYTE));
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      }
     }
 
     ctx.speaking = false;
@@ -778,9 +789,17 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     return confirmedSlotThisTurn ? { ...result, hangup: false, confirmedSlot: true } : result;
   };
 
-  const handleUserUtterance = async (userText: string) => {
+  const handleUserUtterance = async (incomingText: string) => {
     if (!ctx) return;
     clearSilenceOpenerTimer();
+
+    const userText = [pendingIncompleteUserText, incomingText]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    pendingIncompleteUserText = "";
 
     const classification = classifyInboundSpeech(userText);
 
@@ -825,11 +844,12 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
     }
     pendingTurn = true;
     try {
-      ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
       if (isLikelyIncompleteCustomerThought(userText)) {
+        pendingIncompleteUserText = userText;
         log.info("turn.user_thought_incomplete", { callSid: ctx.callSid, text: userText });
         return;
       }
+      ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
       updateConversationMemory(ctx, userText);
       ctx.flow = observeUserFlowState(ctx.flow, userText);
       ctx.lastUserFinalAt = Date.now();
@@ -855,7 +875,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
       // bevor TTS startet). Bei abweichendem Namen / Gatekeeper-Vermutung
       // fallen wir auf den LLM-Pfad zurück, damit Gatekeeper-Logik greift.
       if (isFirstUserTurn) {
-        const templated = buildTurn1OpenerLine(ctx, userText);
+        const templated = buildTurn1OpenerLine(ctx, userText, silenceOpenerSpoken);
         if (templated) {
           log.info("turn.fast_opener", { callSid: ctx.callSid });
           await speak(templated);
@@ -1060,6 +1080,7 @@ export async function handleTelnyxStream(ws: WebSocket, _req: IncomingMessage): 
           if (heardUser) return;
           const opener = buildSilenceOpenerLine(ctx);
           if (!opener) return;
+          silenceOpenerSpoken = true;
           log.info("turn.silence_opener", { callSid: ctx.callSid, waitMs: silenceMs });
           void speak(opener);
         }, silenceMs);
@@ -1240,7 +1261,7 @@ function buildSilenceOpenerLine(ctx: CallContext): string {
  * Andernfalls geben wir null zurück und der LLM-Pfad übernimmt – damit die
  * Gatekeeper-Logik (Empfang/Vorzimmer) korrekt greift.
  */
-function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null {
+function buildTurn1OpenerLine(ctx: CallContext, userText: string, greetingAlreadySpoken = false): string | null {
   const company = (ctx.ownerCompanyName || "").trim() || "unserer Agentur";
   const owner = (ctx.ownerRealName || "").trim() || "Herrn Duic";
   const expected = (ctx.contactName || "").trim();
@@ -1282,6 +1303,10 @@ function buildTurn1OpenerLine(ctx: CallContext, userText: string): string | null
   // Kurze, natürliche Begrüßung mit offener Abschlussfrage.
   // Aufzeichnungsfrage bewusst NICHT im Fast-Path: LLM formuliert sie
   // im nächsten Turn frei, ohne "bitte antworten Sie mit JA oder NEIN".
+  if (greetingAlreadySpoken) {
+    // Der Stille-Opener hat sich bereits vorgestellt – nicht wiederholen.
+    return `Sehr schön, ${salutation}. ${topicLine}`;
+  }
   return [
     `Guten Tag ${salutation}, hier ist Gloria, die digitale Vertriebsassistentin von ${company}.`,
     `Ich rufe im Auftrag von ${owner} an.`,

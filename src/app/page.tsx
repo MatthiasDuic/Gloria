@@ -364,6 +364,7 @@ function pickText(value: string | undefined, fallback?: string) {
 }
 
 const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
+  "callObjective",
   "topicSummary",
   "behavior",
   "conversationGuardrails",
@@ -635,10 +636,11 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
   return {
     id: existing?.id || `topic-policy-${topic.toLowerCase().replace(/\s+/g, "-")}`,
     topic,
+    callObjective: pickText(existing?.callObjective, preset.callObjective),
     topicSummary: pickText(existing?.topicSummary, preset.topicSummary),
     behavior: pickText(existing?.behavior, preset.behavior),
     conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
-    requiredQuestions: pickText(existing?.requiredQuestions, preset.requiredQuestions),
+    requiredQuestions: pickText(existing?.requiredQuestions || existing?.requiredData, preset.requiredQuestions),
     opener: pickText(existing?.opener, ""),
     discovery: pickText(existing?.discovery, ""),
     objectionHandling: pickText(existing?.objectionHandling, ""),
@@ -673,6 +675,7 @@ function buildRecommendedAccountDraft(topic: Topic, existing?: TopicPolicyConfig
 
   return {
     ...baseline,
+    callObjective: pickText(preset.callObjective, baseline.callObjective),
     topicSummary: pickText(preset.topicSummary, baseline.topicSummary),
     behavior: pickText(preset.behavior, baseline.behavior),
     conversationGuardrails: pickText(preset.conversationGuardrails, baseline.conversationGuardrails),
@@ -1749,6 +1752,7 @@ export default function HomePage() {
     const requestPayload = {
       id: draft.id,
       topic: draft.topic,
+      callObjective: draft.callObjective || "",
       topicSummary: draft.topicSummary || "",
       behavior: draft.behavior || "",
       conversationGuardrails: draft.conversationGuardrails || "",
@@ -3160,7 +3164,7 @@ export default function HomePage() {
                       </div>
                       <div className="playbook-overview-card stat">
                         <span className="playbook-kicker">Modell</span>
-                        <strong>5</strong>
+                        <strong>6</strong>
                         <p>klare Steuerfelder pro Thema</p>
                       </div>
                     </div>
@@ -3172,7 +3176,19 @@ export default function HomePage() {
 
                     <div className="playbook-grid top-gap">
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>1. Worum es bei dem Thema geht</strong> <span className="subtle">(Nutzen und Einordnung)</span></h3>
+                        <h3 className="sub-heading"><strong>1. Ziel des Anrufs</strong> <span className="subtle">(gewünschtes Ergebnis)</span></h3>
+                        <p className="subtle" style={{ marginTop: 0 }}>
+                          Beschreiben Sie, welches Ergebnis Gloria anstrebt. Das ist eine Orientierung für das Gespräch, kein starres Skript.
+                        </p>
+                        <textarea
+                          value={activeDraft.callObjective ?? ""}
+                          rows={5}
+                          onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], callObjective: event.target.value } }))}
+                        />
+                      </div>
+
+                      <div className="mini-panel playbook-card">
+                        <h3 className="sub-heading"><strong>2. Worum es bei dem Thema geht</strong> <span className="subtle">(Nutzen und Einordnung)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
                           Hier beschreiben Sie fachlich, worum es im Thema geht, welchen Nutzen der Interessent davon hat
                           und wie Gloria das Thema inhaltlich erklären soll.
@@ -3185,7 +3201,7 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>2. Verhalten & Tonalität</strong> <span className="subtle">(wie Gloria führt)</span></h3>
+                        <h3 className="sub-heading"><strong>3. Verhalten & Tonalität</strong> <span className="subtle">(wie Gloria führt)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
                           Beschreiben Sie, wie Gloria sprechen, führen und auf den Kunden reagieren soll.
                         </p>
@@ -3197,7 +3213,7 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>3. Harte Regeln & Verbote</strong> <span className="subtle">(was Gloria immer oder nie tun darf)</span></h3>
+                        <h3 className="sub-heading"><strong>4. Harte Regeln & Verbote</strong> <span className="subtle">(was Gloria immer oder nie tun darf)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
                           Hier definieren Sie Reihenfolgen, No-Gos, Pflichtverhalten und Grenzen für dieses Thema.
                         </p>
@@ -3209,10 +3225,9 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>4. Pflichtfragen in der Terminierungsphase</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
+                        <h3 className="sub-heading"><strong>5. Fragen nach Terminbestätigung</strong> <span className="subtle">(eine Frage pro Zeile)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
-                          Diese Fragen muss Gloria in der Terminierungs- oder Vorbereitungsphase stellen. Wenn der Kunde sie nicht direkt beantworten möchte,
-                          werden sie in die Terminbestätigungsmail übernommen.
+                          Diese Fragen stellt Gloria erst nach einem bestätigten Termin, einzeln und nur solange der Kunde mitmacht. Bei Ablehnung oder Zeitdruck lässt sie sie aus.
                         </p>
                         <textarea
                           value={activeDraft.requiredQuestions ?? ""}
@@ -3222,7 +3237,7 @@ export default function HomePage() {
                       </div>
 
                       <div className="mini-panel playbook-card">
-                        <h3 className="sub-heading"><strong>5. Beispielantworten</strong> <span className="subtle">(eine Formulierung pro Zeile)</span></h3>
+                        <h3 className="sub-heading"><strong>6. Beispielantworten</strong> <span className="subtle">(eine Formulierung pro Zeile)</span></h3>
                         <p className="subtle" style={{ marginTop: 0 }}>
                           Diese Sätze sind Stilvorlagen für natürliche Antworten. Gloria soll sie sinngemäß nutzen und nicht mechanisch wiederholen.
                         </p>

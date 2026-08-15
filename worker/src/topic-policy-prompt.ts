@@ -3,6 +3,7 @@ import { log } from "./log.js";
 
 export type TopicPolicyFields = {
   topic?: string;
+  callObjective?: string;
   topicSummary?: string;
   behavior?: string;
   conversationGuardrails?: string;
@@ -66,6 +67,7 @@ export async function loadTopicPolicy(opts: {
 
 export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topic = (policy.topic || "").trim();
+  const callObjective = (policy.callObjective || "").trim();
   const topicSummary = (policy.topicSummary || "").trim();
   const behavior = (policy.behavior || "").trim();
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
@@ -74,6 +76,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
 
   if (
     !topicSummary &&
+    !callObjective &&
     !behavior &&
     !conversationGuardrails &&
     !requiredQuestions
@@ -87,6 +90,9 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über dieser Topic Policy. Nutze die Topic Policy als Orientierung für Inhalt und Richtung, aber antworte immer situativ auf die letzte Kundenaussage und nicht als Skript.",
   );
   if (topic) parts.push(`THEMA: ${topic}`);
+  if (callObjective) {
+    parts.push("", "ZIEL DIESES ANRUFS:", callObjective);
+  }
   if (topicSummary) {
     parts.push("", "WORUM ES BEI DIESEM THEMA GEHT UND WELCHEN NUTZEN DER INTERESSENT DAVON HAT:", topicSummary);
   }
@@ -99,8 +105,8 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   if (requiredQuestions) {
     parts.push(
       "",
-      "PFLICHTFRAGEN IN TERMINIERUNGS-/VORBEREITUNGSPHASE:",
-      "Diese Fragen muessen in der Terminierungs- oder Vorbereitungsphase gestellt werden. Wenn der Kunde sie nicht direkt beantworten moechte oder der Call vorher endet, muessen sie in die Terminbestaetigungsmail aufgenommen werden:",
+      "FRAGEN NACH TERMINBESTÄTIGUNG:",
+      "Stelle diese Fragen erst nach einem bestätigten Termin und nur, wenn sie für die Vorbereitung sinnvoll sind. Stelle immer nur eine Frage, erkläre bei sensiblen Daten kurz den Nutzen und akzeptiere ein Nein ohne Nachfassen. Wenn der Kunde keine weiteren Angaben machen möchte oder der Call endet, vermerke die offenen Punkte für die Terminbestätigung:",
       requiredQuestions,
     );
   }
