@@ -884,7 +884,7 @@ function buildDeterministicPkvFlowStep(ctx: CallContext, userText: string): Turn
 
   if (isPkv && awaitingDiscoveryConsent && discoveryConsent) {
     return {
-      reply: "PKV-Beiträge steigen langfristig häufig um etwa drei bis fünf Prozent pro Jahr. Wie stark spüren Sie diese Beitragsentwicklung bei sich?",
+      reply: "Bei Krankenversicherungsbeiträgen in der Gesundheitsversorgung steigen die Kosten langfristig häufig um etwa drei bis fünf Prozent pro Jahr. Wie stark spüren Sie diese Beitragsentwicklung bei sich?",
       hangup: false,
       transfer: false,
     };
@@ -1011,7 +1011,7 @@ function buildDeterministicPkvFlowStep(ctx: CallContext, userText: string): Turn
     && !/wie\s+(?:(?:sehr|stark)\s+)?sp[üu]ren\s+sie|wie\s+erleben\s+sie.*beitragsentwicklung/.test(assistantHistory)
   ) {
       return {
-        reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben des PKV-Verbands liegen die jährlichen Beitragsanpassungen im Durchschnitt häufig bei etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
+        reply: "Die Beiträge in der Gesundheitsversorgung steigen Jahr für Jahr. Nach Angaben von Branchenverbänden liegen die jährlichen Anpassungen häufig im Bereich von etwa drei bis fünf Prozent. Gerade für Unternehmer und Selbstständige ist Planbarkeit wichtig. Wie stark spüren Sie diese Entwicklung bei sich?",
         hangup: false,
         transfer: false,
       };

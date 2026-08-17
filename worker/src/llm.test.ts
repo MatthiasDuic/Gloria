@@ -56,6 +56,19 @@ test("routes normal PKV turns to the worker and questions to OpenAI", () => {
   assert.deepEqual(decideTurnRoute(ctx, "Können wir auch den Dienstag nehmen?"), { route: "worker", reason: "structured_state" });
 });
 
+test("keeps the general contribution opener neutral and does not assume PKV", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-neutral-opening",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const reply = buildDeterministicPkvFlowReply(ctx, "Ja, das ist interessant.");
+  assert.ok(reply);
+  assert.doesNotMatch(reply.reply, /PKV-Beiträge|privat Versicherte|privat versicherte/i);
+  assert.match(reply.reply, /Gesundheitsversorgung|Beitragsentwicklung/i);
+});
+
 test("keeps a final ASR fragment from advancing the PKV flow", () => {
   assert.equal(isLikelyIncompleteCustomerThought("I"), true);
   assert.equal(isLikelyIncompleteCustomerThought("Ich mit der"), true);
@@ -385,7 +398,7 @@ test("builds PKV relevance before asking insurance questions", () => {
 
   let reply = buildDeterministicPkvFlowReply(ctx, "Ja, das dürfen Sie.");
   assert.ok(reply);
-  assert.match(reply.reply, /PKV-Beiträge steigen langfristig/);
+  assert.match(reply.reply, /Beiträgen in der Gesundheitsversorgung|Beitragsentwicklung/);
   assert.match(reply.reply, /drei bis fünf Prozent/);
   assert.doesNotMatch(reply.reply, /privat oder gesetzlich/);
 
@@ -892,7 +905,7 @@ test("runs a complete PKV acquisition scenario through structured state", async 
     return reply.reply;
   };
 
-  assert.match(await turn("Ja, das dürfen Sie."), /PKV-Beiträge steigen langfristig/);
+  assert.match(await turn("Ja, das dürfen Sie."), /Beiträgen in der Gesundheitsversorgung|Beitragsentwicklung/);
   assert.match(await turn("Ja, das spüre ich."), /mit welchem Beitrag/);
   assert.match(await turn("Mit sechshundert Euro."), /detailliert angeschaut/);
   assert.match(await turn("Nein, bisher nicht."), /privat oder gesetzlich/);
