@@ -339,7 +339,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       session: {
         type: "realtime",
         output_modalities: ["audio"],
-        max_output_tokens: 300,
+        max_output_tokens: 1000,
         instructions: buildRealtimeInstructions(ctx),
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
         tools: REALTIME_TOOLS,
