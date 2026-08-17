@@ -90,4 +90,5 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Altersrückstellungen/);
   assert.match(instructions, /Beitragsentlastungstarife/);
   assert.match(instructions, /Steuervorteile/);
+  assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
 });
