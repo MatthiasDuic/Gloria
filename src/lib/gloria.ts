@@ -171,6 +171,7 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
   const goal = firstFilled(
     script.appointmentGoal,
     script.decisionMakerTask,
+    script.callObjective,
     `Einen konkreten Beratungstermin mit Herrn ${principal} vereinbaren.`,
   );
   const behavior = firstFilled(
@@ -181,23 +182,53 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
   const coreTopic = firstFilled(
     script.decisionMakerContext,
     script.problemBuildup,
+    script.topicSummary,
     `Das Kernthema ist ${script.topic}.`,
   );
   const keyInfo = firstFilled(
     script.aiKeyInfo,
     joinFilled([script.problemBuildup, script.discovery]),
+    script.topicSummary,
     `Nutze ${script.topic} als Gesprächsanlass und führe auf einen Termin hin.`,
   );
   const objectionGuide = firstFilled(
     script.objectionHandling,
     "Kurz, souverän und ohne Druck auf Einwände reagieren.",
   );
+  const greetingDecisionMaker = firstFilled(
+    script.greetingDecisionMaker,
+    script.opener,
+    `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an.`,
+  );
+  const greetingGatekeeper = firstFilled(
+    script.greetingGatekeeper,
+    script.gatekeeperBehavior,
+    script.opener,
+    `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel. Ich rufe im Auftrag von Herrn Matthias Duic an. Könnten Sie mich bitte mit der zuständigen Person verbinden?`,
+  );
+  const reasonForCall = firstFilled(
+    script.reasonForCall,
+    script.receptionTopicReason,
+    script.problemBuildup,
+    `Ich habe eine kurze fachliche Frage zum Thema ${script.topic}.`,
+  );
   const discoveryAnchor = firstFilled(
+    script.relevanceQuestion,
     script.discovery,
     "Stelle eine offene Frage und höre erst vollständig zu.",
   );
+  const contributionQuestion = firstFilled(
+    script.contributionQuestion,
+    "Würden Sie mir kurz sagen, was Sie aktuell monatlich für Ihre Versicherung zahlen?",
+  );
+  const projectionText = firstFilled(
+    script.projectionText,
+    script.conceptTransition,
+    "Wenn Sie heute gerade diesen Beitrag zahlen und wir von leichter jährlicher Entwicklung ausgehen, dann wird sich das über die Jahre deutlich erhöhen. Genau deshalb ist die Einordnung wichtig.",
+  );
   const transitionAnchor = firstFilled(
     script.conceptTransition,
+    projectionText,
     `Zeige kurz, was Herr ${principal} im Termin konkret einordnet, und leite dann in die Terminfrage über.`,
   );
   const receptionTask = firstFilled(
@@ -210,6 +241,7 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
   );
   const receptionReason = firstFilled(
     script.receptionTopicReason,
+    reasonForCall,
     `Ich habe eine kurze fachliche Frage zum Thema ${script.topic}.`,
   );
   const consentPrompt = firstFilled(script.consentPrompt, DEFAULT_CONSENT_PROMPT);

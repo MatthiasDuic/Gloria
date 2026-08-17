@@ -1,10 +1,19 @@
 import type { IncomingMessage } from "node:http";
 import { fetch } from "undici";
-import WebSocket, { type WebSocket as ServerWebSocket } from "ws";
+import type { WebSocket as ServerWebSocket } from "ws";
+import { decideAppointment, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { planBargeIn } from "./barge-in-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
+import { advanceContactRouting, createContactRoutingState, instructionForContactRouting, type ContactRoutingState } from "./contact-routing-controller.js";
+import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
 import { postReport } from "./finalize.js";
 import { log } from "./log.js";
+import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
+import { assessPkvConversation, instructionForPkvStage } from "./pkv-conversation-controller.js";
+import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
+import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
+import { TelnyxPlayback } from "./telnyx-playback.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 
 type TelnyxFrame =
@@ -38,25 +47,6 @@ type ClientState = {
   ownerGesellschaft?: string;
   previousSummary?: string;
   isCallback?: number;
-};
-
-type RealtimeMessage = {
-  type?: string;
-  item_id?: string;
-  delta?: string;
-  transcript?: string;
-  name?: string;
-  call_id?: string;
-  arguments?: string;
-  error?: { message?: string };
-  response?: {
-    output?: Array<{
-      type?: string;
-      name?: string;
-      call_id?: string;
-      arguments?: string;
-    }>;
-  };
 };
 
 type RealtimeToolCall = {
@@ -114,37 +104,13 @@ export function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu
     : "audio/pcmu";
 }
 
-function splitPreparationQuestions(policy: { topic?: string; requiredQuestions?: string; requiredData?: string; pkvHealthQuestions?: string } | null): string[] {
-  const source = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "")
-    ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData
-    : policy?.requiredQuestions || policy?.requiredData;
-  const fallback = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "")
-    ? "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?\nKönnten Sie mir Ihre Körpergröße nennen?\nWie ist Ihr aktuelles Gewicht?\nBei welchem Krankenversicherer sind Sie derzeit versichert?\nWie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?\nGibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?\nNehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?\nGab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?\nGab es in den letzten zehn Jahren psychische Behandlungen?\nFehlen aktuell Zähne oder ist Zahnersatz geplant?\nBestehen bei Ihnen bekannte Allergien?"
-    : "";
-  return (source || fallback)
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
-    .filter((line) => line.length > 3);
-}
-
-function isPreparationConsent(text: string): "granted" | "declined" | "unknown" {
-  const normalized = text.trim().toLowerCase();
-  if (/^(?:ja\b|gerne\b|klar\b|okay\b|ok\b|passt\b|in ordnung\b|machen wir\b)/i.test(normalized)) return "granted";
-  if (/^(?:nein\b|nö\b|lieber nicht|keine zeit|nicht jetzt|später|möchte ich nicht)/i.test(normalized)) return "declined";
-  return "unknown";
-}
-
 export function isLikelyNoiseTranscript(text: string): boolean {
-  const normalized = text.toLowerCase().replace(/[^a-zäöüßı0-9:?!.\s-]/g, " ").replace(/\s+/g, " ").trim();
-  if (!normalized) return true;
-  if (/^(?:good to|does that|thank you much|i know|anlıyorum|어\?|aso|gute tag|tag|gutes|ich bin ab|hera|fariha|mhm|hmm|hm+|äh+|uh+|oh+)[.!?]*$/i.test(normalized)) return true;
-  if (normalized.length <= 2 && !/^(?:ja|ne|nein|ok|okay|jo|nö|hm)$/i.test(normalized)) return true;
-  return false;
+  return isUnclearConversationText(text);
 }
 
 function hasClearFarewellOrRejection(ctx: CallContext): boolean {
   const latestUserText = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
-  return /\b(?:auf\s+wiederh[öo]ren|tsch[üu]ss|wiedersehen|einen\s+sch[öo]nen\s+tag|kein\s+interesse|nicht\s+interessiert|bitte\s+nicht|beenden\s+sie|legen\s+sie\s+auf)\b/i.test(latestUserText);
+  return isConversationEndingText(latestUserText);
 }
 
 function buildKnownConversationFacts(ctx: CallContext): string {
@@ -157,27 +123,11 @@ function buildKnownConversationFacts(ctx: CallContext): string {
   return facts.length ? `BEREITS GEKLÄRTE FAKTEN:\n- ${facts.join("\n- ")}\nDiese Angaben sind verbindlich und haben Vorrang vor allgemeinen Policy-Fragen.` : "";
 }
 
-function isPreparationQuestionAnswered(question: string, ctx: CallContext): boolean {
-  const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
-  if (/versicher|privat|gesetzlich|pkv|gkv/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
-  if (/monatsbeitrag|beitrag.*krankenversicherung/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
-  return false;
-}
-
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
-  const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
-  const assistantText = ctx.transcript.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
-  const hasContribution = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
-  const hasTenYearProjection = /(?:in\s+zehn\s+jahren|zehn[- ]jahres|10[- ]jahres|10\s+jahren)/i.test(assistantText);
-  const hasRetirementQuestion = /(?:bis\s+zum\s+ruhestand|bis\s+zur\s+rente|ruhestand|rente).*(?:fühlen|planung|planen)|(?:fühlen|planung|planen).*(?:ruhestand|rente)/i.test(assistantText);
-  if (hasContribution && !hasTenYearProjection) {
-    return "ZWINGENDER NÄCHSTER SCHRITT: Der Kunde hat seinen aktuellen Monatsbeitrag genannt. Gib jetzt ausschließlich eine konkrete Hochrechnung mit genau diesem Betrag. Sage ausdrücklich: 'in zehn Jahren'. Nenne heutigen Betrag, Betrag in zehn Jahren und monatlichen Unterschied. Keine Terminfrage, keine Konzeptbeschreibung, keine Versicherungsstatusfrage.";
-  }
-  if (hasContribution && hasTenYearProjection && !hasRetirementQuestion) {
-    return "ZWINGENDER NÄCHSTER SCHRITT: Die Zehn-Jahres-Hochrechnung ist erfolgt. Frage jetzt ausschließlich: 'Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?' Warte danach auf die Antwort. Keine Terminfrage.";
-  }
-  return "";
+  const assessment = assessPkvConversation(ctx.transcript);
+  if (!assessment.contributionPhrase || assessment.stage === "ready_to_schedule") return "";
+  return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -188,57 +138,13 @@ function isLikelyIncompleteAssistantTurn(text: string): boolean {
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
-
-  const userText = ctx.transcript
-    .filter((turn) => turn.role === "user")
-    .map((turn) => turn.text.toLowerCase())
-    .join(" ");
-  const assistantText = ctx.transcript
-    .filter((turn) => turn.role === "assistant")
-    .map((turn) => turn.text.toLowerCase())
-    .join(" ");
-  const hasInsuranceStatus = /\b(?:privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(userText);
-  const hasContribution = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
-  const hasProjection = /(?:vier\s+prozent|4\s*%)\s+(?:pro\s+jahr)?[\s\S]{0,160}(?:zehn\s+jahr|10\s+jahr)|(?:zehn\s+jahr|10\s+jahr)[\s\S]{0,160}(?:vier\s+prozent|4\s*%)/i.test(assistantText);
-  const conceptQuestionIndex = ctx.transcript
-    .map((turn, index) => ({ turn, index }))
-    .filter(({ turn }) =>
-      turn.role === "assistant" && /(?:arbeitsweise|ersten termin|zweiten termin|tarifoptimierung|beitragsentlastung|altersrückstellung)/i.test(turn.text),
-    )
-    .at(-1)?.index;
-  const interestQuestionIndex = ctx.transcript
-    .map((turn, index) => ({ turn, index }))
-    .filter(({ turn, index }) =>
-      turn.role === "assistant"
-      && (conceptQuestionIndex === undefined || index >= conceptQuestionIndex)
-      && /(?:sinnvoll|interessiert|hilfreich|termin.*(?:vereinbaren|abstimmen)|einordnung.*(?:passt|hilft)|klarheit|entwicklung.*(?:fühlen|planung)|persönliche.*sicht|was bedeutet)/i.test(turn.text),
-    )
-    .at(-1)?.index;
-  const interestAnswer = interestQuestionIndex === undefined
-    ? ""
-    : ctx.transcript.slice(interestQuestionIndex + 1).find((turn) => turn.role === "user")?.text || "";
-  const hasInterest = /^(?:ja\b|ja,?\s*(?:gerne|bitte|das\s+(?:ist|wäre)|tendenziell|grundsätzlich)|gerne\b|interessant\b|hilfreich\b|das\s+macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)/i.test(interestAnswer.trim());
-  const hasOfferedSlotSelection = /(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|vormittag|nachmittag|uhr|\d{1,2}:\d{2})/i.test(userText)
-    && /(?:zwei\s+(?:konkrete\s+)?(?:termine|vorschläge|optionen)|(?:termine|vorschläge)\s*:\s*[^.]+\s+(?:oder|bzw\.?)[^.]+)/i.test(assistantText)
-    && /(?:passt|gut|nehme|wäre|gerne|ja|september|oktober|november|dezember|januar|februar|märz|april|mai|juni|juli|august)/i.test(userText);
-
-  if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
-  if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
-  if (!hasProjection) return { ok: false, reason: "Zeige zuerst anhand des genannten Beitrags eine konkrete Zehn-Jahres-Hochrechnung mit rund vier Prozent pro Jahr." };
-  if (!hasInterest) return { ok: false, reason: "Hole nach Hochrechnung und persönlicher Relevanz erst eine eindeutige Zustimmung auf den nächsten Schritt ein." };
-  if (hasOfferedSlotSelection) return { ok: true };
-  return { ok: true };
+  const assessment = assessPkvConversation(ctx.transcript);
+  if (assessment.stage === "ready_to_schedule") return { ok: true };
+  return { ok: false, reason: instructionForPkvStage(assessment) };
 }
 
 export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
-  const normalize = (value: string) => value
-    .toLowerCase()
-    .replace(/[^a-zäöüß0-9:]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const normalizedPhrase = normalize(phrase);
-  const offeredText = normalize(ctx.freeSlotsPrompt || "");
-  return normalizedPhrase.length > 10 && offeredText.includes(normalizedPhrase);
+  return isSuppliedAppointmentSlot(ctx.freeSlotsPrompt, phrase);
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
@@ -262,8 +168,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
     "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
-    "Topic Policies sind fachliche Leitplanken, kein Ablaufplan. Du darfst Reihenfolge, Formulierung und nächsten Schritt situativ ändern. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
-    "Keine erfundene Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit und kein Callcenter-Ton.",
+    "Topic Policies sind fachliche Leitplanken. Für PKV-Gespräche gilt aber ein verbindlicher Standardflow: relevante Frage, Beitrag, Zehn-Jahres-Hochrechnung, Ruhestand, Nutzen, Interesse, erst dann Termin. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
+    "Sprich menschlich, ruhig, freundlich und auf Augenhöhe. Keine Callcenter-Monologe, keine künstliche Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
@@ -282,11 +188,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen in der Gesundheitsversorgung an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben von Branchenverbänden liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Nach der Zehn-Jahres-Einordnung kommt zuerst ein menschlicher Relevanzschritt: Frage, wie sich diese Entwicklung für den Kunden anfühlt und was sie für seine persönliche Planung bedeutet. Warte auf diese Antwort. Erkläre erst danach die Konzeptphase. Überspringe diesen Relevanzschritt niemals.",
-      "PFLICHT NACH EINEM GENANNTEN MONATSBEITRAG: Rechne sofort transparent und vorsichtig mit rund vier Prozent pro Jahr vor. Nenne ausdrücklich den heutigen Monatsbeitrag, sage ausdrücklich 'in zehn Jahren' und nenne den ungefähren Monatsbeitrag in zehn Jahren sowie den monatlichen Unterschied. Frage danach wörtlich sinngemäß: 'Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?' Warte auf die Antwort. Erkläre erst danach, dass Herr Duic genau dort ansetzt: Er schafft Klarheit über Vertrag, Beitragsverlauf und persönliche Zahlen und prüft als mögliche Optionen Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile zur Gegenfinanzierung der verbleibenden Beiträge im Alter. Nichts davon als Garantie oder Empfehlung darstellen. Erst nach dieser persönlichen Einordnung und Zustimmung darfst du einen Termin anbieten.",
-      "HARTE REIHENFOLGE VOR JEDEM TERMIN: Solange der Kunde noch keinen aktuellen Monatsbeitrag genannt bekommen hat, darfst du weder nach einem Termin fragen noch Tage, Uhrzeiten oder Zeitfenster anbieten. Nach dem Beitrag musst du zuerst eine konkrete Zehn-Jahres-Hochrechnung mit dem echten Betrag geben, ausdrücklich 'in zehn Jahren' sagen, danach nach der Entwicklung bis zum Ruhestand und der persönlichen Planung fragen, die Antwort abwarten, dann Klarheit und die möglichen Optionen erklären und erst danach das Termininteresse abfragen. Ein unklarer ASR-Text wie 'hera' ist keine Zustimmung und darf keinen Schritt voranbringen.",
-      "KONZEPTERKLÄRUNG NUR AUF KONKRETE KUNDENFRAGE: Erkläre den Ablauf mit erstem Analyse-Termin, persönlichem Konzept und anschließend offenen Fragen nur, wenn der Kunde ausdrücklich fragt, wie Herr Duic vorgeht, was im Termin passiert oder wie die möglichen Optionen funktionieren. Im normalen Ablauf keine ausführliche Drei-Termine-Erklärung und keine Frage 'Wäre diese Klarheit hilfreich?'. Nach der persönlichen Relevanzfrage und Zustimmung direkt zur Terminpräferenz übergehen.",
-      "KUNDENNUTZEN: Sage ausdrücklich, was der Kunde davon hat: Klarheit über die persönliche Entwicklung, konkrete prüfbare Optionen und einen nachvollziehbaren Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Herr Duic hilft Unternehmern, Komplexität zu reduzieren und sich nicht allein auf steigende Bescheide verlassen zu müssen. Frage danach, ob genau diese Klarheit für den Kunden hilfreich wäre. Erst nach dieser Antwort darfst du einen Termin anbieten.",
+      "STANDARD-FLOW: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Laut PKV-Verbänden steigen die Beiträge in der Regel jährlich um etwa drei bis fünf Prozent. Wie erleben Sie das aktuell bei sich?' Wenn der Kunde bestätigt, frage: 'Würden Sie mir kurz sagen, was Sie aktuell monatlich für Ihre Krankenversicherung zahlen?' Nach dem Namen des Betrags: 'Wenn Sie heute [Betrag] zahlen und wir von einer durchschnittlichen Erhöhung von etwa vier Prozent pro Jahr ausgehen, dann wären es in zehn Jahren ungefähr [Betrag] pro Monat. Haben Sie sich das bisher schon einmal konkret angeschaut?' Danach: 'Wenn wir diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?' Nachdem der Kunde geantwortet hat, sage: 'Genau hier setzt Herr Duic an. Er schaut sich Ihren bisherigen Beitragsverlauf anhand Ihrer persönlichen Zahlen an und zeigt Ihnen, wie sich die Entwicklung über die nächsten Jahre bis zum Ruhestand wahrscheinlich darstellt. Dabei geht es nicht um allgemeine Werte, sondern um eine nachvollziehbare Perspektive für Ihre Situation. Er prüft mögliche Optionen wie Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile zur Gegenfinanzierung der verbleibenden Beiträge im Alter. Ziel ist Klarheit, nicht Druck.' Dann frage: 'Wäre diese Klarheit für Sie hilfreich?' Erst nach einer klaren positiven Antwort darfst du freie Zeitfenster anbieten.",
+      "KONZEPTERKLÄRUNG NUR AUF KONKRETE KUNDENFRAGE: Erkläre den Ablauf mit erstem Analyse-Termin, persönlichem Konzept und anschließend offenen Fragen nur, wenn der Kunde ausdrücklich fragt, wie Herr Duic vorgeht, was im Termin passiert oder wie die möglichen Optionen funktionieren. Im normalen Ablauf keine ausführliche Drei-Termine-Erklärung; halte dich an den STANDARD-FLOW.",
+      "KUNDENNUTZEN: Sage ausdrücklich, was der Kunde davon hat: Klarheit über die persönliche Entwicklung, konkrete prüfbare Optionen und einen nachvollziehbaren Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Herr Duic hilft Unternehmern, Komplexität zu reduzieren und sich nicht allein auf steigende Bescheide verlassen zu müssen.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für null Euro und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Eine vertraglich garantierte Entlastung darf erst nach Prüfung des konkreten Konzepts genannt werden.",
       "Versicherungsart, heutiger Beitrag, Hochrechnung und echte Zustimmung sind Voraussetzungen für einen PKV-Termin. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
       "Nach einem bestätigten Termin bedeutet ein Nein auf eine Vorbereitungsfrage: 'Kein Problem, dann lassen wir das für den Termin offen.' Stelle diese Frage nicht erneut und fahre nicht mit einem Fragenkatalog fort.",
@@ -329,39 +233,27 @@ export async function handleOpenAiRealtimeTelnyxStream(
   _req: IncomingMessage,
 ): Promise<void> {
   let ctx: CallContext | null = null;
-  let openai: WebSocket | null = null;
+  let openaiSession: OpenAiRealtimeSession | null = null;
   let streamId = "";
   let inputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
   let outputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
-  let sessionReady = false;
   let closed = false;
   let reportPosted = false;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
-  let activeResponse = false;
-  let responseCancelPending = false;
-  let queuedResponseInstructions: string | null = null;
-  let responseFlushTimer: NodeJS.Timeout | null = null;
-  let activeAssistantItemId = "";
-  let outboundAudioBytes = 0;
-  let outboundAudioBuffer = Buffer.alloc(0);
-  let playbackTimer: NodeJS.Timeout | null = null;
-  const playbackQueue: Buffer[] = [];
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
   let assistantContinuationRequested = false;
-  let responseCreateNotBefore = 0;
-  let preparationQuestions: string[] = [];
-  let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
-  let preparationQuestionIndex = 0;
+  let activeAssistantItemId = "";
+  let responseInterrupted = false;
+  let currentAssistantTurnIndex: number | undefined;
+  let preparationState: PreparationState = createPreparationState();
+  let contactRouting: ContactRoutingState | null = null;
+  let unclearClarificationPending = false;
   const pendingUserTranscripts: string[] = [];
-  const queuedAudio: string[] = [];
   const handledToolCalls = new Set<string>();
-  const interruptedItemIds = new Set<string>();
 
   const sendOpenAi = (event: Record<string, unknown>): boolean => {
-    if (!openai || openai.readyState !== WebSocket.OPEN) return false;
-    openai.send(JSON.stringify(event));
-    return true;
+    return openaiSession?.send(event) ?? false;
   };
 
   const sendTelnyx = (event: Record<string, unknown>): boolean => {
@@ -370,39 +262,32 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
-  const clearPlaybackQueue = () => {
-    playbackQueue.length = 0;
-    if (playbackTimer) {
-      clearTimeout(playbackTimer);
-      playbackTimer = null;
-    }
-  };
+  const playback = new TelnyxPlayback({
+    sendFrame: (frame) => sendTelnyx({
+      event: "media",
+      stream_id: streamId,
+      media: { payload: frame.toString("base64") },
+    }),
+    onIdle: () => responses.flush(),
+  });
 
-  const pumpPlaybackQueue = () => {
-    playbackTimer = null;
-    if (closed || playbackQueue.length === 0) {
-      if (!closed) flushQueuedResponse();
-      return;
-    }
-    const frame = playbackQueue.shift();
-    if (!frame) return;
-    if (sendTelnyx({ event: "media", stream_id: streamId, media: { payload: frame.toString("base64") } })) {
-      outboundAudioBytes += frame.length;
-    }
-    if (playbackQueue.length > 0) {
-      playbackTimer = setTimeout(pumpPlaybackQueue, 20);
-    } else {
-      flushQueuedResponse();
-    }
-  };
-
-  const enqueuePlaybackFrame = (frame: Buffer) => {
-    playbackQueue.push(frame);
-    if (!playbackTimer) pumpPlaybackQueue();
-  };
+  const responses = new RealtimeResponseController({
+    sendResponse: (instructions) => sendOpenAi({
+      type: "response.create",
+      ...(instructions ? { response: { instructions } } : {}),
+    }),
+    isPlaybackPending: () => playback.isPending(),
+    onDeferred: ({ instructions, playbackPending }) => {
+      log.info("realtime.response_ignored_while_active", {
+        callSid: ctx?.callSid,
+        instructionsPreview: instructions.slice(0, 80) || "none",
+        playbackPending,
+      });
+    },
+  });
 
   const updateSession = () => {
-    if (!ctx || !sessionReady) return;
+    if (!ctx || !openaiSession?.isReady()) return;
     const configuredSpeed = Number.parseFloat(process.env.OPENAI_REALTIME_SPEED?.trim() || "0.88");
     const speed = Number.isFinite(configuredSpeed) ? Math.min(1.1, Math.max(0.75, configuredSpeed)) : 0.88;
     sendOpenAi({
@@ -445,44 +330,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const facts = ctx ? buildKnownConversationFacts(ctx) : "";
     const sequence = ctx ? buildRequiredPkvSequenceInstruction(ctx) : "";
     const responseInstructions = [facts, sequence, instructions].filter(Boolean).join("\n\n");
-    const delay = Math.max(0, responseCreateNotBefore - Date.now());
-    if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer || delay > 0) {
-      if (queuedResponseInstructions === null) queuedResponseInstructions = responseInstructions;
-      log.info("realtime.response_ignored_while_active", {
-        callSid: ctx?.callSid,
-        instructionsPreview: responseInstructions.slice(0, 80) || "none",
-        cancelPending: responseCancelPending,
-        playbackPending: playbackQueue.length > 0 || Boolean(playbackTimer),
-      });
-      if (!responseFlushTimer) {
-        responseFlushTimer = setTimeout(() => {
-          responseFlushTimer = null;
-          flushQueuedResponse();
-        }, Math.max(20, delay));
-      }
-      return false;
-    }
-    sendOpenAi({
-      type: "response.create",
-      ...(responseInstructions ? { response: { instructions: responseInstructions } } : {}),
-    });
-    return true;
-  };
-
-  const flushQueuedResponse = () => {
-    if (activeResponse || responseCancelPending || queuedResponseInstructions === null) return;
-    if (playbackQueue.length > 0 || playbackTimer) {
-      if (!responseFlushTimer) {
-        responseFlushTimer = setTimeout(() => {
-          responseFlushTimer = null;
-          flushQueuedResponse();
-        }, 20);
-      }
-      return;
-    }
-    const instructions = queuedResponseInstructions;
-    queuedResponseInstructions = null;
-    requestResponse(instructions);
+    return responses.request(responseInstructions);
   };
 
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
@@ -504,35 +352,60 @@ export async function handleOpenAiRealtimeTelnyxStream(
     currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
-    const nextPreparationQuestion = () => preparationQuestions.find((question) => !isPreparationQuestionAnswered(question, currentContext));
-
-    if (preparationMode === "awaiting_consent") {
-      const consent = isPreparationConsent(transcript);
-      if (consent === "granted") {
-        preparationMode = "asking";
-        preparationQuestionIndex = 0;
-        const question = nextPreparationQuestion();
-        if (question) requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${question}"`);
-        else requestResponse("Die bereits geklärten Angaben reichen für die Vorbereitung. Frage nur noch nach der E-Mail-Adresse für die Terminbestätigung.");
-      } else if (consent === "declined") {
-        preparationMode = "complete";
-        requestResponse("Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
-      } else {
-        requestResponse("Die Antwort war unklar. Frage freundlich noch einmal nur, ob zwei Minuten für kurze Vorbereitungsfragen passen.");
+    const event = classifyConversationEvent(transcript);
+    if (event.type === "unclear") {
+      if (!unclearClarificationPending) {
+        unclearClarificationPending = true;
+        requestResponse(instructionForConversationEvent(event));
       }
-    } else if (preparationMode === "asking") {
-      preparationQuestionIndex += 1;
-      const nextQuestion = preparationQuestions[preparationQuestionIndex];
-      const unansweredQuestion = nextQuestion && !isPreparationQuestionAnswered(nextQuestion, currentContext) ? nextQuestion : preparationQuestions.slice(preparationQuestionIndex + 1).find((question) => !isPreparationQuestionAnswered(question, currentContext));
-      if (unansweredQuestion) {
-        requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${unansweredQuestion}"`);
-      } else {
-        preparationMode = "complete";
-        requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
-      }
-    } else {
-      requestResponse();
+      return;
     }
+    unclearClarificationPending = false;
+
+    if (event.type === "clear_rejection") {
+      requestResponse(instructionForConversationEvent(event));
+      return;
+    }
+
+    if (contactRouting && contactRouting.stage !== "decision_maker") {
+      contactRouting = advanceContactRouting(contactRouting, transcript);
+      currentContext.detectedVoicemail = contactRouting.stage === "voicemail";
+      currentContext.queueDetected = contactRouting.stage === "waiting_for_transfer";
+      currentContext.waitingForDecisionMaker = contactRouting.stage === "gatekeeper"
+        || contactRouting.stage === "waiting_for_transfer";
+      log.info("realtime.contact_routing", {
+        callSid: currentContext.callSid,
+        stage: contactRouting.stage,
+      });
+
+      if (contactRouting.stage === "voicemail") {
+        void notifyCallAction(currentContext, "hangup");
+        return;
+      }
+      if (contactRouting.stage === "waiting_for_transfer") return;
+      if (contactRouting.stage !== "decision_maker") {
+        requestResponse(instructionForContactRouting(contactRouting));
+        return;
+      }
+      requestResponse("Der Entscheider ist jetzt bestätigt. Stelle dich transparent als digitale Assistentin von Herrn Duic vor, nenne den Anlass in einem kurzen Satz und frage, ob eine kurze Frage passt. Starte noch nicht mit Beitrag oder Termin.");
+      return;
+    }
+
+    if (preparationState.stage === "inactive") {
+      const resumeInstruction = currentContext.topicKind === "pkv"
+        ? instructionForPkvStage(assessPkvConversation(currentContext.transcript))
+        : undefined;
+      if (event.type === "customer_question" || event.type === "objection") {
+        requestResponse(instructionForConversationEvent(event, resumeInstruction));
+        return;
+      }
+      requestResponse(instructionForConversationEvent(event, resumeInstruction));
+      return;
+    }
+
+    const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
+    preparationState = transition.state;
+    requestResponse(transition.instruction);
   };
 
   const handleToolCall = async (tool: RealtimeToolCall) => {
@@ -550,28 +423,28 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (tool.name === "confirm_appointment") {
       const phrase = typeof args.slot_phrase === "string" ? args.slot_phrase.trim() : "";
-      const eligibility = canConfirmRealtimeAppointment(ctx);
-      if (!phrase) {
-        sendToolResult(tool.callId, { ok: false, error: "missing_slot_phrase" });
-      } else if (!isOfferedSlotPhrase(ctx, phrase)) {
+      const decision = decideAppointment({
+        turns: ctx.transcript,
+        topicKind: ctx.topicKind === "pkv" ? "pkv" : "other",
+        freeSlotsPrompt: ctx.freeSlotsPrompt,
+        slotPhrase: phrase,
+      });
+      if (!decision.ok && decision.error === "slot_not_offered") {
         handledToolCalls.delete(tool.callId);
-        sendToolResult(tool.callId, { ok: false, error: "slot_not_offered", instruction: "Dieser Termin steht nicht in der bereitgestellten freien Slotliste. Biete nur zwei echte freie Slots aus der Liste an." });
+        sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
         requestResponse("Der gewünschte Termin steht so nicht in den freien Vorschlägen. Biete bitte ausschließlich zwei konkrete freie Termine aus der bereitgestellten Liste an.");
-      } else if (!eligibility.ok) {
+      } else if (!decision.ok) {
         handledToolCalls.delete(tool.callId);
-        sendToolResult(tool.callId, { ok: false, error: "appointment_not_ready", instruction: eligibility.reason });
+        sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
       } else {
-        ctx.confirmedSlotPhrase = phrase;
-        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: phrase });
-        sendToolResult(tool.callId, { ok: true, confirmed_slot: phrase });
+        ctx.confirmedSlotPhrase = decision.slotPhrase;
+        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, preference: decision.preference });
+        sendToolResult(tool.callId, { ok: true, confirmed_slot: decision.slotPhrase });
         updateSession();
-        if (preparationQuestions.length > 0) {
-          preparationMode = "awaiting_consent";
-          requestResponse(
-            `Bestätige nur den Termin ${phrase}. Frage danach exakt: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?"`,
-          );
-          return;
-        }
+        const transition = beginPreparation(preparationState, decision.slotPhrase, ctx.transcript);
+        preparationState = transition.state;
+        requestResponse(transition.instruction);
+        return;
       }
       requestResponse();
       return;
@@ -598,31 +471,29 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const connectOpenAi = () => {
-    if (!ctx || openai) return;
+    if (!ctx || openaiSession) return;
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
     const model = process.env.OPENAI_REALTIME_MODEL?.trim() || "gpt-realtime-2.1";
 
-    openai = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    let handleRealtimeEvent = (_message: RealtimeServerEvent): void => undefined;
+    openaiSession = new OpenAiRealtimeSession({
+      apiKey,
+      model,
+      onOpen: () => {
+        updateSession();
+        log.info("realtime.connected", { callSid: ctx?.callSid, model, inputAudioFormat, outputAudioFormat });
+      },
+      onEvent: (message) => handleRealtimeEvent(message),
+      onClose: (code, reason) => {
+        log.info("realtime.closed", { callSid: ctx?.callSid, code, reason });
+      },
+      onError: (error) => {
+        log.error("realtime.socket_error", { callSid: ctx?.callSid, error: error.message });
+      },
     });
 
-    openai.on("open", () => {
-      sessionReady = true;
-      updateSession();
-      for (const payload of queuedAudio.splice(0)) {
-        sendOpenAi({ type: "input_audio_buffer.append", audio: payload });
-      }
-      log.info("realtime.connected", { callSid: ctx?.callSid, model, inputAudioFormat, outputAudioFormat });
-    });
-
-    openai.on("message", (data: WebSocket.RawData) => {
-      let message: RealtimeMessage;
-      try {
-        message = JSON.parse(data.toString()) as RealtimeMessage;
-      } catch {
-        return;
-      }
+    handleRealtimeEvent = (message) => {
 
       if (message.type === "error") {
         const errorMessage = message.error?.message || "unknown_realtime_error";
@@ -639,6 +510,30 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_started") {
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
+        const playbackPending = playback.isPending();
+        const interruption = playback.interrupt();
+        const plan = planBargeIn({
+          responseActive: responses.isActive(),
+          playbackPending,
+          assistantItemId: activeAssistantItemId || undefined,
+          audioEndMs: interruption.audioEndMs,
+        });
+        if (plan.interrupted) {
+          responseInterrupted = true;
+          responses.markInterruptRequested();
+          if (plan.clearTelnyxPlayback) sendTelnyx({ event: "clear" });
+          for (const event of plan.openAiEvents) sendOpenAi(event);
+          if (ctx && currentAssistantTurnIndex !== undefined) {
+            ctx.transcript.splice(currentAssistantTurnIndex, 1);
+            currentAssistantTurnIndex = undefined;
+          }
+          log.info("realtime.barge_in", {
+            callSid: ctx?.callSid,
+            itemId: activeAssistantItemId || undefined,
+            audioEndMs: interruption.audioEndMs,
+            playbackCleared: plan.clearTelnyxPlayback,
+          });
+        }
         return;
       }
 
@@ -646,10 +541,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
           if (isLikelyNoiseTranscript(transcript)) {
-            log.info("realtime.ignored_noise_transcript", { callSid: ctx.callSid, text: transcript });
-            return;
+            log.info("realtime.unclear_transcript", { callSid: ctx.callSid, text: transcript });
           }
-          if (activeResponse) {
+          if (responses.isActive()) {
             pendingUserTranscripts.push(transcript);
             log.info("realtime.user_queued_until_response_done", { callSid: ctx.callSid, text: transcript });
           } else {
@@ -660,54 +554,44 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.created") {
-        activeResponse = true;
+        responses.markCreated();
+        playback.startResponse();
         activeAssistantItemId = "";
-        outboundAudioBytes = 0;
-        outboundAudioBuffer = Buffer.alloc(0);
+        responseInterrupted = false;
+        currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
         return;
       }
 
       if (message.type === "response.output_audio.delta" || message.type === "response.audio.delta") {
-        if (message.delta) {
+        if (!responseInterrupted && message.delta) {
           activeAssistantItemId = message.item_id || activeAssistantItemId;
-          outboundAudioBuffer = Buffer.concat([outboundAudioBuffer, Buffer.from(message.delta, "base64")]);
-          while (outboundAudioBuffer.length >= 160) {
-            const frame = outboundAudioBuffer.subarray(0, 160);
-            outboundAudioBuffer = outboundAudioBuffer.subarray(160);
-            enqueuePlaybackFrame(frame);
-          }
+          playback.appendBase64Audio(message.delta);
         }
         return;
       }
 
       if (message.type === "response.output_audio.done") {
-        if (outboundAudioBuffer.length > 0) {
-          const silenceByte = outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff;
-          const frame = Buffer.concat([
-            outboundAudioBuffer,
-            Buffer.alloc(160 - outboundAudioBuffer.length, silenceByte),
-          ]);
-          enqueuePlaybackFrame(frame);
-          outboundAudioBuffer = Buffer.alloc(0);
-        }
+        if (!responseInterrupted) playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
         return;
       }
 
       if (message.type === "response.output_audio_transcript.delta" || message.type === "response.audio_transcript.delta") {
+        if (responseInterrupted) return;
         assistantTranscript += message.delta || "";
         assistantTranscriptDeltaSeen = true;
         return;
       }
 
       if (message.type === "response.output_audio_transcript.done" || message.type === "response.audio_transcript.done") {
-        if (message.item_id && interruptedItemIds.delete(message.item_id)) return;
+        if (responseInterrupted) return;
         if (!assistantTranscriptDeltaSeen && message.transcript) assistantTranscript += message.transcript;
         return;
       }
 
       if (message.type === "response.function_call_arguments.done" && message.name && message.call_id) {
+        if (responseInterrupted) return;
         void handleToolCall({
           name: message.name,
           callId: message.call_id,
@@ -717,15 +601,20 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.done") {
+        if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
+          responses.markCancelled();
+          assistantTranscript = "";
+          assistantTranscriptDeltaSeen = false;
+          return;
+        }
         const transcript = assistantTranscript.replace(/\s+/g, " ").trim();
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
+          currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }
-        activeResponse = false;
-        responseCancelPending = false;
-        responseCreateNotBefore = Date.now() + 180;
+        responses.markFinished();
         if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
           assistantContinuationRequested = true;
           log.warn("realtime.incomplete_response_recovery", {
@@ -749,27 +638,20 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         const nextUserTranscript = pendingUserTranscripts.splice(0).join(" ").replace(/\s+/g, " ").trim();
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
-        flushQueuedResponse();
+        responses.flush();
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
         return;
       }
 
       if (message.type === "response.cancelled" || message.type === "response.canceled") {
-        activeResponse = false;
-        responseCancelPending = false;
-        flushQueuedResponse();
+        responses.markCancelled();
+        assistantTranscript = "";
+        assistantTranscriptDeltaSeen = false;
       }
-    });
+    };
 
-    openai.on("close", (code, reason) => {
-      sessionReady = false;
-      log.info("realtime.closed", { callSid: ctx?.callSid, code, reason: reason.toString() });
-    });
-
-    openai.on("error", (error) => {
-      log.error("realtime.socket_error", { callSid: ctx?.callSid, error: error.message });
-    });
+    openaiSession.connect();
   };
 
   telnyx.on("message", (raw) => {
@@ -800,6 +682,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         previousSummary: state.previousSummary,
         isCallback: state.isCallback === 1,
       });
+      contactRouting = createContactRoutingState(state.contactName);
       log.info("realtime.call_started", {
         callSid: ctx.callSid,
         streamSid: streamId,
@@ -812,7 +695,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       void loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
-        preparationQuestions = splitPreparationQuestions(policy);
+        if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
+          preparationState = createPreparationState(policy);
+        }
         updateSession();
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
       });
@@ -833,7 +718,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       const silenceMs = Math.max(2500, Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "4200", 10));
       silenceOpenerTimer = setTimeout(() => {
-        if (!ctx || activeResponse) return;
+        if (!ctx || responses.isActive()) return;
         sendOpenAi({
           type: "response.create",
           response: {
@@ -846,18 +731,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (frame.event === "media") {
       if (frame.media.track === "outbound" || frame.media.track === "outbound_track") return;
-      if (!sessionReady) {
-        queuedAudio.push(frame.media.payload);
-        if (queuedAudio.length > 500) queuedAudio.shift();
-      } else {
-        sendOpenAi({ type: "input_audio_buffer.append", audio: frame.media.payload });
-      }
+      openaiSession?.appendInputAudio(frame.media.payload);
       return;
     }
 
     if (frame.event === "stop") {
       try {
-        openai?.close(1000, "call_finished");
+        openaiSession?.close(1000, "call_finished");
       } catch {
         /* ignore */
       }
@@ -872,10 +752,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
   telnyx.on("close", async (code, reason) => {
     if (closed) return;
     closed = true;
-    clearPlaybackQueue();
+    responses.stop();
+    playback.stop();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
     try {
-      openai?.close(1000, "telnyx_closed");
+      openaiSession?.close(1000, "telnyx_closed");
     } catch {
       /* ignore */
     }

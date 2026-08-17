@@ -3249,6 +3249,69 @@ export default function HomePage() {
                       </div>
                     </div>
 
+                    <div className="mini-panel playbook-card top-gap">
+                      <h3 className="sub-heading"><strong>7. Erweiterte Gesprächsbausteine</strong> <span className="subtle">(Begrüßung, Anlass, Übergang, Abschluss)</span></h3>
+                      <p className="subtle" style={{ marginTop: 0 }}>
+                        Diese Felder kontrollieren die einzelnen Sprachbausteine von Gloria. Sie sind besonders nützlich für sehr natürliche, wiederverwendbare Telefonflüsse.
+                      </p>
+
+                      <div className="playbook-grid">
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Begrüßung / Einstieg</h4>
+                          <textarea
+                            value={activeDraft.opener ?? ""}
+                            rows={4}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))}
+                          />
+                        </div>
+
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Grund des Anrufs / Relevanz</h4>
+                          <textarea
+                            value={activeDraft.receptionTopicReason ?? ""}
+                            rows={4}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))}
+                          />
+                        </div>
+
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Problemaufbau / Nutzen</h4>
+                          <textarea
+                            value={activeDraft.problemBuildup ?? ""}
+                            rows={5}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))}
+                          />
+                        </div>
+
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Übergang zum Termin / Wertbrücke</h4>
+                          <textarea
+                            value={activeDraft.conceptTransition ?? ""}
+                            rows={5}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))}
+                          />
+                        </div>
+
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Abschluss / Verabschiedung</h4>
+                          <textarea
+                            value={activeDraft.close ?? ""}
+                            rows={4}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))}
+                          />
+                        </div>
+
+                        <div className="mini-panel playbook-card">
+                          <h4 className="sub-heading">Terminbestätigung</h4>
+                          <textarea
+                            value={activeDraft.appointmentConfirmation ?? ""}
+                            rows={4}
+                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Topic Policy speichern</button>
                       <span className="subtle">Die Topic Policy wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>

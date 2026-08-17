@@ -7,8 +7,9 @@
     "build": "node ./node_modules/next/dist/bin/next build",
     "start": "node ./node_modules/next/dist/bin/next start",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
-    "test": "node --test --import tsx src/lib/prompt-builder.test.ts worker/src/call-classification.test.ts worker/src/openai-realtime-call.test.ts",
-    "qa:call-log": "node scripts/qa-call-log.mjs"
+    "test": "node --test --import tsx src/lib/prompt-builder.test.ts worker/src/call-classification.test.ts worker/src/contact-routing-controller.test.ts worker/src/conversation-event-controller.test.ts worker/src/pkv-conversation-controller.test.ts worker/src/appointment-controller.test.ts worker/src/preparation-controller.test.ts worker/src/telnyx-playback.test.ts worker/src/realtime-response-controller.test.ts worker/src/openai-realtime-session.test.ts worker/src/barge-in-controller.test.ts worker/src/dialog-evaluation.test.ts worker/src/openai-realtime-call.test.ts",
+    "qa:call-log": "node scripts/qa-call-log.mjs",
+    "eval:dialogs": "node --import tsx worker/src/run-dialog-evaluation.ts"
   },
   "dependencies": {
     "next": "16.2.3",

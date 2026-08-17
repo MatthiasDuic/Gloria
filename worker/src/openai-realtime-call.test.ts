@@ -15,7 +15,9 @@ function buildPkvContext() {
     { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
     { role: "user", text: "1280 Euro.", at: 4 },
     { role: "assistant", text: "Bei rund vier Prozent pro Jahr lägen 1280 Euro in zehn Jahren höher.", at: 5 },
-    { role: "assistant", text: "Im ersten Termin erklärt Herr Duic seine Arbeitsweise und analysiert Ihren Vertrag. Ist diese Klarheit für Sie sinnvoll?", at: 6 },
+    { role: "assistant", text: "Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?", at: 6 },
+    { role: "user", text: "Das wäre langfristig eine Belastung.", at: 7 },
+    { role: "assistant", text: "Herr Duic analysiert Ihre persönliche Entwicklung und prüfbare Optionen. Wäre diese Klarheit für Sie hilfreich?", at: 8 },
   );
   return ctx;
 }
@@ -25,7 +27,7 @@ test("maps the configured bidirectional codec to Realtime audio", () => {
   assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
 });
 
-test("ignores common background-noise ASR fragments but keeps short German answers", () => {
+test("classifies unclear ASR fragments but keeps short German answers", () => {
   assert.equal(isLikelyNoiseTranscript("Good to"), true);
   assert.equal(isLikelyNoiseTranscript("Mhm."), true);
   assert.equal(isLikelyNoiseTranscript("Anlıyorum."), true);
@@ -101,6 +103,36 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Steuervorteile/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
   assert.match(instructions, /nur auf konkrete Kundenfrage/i);
+});
+
+test("uses the standard PKV flow in a strict order: relevance → contribution → 10-year projection → retirement bridge → value → interest", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-pkv-flow",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+
+  const relevanceIndex = instructions.search(/Wie erleben Sie das aktuell|Wie erleben Sie das/i);
+  const contributionIndex = instructions.search(/Würden Sie mir kurz sagen, was Sie aktuell monatlich.*?zahlen|aktuellen Monatsbeitrag/i);
+  const projectionIndex = instructions.search(/in zehn Jahren/i);
+  const retirementIndex = instructions.search(/bis zum Ruhestand/i);
+  const valueIndex = instructions.search(/persönlichen Zahlen|planbaren und bezahlbaren Beitrag/i);
+  const interestIndex = instructions.search(/Wäre diese Klarheit für Sie hilfreich/i);
+
+  assert.notEqual(relevanceIndex, -1);
+  assert.notEqual(contributionIndex, -1);
+  assert.notEqual(projectionIndex, -1);
+  assert.notEqual(retirementIndex, -1);
+  assert.notEqual(valueIndex, -1);
+  assert.notEqual(interestIndex, -1);
+
+  assert.ok(relevanceIndex < contributionIndex);
+  assert.ok(contributionIndex < projectionIndex);
+  assert.ok(projectionIndex < retirementIndex);
+  assert.ok(retirementIndex < valueIndex);
+  assert.ok(valueIndex < interestIndex);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {

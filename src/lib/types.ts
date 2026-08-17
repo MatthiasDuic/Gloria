@@ -61,8 +61,21 @@ export interface TopicPolicyConfig {
   requiredQuestions?: string;
   /** Beispielantworten und Formulierungen, die Gloria als Stilvorlage nutzen darf. */
   exampleSentences?: string;
-  // Legacy-/Kompatibilitätsfelder ------------------------------------------------
+  /** Ziel des Anrufs; was Gloria mit dem Gespräch erreichen will. */
   callObjective?: string;
+  /** Beispieltext für die Begrüßung, wenn die Zielperson selbst am Telefon ist. */
+  greetingDecisionMaker?: string;
+  /** Beispieltext für die Begrüßung am Empfang bzw. beim Gatekeeper. */
+  greetingGatekeeper?: string;
+  /** Beispieltext für den Grund des Anrufs. */
+  reasonForCall?: string;
+  /** Beispieltext für die Relevanzfrage. */
+  relevanceQuestion?: string;
+  /** Beispieltext für die Beitragsermittlung. */
+  contributionQuestion?: string;
+  /** Beispieltext für die Hochrechnung und die Brücke zum Nutzungsvorteil. */
+  projectionText?: string;
+  // Legacy-/Kompatibilitätsfelder ------------------------------------------------
   requiredData?: string;
   knowledge?: string;
   objectionResponses?: string;
