@@ -41,6 +41,16 @@ test("allows a PKV appointment after consent to the concept question", () => {
   assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
 });
 
+test("allows a PKV appointment after selecting an offered slot", () => {
+  const ctx = buildPkvContext();
+  ctx.transcript.push(
+    { role: "assistant", text: "Dann habe ich zwei Vorschläge: Montag, 24. August um 15:30 Uhr, oder Dienstag, 25. August um 13:30 Uhr. Welcher Termin passt Ihnen besser?", at: 7 },
+    { role: "user", text: "Der Dienstag ist gut.", at: 8 },
+  );
+
+  assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
+});
+
 test("includes the required decision-maker and gatekeeper opening lines", () => {
   const ctx = newContext({
     callSid: "test-realtime-opening",

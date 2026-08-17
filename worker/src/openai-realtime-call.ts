@@ -114,8 +114,11 @@ export function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu
     : "audio/pcmu";
 }
 
-function splitPreparationQuestions(policy: { requiredQuestions?: string; requiredData?: string } | null): string[] {
-  return (policy?.requiredQuestions || policy?.requiredData || "")
+function splitPreparationQuestions(policy: { topic?: string; requiredQuestions?: string; requiredData?: string; pkvHealthQuestions?: string } | null): string[] {
+  const source = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "")
+    ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData
+    : policy?.requiredQuestions || policy?.requiredData;
+  return (source || "")
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
     .filter((line) => line.length > 3);
@@ -166,12 +169,15 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
     ? ""
     : ctx.transcript.slice(interestQuestionIndex + 1).find((turn) => turn.role === "user")?.text || "";
   const hasInterest = /^(?:ja\b|ja,?\s*(?:gerne|bitte|das\s+(?:ist|wäre)|tendenziell|grundsätzlich)|gerne\b|interessant\b|hilfreich\b|das\s+macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)/i.test(interestAnswer.trim());
+  const hasOfferedSlotSelection = /(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|vormittag|nachmittag|uhr|\d{1,2}:\d{2})/i.test(userText)
+    && /(?:zwei\s+(?:konkrete\s+)?(?:termine|vorschläge|optionen)|(?:termine|vorschläge)\s*:\s*[^.]+\s+(?:oder|bzw\.?)[^.]+)/i.test(assistantText)
+    && /(?:passt|gut|nehme|wäre|gerne|ja)/i.test(userText);
 
   if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
   if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
   if (!hasProjection) return { ok: false, reason: "Zeige zuerst anhand des genannten Beitrags eine konkrete Zehn-Jahres-Hochrechnung mit rund vier Prozent pro Jahr." };
   if (conceptQuestionIndex === undefined) return { ok: false, reason: "Erkläre zuerst kurz Arbeitsweise, Konzeptphase und konkreten Kundennutzen." };
-  if (!hasInterest) return { ok: false, reason: "Hole nach Hochrechnung und Konzept erst eine eindeutige Zustimmung auf die letzte Nutzen- oder Terminfrage ein." };
+  if (!hasInterest && !hasOfferedSlotSelection) return { ok: false, reason: "Hole nach Hochrechnung und Konzept erst eine eindeutige Zustimmung auf die letzte Nutzen- oder Terminfrage ein." };
   return { ok: true };
 }
 
@@ -640,9 +646,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             });
           }
         }
-        flushQueuedResponse();
         const nextUserTranscript = pendingUserTranscripts.shift();
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
+        flushQueuedResponse();
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
         return;

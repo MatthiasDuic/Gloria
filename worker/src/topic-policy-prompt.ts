@@ -9,6 +9,7 @@ export type TopicPolicyFields = {
   conversationGuardrails?: string;
   requiredQuestions?: string;
   requiredData?: string;
+  pkvHealthQuestions?: string;
   exampleSentences?: string;
 };
 
