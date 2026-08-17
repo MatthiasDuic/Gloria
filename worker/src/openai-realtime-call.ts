@@ -118,7 +118,10 @@ function splitPreparationQuestions(policy: { topic?: string; requiredQuestions?:
   const source = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "")
     ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData
     : policy?.requiredQuestions || policy?.requiredData;
-  return (source || "")
+  const fallback = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "")
+    ? "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?\nKönnten Sie mir Ihre Körpergröße nennen?\nWie ist Ihr aktuelles Gewicht?\nBei welchem Krankenversicherer sind Sie derzeit versichert?\nWie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?\nGibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?\nNehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?\nGab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?\nGab es in den letzten zehn Jahren psychische Behandlungen?\nFehlen aktuell Zähne oder ist Zahnersatz geplant?\nBestehen bei Ihnen bekannte Allergien?"
+    : "";
+  return (source || fallback)
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
     .filter((line) => line.length > 3);
@@ -137,6 +140,11 @@ export function isLikelyNoiseTranscript(text: string): boolean {
   if (/^(?:good to|does that|thank you much|i know|anlıyorum|어\?|aso|gute tag|tag|gutes|ich bin ab|mhm|hmm|hm+|äh+|uh+|oh+)[.!?]*$/i.test(normalized)) return true;
   if (normalized.length <= 2 && !/^(?:ja|ne|nein|ok|okay|jo|nö|hm)$/i.test(normalized)) return true;
   return false;
+}
+
+function hasClearFarewellOrRejection(ctx: CallContext): boolean {
+  const latestUserText = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
+  return /\b(?:auf\s+wiederh[öo]ren|tsch[üu]ss|wiedersehen|einen\s+sch[öo]nen\s+tag|kein\s+interesse|nicht\s+interessiert|bitte\s+nicht|beenden\s+sie|legen\s+sie\s+auf)\b/i.test(latestUserText);
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -179,7 +187,7 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
   const hasInterest = /^(?:ja\b|ja,?\s*(?:gerne|bitte|das\s+(?:ist|wäre)|tendenziell|grundsätzlich)|gerne\b|interessant\b|hilfreich\b|das\s+macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)/i.test(interestAnswer.trim());
   const hasOfferedSlotSelection = /(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|vormittag|nachmittag|uhr|\d{1,2}:\d{2})/i.test(userText)
     && /(?:zwei\s+(?:konkrete\s+)?(?:termine|vorschläge|optionen)|(?:termine|vorschläge)\s*:\s*[^.]+\s+(?:oder|bzw\.?)[^.]+)/i.test(assistantText)
-    && /(?:passt|gut|nehme|wäre|gerne|ja)/i.test(userText);
+    && /(?:passt|gut|nehme|wäre|gerne|ja|september|oktober|november|dezember|januar|februar|märz|april|mai|juni|juli|august)/i.test(userText);
 
   if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
   if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
@@ -230,7 +238,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen in der Gesundheitsversorgung an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben von Branchenverbänden liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Danach frage nach der persönlichen Erfahrung und höre zu.",
+      "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen in der Gesundheitsversorgung an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben von Branchenverbänden liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Nach der Zehn-Jahres-Einordnung kommt zuerst ein menschlicher Relevanzschritt: Frage, wie sich diese Entwicklung für den Kunden anfühlt und was sie für seine persönliche Planung bedeutet. Warte auf diese Antwort. Erkläre erst danach die Konzeptphase. Überspringe diesen Relevanzschritt niemals.",
       "Wenn der Kunde seinen aktuellen Monatsbeitrag nennt, rechne sofort transparent und vorsichtig mit rund vier Prozent pro Jahr vor: nenne den heutigen Betrag, den ungefähren Betrag in zehn Jahren und den monatlichen Unterschied. Erkläre in einem kurzen Satz, warum diese Zahl für Planbarkeit relevant ist. Erst wenn der Kunde auf diese persönliche Einordnung positiv reagiert, darfst du einen Termin anbieten.",
       "KONZEPTPHASE VOR DEM TERMIN IST EIN EIGENER GESPRÄCHSSCHRITT: Nach der Hochrechnung fragst du zuerst: 'Darf ich Ihnen kurz sagen, wie Herr Duic daraus einen planbaren Weg entwickelt?' Erst nach Zustimmung erklärst du in maximal zwei kurzen Sätzen: Ersttermin = Arbeitsweise, Vertrag und Beitragsverlauf analysieren; zweiter Termin = persönliches Konzept mit möglichen Stellschrauben wie Tarifoptimierung, Beitragsentlastung, Altersrückstellungen und möglicher steuerlicher Gegenfinanzierung; dritter Termin = offene Fragen und mögliche Entscheidung. Der erste Termin ist Analyse, kein Verkauf.",
       "KUNDENNUTZEN: Sage ausdrücklich, was der Kunde davon hat: Klarheit über die persönliche Entwicklung, konkrete prüfbare Optionen und einen nachvollziehbaren Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Herr Duic hilft Unternehmern, Komplexität zu reduzieren und sich nicht allein auf steigende Bescheide verlassen zu müssen. Frage danach, ob genau diese Klarheit für den Kunden hilfreich wäre. Erst nach dieser Antwort darfst du einen Termin anbieten.",
@@ -508,6 +516,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (tool.name === "end_call") {
+      if (!hasClearFarewellOrRejection(ctx)) {
+        handledToolCalls.delete(tool.callId);
+        sendToolResult(tool.callId, { ok: false, error: "unclear_hangup_request", instruction: "Frage auf Deutsch kurz nach, ob der Kunde das Gespräch beenden möchte. Hänge nicht auf." });
+        requestResponse("Das habe ich nicht eindeutig verstanden. Möchten Sie das Gespräch beenden, oder sollen wir kurz weitermachen?");
+        return;
+      }
       sendToolResult(tool.callId, { ok: true });
       log.info("realtime.hangup", { callSid: ctx.callSid });
       await notifyCallAction(ctx, "hangup");
