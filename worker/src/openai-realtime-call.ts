@@ -259,6 +259,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let reportPosted = false;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let activeResponse = false;
+  let responseCancelPending = false;
+  let queuedResponseInstructions: string | null = null;
   let activeAssistantItemId = "";
   let outboundAudioBytes = 0;
   let outboundAudioBuffer = Buffer.alloc(0);
@@ -319,10 +321,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    if (activeResponse) {
+    if (activeResponse || responseCancelPending) {
+      queuedResponseInstructions = instructions || "";
       log.info("realtime.response_ignored_while_active", {
         callSid: ctx?.callSid,
         instructionsPreview: instructions?.slice(0, 80) || "none",
+        cancelPending: responseCancelPending,
       });
       return false;
     }
@@ -331,6 +335,33 @@ export async function handleOpenAiRealtimeTelnyxStream(
       ...(instructions ? { response: { instructions } } : {}),
     });
     return true;
+  };
+
+  const flushQueuedResponse = () => {
+    if (activeResponse || responseCancelPending || queuedResponseInstructions === null) return;
+    const instructions = queuedResponseInstructions;
+    queuedResponseInstructions = null;
+    requestResponse(instructions);
+  };
+
+  const cancelActiveResponseForBargeIn = () => {
+    if (!activeResponse || responseCancelPending) return;
+    responseCancelPending = true;
+    sendOpenAi({ type: "response.cancel" });
+    if (activeAssistantItemId && outboundAudioBytes > 0) {
+      interruptedItemIds.add(activeAssistantItemId);
+      sendOpenAi({
+        type: "conversation.item.truncate",
+        item_id: activeAssistantItemId,
+        content_index: 0,
+        audio_end_ms: Math.floor(outboundAudioBytes / 8),
+      });
+    }
+    sendTelnyx({ event: "clear", stream_id: streamId });
+    activeResponse = false;
+    outboundAudioBuffer = Buffer.alloc(0);
+    assistantTranscript = "";
+    log.info("realtime.barge_in", { callSid: ctx?.callSid });
   };
 
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
@@ -438,32 +469,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_started") {
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
-        if (activeResponse && assistantTranscript.trim().length > 0) {
-          const hasMeaningfulUserTurn = /[a-zäöüß]/i.test((message.transcript || "").trim()) || assistantTranscript.trim().length > 0;
-          if (hasMeaningfulUserTurn) {
-            sendOpenAi({ type: "response.cancel" });
-            if (activeAssistantItemId && outboundAudioBytes > 0) {
-              interruptedItemIds.add(activeAssistantItemId);
-              sendOpenAi({
-                type: "conversation.item.truncate",
-                item_id: activeAssistantItemId,
-                content_index: 0,
-                audio_end_ms: Math.floor(outboundAudioBytes / 8),
-              });
-            }
-            sendTelnyx({ event: "clear", stream_id: streamId });
-            activeResponse = false;
-            outboundAudioBuffer = Buffer.alloc(0);
-            assistantTranscript = "";
-            log.info("realtime.barge_in", { callSid: ctx?.callSid });
-          }
-        }
         return;
       }
 
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
+          if (activeResponse && /[a-zäöüß]{3,}/i.test(transcript)) {
+            cancelActiveResponseForBargeIn();
+          }
           ctx.lastUserFinalAt = Date.now();
           ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
           log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
@@ -564,6 +578,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.done") {
         activeResponse = false;
+        responseCancelPending = false;
         for (const item of message.response?.output || []) {
           if (item.type === "function_call" && item.name && item.call_id) {
             void handleToolCall({
@@ -573,6 +588,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
             });
           }
         }
+        flushQueuedResponse();
+        return;
+      }
+
+      if (message.type === "response.cancelled" || message.type === "response.canceled") {
+        activeResponse = false;
+        responseCancelPending = false;
+        flushQueuedResponse();
       }
     });
 
