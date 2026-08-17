@@ -319,10 +319,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
+    if (activeResponse) {
+      log.info("realtime.response_ignored_while_active", {
+        callSid: ctx?.callSid,
+        instructionsPreview: instructions?.slice(0, 80) || "none",
+      });
+      return false;
+    }
     sendOpenAi({
       type: "response.create",
       ...(instructions ? { response: { instructions } } : {}),
     });
+    return true;
   };
 
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
@@ -478,7 +486,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               preparationMode = "complete";
               requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
             }
-          } else {
+          } else if (!activeResponse) {
             requestResponse();
           }
         }
