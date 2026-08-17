@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "Telnyx Media Streams worker for Gloria (OpenAI ASR/LLM + ElevenLabs TTS).",
+  "description": "Telnyx Media Streams worker for Gloria (OpenAI Realtime audio).",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
@@ -17,7 +17,6 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "lamejs": "^1.2.1",
     "undici": "^6.20.1",
     "ws": "^8.18.0"
   },

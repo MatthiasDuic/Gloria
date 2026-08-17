@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, canConfirmRealtimeAppointment } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, canConfirmRealtimeAppointment, openAiAudioFormat } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -19,6 +19,11 @@ function buildPkvContext() {
   );
   return ctx;
 }
+
+test("maps the configured bidirectional codec to Realtime audio", () => {
+  assert.equal(openAiAudioFormat("PCMU"), "audio/pcmu");
+  assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
+});
 
 test("does not use an earlier acknowledgement as PKV appointment consent", () => {
   const ctx = buildPkvContext();

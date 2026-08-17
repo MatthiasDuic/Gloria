@@ -21,8 +21,6 @@ services:
         sync: true
       - key: OPENAI_MODEL
         value: gpt-4.1-mini
-      - key: OPENAI_AUDIO_REALTIME
-        value: true
       - key: OPENAI_REALTIME_MODEL
         value: gpt-realtime-2.1
       - key: OPENAI_REALTIME_REASONING_EFFORT
@@ -31,52 +29,8 @@ services:
         value: marin
       - key: OPENAI_REALTIME_VAD_EAGERNESS
         value: low
-      - key: LLM_TRANSCRIPT_TURNS
-        value: 10
-      - key: LLM_MAX_TOKENS
-        value: 105
-      - key: LLM_TIMEOUT_MS
-        value: 7000
-      - key: LLM_FIRST_TOKEN_TIMEOUT_MS
-        value: 1600
-      - key: LLM_EARLY_FLUSH_CHARS
-        value: 160
-      - key: LLM_COMPACT_PROMPT
-        value: 1
-      - key: TURN_FIRST_AUDIO_SLO_MS
-        value: 2400
-      - key: ELEVENLABS_API_KEY
-        sync: true
-      - key: ELEVENLABS_VOICE_ID
-        sync: true
-      - key: ELEVENLABS_MODEL
-        value: eleven_multilingual_v2
-      - key: GLORIA_VOICE_MODE
-        value: balanced
-      - key: ELEVENLABS_STABILITY
-        value: 0.42
-      - key: ELEVENLABS_SIMILARITY
-        value: 0.9
-      - key: ELEVENLABS_STYLE
-        value: 0.38
-      - key: ELEVENLABS_SPEED
-        value: 0.92
-      - key: ELEVENLABS_SPEAKER_BOOST
-        value: true
-      - key: ELEVENLABS_LATENCY_MODE
-        value: 1
-      - key: OPENAI_REALTIME_ASR_MODEL
-        value: gpt-4o-realtime-preview
-      - key: OPENAI_TRANSCRIBE_LANGUAGE
-        value: de
-      - key: OPENAI_ASR_SILENCE_MS
-        value: 800
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
-        value: PCMA
-      - key: ASR_FINAL_COALESCE_MS
-        value: 520
-      - key: ASR_UTTERANCE_END_GRACE_MS
-        value: 320
+        value: PCMU
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN

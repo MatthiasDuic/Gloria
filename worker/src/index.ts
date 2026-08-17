@@ -1,17 +1,7 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
-import { handleTelnyxStream } from "./telnyx-stream.js";
 import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
-
-// IMPORTANT: The following env vars MUST be set in Render dashboard:
-// - APP_INTERNAL_TOKEN
-// - STREAM_SHARED_SECRET
-// - OPENAI_REALTIME_ASR_MODEL (optional, defaults to gpt-4o-realtime-preview)
-// - OPENAI_TRANSCRIBE_LANGUAGE (optional, defaults to de)
-// - ELEVENLABS_API_KEY
-// - ELEVENLABS_VOICE_ID
-// Otherwise, worker will not authenticate with Vercel APIs
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
@@ -39,9 +29,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    const useAudioRealtime = !/^(?:0|false|no|off)$/i.test(process.env.OPENAI_AUDIO_REALTIME || "true");
-    const handler = useAudioRealtime ? handleOpenAiRealtimeTelnyxStream : handleTelnyxStream;
-    handler(ws, req).catch((error) => {
+    handleOpenAiRealtimeTelnyxStream(ws, req).catch((error) => {
       log.error("ws.handler_failed", { error: error instanceof Error ? error.message : String(error) });
       try {
         ws.close(1011, "internal_error");

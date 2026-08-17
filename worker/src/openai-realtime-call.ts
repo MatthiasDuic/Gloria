@@ -105,8 +105,10 @@ function decodeClientState(raw?: string): ClientState {
   }
 }
 
-function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu" {
-  const normalized = (encoding || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+export function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu" {
+  const normalized = (encoding || process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMU")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
   return normalized.includes("PCMA") || normalized.includes("ALAW")
     ? "audio/pcma"
     : "audio/pcmu";
@@ -264,6 +266,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let activeAssistantItemId = "";
   let outboundAudioBytes = 0;
   let outboundAudioBuffer = Buffer.alloc(0);
+  let playbackTimer: NodeJS.Timeout | null = null;
+  const playbackQueue: Buffer[] = [];
   let assistantTranscript = "";
   let preparationQuestions: string[] = [];
   let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
@@ -282,6 +286,32 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (telnyx.readyState !== telnyx.OPEN) return false;
     telnyx.send(JSON.stringify(event));
     return true;
+  };
+
+  const clearPlaybackQueue = () => {
+    playbackQueue.length = 0;
+    if (playbackTimer) {
+      clearTimeout(playbackTimer);
+      playbackTimer = null;
+    }
+  };
+
+  const pumpPlaybackQueue = () => {
+    playbackTimer = null;
+    if (closed || playbackQueue.length === 0) return;
+    const frame = playbackQueue.shift();
+    if (!frame) return;
+    if (sendTelnyx({ event: "media", stream_id: streamId, media: { payload: frame.toString("base64") } })) {
+      outboundAudioBytes += frame.length;
+    }
+    if (playbackQueue.length > 0) {
+      playbackTimer = setTimeout(pumpPlaybackQueue, 20);
+    }
+  };
+
+  const enqueuePlaybackFrame = (frame: Buffer) => {
+    playbackQueue.push(frame);
+    if (!playbackTimer) pumpPlaybackQueue();
   };
 
   const updateSession = () => {
@@ -339,6 +369,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const flushQueuedResponse = () => {
     if (activeResponse || responseCancelPending || queuedResponseInstructions === null) return;
+    if (playbackQueue.length > 0 || playbackTimer) {
+      setTimeout(flushQueuedResponse, 20);
+      return;
+    }
     const instructions = queuedResponseInstructions;
     queuedResponseInstructions = null;
     requestResponse(instructions);
@@ -358,6 +392,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       });
     }
     sendTelnyx({ event: "clear", stream_id: streamId });
+    clearPlaybackQueue();
     activeResponse = false;
     outboundAudioBuffer = Buffer.alloc(0);
     assistantTranscript = "";
@@ -526,8 +561,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           while (outboundAudioBuffer.length >= 160) {
             const frame = outboundAudioBuffer.subarray(0, 160);
             outboundAudioBuffer = outboundAudioBuffer.subarray(160);
-            outboundAudioBytes += frame.length;
-            sendTelnyx({ event: "media", stream_id: streamId, media: { payload: frame.toString("base64") } });
+            enqueuePlaybackFrame(frame);
           }
         }
         return;
@@ -540,8 +574,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             outboundAudioBuffer,
             Buffer.alloc(160 - outboundAudioBuffer.length, silenceByte),
           ]);
-          outboundAudioBytes += frame.length;
-          sendTelnyx({ event: "media", stream_id: streamId, media: { payload: frame.toString("base64") } });
+          enqueuePlaybackFrame(frame);
           outboundAudioBuffer = Buffer.alloc(0);
         }
         return;
@@ -620,7 +653,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (frame.event === "start") {
       const state = decodeClientState(frame.start.client_state);
       streamId = frame.stream_id;
-      audioFormat = openAiAudioFormat(frame.start.media_format?.encoding);
+      audioFormat = openAiAudioFormat(process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC);
       ctx = newContext({
         callSid: frame.start.call_control_id,
         streamSid: frame.stream_id,
@@ -707,6 +740,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   telnyx.on("close", async (code, reason) => {
     if (closed) return;
     closed = true;
+    clearPlaybackQueue();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
     try {
       openai?.close(1000, "telnyx_closed");
