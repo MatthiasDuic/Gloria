@@ -131,6 +131,14 @@ function isPreparationConsent(text: string): "granted" | "declined" | "unknown" 
   return "unknown";
 }
 
+export function isLikelyNoiseTranscript(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^a-zäöüßı0-9:?!.\s-]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+  if (/^(?:good to|does that|thank you much|i know|anlıyorum|어\?|aso|gute tag|tag|gutes|ich bin ab|mhm|hmm|hm+|äh+|uh+|oh+)[.!?]*$/i.test(normalized)) return true;
+  if (normalized.length <= 2 && !/^(?:ja|ne|nein|ok|okay|jo|nö|hm)$/i.test(normalized)) return true;
+  return false;
+}
+
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -362,7 +370,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
             turn_detection: {
               type: "server_vad",
-              silence_duration_ms: 1000,
+              threshold: 0.7,
+              silence_duration_ms: 1200,
               prefix_padding_ms: 300,
               create_response: false,
               interrupt_response: false,
@@ -553,6 +562,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
+          if (isLikelyNoiseTranscript(transcript)) {
+            log.info("realtime.ignored_noise_transcript", { callSid: ctx.callSid, text: transcript });
+            return;
+          }
           if (activeResponse) {
             pendingUserTranscripts.push(transcript);
             log.info("realtime.user_queued_until_response_done", { callSid: ctx.callSid, text: transcript });

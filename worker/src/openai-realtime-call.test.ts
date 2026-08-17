@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, canConfirmRealtimeAppointment, openAiAudioFormat } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, openAiAudioFormat } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -23,6 +23,16 @@ function buildPkvContext() {
 test("maps the configured bidirectional codec to Realtime audio", () => {
   assert.equal(openAiAudioFormat("PCMU"), "audio/pcmu");
   assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
+});
+
+test("ignores common background-noise ASR fragments but keeps short German answers", () => {
+  assert.equal(isLikelyNoiseTranscript("Good to"), true);
+  assert.equal(isLikelyNoiseTranscript("Mhm."), true);
+  assert.equal(isLikelyNoiseTranscript("Anlıyorum."), true);
+  assert.equal(isLikelyNoiseTranscript("Ja."), false);
+  assert.equal(isLikelyNoiseTranscript("Nein."), false);
+  assert.equal(isLikelyNoiseTranscript("Dienstag."), false);
+  assert.equal(isLikelyNoiseTranscript("Nachmittag."), false);
 });
 
 test("does not use an earlier acknowledgement as PKV appointment consent", () => {
