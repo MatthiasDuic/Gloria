@@ -312,6 +312,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let activeResponse = false;
   let responseCancelPending = false;
   let queuedResponseInstructions: string | null = null;
+  let responseFlushTimer: NodeJS.Timeout | null = null;
   let activeAssistantItemId = "";
   let outboundAudioBytes = 0;
   let outboundAudioBuffer = Buffer.alloc(0);
@@ -417,14 +418,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const responseInstructions = [facts, instructions].filter(Boolean).join("\n\n");
     const delay = Math.max(0, responseCreateNotBefore - Date.now());
     if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer || delay > 0) {
-      queuedResponseInstructions = responseInstructions;
+      if (queuedResponseInstructions === null) queuedResponseInstructions = responseInstructions;
       log.info("realtime.response_ignored_while_active", {
         callSid: ctx?.callSid,
         instructionsPreview: responseInstructions.slice(0, 80) || "none",
         cancelPending: responseCancelPending,
         playbackPending: playbackQueue.length > 0 || Boolean(playbackTimer),
       });
-      setTimeout(flushQueuedResponse, Math.max(20, delay));
+      if (!responseFlushTimer) {
+        responseFlushTimer = setTimeout(() => {
+          responseFlushTimer = null;
+          flushQueuedResponse();
+        }, Math.max(20, delay));
+      }
       return false;
     }
     sendOpenAi({
@@ -437,7 +443,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const flushQueuedResponse = () => {
     if (activeResponse || responseCancelPending || queuedResponseInstructions === null) return;
     if (playbackQueue.length > 0 || playbackTimer) {
-      setTimeout(flushQueuedResponse, 20);
+      if (!responseFlushTimer) {
+        responseFlushTimer = setTimeout(() => {
+          responseFlushTimer = null;
+          flushQueuedResponse();
+        }, 20);
+      }
       return;
     }
     const instructions = queuedResponseInstructions;
