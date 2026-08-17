@@ -343,8 +343,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
               language: "de",
             },
             turn_detection: {
-              type: "semantic_vad",
-              eagerness: process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim() || "medium",
+              type: "server_vad",
+              silence_duration_ms: 650,
+              prefix_padding_ms: 300,
               create_response: false,
               interrupt_response: false,
             },
