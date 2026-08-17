@@ -147,6 +147,23 @@ function hasClearFarewellOrRejection(ctx: CallContext): boolean {
   return /\b(?:auf\s+wiederh[öo]ren|tsch[üu]ss|wiedersehen|einen\s+sch[öo]nen\s+tag|kein\s+interesse|nicht\s+interessiert|bitte\s+nicht|beenden\s+sie|legen\s+sie\s+auf)\b/i.test(latestUserText);
 }
 
+function buildKnownConversationFacts(ctx: CallContext): string {
+  const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
+  const facts: string[] = [];
+  if (/\b(?:gesetzlich|gkv)\b/i.test(userText)) facts.push("Versicherungsstatus: gesetzlich versichert (bereits geklärt; nicht erneut fragen).");
+  else if (/\b(?:privat|pkv)\b/i.test(userText)) facts.push("Versicherungsstatus: privat versichert (bereits geklärt; nicht erneut fragen).");
+  const contribution = userText.match(/\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i)?.[0];
+  if (contribution) facts.push(`Aktueller Monatsbeitrag: ${contribution} (bereits genannt; nicht erneut fragen).`);
+  return facts.length ? `BEREITS GEKLÄRTE FAKTEN:\n- ${facts.join("\n- ")}\nDiese Angaben sind verbindlich und haben Vorrang vor allgemeinen Policy-Fragen.` : "";
+}
+
+function isPreparationQuestionAnswered(question: string, ctx: CallContext): boolean {
+  const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
+  if (/versicher|privat|gesetzlich|pkv|gkv/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
+  if (/monatsbeitrag|beitrag.*krankenversicherung/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
+  return false;
+}
+
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -214,7 +231,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
     "Sprich natürlich, klar und in kurzen Gesprächsabschnitten. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
-    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort.",
+    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
     "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
@@ -240,7 +257,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(
       "PKV-GESPRÄCHSKOMPASS: Starte nicht mit einer Terminfrage. Knüpfe emotional und konkret an die Erfahrung des Kunden mit steigenden Beiträgen in der Gesundheitsversorgung an. Du darfst den einen freigegebenen Orientierungswert nennen: Nach Angaben von Branchenverbänden liegen langfristige Beitragsanpassungen häufig bei etwa drei bis fünf Prozent jährlich. Nach der Zehn-Jahres-Einordnung kommt zuerst ein menschlicher Relevanzschritt: Frage, wie sich diese Entwicklung für den Kunden anfühlt und was sie für seine persönliche Planung bedeutet. Warte auf diese Antwort. Erkläre erst danach die Konzeptphase. Überspringe diesen Relevanzschritt niemals.",
       "Wenn der Kunde seinen aktuellen Monatsbeitrag nennt, rechne sofort transparent und vorsichtig mit rund vier Prozent pro Jahr vor: nenne den heutigen Betrag, den ungefähren Betrag in zehn Jahren und den monatlichen Unterschied. Erkläre in einem kurzen Satz, warum diese Zahl für Planbarkeit relevant ist. Erst wenn der Kunde auf diese persönliche Einordnung positiv reagiert, darfst du einen Termin anbieten.",
-      "KONZEPTPHASE VOR DEM TERMIN IST EIN EIGENER GESPRÄCHSSCHRITT: Nach der Hochrechnung fragst du zuerst: 'Darf ich Ihnen kurz sagen, wie Herr Duic daraus einen planbaren Weg entwickelt?' Erst nach Zustimmung erklärst du in maximal zwei kurzen Sätzen: Ersttermin = Arbeitsweise, Vertrag und Beitragsverlauf analysieren; zweiter Termin = persönliches Konzept mit möglichen Stellschrauben wie Tarifoptimierung, Beitragsentlastung, Altersrückstellungen und möglicher steuerlicher Gegenfinanzierung; dritter Termin = offene Fragen und mögliche Entscheidung. Der erste Termin ist Analyse, kein Verkauf.",
+      "KONZEPTPHASE VOR DEM TERMIN IST EIN EIGENER GESPRÄCHSSCHRITT: Nach der persönlichen Relevanzfrage fragst du zuerst: 'Darf ich Ihnen kurz sagen, wie Herr Duic Ihre Zahlen und Beitragsentwicklung im Termin einordnet?' Erst nach Zustimmung erklärst du: Im ersten Termin werden Vertrag, Beitragsverlauf und persönliche Zahlen geprüft; im zweiten Termin folgt ein persönliches Konzept mit möglichen Stellschrauben; im dritten Termin klären Sie offene Fragen und eine mögliche Entscheidung. Der erste Termin ist Analyse, kein Verkauf.",
       "KUNDENNUTZEN: Sage ausdrücklich, was der Kunde davon hat: Klarheit über die persönliche Entwicklung, konkrete prüfbare Optionen und einen nachvollziehbaren Weg zu einem im Alter planbaren und bezahlbaren Beitrag für die Gesundheitsversorgung. Herr Duic hilft Unternehmern, Komplexität zu reduzieren und sich nicht allein auf steigende Bescheide verlassen zu müssen. Frage danach, ob genau diese Klarheit für den Kunden hilfreich wäre. Erst nach dieser Antwort darfst du einen Termin anbieten.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für null Euro und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Eine vertraglich garantierte Entlastung darf erst nach Prüfung des konkreten Konzepts genannt werden.",
       "Versicherungsart, heutiger Beitrag, Hochrechnung und echte Zustimmung sind Voraussetzungen für einen PKV-Termin. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
@@ -396,12 +413,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
+    const facts = ctx ? buildKnownConversationFacts(ctx) : "";
+    const responseInstructions = [facts, instructions].filter(Boolean).join("\n\n");
     const delay = Math.max(0, responseCreateNotBefore - Date.now());
     if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer || delay > 0) {
-      queuedResponseInstructions = instructions || "";
+      queuedResponseInstructions = responseInstructions;
       log.info("realtime.response_ignored_while_active", {
         callSid: ctx?.callSid,
-        instructionsPreview: instructions?.slice(0, 80) || "none",
+        instructionsPreview: responseInstructions.slice(0, 80) || "none",
         cancelPending: responseCancelPending,
         playbackPending: playbackQueue.length > 0 || Boolean(playbackTimer),
       });
@@ -410,7 +429,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
     sendOpenAi({
       type: "response.create",
-      ...(instructions ? { response: { instructions } } : {}),
+      ...(responseInstructions ? { response: { instructions: responseInstructions } } : {}),
     });
     return true;
   };
@@ -439,17 +458,22 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const processUserTranscript = (transcript: string) => {
     if (!ctx) return;
+    const currentContext = ctx;
     assistantContinuationRequested = false;
-    ctx.lastUserFinalAt = Date.now();
-    ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
-    log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
+    currentContext.lastUserFinalAt = Date.now();
+    currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
+    log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
+
+    const nextPreparationQuestion = () => preparationQuestions.find((question) => !isPreparationQuestionAnswered(question, currentContext));
 
     if (preparationMode === "awaiting_consent") {
       const consent = isPreparationConsent(transcript);
       if (consent === "granted") {
         preparationMode = "asking";
         preparationQuestionIndex = 0;
-        requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${preparationQuestions[0]}"`);
+        const question = nextPreparationQuestion();
+        if (question) requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${question}"`);
+        else requestResponse("Die bereits geklärten Angaben reichen für die Vorbereitung. Frage nur noch nach der E-Mail-Adresse für die Terminbestätigung.");
       } else if (consent === "declined") {
         preparationMode = "complete";
         requestResponse("Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
@@ -459,8 +483,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
     } else if (preparationMode === "asking") {
       preparationQuestionIndex += 1;
       const nextQuestion = preparationQuestions[preparationQuestionIndex];
-      if (nextQuestion) {
-        requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${nextQuestion}"`);
+      const unansweredQuestion = nextQuestion && !isPreparationQuestionAnswered(nextQuestion, currentContext) ? nextQuestion : preparationQuestions.slice(preparationQuestionIndex + 1).find((question) => !isPreparationQuestionAnswered(question, currentContext));
+      if (unansweredQuestion) {
+        requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${unansweredQuestion}"`);
       } else {
         preparationMode = "complete";
         requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
