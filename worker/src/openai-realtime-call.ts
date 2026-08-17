@@ -199,7 +199,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
     "Sprich natürlich, klar und in kurzen Gesprächsabschnitten. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort.",
-    "Lass den Gesprächspartner ausreden. Bei Satzfragmenten, Stocken oder kurzer Sprechpause wartest du lieber, statt den Gedanken zu vervollständigen.",
+    "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
+    "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
     "Topic Policies sind fachliche Leitplanken, kein Ablaufplan. Du darfst Reihenfolge, Formulierung und nächsten Schritt situativ ändern. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
     "Keine erfundene Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit und kein Callcenter-Ton.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
@@ -285,6 +286,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
   let assistantContinuationRequested = false;
+  let responseCreateNotBefore = 0;
   let preparationQuestions: string[] = [];
   let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
   let preparationQuestionIndex = 0;
@@ -359,7 +361,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
             turn_detection: {
               type: "server_vad",
-              silence_duration_ms: 650,
+              silence_duration_ms: 1000,
               prefix_padding_ms: 300,
               create_response: false,
               interrupt_response: false,
@@ -376,7 +378,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer) {
+    const delay = Math.max(0, responseCreateNotBefore - Date.now());
+    if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer || delay > 0) {
       queuedResponseInstructions = instructions || "";
       log.info("realtime.response_ignored_while_active", {
         callSid: ctx?.callSid,
@@ -384,7 +387,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         cancelPending: responseCancelPending,
         playbackPending: playbackQueue.length > 0 || Boolean(playbackTimer),
       });
-      setTimeout(flushQueuedResponse, 20);
+      setTimeout(flushQueuedResponse, Math.max(20, delay));
       return false;
     }
     sendOpenAi({
@@ -458,7 +461,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       args = JSON.parse(tool.argumentsJson || "{}") as Record<string, unknown>;
     } catch {
       sendToolResult(tool.callId, { ok: false, error: "invalid_arguments" });
-      sendOpenAi({ type: "response.create" });
+      requestResponse();
       return;
     }
 
@@ -625,6 +628,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         activeResponse = false;
         responseCancelPending = false;
+        responseCreateNotBefore = Date.now() + 180;
         if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
           assistantContinuationRequested = true;
           log.warn("realtime.incomplete_response_recovery", {
@@ -646,7 +650,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             });
           }
         }
-        const nextUserTranscript = pendingUserTranscripts.shift();
+        const nextUserTranscript = pendingUserTranscripts.splice(0).join(" ").replace(/\s+/g, " ").trim();
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
         flushQueuedResponse();
         assistantTranscript = "";
