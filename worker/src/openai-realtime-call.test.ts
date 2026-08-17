@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -100,4 +100,22 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Beitragsentlastungstarife/);
   assert.match(instructions, /Steuervorteile/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
+});
+
+test("forces the ten-year projection before scheduling after a contribution", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-pkv-order",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push({ role: "user", text: "Ich zahle tausend Euro.", at: 1 });
+
+  const instruction = buildRequiredPkvSequenceInstruction(ctx);
+  assert.match(instruction, /in zehn Jahren/);
+  assert.match(instruction, /Keine Terminfrage/);
+
+  ctx.transcript.push(
+    { role: "assistant", text: "Bei 1000 Euro wären es in zehn Jahren ungefähr 1480 Euro.", at: 2 },
+  );
+  assert.match(buildRequiredPkvSequenceInstruction(ctx), /bis zum Ruhestand/);
 });

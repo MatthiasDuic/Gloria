@@ -164,6 +164,22 @@ function isPreparationQuestionAnswered(question: string, ctx: CallContext): bool
   return false;
 }
 
+export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
+  if (ctx.topicKind !== "pkv") return "";
+  const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
+  const assistantText = ctx.transcript.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
+  const hasContribution = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
+  const hasTenYearProjection = /(?:in\s+zehn\s+jahren|zehn[- ]jahres|10[- ]jahres|10\s+jahren)/i.test(assistantText);
+  const hasRetirementQuestion = /(?:bis\s+zum\s+ruhestand|bis\s+zur\s+rente|ruhestand|rente).*(?:fühlen|planung|planen)|(?:fühlen|planung|planen).*(?:ruhestand|rente)/i.test(assistantText);
+  if (hasContribution && !hasTenYearProjection) {
+    return "ZWINGENDER NÄCHSTER SCHRITT: Der Kunde hat seinen aktuellen Monatsbeitrag genannt. Gib jetzt ausschließlich eine konkrete Hochrechnung mit genau diesem Betrag. Sage ausdrücklich: 'in zehn Jahren'. Nenne heutigen Betrag, Betrag in zehn Jahren und monatlichen Unterschied. Keine Terminfrage, keine Konzeptbeschreibung, keine Versicherungsstatusfrage.";
+  }
+  if (hasContribution && hasTenYearProjection && !hasRetirementQuestion) {
+    return "ZWINGENDER NÄCHSTER SCHRITT: Die Zehn-Jahres-Hochrechnung ist erfolgt. Frage jetzt ausschließlich: 'Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?' Warte danach auf die Antwort. Keine Terminfrage.";
+  }
+  return "";
+}
+
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -428,7 +444,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestResponse = (instructions?: string) => {
     const facts = ctx ? buildKnownConversationFacts(ctx) : "";
-    const responseInstructions = [facts, instructions].filter(Boolean).join("\n\n");
+    const sequence = ctx ? buildRequiredPkvSequenceInstruction(ctx) : "";
+    const responseInstructions = [facts, sequence, instructions].filter(Boolean).join("\n\n");
     const delay = Math.max(0, responseCreateNotBefore - Date.now());
     if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer || delay > 0) {
       if (queuedResponseInstructions === null) queuedResponseInstructions = responseInstructions;
