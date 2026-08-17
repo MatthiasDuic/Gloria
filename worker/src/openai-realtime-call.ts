@@ -185,7 +185,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
-    "Sprich pro Turn höchstens zwei bis drei kurze Sätze und stelle höchstens eine Frage. Keine Absätze, keine Wiederholung derselben Rechnung. Nach einer Frage wartest du wirklich auf die Antwort.",
+    "Sprich pro Turn höchstens zwei bis drei kurze Sätze und stelle höchstens eine Frage. Formuliere die Frage möglichst als letzten kurzen Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
     "Lass den Gesprächspartner ausreden. Bei Satzfragmenten, Stocken oder kurzer Sprechpause wartest du lieber, statt den Gedanken zu vervollständigen.",
     "Topic Policies sind fachliche Leitplanken, kein Ablaufplan. Du darfst Reihenfolge, Formulierung und nächsten Schritt situativ ändern. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
     "Keine erfundene Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit und kein Callcenter-Ton.",
@@ -300,7 +300,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const pumpPlaybackQueue = () => {
     playbackTimer = null;
-    if (closed || playbackQueue.length === 0) return;
+    if (closed || playbackQueue.length === 0) {
+      if (!closed) flushQueuedResponse();
+      return;
+    }
     const frame = playbackQueue.shift();
     if (!frame) return;
     if (sendTelnyx({ event: "media", stream_id: streamId, media: { payload: frame.toString("base64") } })) {
@@ -308,6 +311,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
     if (playbackQueue.length > 0) {
       playbackTimer = setTimeout(pumpPlaybackQueue, 20);
+    } else {
+      flushQueuedResponse();
     }
   };
 
@@ -355,13 +360,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    if (activeResponse || responseCancelPending) {
+    if (activeResponse || responseCancelPending || playbackQueue.length > 0 || playbackTimer) {
       queuedResponseInstructions = instructions || "";
       log.info("realtime.response_ignored_while_active", {
         callSid: ctx?.callSid,
         instructionsPreview: instructions?.slice(0, 80) || "none",
         cancelPending: responseCancelPending,
+        playbackPending: playbackQueue.length > 0 || Boolean(playbackTimer),
       });
+      setTimeout(flushQueuedResponse, 20);
       return false;
     }
     sendOpenAi({
