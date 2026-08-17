@@ -379,27 +379,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestResponse(instructions);
   };
 
-  const cancelActiveResponseForBargeIn = () => {
-    if (!activeResponse || responseCancelPending) return;
-    responseCancelPending = true;
-    sendOpenAi({ type: "response.cancel" });
-    if (activeAssistantItemId && outboundAudioBytes > 0) {
-      interruptedItemIds.add(activeAssistantItemId);
-      sendOpenAi({
-        type: "conversation.item.truncate",
-        item_id: activeAssistantItemId,
-        content_index: 0,
-        audio_end_ms: Math.floor(outboundAudioBytes / 8),
-      });
-    }
-    sendTelnyx({ event: "clear", stream_id: streamId });
-    clearPlaybackQueue();
-    activeResponse = false;
-    outboundAudioBuffer = Buffer.alloc(0);
-    assistantTranscript = "";
-    log.info("realtime.barge_in", { callSid: ctx?.callSid });
-  };
-
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
     sendOpenAi({
       type: "conversation.item.create",
@@ -511,9 +490,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
-          if (activeResponse && /[a-zäöüß]{3,}/i.test(transcript)) {
-            cancelActiveResponseForBargeIn();
-          }
           ctx.lastUserFinalAt = Date.now();
           ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
           log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
