@@ -273,6 +273,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let preparationQuestions: string[] = [];
   let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
   let preparationQuestionIndex = 0;
+  const pendingUserTranscripts: string[] = [];
   const queuedAudio: string[] = [];
   const handledToolCalls = new Set<string>();
   const interruptedItemIds = new Set<string>();
@@ -392,6 +393,38 @@ export async function handleOpenAiRealtimeTelnyxStream(
     });
   };
 
+  const processUserTranscript = (transcript: string) => {
+    if (!ctx) return;
+    ctx.lastUserFinalAt = Date.now();
+    ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
+    log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
+
+    if (preparationMode === "awaiting_consent") {
+      const consent = isPreparationConsent(transcript);
+      if (consent === "granted") {
+        preparationMode = "asking";
+        preparationQuestionIndex = 0;
+        requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${preparationQuestions[0]}"`);
+      } else if (consent === "declined") {
+        preparationMode = "complete";
+        requestResponse("Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
+      } else {
+        requestResponse("Die Antwort war unklar. Frage freundlich noch einmal nur, ob zwei Minuten für kurze Vorbereitungsfragen passen.");
+      }
+    } else if (preparationMode === "asking") {
+      preparationQuestionIndex += 1;
+      const nextQuestion = preparationQuestions[preparationQuestionIndex];
+      if (nextQuestion) {
+        requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${nextQuestion}"`);
+      } else {
+        preparationMode = "complete";
+        requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
+      }
+    } else {
+      requestResponse();
+    }
+  };
+
   const handleToolCall = async (tool: RealtimeToolCall) => {
     if (!ctx || handledToolCalls.has(tool.callId)) return;
     handledToolCalls.add(tool.callId);
@@ -492,33 +525,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
-          ctx.lastUserFinalAt = Date.now();
-          ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
-          log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
-
-          if (preparationMode === "awaiting_consent") {
-            const consent = isPreparationConsent(transcript);
-            if (consent === "granted") {
-              preparationMode = "asking";
-              preparationQuestionIndex = 0;
-              requestResponse(`Stelle ausschließlich diese Vorbereitungsfrage: "${preparationQuestions[0]}"`);
-            } else if (consent === "declined") {
-              preparationMode = "complete";
-              requestResponse("Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
-            } else {
-              requestResponse("Die Antwort war unklar. Frage freundlich noch einmal nur, ob zwei Minuten für kurze Vorbereitungsfragen passen.");
-            }
-          } else if (preparationMode === "asking") {
-            preparationQuestionIndex += 1;
-            const nextQuestion = preparationQuestions[preparationQuestionIndex];
-            if (nextQuestion) {
-              requestResponse(`Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${nextQuestion}"`);
-            } else {
-              preparationMode = "complete";
-              requestResponse("Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.");
-            }
-          } else if (!activeResponse) {
-            requestResponse();
+          if (activeResponse) {
+            pendingUserTranscripts.push(transcript);
+            log.info("realtime.user_queued_until_response_done", { callSid: ctx.callSid, text: transcript });
+          } else {
+            processUserTranscript(transcript);
           }
         }
         return;
@@ -601,6 +612,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
           }
         }
         flushQueuedResponse();
+        const nextUserTranscript = pendingUserTranscripts.shift();
+        if (nextUserTranscript) processUserTranscript(nextUserTranscript);
         return;
       }
 
