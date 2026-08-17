@@ -725,8 +725,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (!ctx) return;
         const busySlots = slots || [];
         const free = computeFreeSlots(busySlots, {
-          daysAhead: 14,
-          maxCount: 8,
+          daysAhead: 60,
+          maxCount: 40,
           bufferMinutes: 90,
           minLeadDays: 7,
         });

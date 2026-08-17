@@ -134,7 +134,7 @@ export function computeFreeSlots(
     return { hour, minute, weekday: weekdayMap[wd] ?? 0 };
   }
 
-  const out: Array<{ startUtc: string; phrase: string }> = [];
+  const candidates: Array<{ startUtc: string; phrase: string }> = [];
   const now = Date.now();
   // Starte standardmäßig frühestens in der nächsten Woche, um keine
   // kurzfristigen Folgetag-Termine als Erstvorschlag zu erzeugen.
@@ -143,7 +143,7 @@ export function computeFreeSlots(
 
   const endHorizon = now + daysAhead * 24 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000;
 
-  while (cursor < endHorizon && out.length < maxCount) {
+  while (cursor < endHorizon) {
     const candidate = new Date(cursor);
     const { hour, weekday } = berlinHourMinute(candidate);
     // Nur Mo–Fr.
@@ -153,7 +153,7 @@ export function computeFreeSlots(
         (r) => cursor < r.end + bufferMs && slotEnd > r.start - bufferMs,
       );
       if (!collides) {
-        out.push({
+        candidates.push({
           startUtc: candidate.toISOString(),
           phrase: fmtBerlin.format(candidate) + " Uhr",
         });
@@ -165,7 +165,13 @@ export function computeFreeSlots(
     cursor += 30 * 60 * 1000;
   }
 
-  return out;
+  if (candidates.length <= maxCount) return candidates;
+  const distributed: Array<{ startUtc: string; phrase: string }> = [];
+  const step = candidates.length / maxCount;
+  for (let index = 0; index < maxCount; index += 1) {
+    distributed.push(candidates[Math.min(candidates.length - 1, Math.floor(index * step))]);
+  }
+  return distributed;
 }
 
 /**
@@ -176,10 +182,10 @@ export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: strin
   if (slots.length === 0) return "";
   const lines = slots.map((s) => `- ${s.phrase}`);
   return [
-    "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab nächster Woche – nutze diese Liste, falls dein erster Vorschlag abgelehnt wird):",
+    "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab nächster Woche und über mehrere Wochen hinweg):",
     ...lines,
     "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei dieser Slots vor, die zur Praeferenz passen.",
-    "Wenn der Anrufende beide ablehnt, nimm zwei weitere passende aus dieser Liste - KEINE freien Erfindungen außerhalb dieser Liste.",
+    "Wenn der Anrufende einen anderen Zeitraum oder eine andere Woche wünscht, akzeptiere diesen Wunsch, frage bei Bedarf kurz nach der gewünschten Woche und wähle danach zwei passende Slots aus diesem späteren Zeitraum. Bestehe nicht auf der zuerst angebotenen Woche. Erfinde niemals freie Zeiten außerhalb dieser Liste.",
     "",
   ].join("\n");
 }
