@@ -317,12 +317,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const updateSession = () => {
     if (!ctx || !sessionReady) return;
+    const configuredSpeed = Number.parseFloat(process.env.OPENAI_REALTIME_SPEED?.trim() || "0.88");
+    const speed = Number.isFinite(configuredSpeed) ? Math.min(1.1, Math.max(0.75, configuredSpeed)) : 0.88;
     sendOpenAi({
       type: "session.update",
       session: {
         type: "realtime",
         output_modalities: ["audio"],
-        max_output_tokens: 160,
+        max_output_tokens: 220,
         instructions: buildRealtimeInstructions(ctx),
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
         tools: REALTIME_TOOLS,
@@ -344,7 +346,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           output: {
             format: { type: outputAudioFormat },
             voice: process.env.OPENAI_REALTIME_VOICE?.trim() || "marin",
-            speed: 1,
+            speed,
           },
         },
       },

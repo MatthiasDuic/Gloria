@@ -27,6 +27,8 @@ services:
         value: low
       - key: OPENAI_REALTIME_VOICE
         value: marin
+      - key: OPENAI_REALTIME_SPEED
+        value: 0.88
       - key: OPENAI_REALTIME_VAD_EAGERNESS
         value: low
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
