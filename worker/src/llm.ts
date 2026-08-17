@@ -100,6 +100,27 @@ export function prewarmOpenAi(): void {
     });
 }
 
+export function shouldFlushStreamSentence(pendingText: string, ch: string): boolean {
+  const trimmed = pendingText.trim();
+  if (!trimmed) return false;
+
+  if (/[.!?]/.test(ch)) {
+    const tail = trimmed.slice(-3).toLowerCase();
+    const isAbbrev =
+      /\b(z|b|hr|fr|dr|st|ca|bzw|usw|inkl|ggf|evtl|nr|tel|app)\.$/i.test(trimmed) ||
+      /\b\d+\.$/.test(trimmed) ||
+      tail.endsWith(" z.") ||
+      tail.endsWith(" b.");
+    return trimmed.length >= 8 && !isAbbrev;
+  }
+
+  if (/[,:;]/.test(ch)) {
+    return false;
+  }
+
+  return trimmed.length >= 250 && /\s/.test(ch);
+}
+
 export async function streamReply(
   ctx: CallContext,
   userText: string,
@@ -262,24 +283,15 @@ export async function streamReply(
         } else {
           replyText += ch;
           pendingFlush += ch;
-          // Satzgrenze: nur echte Satzenden flushen (kein Komma-Split).
-          // Komma-Splits erzeugen Satzfragmente mit falscher Intonation im TTS.
-          if (/[.!?]/.test(ch) && pendingFlush.length >= 8) {
-            // Schutz gegen Abkürzungen: "z." / "B." / "Hr." / "Fr." / Ordinalia.
-            const tail = replyText.slice(-3).toLowerCase();
-            const isAbbrev =
-              /\b(z|b|hr|fr|dr|st|ca|bzw|usw|inkl|ggf|evtl|nr|tel|app)\.$/i.test(replyText) ||
-              /\b\d+\.$/.test(replyText) || // Ordinalzahlen "30.", "12."
-              tail.endsWith(" z.") ||
-              tail.endsWith(" b.");
-            if (!isAbbrev) flushSentence();
-          }
-          // Latenzbremsen vermeiden: bei langen Teilsaetzen an natuerlichen
-          // Klauselgrenzen frueh flushen, statt auf den finalen Punkt zu warten.
-          if (pendingFlush.length >= earlyFlushChars && /[,;:]/.test(ch)) {
+          // Satzgrenze: nur echte Satzenden flushen. Kommas und andere
+          // Klauselzeichen sind keine gültige TTS-Segmentgrenze, weil sie
+          // sonst mitten im Satz abgeschnittene, unnatürliche Phrasen
+          // aussprechen.
+          if (shouldFlushStreamSentence(pendingFlush, ch)) {
             flushSentence();
           }
-          // Sicherheitspuffer: sehr lange Segmente an Leerzeichen trennen.
+          // Sicherheitspuffer: sehr lange Segmente nur noch an Leerzeichen
+          // trennen, wenn der Satz bereits deutlich über die normale Länge geht.
           if (pendingFlush.length >= 250 && /\s/.test(ch)) {
             flushSentence();
           }

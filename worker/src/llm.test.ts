@@ -7,6 +7,7 @@ import {
   decideTurnRoute,
   isCustomerFarewell,
   isLikelyIncompleteCustomerThought,
+  shouldFlushStreamSentence,
   streamReply,
   parseGermanEuroAmount,
   type TurnOutput,
@@ -69,6 +70,12 @@ test("recognizes common caller farewells", () => {
   assert.equal(isCustomerFarewell("Auf Wiederhören."), true);
   assert.equal(isCustomerFarewell("Tschüss und einen schönen Tag."), true);
   assert.equal(isCustomerFarewell("Ich habe noch eine Frage."), false);
+});
+
+test("does not flush a sentence at a comma before the clause is finished", () => {
+  assert.equal(shouldFlushStreamSentence("Danke für die Info, ich prüfe das jetzt", ","), false);
+  assert.equal(shouldFlushStreamSentence("Danke für die Info, ich prüfe das jetzt", "."), true);
+  assert.equal(shouldFlushStreamSentence("Es dauert einen Moment, ich habe die Daten gerade noch einmal geprüft", ","), false);
 });
 
 test("does not repeat the starting bridge after the projection question", () => {
