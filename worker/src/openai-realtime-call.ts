@@ -303,9 +303,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
             turn_detection: {
               type: "semantic_vad",
-              eagerness: process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim() || "low",
+              eagerness: process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim() || "medium",
               create_response: false,
-              interrupt_response: true,
+              interrupt_response: false,
             },
           },
           output: {
@@ -438,22 +438,25 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_started") {
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
-        if (activeResponse) {
-          sendOpenAi({ type: "response.cancel" });
-          if (activeAssistantItemId && outboundAudioBytes > 0) {
-            interruptedItemIds.add(activeAssistantItemId);
-            sendOpenAi({
-              type: "conversation.item.truncate",
-              item_id: activeAssistantItemId,
-              content_index: 0,
-              audio_end_ms: Math.floor(outboundAudioBytes / 8),
-            });
+        if (activeResponse && assistantTranscript.trim().length > 0) {
+          const hasMeaningfulUserTurn = /[a-zäöüß]/i.test((message.transcript || "").trim()) || assistantTranscript.trim().length > 0;
+          if (hasMeaningfulUserTurn) {
+            sendOpenAi({ type: "response.cancel" });
+            if (activeAssistantItemId && outboundAudioBytes > 0) {
+              interruptedItemIds.add(activeAssistantItemId);
+              sendOpenAi({
+                type: "conversation.item.truncate",
+                item_id: activeAssistantItemId,
+                content_index: 0,
+                audio_end_ms: Math.floor(outboundAudioBytes / 8),
+              });
+            }
+            sendTelnyx({ event: "clear", stream_id: streamId });
+            activeResponse = false;
+            outboundAudioBuffer = Buffer.alloc(0);
+            assistantTranscript = "";
+            log.info("realtime.barge_in", { callSid: ctx?.callSid });
           }
-          sendTelnyx({ event: "clear", stream_id: streamId });
-          activeResponse = false;
-          outboundAudioBuffer = Buffer.alloc(0);
-          assistantTranscript = "";
-          log.info("realtime.barge_in", { callSid: ctx?.callSid });
         }
         return;
       }
