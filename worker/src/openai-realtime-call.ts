@@ -255,7 +255,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let ctx: CallContext | null = null;
   let openai: WebSocket | null = null;
   let streamId = "";
-  let audioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcmu";
+  let inputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
+  let outputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
   let sessionReady = false;
   let closed = false;
   let reportPosted = false;
@@ -328,7 +329,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         tool_choice: "auto",
         audio: {
           input: {
-            format: { type: audioFormat },
+            format: { type: inputAudioFormat },
             transcription: {
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
@@ -341,7 +342,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
           },
           output: {
-            format: { type: audioFormat },
+            format: { type: outputAudioFormat },
             voice: process.env.OPENAI_REALTIME_VOICE?.trim() || "marin",
             speed: 1,
           },
@@ -478,7 +479,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       for (const payload of queuedAudio.splice(0)) {
         sendOpenAi({ type: "input_audio_buffer.append", audio: payload });
       }
-      log.info("realtime.connected", { callSid: ctx?.callSid, model, audioFormat });
+      log.info("realtime.connected", { callSid: ctx?.callSid, model, inputAudioFormat, outputAudioFormat });
     });
 
     openai.on("message", (data: WebSocket.RawData) => {
@@ -569,7 +570,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.output_audio.done") {
         if (outboundAudioBuffer.length > 0) {
-          const silenceByte = audioFormat === "audio/pcma" ? 0xd5 : 0xff;
+          const silenceByte = outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff;
           const frame = Buffer.concat([
             outboundAudioBuffer,
             Buffer.alloc(160 - outboundAudioBuffer.length, silenceByte),
@@ -653,7 +654,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (frame.event === "start") {
       const state = decodeClientState(frame.start.client_state);
       streamId = frame.stream_id;
-      audioFormat = openAiAudioFormat(process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC);
+      inputAudioFormat = openAiAudioFormat(frame.start.media_format?.encoding);
+      outputAudioFormat = openAiAudioFormat(process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA");
       ctx = newContext({
         callSid: frame.start.call_control_id,
         streamSid: frame.stream_id,
@@ -672,7 +674,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
       log.info("realtime.call_started", {
         callSid: ctx.callSid,
         streamSid: streamId,
-        audioFormat,
+        inputAudioFormat,
+        outputAudioFormat,
         topic: ctx.topic,
       });
       connectOpenAi();

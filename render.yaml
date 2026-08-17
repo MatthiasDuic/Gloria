@@ -30,7 +30,7 @@ services:
       - key: OPENAI_REALTIME_VAD_EAGERNESS
         value: low
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
-        value: PCMU
+        value: PCMA
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN

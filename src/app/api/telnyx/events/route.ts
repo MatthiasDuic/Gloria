@@ -241,7 +241,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
       });
     } else if (eventType === "call.answered") {
-      const streamBidirectionalCodec = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMU").trim();
+      const streamBidirectionalCodec = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim();
       await sendTelnyxCommand(callControlId, "streaming_start", {
         stream_url: getTelnyxMediaStreamUrl(),
         stream_track: "both_tracks",
