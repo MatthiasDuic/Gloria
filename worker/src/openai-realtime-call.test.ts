@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, openAiAudioFormat } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -54,11 +54,19 @@ test("allows a PKV appointment after consent to the concept question", () => {
 test("allows a PKV appointment after selecting an offered slot", () => {
   const ctx = buildPkvContext();
   ctx.transcript.push(
+    { role: "user", text: "Ja, diese Klarheit ist für mich hilfreich.", at: 6.5 },
     { role: "assistant", text: "Dann habe ich zwei Vorschläge: Montag, 24. August um 15:30 Uhr, oder Dienstag, 25. August um 13:30 Uhr. Welcher Termin passt Ihnen besser?", at: 7 },
     { role: "user", text: "Der Dienstag ist gut.", at: 8 },
   );
 
   assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
+});
+
+test("rejects invented slots and accepts exact supplied slots", () => {
+  const ctx = buildPkvContext();
+  ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
+  assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 11:00 Uhr"), true);
+  assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
 test("includes the required decision-maker and gatekeeper opening lines", () => {

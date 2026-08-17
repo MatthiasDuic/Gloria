@@ -206,14 +206,24 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
     && /(?:zwei\s+(?:konkrete\s+)?(?:termine|vorschläge|optionen)|(?:termine|vorschläge)\s*:\s*[^.]+\s+(?:oder|bzw\.?)[^.]+)/i.test(assistantText)
     && /(?:passt|gut|nehme|wäre|gerne|ja|september|oktober|november|dezember|januar|februar|märz|april|mai|juni|juli|august)/i.test(userText);
 
-  if (hasOfferedSlotSelection) return { ok: true };
-
   if (!hasInsuranceStatus) return { ok: false, reason: "Vor einer Terminbestätigung fehlt die Versicherungsart." };
   if (!hasContribution) return { ok: false, reason: "Vor einer Terminbestätigung fehlt der aktuelle Monatsbeitrag." };
   if (!hasProjection) return { ok: false, reason: "Zeige zuerst anhand des genannten Beitrags eine konkrete Zehn-Jahres-Hochrechnung mit rund vier Prozent pro Jahr." };
   if (conceptQuestionIndex === undefined) return { ok: false, reason: "Erkläre zuerst kurz Arbeitsweise, Konzeptphase und konkreten Kundennutzen." };
   if (!hasInterest) return { ok: false, reason: "Hole nach Hochrechnung und Konzept erst eine eindeutige Zustimmung auf die letzte Nutzen- oder Terminfrage ein." };
+  if (hasOfferedSlotSelection) return { ok: true };
   return { ok: true };
+}
+
+export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
+  const normalize = (value: string) => value
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalizedPhrase = normalize(phrase);
+  const offeredText = normalize(ctx.freeSlotsPrompt || "");
+  return normalizedPhrase.length > 10 && offeredText.includes(normalizedPhrase);
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
@@ -526,6 +536,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       const eligibility = canConfirmRealtimeAppointment(ctx);
       if (!phrase) {
         sendToolResult(tool.callId, { ok: false, error: "missing_slot_phrase" });
+      } else if (!isOfferedSlotPhrase(ctx, phrase)) {
+        handledToolCalls.delete(tool.callId);
+        sendToolResult(tool.callId, { ok: false, error: "slot_not_offered", instruction: "Dieser Termin steht nicht in der bereitgestellten freien Slotliste. Biete nur zwei echte freie Slots aus der Liste an." });
+        requestResponse("Der gewünschte Termin steht so nicht in den freien Vorschlägen. Biete bitte ausschließlich zwei konkrete freie Termine aus der bereitgestellten Liste an.");
       } else if (!eligibility.ok) {
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: "appointment_not_ready", instruction: eligibility.reason });
