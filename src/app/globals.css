@@ -457,6 +457,26 @@ textarea {
   height: 100%;
 }
 
+.playbook-details {
+  height: auto;
+}
+
+.playbook-details > summary {
+  cursor: pointer;
+  color: var(--ink-900);
+  font-size: 1rem;
+  list-style-position: outside;
+  margin-left: 18px;
+}
+
+.playbook-details[open] > summary {
+  margin-bottom: 12px;
+}
+
+.playbook-details > summary::marker {
+  color: var(--accent-600);
+}
+
 .playbook-card-wide {
   grid-column: 1 / -1;
 }

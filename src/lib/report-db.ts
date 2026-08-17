@@ -1885,6 +1885,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
         topic,
         // Topic-Policy-Felder: explizite Werte aus PostgreSQL behalten,
         // alte Playbook-Inhalte nur als Rückwärtskompatibilitätsfallback nutzen.
+        callObjective: typeof data.callObjective === "string" ? data.callObjective : undefined,
         topicSummary:
           typeof data.topicSummary === "string"
             ? data.topicSummary
@@ -1907,6 +1908,17 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
         objectionResponses:
           typeof data.objectionResponses === "string" ? data.objectionResponses : undefined,
         proofPoints: typeof data.proofPoints === "string" ? data.proofPoints : undefined,
+        transferHandling: typeof data.transferHandling === "string" ? data.transferHandling : undefined,
+        greetingDecisionMaker:
+          typeof data.greetingDecisionMaker === "string" ? data.greetingDecisionMaker : undefined,
+        greetingGatekeeper:
+          typeof data.greetingGatekeeper === "string" ? data.greetingGatekeeper : undefined,
+        reasonForCall: typeof data.reasonForCall === "string" ? data.reasonForCall : undefined,
+        relevanceQuestion:
+          typeof data.relevanceQuestion === "string" ? data.relevanceQuestion : undefined,
+        contributionQuestion:
+          typeof data.contributionQuestion === "string" ? data.contributionQuestion : undefined,
+        projectionText: typeof data.projectionText === "string" ? data.projectionText : undefined,
         opener: String(data.opener || ""),
         discovery: String(data.discovery || ""),
         objectionHandling: String(data.objectionHandling || ""),
