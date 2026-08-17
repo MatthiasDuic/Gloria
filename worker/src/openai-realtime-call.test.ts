@@ -53,5 +53,5 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   assert.match(instructions, /Guten Tag, mein Name ist Gloria/);
   assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
-  assert.match(instructions, /kurze Einordnung zum Thema private Krankenversicherung/);
+  assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
 });

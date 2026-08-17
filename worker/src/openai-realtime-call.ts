@@ -128,6 +128,12 @@ function isPreparationConsent(text: string): "granted" | "declined" | "unknown" 
   return "unknown";
 }
 
+function isLikelyIncompleteAssistantTurn(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length < 45) return false;
+  return !/[.!?؟]$/.test(normalized);
+}
+
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
 
@@ -201,7 +207,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   if (target) {
     parts.push(
-      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zum Thema ${ctx.topic || "Versicherung"}." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang.`,
+      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
@@ -272,6 +278,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const playbackQueue: Buffer[] = [];
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
+  let assistantContinuationRequested = false;
   let preparationQuestions: string[] = [];
   let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
   let preparationQuestionIndex = 0;
@@ -405,6 +412,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const processUserTranscript = (transcript: string) => {
     if (!ctx) return;
+    assistantContinuationRequested = false;
     ctx.lastUserFinalAt = Date.now();
     ctx.transcript.push({ role: "user", text: transcript, at: Date.now() });
     log.info("realtime.user_said", { callSid: ctx.callSid, text: transcript });
@@ -611,6 +619,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         activeResponse = false;
         responseCancelPending = false;
+        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
+          assistantContinuationRequested = true;
+          log.warn("realtime.incomplete_response_recovery", {
+            callSid: ctx?.callSid,
+            text: transcript,
+          });
+          requestResponse("Deine letzte Antwort wurde technisch mitten im Satz beendet. Setze den angefangenen Satz unmittelbar und natürlich zu Ende. Wiederhole den bereits gesprochenen Teil nicht. Stelle danach höchstens eine kurze Frage und warte dann auf den Kunden.");
+          assistantTranscript = "";
+          assistantTranscriptDeltaSeen = false;
+          return;
+        }
+        assistantContinuationRequested = false;
         for (const item of message.response?.output || []) {
           if (item.type === "function_call" && item.name && item.call_id) {
             void handleToolCall({
