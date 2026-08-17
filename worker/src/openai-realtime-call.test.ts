@@ -29,6 +29,7 @@ test("ignores common background-noise ASR fragments but keeps short German answe
   assert.equal(isLikelyNoiseTranscript("Good to"), true);
   assert.equal(isLikelyNoiseTranscript("Mhm."), true);
   assert.equal(isLikelyNoiseTranscript("Anlıyorum."), true);
+  assert.equal(isLikelyNoiseTranscript("hera"), true);
   assert.equal(isLikelyNoiseTranscript("Ja."), false);
   assert.equal(isLikelyNoiseTranscript("Nein."), false);
   assert.equal(isLikelyNoiseTranscript("Dienstag."), false);
