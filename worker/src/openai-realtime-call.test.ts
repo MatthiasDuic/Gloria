@@ -100,6 +100,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Beitragsentlastungstarife/);
   assert.match(instructions, /Steuervorteile/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
+  assert.match(instructions, /nur auf konkrete Kundenfrage/i);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {
