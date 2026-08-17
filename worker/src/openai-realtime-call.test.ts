@@ -75,3 +75,19 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
 });
+
+test("requires the PKV ten-year and retirement bridge after a contribution", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-pkv-projection",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /in zehn Jahren/);
+  assert.match(instructions, /bis zum Ruhestand/);
+  assert.match(instructions, /Tarifoptimierung/);
+  assert.match(instructions, /Altersrückstellungen/);
+  assert.match(instructions, /Beitragsentlastungstarife/);
+  assert.match(instructions, /Steuervorteile/);
+});
