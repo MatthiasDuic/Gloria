@@ -186,6 +186,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
     "Sprich pro Turn höchstens zwei bis drei kurze Sätze und stelle höchstens eine Frage. Formuliere die Frage möglichst als letzten kurzen Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
+    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort.",
     "Lass den Gesprächspartner ausreden. Bei Satzfragmenten, Stocken oder kurzer Sprechpause wartest du lieber, statt den Gedanken zu vervollständigen.",
     "Topic Policies sind fachliche Leitplanken, kein Ablaufplan. Du darfst Reihenfolge, Formulierung und nächsten Schritt situativ ändern. Fakten-, Datenschutz- und Freiwilligkeitsgrenzen bleiben verbindlich.",
     "Keine erfundene Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit und kein Callcenter-Ton.",
@@ -270,6 +271,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let playbackTimer: NodeJS.Timeout | null = null;
   const playbackQueue: Buffer[] = [];
   let assistantTranscript = "";
+  let assistantTranscriptDeltaSeen = false;
   let preparationQuestions: string[] = [];
   let preparationMode: "none" | "awaiting_consent" | "asking" | "complete" = "none";
   let preparationQuestionIndex = 0;
@@ -549,6 +551,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         outboundAudioBytes = 0;
         outboundAudioBuffer = Buffer.alloc(0);
         assistantTranscript = "";
+        assistantTranscriptDeltaSeen = false;
         return;
       }
 
@@ -580,21 +583,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.output_audio_transcript.delta" || message.type === "response.audio_transcript.delta") {
         assistantTranscript += message.delta || "";
+        assistantTranscriptDeltaSeen = true;
         return;
       }
 
       if (message.type === "response.output_audio_transcript.done" || message.type === "response.audio_transcript.done") {
-        if (message.item_id && interruptedItemIds.delete(message.item_id)) {
-          assistantTranscript = "";
-          return;
-        }
-        const transcript = (message.transcript || assistantTranscript).trim();
-        if (ctx && transcript) {
-          const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
-          ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
-          log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
-        }
-        assistantTranscript = "";
+        if (message.item_id && interruptedItemIds.delete(message.item_id)) return;
+        if (!assistantTranscriptDeltaSeen && message.transcript) assistantTranscript += message.transcript;
         return;
       }
 
@@ -608,6 +603,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.done") {
+        const transcript = assistantTranscript.replace(/\s+/g, " ").trim();
+        if (ctx && transcript) {
+          const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
+          ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
+          log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
+        }
         activeResponse = false;
         responseCancelPending = false;
         for (const item of message.response?.output || []) {
@@ -622,6 +623,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         flushQueuedResponse();
         const nextUserTranscript = pendingUserTranscripts.shift();
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
+        assistantTranscript = "";
+        assistantTranscriptDeltaSeen = false;
         return;
       }
 
