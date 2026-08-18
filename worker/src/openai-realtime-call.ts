@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
-import { decideAppointment, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { appointmentOfferInstruction, decideAppointment, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
 import { advanceContactRouting, createContactRoutingState, instructionForContactRouting, type ContactRoutingState } from "./contact-routing-controller.js";
@@ -127,6 +127,15 @@ function buildKnownConversationFacts(ctx: CallContext): string {
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
   const assessment = assessPkvConversation(ctx.transcript);
+  const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
+  const assistantText = ctx.transcript.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
+  const latestUser = userTurns.at(-1)?.text || "";
+  const hasConceptTransition = /(?:erster\s+termin|analyse|konzept|beitragsentlastung|tarifoptimierung|altersrückstellung|planbaren\s+beitrag)/i.test(assistantText);
+  const acceptedConceptPrompt = /(?:ja|gerne|klar|darf|passt|okay|ok)/i.test(latestUser)
+    && /worum\s+es\s+geht|kurz\s+sagen/i.test(ctx.transcript.at(-2)?.text || "");
+  if (!assessment.contributionPhrase && !assessment.insuranceStatus && acceptedConceptPrompt && !hasConceptTransition) {
+    return "ZWINGENDER NÄCHSTER SCHRITT: Erkläre jetzt zuerst unser Konzept und noch keine Versicherungsfrage. Sage, dass wir 1) die bisherige Beitragsentwicklung analysieren, 2) die Entwicklung bis zum Ruhestand hochrechnen, 3) die derzeitige Krankenversicherung und den Tarif im Termin analysieren und 4) daraus ein persönliches Konzept mit möglichen Beitragsentlastungstarifen, Tarifoptimierung, Altersrückstellungen und gegebenenfalls steuerlichen Finanzierungsmöglichkeiten ableiten. Frage danach, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Keine Terminfrage.";
+  }
   if (!assessment.contributionPhrase || assessment.stage === "ready_to_schedule") return "";
   return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
 }
@@ -183,7 +192,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
-    "Sprich natürlich, klar und in passenden Gesprächsabschnitten. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
+    "Sprich natürlich, klar und in passenden Gesprächsabschnitten. Setze kurze natürliche Pausen mit Kommas und kurzen Sätzen, statt lange Satzketten oder Aufzählungen zu sprechen. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
@@ -208,7 +217,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-FALLBACK BIS ZUR GELADENEN TOPIC POLICY: Erkläre zuerst kurz die Beitragsentwicklung und frage: 'Wie erleben Sie das aktuell?' Frage danach nach dem aktuellen Monatsbeitrag. Ordne ihn mit einer vorsichtigen Hochrechnung in zehn Jahren ein, frage anschließend nach der Bedeutung bis zum Ruhestand und erkläre erst dann den Nutzen einer Einordnung anhand der persönlichen Zahlen für einen planbaren und bezahlbaren Beitrag. Frage danach: 'Wäre diese Klarheit für Sie hilfreich?'",
+      "PKV-ABLAUF: Nach der Zustimmung zur Frage, worum es geht, erkläre zuerst unser Konzept: Beitragsentwicklung analysieren, die Entwicklung in zehn Jahren und bis zum Ruhestand hochrechnen, die derzeitige Krankenversicherung und den Tarif analysieren und daraus ein persönliches Konzept mit möglichen Beitragsentlastungstarifen, Tarifoptimierung, Altersrückstellungen und gegebenenfalls steuerlichen Finanzierungsmöglichkeiten ableiten. Erst danach frage nach Versicherungsstatus und aktuellem Beitrag. Vergleiche keine gesetzlichen Kassen und biete keine Wahltarife oder Bonusprogramme an.",
       "MÖGLICHE PRÜFOPTIONEN: Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile dürfen nur als mögliche Prüfoptionen nach persönlicher Analyse genannt werden, nie als Empfehlung oder Garantie. Den Ablauf des Analyse-Termins oder diese Optionen erklärst du nur auf konkrete Kundenfrage ausführlicher.",
       "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen Versicherungsart, heutiger Beitrag, eine nachvollziehbare Zehn-Jahres-Einordnung und eine klare, auf die Nutzenfrage bezogene Zustimmung vorliegen. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für Ersparnisse oder stabile Beiträge und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Mögliche Instrumente nur als Prüfoption nach persönlicher Analyse nennen.",
@@ -366,7 +375,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
         audioBytes += chunk.length;
         playback.appendBase64Audio(chunk.toString("base64"));
-      });
+      }, ctx?.voiceProfile);
       if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
         playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
         if (audioBytes === 0) playback.interrupt();
@@ -466,6 +475,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
       const resumeInstruction = currentContext.topicKind === "pkv"
         ? instructionForPkvStage(assessPkvConversation(currentContext.transcript))
         : undefined;
+      const assessment = currentContext.topicKind === "pkv"
+        ? assessPkvConversation(currentContext.transcript)
+        : undefined;
+      if (assessment?.stage === "ready_to_schedule") {
+        const offer = appointmentOfferInstruction(
+          currentContext.freeSlotsPrompt,
+          detectAppointmentPreference(currentContext.transcript),
+        );
+        if (offer) {
+          requestEventResponse(offer);
+          return;
+        }
+      }
       if (event.type === "customer_question" || event.type === "objection") {
         requestEventResponse(instructionForConversationEvent(event, resumeInstruction));
         return;

@@ -30,7 +30,17 @@ services:
       - key: ELEVENLABS_VOICE_ID
         value: Ywa4Py8gVz5ugeNVy6iC
       - key: ELEVENLABS_MODEL
-        value: eleven_flash_v2_5
+        value: eleven_multilingual_v2
+      - key: ELEVENLABS_STABILITY
+        value: "0.27"
+      - key: ELEVENLABS_SIMILARITY
+        value: "0.86"
+      - key: ELEVENLABS_STYLE
+        value: "0.62"
+      - key: ELEVENLABS_SPEED
+        value: "0.90"
+      - key: ELEVENLABS_SPEAKER_BOOST
+        value: "false"
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: APP_BASE_URL

@@ -1,4 +1,5 @@
 import { fetch } from "undici";
+import type { VoiceProfile } from "./topic-policy.js";
 
 export type ElevenLabsOutputFormat = "alaw_8000" | "ulaw_8000";
 
@@ -21,6 +22,7 @@ export async function streamElevenLabsAudio(
   outputFormat: ElevenLabsOutputFormat,
   signal: AbortSignal,
   onChunk: (chunk: Buffer) => void,
+  voiceProfile?: Pick<VoiceProfile, "stability" | "similarity" | "style" | "speed" | "speakerBoost">,
 ): Promise<void> {
   const apiKey = getApiKey();
   const voiceId = getVoiceId();
@@ -38,7 +40,15 @@ export async function streamElevenLabsAudio(
       body: JSON.stringify({
         text,
         model_id: process.env.ELEVENLABS_MODEL?.trim() || "eleven_multilingual_v2",
-        voice_settings: { stability: 0.42, similarity_boost: 0.9, style: 0.38, use_speaker_boost: true },
+        voice_settings: {
+          stability: Number.parseFloat(process.env.ELEVENLABS_STABILITY?.trim() || String(voiceProfile?.stability ?? 0.27)),
+          similarity_boost: Number.parseFloat(process.env.ELEVENLABS_SIMILARITY?.trim() || String(voiceProfile?.similarity ?? 0.86)),
+          style: Number.parseFloat(process.env.ELEVENLABS_STYLE?.trim() || String(voiceProfile?.style ?? 0.62)),
+          speed: Number.parseFloat(process.env.ELEVENLABS_SPEED?.trim() || String(voiceProfile?.speed ?? 0.9)),
+          use_speaker_boost: process.env.ELEVENLABS_SPEAKER_BOOST?.trim()
+            ? process.env.ELEVENLABS_SPEAKER_BOOST.trim() === "true"
+            : voiceProfile?.speakerBoost ?? false,
+        },
       }),
       signal,
     },

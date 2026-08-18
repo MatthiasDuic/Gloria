@@ -107,7 +107,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /nur auf konkrete Kundenfrage/i);
 });
 
-test("uses the standard PKV flow in a strict order: relevance → contribution → 10-year projection → retirement bridge → value → interest", () => {
+test("uses the standard PKV flow in a strict order: concept → insurance status and contribution", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-flow",
     streamSid: "test-stream",
@@ -116,25 +116,14 @@ test("uses the standard PKV flow in a strict order: relevance → contribution �
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const relevanceIndex = instructions.search(/Wie erleben Sie das aktuell|Wie erleben Sie das/i);
-  const contributionIndex = instructions.search(/Würden Sie mir kurz sagen, was Sie aktuell monatlich.*?zahlen|aktuellen Monatsbeitrag/i);
-  const projectionIndex = instructions.search(/in zehn Jahren/i);
-  const retirementIndex = instructions.search(/bis zum Ruhestand/i);
-  const valueIndex = instructions.search(/persönlichen Zahlen|planbaren und bezahlbaren Beitrag/i);
-  const interestIndex = instructions.search(/Wäre diese Klarheit für Sie hilfreich/i);
+  const conceptIndex = instructions.search(/Beitragsentwicklung analysieren/);
+  const projectionIndex = instructions.search(/in zehn Jahren und bis zum Ruhestand hochrechnen/);
+  const contributionIndex = instructions.search(/Versicherungsstatus und aktuellem Beitrag/);
 
-  assert.notEqual(relevanceIndex, -1);
-  assert.notEqual(contributionIndex, -1);
+  assert.notEqual(conceptIndex, -1);
   assert.notEqual(projectionIndex, -1);
-  assert.notEqual(retirementIndex, -1);
-  assert.notEqual(valueIndex, -1);
-  assert.notEqual(interestIndex, -1);
-
-  assert.ok(relevanceIndex < contributionIndex);
-  assert.ok(contributionIndex < projectionIndex);
-  assert.ok(projectionIndex < retirementIndex);
-  assert.ok(retirementIndex < valueIndex);
-  assert.ok(valueIndex < interestIndex);
+  assert.notEqual(contributionIndex, -1);
+  assert.ok(conceptIndex < contributionIndex);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {
@@ -182,6 +171,22 @@ test("places the active PKV stage after optional response guidance", () => {
   ctx.transcript.push({ role: "user", text: "Ich zahle 1000 Euro im Monat.", at: 1 });
   const response = buildRealtimeResponseInstructions(ctx, "Begründe die Antwort knapp.", true);
   assert.ok(response.indexOf("Begründe die Antwort knapp.") < response.indexOf("ZWINGENDER NÄCHSTER SCHRITT"));
+});
+
+test("requires the concept bridge after permission to explain the call", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-concept-bridge",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push(
+    { role: "assistant", text: "Darf ich Ihnen kurz sagen, worum es geht?", at: 1 },
+    { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
+  );
+  const instruction = buildRequiredPkvSequenceInstruction(ctx);
+  assert.match(instruction, /Beitragsentwicklung analysieren/);
+  assert.match(instruction, /Tarifoptimierung/);
+  assert.doesNotMatch(instruction, /Wahltarife|Bonusprogramme/);
 });
 
 test("restores the decision-maker introduction only when playback was interrupted", () => {
