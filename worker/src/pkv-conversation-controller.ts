@@ -49,7 +49,7 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
       ? "gkv"
       : undefined;
   const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
-  const relevanceAsked = /(?:wie nehmen sie diese entwicklung wahr|wie stark sp[üu]ren sie die entwicklung|gr[öo][ßs]te sorge.*beitr[aä]ge|darf ich ihnen kurz sagen, worum es geht)/i.test(assistantText);
+  const relevanceAsked = /(?:wie nehmen sie diese entwicklung wahr|wie stark sp[üu]ren sie die entwicklung|gr[öo][ßs]te sorge.*beitr[aä]ge)/i.test(assistantText);
   const conceptDelivered = /(?:beitragsstabilität|bezahlbarkeit im alter|persönliche[sr]? konzept|beitragsentlastung|tarifoptimierung|altersrückstellungen|analysekonzept|analyse-konzept)/i.test(assistantText);
   const projectionDelivered = /(?:in\s+zehn\s+jahren|in\s+10\s+jahren|zehn[- ]jahres|10[- ]jahres)/i.test(assistantText)
     && /(?:vier\s+prozent|4\s*%|hochrechn|ungefähr|etwa)/i.test(assistantText);
@@ -63,7 +63,7 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
   if (!interestConfirmed && retirementReflectionAsked && !interestConfirmed) stage = "need_interest";
   else if (projectionDelivered && !retirementReflectionAsked) stage = "need_retirement_reflection";
   else if (contributionPhrase && !projectionDelivered) stage = "need_projection";
-  else if (permissionToExplain && !conceptDelivered) stage = "need_interest";
+  else if (permissionToExplain && !relevanceAsked) stage = "need_relevance";
   else if (!relevanceAsked) stage = "need_relevance";
   else if (!contributionPhrase) stage = "need_contribution";
   else if (!projectionDelivered) stage = "need_projection";

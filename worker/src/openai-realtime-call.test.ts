@@ -180,7 +180,7 @@ test("places the active PKV stage after optional response guidance", () => {
   assert.ok(response.indexOf("Begründe die Antwort knapp.") < response.indexOf("ZWINGENDER NÄCHSTER SCHRITT"));
 });
 
-test("requires the concept bridge after permission to explain the call", () => {
+test("requires the sensibilization and relevance question after permission to explain the call", () => {
   const ctx = newContext({
     callSid: "test-realtime-concept-bridge",
     streamSid: "test-stream",
@@ -191,9 +191,9 @@ test("requires the concept bridge after permission to explain the call", () => {
     { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
   );
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /Konzept|Beitragsentwicklung/);
-  assert.match(instruction, /Tarifoptimierung/);
-  assert.doesNotMatch(instruction, /Wahltarife|Bonusprogramme/);
+  assert.match(instruction, /Beitragsentwicklung|wie nehmen Sie diese entwicklung wahr/i);
+  assert.match(instruction, /Sensibilisiere|steigen Jahr für Jahr/);
+  assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
 });
 
 test("restores the decision-maker introduction only when playback was interrupted", () => {
