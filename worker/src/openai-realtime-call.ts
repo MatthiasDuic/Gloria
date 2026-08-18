@@ -249,6 +249,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let ttsTurn = 0;
   let responseInterrupted = false;
   let currentAssistantTurnIndex: number | undefined;
+  let decisionMakerIntroPending = false;
   let preparationState: PreparationState = createPreparationState();
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
@@ -366,6 +367,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
+  const requestDecisionMakerIntro = () => {
+    decisionMakerIntroPending = true;
+    requestResponse("Der Entscheider ist jetzt bestätigt. Stelle dich transparent als digitale Assistentin von Herrn Duic vor, nenne den Anlass in einem kurzen Satz und frage, ob eine kurze Frage passt. Starte noch nicht mit Beitrag oder Termin.");
+  };
+
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
     sendOpenAi({
       type: "conversation.item.create",
@@ -395,6 +401,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
     unclearClarificationPending = false;
 
+    if (contactRouting?.stage === "decision_maker" && decisionMakerIntroPending) {
+      requestDecisionMakerIntro();
+      return;
+    }
+
     if (event.type === "clear_rejection") {
       requestResponse(instructionForConversationEvent(event));
       return;
@@ -420,7 +431,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse(instructionForContactRouting(contactRouting));
         return;
       }
-      requestResponse("Der Entscheider ist jetzt bestätigt. Stelle dich transparent als digitale Assistentin von Herrn Duic vor, nenne den Anlass in einem kurzen Satz und frage, ob eine kurze Frage passt. Starte noch nicht mit Beitrag oder Termin.");
+      requestDecisionMakerIntro();
       return;
     }
 
@@ -657,6 +668,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           assistantTranscriptDeltaSeen = false;
           return;
         }
+        if (decisionMakerIntroPending) decisionMakerIntroPending = false;
         const transcript = assistantTranscript.replace(/\s+/g, " ").trim();
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
