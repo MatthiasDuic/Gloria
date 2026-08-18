@@ -131,6 +131,16 @@ export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
 }
 
+export function buildRealtimeResponseInstructions(
+  ctx: CallContext,
+  instructions?: string,
+  includeSequence = true,
+): string {
+  const facts = buildKnownConversationFacts(ctx);
+  const sequence = includeSequence ? buildRequiredPkvSequenceInstruction(ctx) : "";
+  return [facts, sequence, instructions].filter(Boolean).join("\n\n");
+}
+
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/["“”'»«]+$/g, "").replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -364,9 +374,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    const facts = ctx ? buildKnownConversationFacts(ctx) : "";
-    const sequence = ctx ? buildRequiredPkvSequenceInstruction(ctx) : "";
-    const responseInstructions = [facts, sequence, instructions].filter(Boolean).join("\n\n");
+    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, instructions) : instructions || "";
+    return responses.request(responseInstructions);
+  };
+
+  const requestEventResponse = (instructions: string) => {
+    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, instructions, false) : instructions;
     return responses.request(responseInstructions);
   };
 
@@ -398,7 +411,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (event.type === "unclear") {
       if (!unclearClarificationPending) {
         unclearClarificationPending = true;
-        requestResponse(instructionForConversationEvent(event));
+        requestEventResponse(instructionForConversationEvent(event));
       }
       return;
     }
@@ -410,7 +423,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (event.type === "clear_rejection") {
-      requestResponse(instructionForConversationEvent(event));
+      requestEventResponse(instructionForConversationEvent(event));
       return;
     }
 
@@ -431,7 +444,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       if (contactRouting.stage === "waiting_for_transfer") return;
       if (contactRouting.stage !== "decision_maker") {
-        requestResponse(instructionForContactRouting(contactRouting));
+        requestEventResponse(instructionForContactRouting(contactRouting));
         return;
       }
       requestDecisionMakerIntro();
@@ -443,16 +456,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ? instructionForPkvStage(assessPkvConversation(currentContext.transcript))
         : undefined;
       if (event.type === "customer_question" || event.type === "objection") {
-        requestResponse(instructionForConversationEvent(event, resumeInstruction));
+        requestEventResponse(instructionForConversationEvent(event, resumeInstruction));
         return;
       }
-      requestResponse(instructionForConversationEvent(event, resumeInstruction));
+      requestEventResponse(instructionForConversationEvent(event, resumeInstruction));
       return;
     }
 
     const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
     preparationState = transition.state;
-    requestResponse(transition.instruction);
+    requestEventResponse(transition.instruction);
   };
 
   const handleToolCall = async (tool: RealtimeToolCall) => {
@@ -650,7 +663,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         || message.type === "response.text.done"
       ) {
         if (responseInterrupted) return;
-        if (!assistantTranscriptDeltaSeen && message.transcript) assistantTranscript += message.transcript;
+        if (!assistantTranscriptDeltaSeen) {
+          assistantTranscript += message.transcript || message.text || "";
+        }
         return;
       }
 
@@ -667,6 +682,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.done") {
         if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
           responses.markCancelled();
+          responseInterrupted = false;
+          activeAssistantItemId = "";
+          assistantAudioBytes = 0;
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
           return;
@@ -717,6 +735,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.cancelled" || message.type === "response.canceled") {
         responses.markCancelled();
+        responseInterrupted = false;
+        activeAssistantItemId = "";
+        assistantAudioBytes = 0;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
       }

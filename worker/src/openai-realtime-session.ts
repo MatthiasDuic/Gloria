@@ -5,6 +5,7 @@ export type RealtimeServerEvent = {
   item_id?: string;
   delta?: string;
   transcript?: string;
+  text?: string;
   name?: string;
   call_id?: string;
   arguments?: string;

@@ -43,8 +43,12 @@ test("parses server events and ignores malformed frames", () => {
   session.connect();
   socket.open();
   socket.message({ type: "response.created" });
+  socket.message({ type: "response.output_text.done", text: "Eine fertige Antwort." });
   socket.emit("message", Buffer.from("not-json"));
-  assert.deepEqual(events, [{ type: "response.created" }]);
+  assert.deepEqual(events, [
+    { type: "response.created" },
+    { type: "response.output_text.done", text: "Eine fertige Antwort." },
+  ]);
 });
 
 test("serializes client events and closes cleanly", () => {

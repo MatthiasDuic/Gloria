@@ -22,12 +22,13 @@ function targetNameTokens(targetName?: string): string[] {
 
 function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   const normalized = text.toLowerCase();
-  if (/\b(?:das bin ich|ich bin es|ich bin selbst|selbst am apparat|sprechen sie mit mir|ich bin zuständig|hier ist)\b/i.test(normalized)) {
+  if (/\b(?:das bin ich|ich bin es|ich bin selbst|selbst am apparat|sprechen sie mit mir|ich bin zuständig)\b/i.test(normalized)) {
     return true;
   }
-  return targetNameTokens(targetName).some((token) =>
-    new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(normalized),
-  );
+  const targetTokens = targetNameTokens(targetName);
+  if (targetTokens.length === 0) return false;
+  const escapedName = targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  return new RegExp(`(?:\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|\\bhier\\s+ist\\s+${escapedName}\\b|\\b${escapedName}\\s+am\\s+apparat\\b)`, "i").test(normalized);
 }
 
 export function createContactRoutingState(targetName?: string): ContactRoutingState {

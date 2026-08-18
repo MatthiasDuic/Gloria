@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -153,4 +153,22 @@ test("forces the ten-year projection before scheduling after a contribution", ()
     { role: "assistant", text: "Bei 1000 Euro wären es in zehn Jahren ungefähr 1480 Euro.", at: 2 },
   );
   assert.match(buildRequiredPkvSequenceInstruction(ctx), /bis zum Ruhestand/);
+});
+
+test("keeps customer-question responses separate from the PKV sequence", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-question-priority",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push({ role: "user", text: "Ich bin gesetzlich versichert.", at: 1 });
+
+  const response = buildRealtimeResponseInstructions(
+    ctx,
+    "Beantworte zuerst ausschließlich die konkrete Kundenfrage: Kann ich Sie sehen?",
+    false,
+  );
+
+  assert.match(response, /Beantworte zuerst ausschließlich/);
+  assert.doesNotMatch(response, /ZWINGENDER NÄCHSTER SCHRITT/);
 });

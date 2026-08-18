@@ -23,6 +23,14 @@ test("recognizes a self-identified decision maker without repeating the pitch", 
   assert.equal(state.stage, "decision_maker");
 });
 
+test("does not treat a bare target-name mention as self-identification", () => {
+  const state = advanceContactRouting(
+    createContactRoutingState("Herr Neumann"),
+    "Ich stelle Sie zu Herrn Neumann durch.",
+  );
+  assert.equal(state.stage, "gatekeeper");
+});
+
 test("makes voicemail a terminal routing state", () => {
   let state = advanceContactRouting(
     createContactRoutingState("Herr Neumann"),
