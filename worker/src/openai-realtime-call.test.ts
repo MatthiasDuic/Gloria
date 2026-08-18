@@ -173,6 +173,17 @@ test("keeps customer-question responses separate from the PKV sequence", () => {
   assert.doesNotMatch(response, /ZWINGENDER NÄCHSTER SCHRITT/);
 });
 
+test("places the active PKV stage after optional response guidance", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-sequence-priority",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push({ role: "user", text: "Ich zahle 1000 Euro im Monat.", at: 1 });
+  const response = buildRealtimeResponseInstructions(ctx, "Begründe die Antwort knapp.", true);
+  assert.ok(response.indexOf("Begründe die Antwort knapp.") < response.indexOf("ZWINGENDER NÄCHSTER SCHRITT"));
+});
+
 test("restores the decision-maker introduction only when playback was interrupted", () => {
   assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: true }), true);
   assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: false }), false);

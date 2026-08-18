@@ -138,7 +138,7 @@ export function buildRealtimeResponseInstructions(
 ): string {
   const facts = buildKnownConversationFacts(ctx);
   const sequence = includeSequence ? buildRequiredPkvSequenceInstruction(ctx) : "";
-  return [facts, sequence, instructions].filter(Boolean).join("\n\n");
+  return [facts, instructions, sequence].filter(Boolean).join("\n\n");
 }
 
 export function shouldRestoreDecisionMakerIntro(params: {
@@ -183,7 +183,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
-    "Sprich natürlich, klar und in kurzen Gesprächsabschnitten. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
+    "Sprich natürlich, klar und in kurzen Gesprächsabschnitten. Höchstens zwei kurze Sätze und ungefähr 35 Wörter pro Turn. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
@@ -319,7 +319,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       session: {
         type: "realtime",
         output_modalities: ["text"],
-        max_output_tokens: 1000,
+        max_output_tokens: 220,
         instructions: buildRealtimeInstructions(ctx),
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
         tools: REALTIME_TOOLS,
@@ -330,12 +330,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
             transcription: {
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
+              prompt: process.env.OPENAI_TRANSCRIBE_PROMPT?.trim()
+                || "Deutsches Telefonat zur privaten Krankenversicherung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Betraege sowie gesetzlich und privat.",
             },
             turn_detection: {
               type: "server_vad",
               threshold: 0.7,
-              silence_duration_ms: 1200,
-              prefix_padding_ms: 300,
+              silence_duration_ms: 1600,
+              prefix_padding_ms: 500,
               create_response: false,
               interrupt_response: false,
             },
