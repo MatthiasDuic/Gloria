@@ -1,8 +1,9 @@
 import type { IncomingMessage } from "node:http";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
-import { appointmentOfferInstruction, decideAppointment, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
+import { formatAmountForSpeech } from "./preparation-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
 import { advanceContactRouting, createContactRoutingState, instructionForContactRouting, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
@@ -200,7 +201,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag. Biete danach genau zwei Optionen an zwei verschiedenen Kalendertagen an, niemals zwei Uhrzeiten desselben Tages. Wenn der Kunde beide Optionen ablehnt, frage nach seinem gewünschten Zeitraum oder seiner gewünschten Woche und biete danach zwei passende echte Slots aus diesem Zeitraum an. Erfinde niemals einen Termin. Nach eindeutiger Auswahl eines angebotenen Slots rufst du confirm_appointment sofort auf, ohne weitere Bestätigungs- oder Nutzenfragen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
-    "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage; bei Nein oder Zeitdruck beendest du die Fragerunde sofort und ohne Nachfassen.",
+    "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
+      "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
@@ -218,7 +220,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen die Konzept-Erklärung, der heutige Beitrag, eine nachvollziehbare Einordnung der langfristigen Beitragsentwicklung und eine klare, auf den Nutzen bezogene Zustimmung vorliegen. Der Versicherungsstatus ist für diesen Gesprächspfad irrelevant und darf nicht als Voraussetzung behandelt werden. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
       "PKV-HARTE GESPRÄCHSREGEL: Erkläre nach der Zustimmung zum Gesprächsanlass zuerst persönlich und verständlich das Analysekonzept und frage, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Erst wenn dieses Konzept erklärt und beantwortet wurde, darfst du nach gesetzlich oder privat fragen. Sprich niemals über Kassenwahl, Einkommen, Zusatzleistungen, Bonusprogramme oder Wahltarife; das ist nicht das Ziel dieses PKV-Anrufs.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für Ersparnisse oder stabile Beiträge und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Mögliche Instrumente nur als Prüfoption nach persönlicher Analyse nennen.",
-      "Nach einem bestätigten Termin bedeutet ein Nein auf eine Vorbereitungsfrage: 'Kein Problem, dann lassen wir das für den Termin offen.' Stelle diese Frage nicht erneut und fahre nicht mit einem Fragenkatalog fort.",
+      "Nach einem bestätigten Termin bedeutet ein Nein auf eine einzelne Vorbereitungs- oder Gesundheitsfrage: 'Kein Problem, dann lassen wir diesen Punkt für den Termin offen.' Stelle diese Frage nicht erneut, sondern fahre mit der nächsten Frage fort. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
+      "Nach einem bestätigten Termin bedeutet ein Nein auf eine einzelne Vorbereitungs- oder Gesundheitsfrage: 'Kein Problem, dann lassen wir diesen Punkt für den Termin offen.' Stelle diese Frage nicht erneut, sondern fahre mit der nächsten Frage fort. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -232,7 +235,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   }
   parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf gebeten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
 
-  return parts.join("\n\n");
+  const instructions = parts.join("\n\n");
+  return convertNumbersForSpeech(instructions);
 }
 
 async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<void> {
@@ -531,11 +535,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
       } else {
-        ctx.confirmedSlotPhrase = decision.slotPhrase;
-        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, preference: decision.preference });
-        sendToolResult(tool.callId, { ok: true, confirmed_slot: decision.slotPhrase });
+        const speechSlotPhrase = convertSlotPhraseForSpeech(decision.slotPhrase);
+        ctx.confirmedSlotPhrase = speechSlotPhrase;
+        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, speechSlot: speechSlotPhrase, preference: decision.preference });
+        sendToolResult(tool.callId, { ok: true, confirmed_slot: speechSlotPhrase });
         updateSession();
-        const transition = beginPreparation(preparationState, decision.slotPhrase, ctx.transcript);
+        const transition = beginPreparation(preparationState, speechSlotPhrase, ctx.transcript);
         preparationState = transition.state;
         requestResponse(transition.instruction);
         return;
@@ -906,4 +911,29 @@ export async function handleOpenAiRealtimeTelnyxStream(
   telnyx.on("error", (error) => {
     log.error("realtime.telnyx_error", { callSid: ctx?.callSid, error: error.message });
   });
+}
+
+
+
+function convertNumbersForSpeech(text: string): string {
+  // Convert times like "13:00" to "dreizehn Uhr", "15:30" to "fünfzehn Uhr dreißig"
+  const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
+  const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
+  
+  // Convert time: "um 13:00" or "13:00 Uhr" → "um dreizehn Uhr"
+  let result = text.replace(/\b(\d{1,2}):(\d{2})\s*(?:Uhr)?/g, (match, hourStr, minuteStr) => {
+    const hour = Number.parseInt(hourStr, 10);
+    const minute = Number.parseInt(minuteStr, 10);
+    const hourWord = hourWords[hour % 24] || String(hour);
+    if (minute === 0) return `${hourWord} Uhr`;
+    const minuteWord = minuteWords[minute] || String(minute);
+    return `${hourWord} Uhr ${minuteWord}`;
+  });
+
+  result = result.replace(/\b(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(Euro|EUR|€)\b/gi, (match, amount, unit) => {
+    const numericAmount = amount.replace(/\./g, "").split(",")[0];
+    return `${formatAmountForSpeech(numericAmount)} ${unit === "€" ? "Euro" : unit}`;
+  });
+  
+  return result;
 }

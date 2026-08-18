@@ -1,5 +1,22 @@
 import { assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
 
+export function convertSlotPhraseForSpeech(slotPhrase: string): string {
+  // Convert times: "11:00 Uhr" → "elf Uhr", "15:30 Uhr" → "fünfzehn Uhr dreißig"
+  const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
+  const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
+  
+  let result = slotPhrase;
+  result = result.replace(/\b(\d{1,2}):(\d{2})\s*(?:Uhr)?/g, (match, hourStr, minuteStr) => {
+    const hour = Number.parseInt(hourStr, 10);
+    const minute = Number.parseInt(minuteStr, 10);
+    const hourWord = hourWords[hour % 24] || String(hour);
+    if (minute === 0) return `${hourWord} Uhr`;
+    const minuteWord = minuteWords[minute] || String(minute);
+    return `${hourWord} Uhr ${minuteWord}`;
+  });
+  
+  return result;
+}
 export type AppointmentPreference = "morning" | "afternoon" | "unknown";
 
 export type AppointmentDecision =

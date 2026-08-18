@@ -38,8 +38,8 @@ test("stops immediately when the customer declines during the questions", () => 
   let transition = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
   transition = advancePreparation(transition.state, "Ja.", []);
   transition = advancePreparation(transition.state, "Das möchte ich nicht beantworten.", []);
-  assert.equal(transition.state.stage, "awaiting_email");
-  assert.match(transition.instruction, /ohne Nachfassen/);
+  assert.equal(transition.state.stage, "asking");
+  assert.match(transition.instruction, /nächste Frage/);
 });
 
 test("repeats the current question when the answer does not fit", () => {

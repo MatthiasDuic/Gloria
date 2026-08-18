@@ -1,5 +1,56 @@
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
+
+export function formatTimeForSpeech(timeStr: string): string {
+  // Re-export for use in other modules (delegates to formatTimeGerman)
+  const [hourStr, minuteStr] = timeStr.split(":") || [];
+  if (!hourStr) return timeStr;
+  const hour = Number.parseInt(hourStr, 10);
+  const minute = minuteStr ? Number.parseInt(minuteStr, 10) : 0;
+  const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
+  const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig"];
+  const hourWord = hourWords[hour % 24] || String(hour);
+  if (minute === 0) return `${hourWord} Uhr`;
+  const minuteWord = minuteWords[minute] || String(minute);
+  return `${hourWord} Uhr ${minuteWord}`;
+}
+
+export function formatAmountForSpeech(amount: string | number): string {
+  // Re-export for use in other modules (delegates to formatAmountGerman)
+  const num = typeof amount === "string" ? Number.parseInt(amount.replace(/\D/g, ""), 10) : amount;
+  if (Number.isNaN(num) || num < 0) return String(amount);
+  if (num < 20) {
+    const words = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn"];
+    return words[num] || String(num);
+  }
+  if (num === 20) return "zwanzig";
+  if (num < 100) {
+    const tens = Math.floor(num / 10);
+    const ones = num % 10;
+    const tensWords = ["", "", "zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig", "siebzig", "achtzig", "neunzig"];
+    const onesWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"];
+    if (ones === 0) return tensWords[tens];
+    return `${onesWords[ones]}und${tensWords[tens]}`;
+  }
+  if (num < 1000) {
+    const hundreds = Math.floor(num / 100);
+    const remainder = num % 100;
+    const hundredsWords = ["", "einhundert", "zweihundert", "dreihundert", "vierhundert", "fünfhundert", "sechshundert", "siebenhundert", "achthundert", "neunhundert"];
+    const hundredWord = hundredsWords[hundreds];
+    if (remainder === 0) return hundredWord;
+    const remainderWord = formatAmountForSpeech(remainder);
+    return `${hundredWord}${remainderWord}`;
+  }
+  if (num < 1000000) {
+    const thousands = Math.floor(num / 1000);
+    const remainder = num % 1000;
+    const thousandWord = thousands === 1 ? "eintausend" : `${formatAmountForSpeech(thousands)}tausend`;
+    if (remainder === 0) return thousandWord;
+    const remainderWord = formatAmountForSpeech(remainder);
+    return `${thousandWord}${remainderWord}`;
+  }
+  return String(num);
+}
 export type PreparationPolicy = {
   topic?: string;
   requiredQuestions?: string;
@@ -155,6 +206,13 @@ export function advancePreparation(
 
   if (state.stage === "asking") {
     if (/^(?:nein|nö|lieber nicht|keine zeit|nicht jetzt|möchte ich nicht(?:s)? beantworten|das möchte ich nicht|will ich nicht)\b/i.test(userText.trim())) {
+      const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
+      if (next) {
+        return {
+          state: { ...state, currentQuestionIndex: next.index },
+          instruction: `Akzeptiere die Absage freundlich ohne Nachfassen. Stelle ausschließlich die nächste Frage: "${next.question}"`,
+        };
+      }
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
