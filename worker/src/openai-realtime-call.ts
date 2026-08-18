@@ -132,10 +132,12 @@ export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = text.replace(/["“”'»«]+$/g, "").replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
   return !/[.!?؟]$/.test(normalized);
 }
+
+const DECISION_MAKER_INTRO = "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?";
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
@@ -669,8 +671,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
           assistantTranscriptDeltaSeen = false;
           return;
         }
+        const wasDecisionMakerIntroPending = decisionMakerIntroPending;
         if (decisionMakerIntroPending) decisionMakerIntroPending = false;
-        const transcript = assistantTranscript.replace(/\s+/g, " ").trim();
+        const transcript = wasDecisionMakerIntroPending
+          ? DECISION_MAKER_INTRO
+          : assistantTranscript.replace(/\s+/g, " ").trim();
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
