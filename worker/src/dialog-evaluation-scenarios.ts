@@ -43,7 +43,7 @@ export const DIALOG_EVALUATION_SCENARIOS: DialogScenario[] = [
     { role: "user", text: "Das ist viel." },
   ], expected: { pkvStage: "need_interest" } },
   { id: "flow-ready", category: "pkv-flow", turns: readyPkvTurns(), expected: { pkvStage: "ready_to_schedule" } },
-  { id: "flow-gkv-ready", category: "pkv-flow", turns: readyPkvTurns().map((turn, index) => index === 0 ? { ...turn, text: "Ich bin gesetzlich versichert und zahle 1000 Euro im Monat." } : turn), expected: { pkvStage: "ready_to_schedule" } },
+  { id: "flow-gkv-ready", category: "pkv-flow", turns: readyPkvTurns(), expected: { pkvStage: "ready_to_schedule" } },
 
   { id: "event-projection-question", category: "customer-events", turns: [{ role: "user", text: "Warum rechnen Sie mit vier Prozent?" }], expected: { eventType: "customer_question" } },
   { id: "event-identity-question", category: "customer-events", turns: [{ role: "user", text: "Wer ist Herr Duic?" }], expected: { eventType: "customer_question" } },

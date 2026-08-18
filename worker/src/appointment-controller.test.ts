@@ -7,6 +7,8 @@ const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uh
 
 function readyPkvTurns(): ConversationTurn[] {
   return [
+    { role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?" },
+    { role: "user", text: "Ja, die Beiträge steigen jedes Jahr." },
     { role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." },
     { role: "assistant", text: "Bei vier Prozent pro Jahr sind es in zehn Jahren ungefähr 1480 Euro." },
     { role: "assistant", text: "Wie fühlt sich diese Entwicklung bis zum Ruhestand für Sie und Ihre Planung an?" },

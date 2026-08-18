@@ -12,7 +12,7 @@ export function isUnclearConversationText(text: string): boolean {
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return true;
-  if (/^(?:good to|does that|thank you much|i know|anlıyorum|어\?|aso|gute tag|tag|gutes|ich bin ab|hera|fariha|mhm|hmm|hm+|äh+|uh+|oh+)[.!?]*$/i.test(normalized)) return true;
+  if (/^(?:good to|does that|thank you much|i know|anlıyorum|어\?|aso|gute tag|tag|gutes|ich bin ab|hera|fariha|mhm|hmm|hm+|äh+|uh+|oh+|das)[.!?]*$/i.test(normalized)) return true;
   return normalized.length <= 2 && !/^(?:ja|ne|nein|ok|jo|nö)$/i.test(normalized);
 }
 

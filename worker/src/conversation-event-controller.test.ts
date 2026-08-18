@@ -31,4 +31,6 @@ test("keeps unclear fragments from changing the flow", () => {
   const event = classifyConversationEvent("Mhm.");
   assert.equal(event.type, "unclear");
   assert.match(instructionForConversationEvent(event), /keine Zustimmung/);
+  assert.equal(classifyConversationEvent("Das.").type, "unclear");
+  assert.equal(classifyConversationEvent("Das...").type, "unclear");
 });
