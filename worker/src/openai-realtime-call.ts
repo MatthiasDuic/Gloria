@@ -141,6 +141,13 @@ export function buildRealtimeResponseInstructions(
   return [facts, sequence, instructions].filter(Boolean).join("\n\n");
 }
 
+export function shouldRestoreDecisionMakerIntro(params: {
+  decisionMakerIntroWasLastResponse: boolean;
+  playbackPending: boolean;
+}): boolean {
+  return params.decisionMakerIntroWasLastResponse && params.playbackPending;
+}
+
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/["“”'»«]+$/g, "").replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -263,6 +270,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let responseInterrupted = false;
   let currentAssistantTurnIndex: number | undefined;
   let decisionMakerIntroPending = false;
+  let decisionMakerIntroWasLastResponse = false;
   let preparationState: PreparationState = createPreparationState();
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
@@ -574,6 +582,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ttsTurn += 1;
         ttsAbortController?.abort();
         const playbackPending = playback.isPending();
+        if (shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse, playbackPending })) {
+          decisionMakerIntroPending = true;
+        }
         const interruption = playback.interrupt();
         const plan = planBargeIn({
           responseActive: responses.isActive(),
@@ -623,6 +634,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         activeAssistantItemId = "";
         assistantAudioBytes = 0;
         responseInterrupted = false;
+        decisionMakerIntroWasLastResponse = false;
         currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
@@ -692,6 +704,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         const wasDecisionMakerIntroPending = decisionMakerIntroPending;
         if (decisionMakerIntroPending) decisionMakerIntroPending = false;
+        decisionMakerIntroWasLastResponse = wasDecisionMakerIntroPending;
         const transcript = wasDecisionMakerIntroPending
           ? DECISION_MAKER_INTRO
           : assistantTranscript.replace(/\s+/g, " ").trim();
