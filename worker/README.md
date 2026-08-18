@@ -1,9 +1,9 @@
 # Gloria Stream Worker (Render)
 
 Persistenter WebSocket-Server, der Telnyx Media Streams für Gloria verarbeitet.
-Standard-Pipeline: **Telnyx G.711 ↔ OpenAI Realtime Audio**. Das Modell hört,
-denkt und spricht in einer persistenten Vollduplex-Session. Der bisherige
-ASR/LLM/ElevenLabs-Pfad bleibt als abschaltbarer Rückfallpfad erhalten.
+Standard-Pipeline: **Telnyx G.711 ↔ OpenAI Realtime + ElevenLabs**. OpenAI hört,
+transkribiert und steuert den Dialog; ElevenLabs erzeugt die Stimme direkt als
+G.711-Telefoncodec.
 
 Vercel kann keine langlebigen WebSocket-Server hosten, deshalb läuft dieser
 Worker separat auf Render. Vercel liefert weiterhin Dashboard, REST-API,
@@ -17,7 +17,8 @@ Telnyx  ───►  Vercel /api/telnyx/call  (Call-Control + WebSocket-Stream)
    │
    └── Audio (μ-law 8 kHz, 20 ms Frames)
       └────►  Render-Worker  ws://…/telnyx-stream
-                   └─ OpenAI Realtime Audio (semantische VAD, Dialog, Sprache)
+                   └─ OpenAI Realtime Text (semantische VAD, Dialog, Tools)
+                         └─ ElevenLabs Audio-Stream (A-law/μ-law 8 kHz)
                          ├─ Topic Policies als flexible fachliche Leitplanken
                          └─ Tools: Termin bestätigen, Übergabe, Gespräch beenden
 ```
@@ -47,6 +48,8 @@ ngrok http 8080
 2. Render erkennt `render.yaml` im Root und legt den Service `gloria-stream-worker` automatisch an.
 3. **Secrets eintragen** (Render → Service → Environment):
    - `OPENAI_API_KEY`
+      - `ELEVENLABS_API_KEY`
+      - `ELEVENLABS_VOICE_ID` (z. B. `Ywa4Py8gVz5ugeNVy6iC`)
    - `STREAM_SHARED_SECRET` (z. B. `openssl rand -hex 32`)
    - `APP_INTERNAL_TOKEN` (gleicher Wert wie auf Vercel)
 4. **Deploy** klicken. Render baut mit `npm install && npm run build` und startet `npm run start`.

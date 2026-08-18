@@ -25,10 +25,12 @@ services:
         value: gpt-realtime-2.1
       - key: OPENAI_REALTIME_REASONING_EFFORT
         value: low
-      - key: OPENAI_REALTIME_VOICE
-        value: marin
-      - key: OPENAI_REALTIME_SPEED
-        value: 0.88
+      - key: ELEVENLABS_API_KEY
+        sync: true
+      - key: ELEVENLABS_VOICE_ID
+        value: Ywa4Py8gVz5ugeNVy6iC
+      - key: ELEVENLABS_MODEL
+        value: eleven_flash_v2_5
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: APP_BASE_URL

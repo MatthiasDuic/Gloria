@@ -38,3 +38,18 @@ test("clears and truncates remaining playback after generation already finished"
     { type: "conversation.item.truncate", item_id: "item_456", content_index: 0, audio_end_ms: 220 },
   ]);
 });
+
+test("does not truncate beyond audio delivered by OpenAI", () => {
+  const plan = planBargeIn({
+    responseActive: true,
+    playbackPending: true,
+    assistantItemId: "item_789",
+    audioEndMs: 19940,
+    assistantAudioBytes: 14650 * 8,
+  });
+
+  assert.deepEqual(plan.openAiEvents, [
+    { type: "response.cancel" },
+    { type: "conversation.item.truncate", item_id: "item_789", content_index: 0, audio_end_ms: 14650 },
+  ]);
+});

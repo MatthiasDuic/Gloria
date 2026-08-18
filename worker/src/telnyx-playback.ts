@@ -21,6 +21,7 @@ export class TelnyxPlayback {
   private audioBuffer = Buffer.alloc(0);
   private stopped = false;
   private sentBytes = 0;
+  private responsePending = false;
 
   constructor(options: TelnyxPlaybackOptions) {
     this.sendFrame = options.sendFrame;
@@ -34,6 +35,7 @@ export class TelnyxPlayback {
   startResponse(): void {
     this.audioBuffer = Buffer.alloc(0);
     this.sentBytes = 0;
+    this.responsePending = true;
   }
 
   appendBase64Audio(delta: string): void {
@@ -56,7 +58,7 @@ export class TelnyxPlayback {
   }
 
   isPending(): boolean {
-    return this.queue.length > 0 || this.timer !== null;
+    return this.responsePending || this.queue.length > 0 || this.timer !== null;
   }
 
   bytesSent(): number {
@@ -71,6 +73,7 @@ export class TelnyxPlayback {
     if (this.timer) this.cancelSchedule(this.timer);
     this.timer = null;
     this.sentBytes = 0;
+    this.responsePending = false;
     return { audioEndMs: sentFrames * this.frameIntervalMs, bytesSent };
   }
 
@@ -87,7 +90,10 @@ export class TelnyxPlayback {
   private pump = (): void => {
     this.timer = null;
     if (this.stopped || this.queue.length === 0) {
-      if (!this.stopped) this.onIdle?.();
+      if (!this.stopped) {
+        this.responsePending = false;
+        this.onIdle?.();
+      }
       return;
     }
     const frame = this.queue.shift();

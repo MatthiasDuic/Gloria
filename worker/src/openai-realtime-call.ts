@@ -9,6 +9,7 @@ import { classifyConversationEvent, instructionForConversationEvent, isConversat
 import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
+import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { assessPkvConversation, instructionForPkvStage } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
@@ -243,6 +244,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let assistantTranscriptDeltaSeen = false;
   let assistantContinuationRequested = false;
   let activeAssistantItemId = "";
+  let assistantAudioBytes = 0;
+  let ttsAbortController: AbortController | null = null;
+  let ttsTurn = 0;
   let responseInterrupted = false;
   let currentAssistantTurnIndex: number | undefined;
   let preparationState: PreparationState = createPreparationState();
@@ -287,13 +291,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const updateSession = () => {
     if (!ctx || !openaiSession?.isReady()) return;
-    const configuredSpeed = Number.parseFloat(process.env.OPENAI_REALTIME_SPEED?.trim() || "0.88");
-    const speed = Number.isFinite(configuredSpeed) ? Math.min(1.1, Math.max(0.75, configuredSpeed)) : 0.88;
     sendOpenAi({
       type: "session.update",
       session: {
         type: "realtime",
-        output_modalities: ["audio"],
+        output_modalities: ["text"],
         max_output_tokens: 1000,
         instructions: buildRealtimeInstructions(ctx),
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
@@ -315,14 +317,46 @@ export async function handleOpenAiRealtimeTelnyxStream(
               interrupt_response: false,
             },
           },
-          output: {
-            format: { type: outputAudioFormat },
-            voice: process.env.OPENAI_REALTIME_VOICE?.trim() || "marin",
-            speed,
-          },
         },
       },
     });
+  };
+
+  const speakWithElevenLabs = async (text: string): Promise<void> => {
+    if (!isElevenLabsConfigured()) {
+      log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
+      playback.interrupt();
+      return;
+    }
+
+    const turn = ++ttsTurn;
+    const controller = new AbortController();
+    ttsAbortController?.abort();
+    ttsAbortController = controller;
+    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
+    let audioBytes = 0;
+
+    try {
+      await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
+        if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+        audioBytes += chunk.length;
+        playback.appendBase64Audio(chunk.toString("base64"));
+      });
+      if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
+        playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
+        if (audioBytes === 0) playback.interrupt();
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        log.error("realtime.elevenlabs_failed", {
+          callSid: ctx?.callSid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        playback.interrupt();
+      }
+    } finally {
+      if (ttsAbortController === controller) ttsAbortController = null;
+    }
   };
 
   const requestResponse = (instructions?: string) => {
@@ -509,6 +543,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_started") {
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
+        ttsTurn += 1;
+        ttsAbortController?.abort();
         const playbackPending = playback.isPending();
         const interruption = playback.interrupt();
         const plan = planBargeIn({
@@ -516,6 +552,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           playbackPending,
           assistantItemId: activeAssistantItemId || undefined,
           audioEndMs: interruption.audioEndMs,
+          assistantAudioBytes,
         });
         if (plan.interrupted) {
           responseInterrupted = true;
@@ -556,6 +593,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         responses.markCreated();
         playback.startResponse();
         activeAssistantItemId = "";
+        assistantAudioBytes = 0;
         responseInterrupted = false;
         currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
@@ -566,6 +604,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.output_audio.delta" || message.type === "response.audio.delta") {
         if (!responseInterrupted && message.delta) {
           activeAssistantItemId = message.item_id || activeAssistantItemId;
+          assistantAudioBytes += Buffer.from(message.delta, "base64").length;
           playback.appendBase64Audio(message.delta);
         }
         return;
@@ -583,7 +622,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
 
-      if (message.type === "response.output_audio_transcript.done" || message.type === "response.audio_transcript.done") {
+      if (message.type === "response.output_text.delta" || message.type === "response.text.delta") {
+        if (responseInterrupted) return;
+        assistantTranscript += message.delta || "";
+        assistantTranscriptDeltaSeen = true;
+        return;
+      }
+
+      if (
+        message.type === "response.output_audio_transcript.done"
+        || message.type === "response.audio_transcript.done"
+        || message.type === "response.output_text.done"
+        || message.type === "response.text.done"
+      ) {
         if (responseInterrupted) return;
         if (!assistantTranscriptDeltaSeen && message.transcript) assistantTranscript += message.transcript;
         return;
@@ -613,8 +664,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
           currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }
+        if (!transcript) playback.interrupt();
         responses.markFinished();
         if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
+          playback.interrupt();
           assistantContinuationRequested = true;
           log.warn("realtime.incomplete_response_recovery", {
             callSid: ctx?.callSid,
@@ -625,6 +678,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           assistantTranscriptDeltaSeen = false;
           return;
         }
+        if (transcript) void speakWithElevenLabs(transcript);
         assistantContinuationRequested = false;
         for (const item of message.response?.output || []) {
           if (item.type === "function_call" && item.name && item.call_id) {
