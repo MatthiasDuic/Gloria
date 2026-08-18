@@ -205,6 +205,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.confirmedSlotPhrase) {
     parts.push(`Bereits bestätigter Termin: ${ctx.confirmedSlotPhrase}. Diesen Termin nicht verändern.`);
   }
+  parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf gebeten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
 
   return parts.join("\n\n");
 }
@@ -369,7 +370,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
-    requestResponse("Der Entscheider ist jetzt bestätigt. Stelle dich transparent als digitale Assistentin von Herrn Duic vor, nenne den Anlass in einem kurzen Satz und frage, ob eine kurze Frage passt. Starte noch nicht mit Beitrag oder Termin.");
+    requestResponse("Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, Versicherung oder Termin.");
   };
 
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {

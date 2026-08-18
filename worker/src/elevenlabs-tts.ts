@@ -2,12 +2,14 @@ import { fetch } from "undici";
 
 export type ElevenLabsOutputFormat = "alaw_8000" | "ulaw_8000";
 
+const DEFAULT_VOICE_ID = "Ywa4Py8gVz5ugeNVy6iC";
+
 function getApiKey(): string {
   return process.env.ELEVENLABS_API_KEY?.trim() || "";
 }
 
 function getVoiceId(): string {
-  return process.env.ELEVENLABS_VOICE_ID?.trim() || "";
+  return process.env.ELEVENLABS_VOICE_ID?.trim() || DEFAULT_VOICE_ID;
 }
 
 export function isElevenLabsConfigured(): boolean {

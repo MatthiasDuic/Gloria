@@ -85,6 +85,8 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
+  assert.match(instructions, /beginne nicht mit der Versicherungsfrage/);
 });
 
 test("requires the PKV ten-year and retirement bridge after a contribution", () => {
