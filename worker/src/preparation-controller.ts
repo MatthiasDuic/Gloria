@@ -7,7 +7,7 @@ export type PreparationPolicy = {
   pkvHealthQuestions?: string;
 };
 
-export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "completed" | "declined";
+export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "awaiting_email" | "completed" | "declined";
 
 export type PreparationState = {
   stage: PreparationStage;
@@ -77,6 +77,15 @@ function nextUnansweredQuestion(
   return undefined;
 }
 
+function isAnswerPlausible(question: string, text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized || /^(?:hallo|ja|okay|ok|mhm|äh+|hm+|keine ahnung)[.!?]*$/i.test(normalized)) return false;
+  if (/geburtsdatum/i.test(question)) return /\b(?:\d{1,2}\.\s*)?(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|\d{1,2}[./-]\d{1,2})\b|\b(?:19|20)\d{2}\b/i.test(normalized);
+  if (/körpergröße|groesse/i.test(question)) return /\b(?:\d[,.]?\d?\s*(?:m|meter|cm|zentimeter)|ein[e]?\s+meter)\b/i.test(normalized);
+  if (/gewicht/i.test(question)) return /\b\d{2,3}\s*(?:kg|kilo|kilogramm)\b/i.test(normalized) || /\b(?:\w+\s+){0,2}(?:kilo|kilogramm)\b/i.test(normalized);
+  if (/medikament|behandlung|diagnos|allerg/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized) || normalized.length > 5;
+  return normalized.length >= 3;
+}
 export function beginPreparation(
   state: PreparationState,
   confirmedSlotPhrase: string,
@@ -84,14 +93,14 @@ export function beginPreparation(
 ): PreparationTransition {
   if (state.questions.length === 0) {
     return {
-      state: { ...state, stage: "completed" },
+      state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach nur nach der E-Mail-Adresse für die Terminbestätigung.`,
     };
   }
   const firstQuestion = nextUnansweredQuestion(state, turns, 0);
   if (!firstQuestion) {
     return {
-      state: { ...state, stage: "completed" },
+      state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Frage danach nur nach der E-Mail-Adresse für die Terminbestätigung.`,
     };
   }
@@ -110,7 +119,7 @@ export function advancePreparation(
     const consent = preparationConsent(userText);
     if (consent === "declined") {
       return {
-        state: { ...state, stage: "declined", currentQuestionIndex: undefined },
+        state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
       };
     }
@@ -123,7 +132,7 @@ export function advancePreparation(
     const next = nextUnansweredQuestion(state, turns, 0);
     if (!next) {
       return {
-        state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+        state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Die bereits geklärten Angaben reichen für die Vorbereitung. Frage nur noch nach der E-Mail-Adresse für die Terminbestätigung.",
       };
     }
@@ -136,8 +145,15 @@ export function advancePreparation(
   if (state.stage === "asking") {
     if (preparationConsent(userText) === "declined") {
       return {
-        state: { ...state, stage: "declined", currentQuestionIndex: undefined },
+        state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
+      };
+    }
+    const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
+    if (currentQuestion && !isAnswerPlausible(currentQuestion, userText)) {
+      return {
+        state,
+        instruction: `Die Antwort passt noch nicht eindeutig zur Frage. Stelle ausschließlich dieselbe Vorbereitungsfrage noch einmal, ohne dich zu bedanken: "${currentQuestion}"`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
@@ -148,15 +164,25 @@ export function advancePreparation(
       };
     }
     return {
-      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: "Die Vorbereitungsfragen sind vollständig. Bedanke dich kurz und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
+      state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
+      instruction: "Die Vorbereitungsfragen sind vollständig. Sage nur kurz: Danke, das hilft Herrn Duic bei der Vorbereitung. Frage danach ausschließlich nach der E-Mail-Adresse für die Terminbestätigung.",
     };
   }
 
+
+  if (state.stage === "awaiting_email") {
+    if (!/@|\b(?:at|punkt)\b/i.test(userText)) {
+      return { state, instruction: "Frage ausschließlich noch einmal nach der E-Mail-Adresse für die Terminbestätigung." };
+    }
+    return {
+      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+      instruction: "Bedanke dich einmal kurz für die E-Mail-Adresse und verabschiede dich freundlich. Stelle keine weitere Frage.",
+    };
+  }
   if (state.stage === "completed" || state.stage === "declined") {
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: "Bedanke dich kurz für die Angabe und bestätige, dass die Vorbereitung für den Termin abgeschlossen ist. Stelle keine weitere Frage.",
+      instruction: "Keine weitere Antwort erforderlich. Warte auf das Gesprächsende.",
     };
   }
 

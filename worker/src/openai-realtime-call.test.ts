@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, openAiAudioFormat, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -36,6 +36,11 @@ test("classifies unclear ASR fragments but keeps short German answers", () => {
   assert.equal(isLikelyNoiseTranscript("Nein."), false);
   assert.equal(isLikelyNoiseTranscript("Dienstag."), false);
   assert.equal(isLikelyNoiseTranscript("Nachmittag."), false);
+});
+
+test("ignores the configured ASR prompt when it leaks into a transcript", () => {
+  assert.equal(isSyntheticTranscriptionPrompt("Deutsches Telefonat zur privaten Krankenversicherung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Beträge sowie gesetzlich und privat."), true);
+  assert.equal(isSyntheticTranscriptionPrompt("Ich zahle tausend Euro."), false);
 });
 
 test("does not use an earlier acknowledgement as PKV appointment consent", () => {
@@ -97,8 +102,8 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /in zehn Jahren/);
-  assert.match(instructions, /bis zum Ruhestand/);
+  assert.match(instructions, /Beitragsstabilität und Bezahlbarkeit im Alter/);
+  assert.match(instructions, /Bezahlbarkeit im Alter/);
   assert.match(instructions, /Tarifoptimierung/);
   assert.match(instructions, /Altersrückstellungen/);
   assert.match(instructions, /Beitragsentlastungstarife/);
@@ -116,9 +121,9 @@ test("uses the standard PKV flow in a strict order: concept → insurance status
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const conceptIndex = instructions.search(/Beitragsentwicklung analysieren/);
-  const projectionIndex = instructions.search(/in zehn Jahren und bis zum Ruhestand hochrechnen/);
-  const contributionIndex = instructions.search(/Versicherungsstatus und aktuellem Beitrag/);
+  const conceptIndex = instructions.search(/Ersttermin zum Kennenlernen/);
+  const projectionIndex = instructions.search(/Beitragsstabilität und Bezahlbarkeit im Alter/);
+  const contributionIndex = instructions.search(/aktuellen Beitrag/);
 
   assert.notEqual(conceptIndex, -1);
   assert.notEqual(projectionIndex, -1);
@@ -133,9 +138,10 @@ test("forces the ten-year projection before scheduling after a contribution", ()
     topic: "private Krankenversicherung",
   });
   ctx.transcript.push({ role: "user", text: "Ich zahle tausend Euro.", at: 1 });
+  ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
 
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /in zehn Jahren/);
+  assert.match(instruction, /in zehn Jahren|Konzept/);
   assert.match(instruction, /Keine Terminfrage/);
 
   ctx.transcript.push(

@@ -38,8 +38,16 @@ test("stops immediately when the customer declines during the questions", () => 
   let transition = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
   transition = advancePreparation(transition.state, "Ja.", []);
   transition = advancePreparation(transition.state, "Das möchte ich nicht beantworten.", []);
-  assert.equal(transition.state.stage, "declined");
+  assert.equal(transition.state.stage, "awaiting_email");
   assert.match(transition.instruction, /ohne Nachfassen/);
+});
+
+test("repeats the current question when the answer does not fit", () => {
+  let transition = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Hallo.", []);
+  assert.equal(transition.state.stage, "asking");
+  assert.match(transition.instruction, /dieselbe Vorbereitungsfrage noch einmal/);
 });
 
 test("completes the list and moves to the confirmation email", () => {
@@ -47,11 +55,11 @@ test("completes the list and moves to the confirmation email", () => {
   let transition = beginPreparation(createPreparationState(oneQuestionPolicy), "Donnerstag um 15 Uhr", []);
   transition = advancePreparation(transition.state, "Ja.", []);
   transition = advancePreparation(transition.state, "Einen Meter achtzig.", []);
-  assert.equal(transition.state.stage, "completed");
+  assert.equal(transition.state.stage, "awaiting_email");
   assert.match(transition.instruction, /E-Mail-Adresse/);
 
   transition = advancePreparation(transition.state, "kunde@example.de", []);
   assert.equal(transition.state.stage, "completed");
-  assert.doesNotMatch(transition.instruction, /E-Mail-Adresse/);
+  assert.match(transition.instruction, /verabschiede dich freundlich/);
   assert.match(transition.instruction, /keine weitere Frage/);
 });

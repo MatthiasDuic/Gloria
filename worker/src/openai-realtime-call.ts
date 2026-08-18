@@ -109,6 +109,10 @@ export function isLikelyNoiseTranscript(text: string): boolean {
   return isUnclearConversationText(text);
 }
 
+export function isSyntheticTranscriptionPrompt(text: string): boolean {
+  return /deutsches telefonat zur privaten krankenversicherung|achte besonders auf eigennamen.*euro[- ]?betr[aä]ge/i.test(text.trim());
+}
+
 function hasClearFarewellOrRejection(ctx: CallContext): boolean {
   const latestUserText = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
   return isConversationEndingText(latestUserText);
@@ -217,9 +221,10 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-ABLAUF: Nach der Zustimmung zur Frage, worum es geht, erkläre zuerst unser Konzept: Beitragsentwicklung analysieren, die Entwicklung in zehn Jahren und bis zum Ruhestand hochrechnen, die derzeitige Krankenversicherung und den Tarif analysieren und daraus ein persönliches Konzept mit möglichen Beitragsentlastungstarifen, Tarifoptimierung, Altersrückstellungen und gegebenenfalls steuerlichen Finanzierungsmöglichkeiten ableiten. Erst danach frage nach Versicherungsstatus und aktuellem Beitrag. Vergleiche keine gesetzlichen Kassen und biete keine Wahltarife oder Bonusprogramme an.",
+      "PKV-ABLAUF: Nach der Zustimmung zur Frage, worum es geht, erkläre zuerst unser Konzept menschlich und ohne Fachvortrag: Ersttermin zum Kennenlernen, Erklärung der Arbeitsweise und Aufnahme des Ist-Zustands; Zweittermin mit einem individuell zugeschnittenen Konzept für Beitragsstabilität und Bezahlbarkeit im Alter inklusive Tarifoptimierung, Altersrückstellungen, Beitragsentlastungskomponenten und möglicher Steuervorteile; dritter Termin für Abschluss und offene Fragen. Der Versicherungsstatus ist kein Gate und darf niemals eine GKV-Beratung auslösen. Frage erst nach dem Konzept und seiner Wirkung nach dem aktuellen Beitrag, wenn dieser für die persönliche Einordnung gebraucht wird.",
       "MÖGLICHE PRÜFOPTIONEN: Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile dürfen nur als mögliche Prüfoptionen nach persönlicher Analyse genannt werden, nie als Empfehlung oder Garantie. Den Ablauf des Analyse-Termins oder diese Optionen erklärst du nur auf konkrete Kundenfrage ausführlicher.",
-      "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen Versicherungsart, heutiger Beitrag, eine nachvollziehbare Zehn-Jahres-Einordnung und eine klare, auf die Nutzenfrage bezogene Zustimmung vorliegen. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
+      "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen die Konzept-Erklärung, der heutige Beitrag, eine nachvollziehbare Einordnung der langfristigen Beitragsentwicklung und eine klare, auf den Nutzen bezogene Zustimmung vorliegen. Der Versicherungsstatus ist für diesen Gesprächspfad irrelevant und darf nicht als Voraussetzung behandelt werden. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
+      "PKV-HARTE GESPRÄCHSREGEL: Erkläre nach der Zustimmung zum Gesprächsanlass zuerst persönlich und verständlich das Analysekonzept und frage, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Erst wenn dieses Konzept erklärt und beantwortet wurde, darfst du nach gesetzlich oder privat fragen. Sprich niemals über Kassenwahl, Einkommen, Zusatzleistungen, Bonusprogramme oder Wahltarife; das ist nicht das Ziel dieses PKV-Anrufs.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für Ersparnisse oder stabile Beiträge und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Mögliche Instrumente nur als Prüfoption nach persönlicher Analyse nennen.",
       "Nach einem bestätigten Termin bedeutet ein Nein auf eine Vorbereitungsfrage: 'Kein Problem, dann lassen wir das für den Termin offen.' Stelle diese Frage nicht erneut und fahre nicht mit einem Fragenkatalog fort.",
     );
@@ -421,6 +426,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const processUserTranscript = (transcript: string) => {
     if (!ctx) return;
+    if (isSyntheticTranscriptionPrompt(transcript)) {
+      log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
+      return;
+    }
     const currentContext = ctx;
     assistantContinuationRequested = false;
     currentContext.lastUserFinalAt = Date.now();
@@ -498,6 +507,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
     preparationState = transition.state;
+    if (preparationState.stage === "completed") return;
     requestEventResponse(transition.instruction);
   };
 

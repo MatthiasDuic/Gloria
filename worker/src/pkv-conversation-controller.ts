@@ -4,6 +4,7 @@ export type ConversationTurn = {
 };
 
 export type PkvConversationStage =
+  | "need_concept"
   | "need_insurance"
   | "need_contribution"
   | "need_projection"
@@ -13,6 +14,7 @@ export type PkvConversationStage =
 
 export type PkvConversationAssessment = {
   stage: PkvConversationStage;
+  conceptDelivered: boolean;
   insuranceStatus?: "pkv" | "gkv";
   contributionPhrase?: string;
   projectionDelivered: boolean;
@@ -47,6 +49,7 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
       ? "gkv"
       : undefined;
   const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
+  const conceptDelivered = /(?:beitragsentwicklung|bis zum ruhestand|persönliche[sr]? konzept|persönlichen zahlen|beitragsentlastungstarif|tarifoptimierung|altersrückstellungen)/i.test(assistantText);
   const projectionDelivered = /(?:in\s+zehn\s+jahren|in\s+10\s+jahren|zehn[- ]jahres|10[- ]jahres)/i.test(assistantText)
     && /(?:vier\s+prozent|4\s*%|hochrechn|ungefähr|etwa)/i.test(assistantText);
   const retirementReflectionAsked = /(?:ruhestand|rente)[^.?!]*(?:fühlt|fühlen|bedeutet|planung)|(?:fühlt|fühlen|bedeutet|planung)[^.?!]*(?:ruhestand|rente)/i.test(assistantText);
@@ -54,14 +57,15 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
   const interestConfirmed = /^(?:ja\b|gerne\b|interessant\b|hilfreich\b|das\s+macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)/i.test(interestAnswer);
 
   let stage: PkvConversationStage = "ready_to_schedule";
-  if (!contributionPhrase) stage = insuranceStatus ? "need_contribution" : "need_insurance";
+  if (!conceptDelivered) stage = "need_concept";
+  else if (!contributionPhrase) stage = "need_contribution";
   else if (!projectionDelivered) stage = "need_projection";
   else if (!retirementReflectionAsked) stage = "need_retirement_reflection";
   else if (!interestConfirmed) stage = "need_interest";
-  else if (!insuranceStatus) stage = "need_insurance";
 
   return {
     stage,
+    conceptDelivered,
     insuranceStatus,
     contributionPhrase,
     projectionDelivered,
@@ -72,6 +76,8 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
 
 export function instructionForPkvStage(assessment: PkvConversationAssessment): string {
   switch (assessment.stage) {
+    case "need_concept":
+      return "Erkläre jetzt zuerst kurz und menschlich das Konzept: Im Ersttermin lernen wir uns kennen, erklären unsere Arbeitsweise und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein individuell zugeschnittenes Konzept zur Beitragsstabilität und Bezahlbarkeit im Alter, inklusive Tarifoptimierung, Altersrückstellungen, Beitragsentlastungskomponenten und möglicher Steuervorteile zur Finanzierung der Gesundheitsversorgung im Alter. Ein dritter Termin ist erst für Abschluss und offene Fragen vorgesehen. Hole den Kunden emotional ab, indem du an seine Aussage anknüpfst. Frage danach, ob er seine Beitragsentwicklung schon einmal so betrachtet hat. Frage noch nicht nach gesetzlich oder privat und noch nicht nach dem Beitrag.";
     case "need_insurance":
       return "Frage ausschließlich, ob der Kunde aktuell gesetzlich oder privat krankenversichert ist. Keine Terminfrage.";
     case "need_contribution":

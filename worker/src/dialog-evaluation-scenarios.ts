@@ -15,13 +15,14 @@ function readyPkvTurns(extra: EvaluationTurn[] = []): EvaluationTurn[] {
 }
 
 export const DIALOG_EVALUATION_SCENARIOS: DialogScenario[] = [
-  { id: "flow-empty", category: "pkv-flow", turns: [], expected: { pkvStage: "need_insurance" } },
-  { id: "flow-pkv-status", category: "pkv-flow", turns: [{ role: "user", text: "Ich bin privat versichert." }], expected: { pkvStage: "need_contribution" } },
-  { id: "flow-gkv-status", category: "pkv-flow", turns: [{ role: "user", text: "Ich bin gesetzlich versichert." }], expected: { pkvStage: "need_contribution" } },
-  { id: "flow-amount-first", category: "pkv-flow", turns: [{ role: "user", text: "Ich zahle 950 Euro." }], expected: { pkvStage: "need_projection" } },
-  { id: "flow-status-and-amount", category: "pkv-flow", turns: [{ role: "user", text: "Privat versichert, aktuell 1200 Euro." }], expected: { pkvStage: "need_projection" } },
+  { id: "flow-empty", category: "pkv-flow", turns: [], expected: { pkvStage: "need_concept" } },
+  { id: "flow-pkv-status", category: "pkv-flow", turns: [{ role: "user", text: "Ich bin privat versichert." }, { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." }], expected: { pkvStage: "need_contribution" } },
+  { id: "flow-gkv-status", category: "pkv-flow", turns: [{ role: "user", text: "Ich bin gesetzlich versichert." }, { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." }], expected: { pkvStage: "need_contribution" } },
+  { id: "flow-amount-first", category: "pkv-flow", turns: [{ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." }, { role: "user", text: "Ich zahle 950 Euro." }], expected: { pkvStage: "need_projection" } },
+  { id: "flow-status-and-amount", category: "pkv-flow", turns: [{ role: "user", text: "Privat versichert, aktuell 1200 Euro." }, { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." }], expected: { pkvStage: "need_projection" } },
   { id: "flow-after-projection", category: "pkv-flow", turns: [
     { role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." },
+    { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." },
     { role: "assistant", text: "Bei vier Prozent pro Jahr wären es in zehn Jahren ungefähr 1480 Euro." },
   ], expected: { pkvStage: "need_retirement_reflection" } },
   { id: "flow-after-retirement-answer", category: "pkv-flow", turns: [

@@ -7,7 +7,10 @@ test("passes a clean deterministic PKV stage scenario", () => {
   const result = evaluateDialogScenario({
     id: "clean-stage",
     category: "flow",
-    turns: [{ role: "user", text: "Ich bin privat versichert." }],
+    turns: [
+      { role: "user", text: "Ich bin privat versichert." },
+      { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." },
+    ],
     expected: { pkvStage: "need_contribution" },
   });
   assert.equal(result.passed, true);
