@@ -11,6 +11,7 @@ function buildPkvContext() {
   });
   ctx.transcript.push(
     { role: "user", text: "Ja, die Beiträge steigen jedes Jahr.", at: 1 },
+    { role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?", at: 1.5 },
     { role: "user", text: "Ich bin gesetzlich versichert.", at: 2 },
     { role: "assistant", text: "Wie hoch ist Ihr aktueller Monatsbeitrag?", at: 3 },
     { role: "user", text: "1280 Euro.", at: 4 },
@@ -49,7 +50,7 @@ test("does not use an earlier acknowledgement as PKV appointment consent", () =>
 
   const result = canConfirmRealtimeAppointment(ctx);
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /Zustimmung/);
+  if (!result.ok) assert.match(result.reason, /Beitragsentwicklung|Konzept/);
 });
 
 test("allows a PKV appointment after consent to the concept question", () => {
@@ -141,7 +142,7 @@ test("forces the ten-year projection before scheduling after a contribution", ()
   ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
 
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /in zehn Jahren|Konzept/);
+  assert.match(instruction, /in zehn Jahren|Beitragsentwicklung/);
   assert.match(instruction, /Keine Terminfrage/);
 
   ctx.transcript.push(
@@ -190,7 +191,7 @@ test("requires the concept bridge after permission to explain the call", () => {
     { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
   );
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /Beitragsentwicklung analysieren/);
+  assert.match(instruction, /Konzept|Beitragsentwicklung/);
   assert.match(instruction, /Tarifoptimierung/);
   assert.doesNotMatch(instruction, /Wahltarife|Bonusprogramme/);
 });

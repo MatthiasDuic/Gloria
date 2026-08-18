@@ -123,7 +123,7 @@ function buildKnownConversationFacts(ctx: CallContext): string {
   const facts: string[] = [];
   if (/\b(?:gesetzlich|gkv)\b/i.test(userText)) facts.push("Versicherungsstatus: gesetzlich versichert (bereits geklärt; nicht erneut fragen).");
   else if (/\b(?:privat|pkv)\b/i.test(userText)) facts.push("Versicherungsstatus: privat versichert (bereits geklärt; nicht erneut fragen).");
-  const contribution = userText.match(/\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i)?.[0];
+  const contribution = userText.match(/\b(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro\b/i)?.[0];
   if (contribution) facts.push(`Aktueller Monatsbeitrag: ${contribution} (bereits genannt; nicht erneut fragen).`);
   return facts.length ? `BEREITS GEKLÄRTE FAKTEN:\n- ${facts.join("\n- ")}\nDiese Angaben sind verbindlich und haben Vorrang vor allgemeinen Policy-Fragen.` : "";
 }
@@ -131,16 +131,7 @@ function buildKnownConversationFacts(ctx: CallContext): string {
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
   const assessment = assessPkvConversation(ctx.transcript);
-  const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
-  const assistantText = ctx.transcript.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
-  const latestUser = userTurns.at(-1)?.text || "";
-  const hasConceptTransition = /(?:erster\s+termin|analyse|konzept|beitragsentlastung|tarifoptimierung|altersrückstellung|planbaren\s+beitrag)/i.test(assistantText);
-  const acceptedConceptPrompt = /(?:ja|gerne|klar|darf|passt|okay|ok)/i.test(latestUser)
-    && /worum\s+es\s+geht|kurz\s+sagen/i.test(ctx.transcript.at(-2)?.text || "");
-  if (!assessment.contributionPhrase && !assessment.insuranceStatus && acceptedConceptPrompt && !hasConceptTransition) {
-    return "ZWINGENDER NÄCHSTER SCHRITT: Erkläre jetzt zuerst unser Konzept und noch keine Versicherungsfrage. Sage, dass wir 1) die bisherige Beitragsentwicklung analysieren, 2) die Entwicklung bis zum Ruhestand hochrechnen, 3) die derzeitige Krankenversicherung und den Tarif im Termin analysieren und 4) daraus ein persönliches Konzept mit möglichen Beitragsentlastungstarifen, Tarifoptimierung, Altersrückstellungen und gegebenenfalls steuerlichen Finanzierungsmöglichkeiten ableiten. Frage danach, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Keine Terminfrage.";
-  }
-  if (!assessment.contributionPhrase || assessment.stage === "ready_to_schedule") return "";
+  if (assessment.stage === "ready_to_schedule") return "";
   return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
 }
 
@@ -507,7 +498,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
     preparationState = transition.state;
-    if (preparationState.stage === "completed") return;
     requestEventResponse(transition.instruction);
   };
 

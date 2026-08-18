@@ -83,8 +83,19 @@ function isAnswerPlausible(question: string, text: string): boolean {
   if (/geburtsdatum/i.test(question)) return /\b(?:\d{1,2}\.\s*)?(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|\d{1,2}[./-]\d{1,2})\b|\b(?:19|20)\d{2}\b/i.test(normalized);
   if (/körpergröße|groesse/i.test(question)) return /\b(?:\d[,.]?\d?\s*(?:m|meter|cm|zentimeter)|ein[e]?\s+meter)\b/i.test(normalized);
   if (/gewicht/i.test(question)) return /\b\d{2,3}\s*(?:kg|kilo|kilogramm)\b/i.test(normalized) || /\b(?:\w+\s+){0,2}(?:kilo|kilogramm)\b/i.test(normalized);
-  if (/medikament|behandlung|diagnos|allerg/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized) || normalized.length > 5;
+  if (/medikament|behandlung|diagnos|allerg|stationär|krankenhaus|psychisch|zähne|zahnersatz/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
   return normalized.length >= 3;
+}
+
+function followUpQuestions(question: string, answer: string): string[] {
+  if (!/^ja\b/i.test(answer.trim())) return [];
+  if (/medikament/i.test(question)) return ["Welche Medikamente nehmen Sie regelmäßig ein?"];
+  if (/laufende behandlungen|diagnos/i.test(question)) return ["Um welche Behandlung oder Diagnose geht es genau?"];
+  if (/stationär|krankenhaus/i.test(question)) return ["Was war der Grund für den stationären Aufenthalt?", "Wie lange waren Sie im Krankenhaus?", "Sind Sie deswegen heute behandlungs- und beschwerdefrei?"];
+  if (/psychisch/i.test(question)) return ["Um welche Behandlung ging es, und sind Sie heute beschwerdefrei?"];
+  if (/zähne|zahnersatz/i.test(question)) return ["Was ist aktuell geplant oder offen?"];
+  if (/allerg/i.test(question)) return ["Welche Allergie liegt bei Ihnen vor?"];
+  return [];
 }
 export function beginPreparation(
   state: PreparationState,
@@ -143,7 +154,7 @@ export function advancePreparation(
   }
 
   if (state.stage === "asking") {
-    if (preparationConsent(userText) === "declined") {
+    if (/^(?:nein|nö|lieber nicht|keine zeit|nicht jetzt|möchte ich nicht(?:s)? beantworten|das möchte ich nicht|will ich nicht)\b/i.test(userText.trim())) {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
@@ -154,6 +165,15 @@ export function advancePreparation(
       return {
         state,
         instruction: `Die Antwort passt noch nicht eindeutig zur Frage. Stelle ausschließlich dieselbe Vorbereitungsfrage noch einmal, ohne dich zu bedanken: "${currentQuestion}"`,
+      };
+    }
+    const followUps = currentQuestion ? followUpQuestions(currentQuestion, userText) : [];
+    if (followUps.length) {
+      const questions = [...state.questions];
+      questions.splice((state.currentQuestionIndex ?? -1) + 1, 0, ...followUps);
+      return {
+        state: { ...state, questions, currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1 },
+        instruction: `Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${followUps[0]}"`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
@@ -176,7 +196,7 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: "Bedanke dich einmal kurz für die E-Mail-Adresse und verabschiede dich freundlich. Stelle keine weitere Frage.",
+      instruction: "Bedanke dich einmal kurz für die E-Mail-Adresse, verabschiede dich freundlich und rufe danach end_call auf. Stelle keine weitere Frage.",
     };
   }
   if (state.stage === "completed" || state.stage === "declined") {

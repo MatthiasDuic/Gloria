@@ -4,9 +4,10 @@ import { assessPkvConversation, instructionForPkvStage, type ConversationTurn } 
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
-  assert.equal(assessPkvConversation(turns).stage, "need_concept");
+  assert.equal(assessPkvConversation(turns).stage, "need_relevance");
 
   turns.push({ role: "user", text: "Ich bin privat versichert." });
+  turns.push({ role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?" });
   turns.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." });
   assert.equal(assessPkvConversation(turns).stage, "need_contribution");
 
@@ -30,6 +31,7 @@ test("derives one deterministic next step from the PKV transcript", () => {
 test("does not treat an earlier yes as scheduling consent", () => {
   const assessment = assessPkvConversation([
     { role: "user", text: "Ja, ich bin privat versichert und zahle 900 Euro." },
+    { role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?" },
     { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." },
     { role: "assistant", text: "Bei vier Prozent pro Jahr sind das in zehn Jahren ungefähr 1330 Euro." },
     { role: "assistant", text: "Wie fühlt sich diese Entwicklung bis zum Ruhestand für Sie und Ihre Planung an?" },

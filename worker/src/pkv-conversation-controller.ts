@@ -4,7 +4,7 @@ export type ConversationTurn = {
 };
 
 export type PkvConversationStage =
-  | "need_concept"
+  | "need_relevance"
   | "need_insurance"
   | "need_contribution"
   | "need_projection"
@@ -22,7 +22,7 @@ export type PkvConversationAssessment = {
   interestConfirmed: boolean;
 };
 
-const CONTRIBUTION_PATTERN = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i;
+const CONTRIBUTION_PATTERN = /\b(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro\b/i;
 
 function findInterestAnswer(turns: ConversationTurn[]): string {
   let questionIndex = -1;
@@ -49,15 +49,22 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
       ? "gkv"
       : undefined;
   const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
-  const conceptDelivered = /(?:beitragsentwicklung|bis zum ruhestand|persönliche[sr]? konzept|persönlichen zahlen|beitragsentlastungstarif|tarifoptimierung|altersrückstellungen)/i.test(assistantText);
+  const relevanceAsked = /(?:wie nehmen sie diese entwicklung wahr|wie stark sp[üu]ren sie die entwicklung|gr[öo][ßs]te sorge.*beitr[aä]ge|darf ich ihnen kurz sagen, worum es geht)/i.test(assistantText);
+  const conceptDelivered = /(?:beitragsstabilität|bezahlbarkeit im alter|persönliche[sr]? konzept|beitragsentlastung|tarifoptimierung|altersrückstellungen|analysekonzept|analyse-konzept)/i.test(assistantText);
   const projectionDelivered = /(?:in\s+zehn\s+jahren|in\s+10\s+jahren|zehn[- ]jahres|10[- ]jahres)/i.test(assistantText)
     && /(?:vier\s+prozent|4\s*%|hochrechn|ungefähr|etwa)/i.test(assistantText);
   const retirementReflectionAsked = /(?:ruhestand|rente)[^.?!]*(?:fühlt|fühlen|bedeutet|planung)|(?:fühlt|fühlen|bedeutet|planung)[^.?!]*(?:ruhestand|rente)/i.test(assistantText);
   const interestAnswer = findInterestAnswer(turns);
   const interestConfirmed = /^(?:ja\b|gerne\b|interessant\b|hilfreich\b|das\s+macht\s+sinn|klingt\s+gut|möchte\s+ich|will\s+ich)/i.test(interestAnswer);
+  const permissionToExplain = /darf\s+ich\s+ihnen\s+kurz\s+sagen,\s*worum\s+es\s+geht/i.test(assistantText)
+    && /(?:ja\b|klar\b|gerne\b|selbstverständlich|darf\s+sie|darf\s+ich\s+es\s+erklären)/i.test(userText);
 
   let stage: PkvConversationStage = "ready_to_schedule";
-  if (!conceptDelivered) stage = "need_concept";
+  if (!interestConfirmed && retirementReflectionAsked && !interestConfirmed) stage = "need_interest";
+  else if (projectionDelivered && !retirementReflectionAsked) stage = "need_retirement_reflection";
+  else if (contributionPhrase && !projectionDelivered) stage = "need_projection";
+  else if (permissionToExplain && !conceptDelivered) stage = "need_interest";
+  else if (!relevanceAsked) stage = "need_relevance";
   else if (!contributionPhrase) stage = "need_contribution";
   else if (!projectionDelivered) stage = "need_projection";
   else if (!retirementReflectionAsked) stage = "need_retirement_reflection";
@@ -76,18 +83,18 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
 
 export function instructionForPkvStage(assessment: PkvConversationAssessment): string {
   switch (assessment.stage) {
-    case "need_concept":
-      return "Erkläre jetzt zuerst kurz und menschlich das Konzept: Im Ersttermin lernen wir uns kennen, erklären unsere Arbeitsweise und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein individuell zugeschnittenes Konzept zur Beitragsstabilität und Bezahlbarkeit im Alter, inklusive Tarifoptimierung, Altersrückstellungen, Beitragsentlastungskomponenten und möglicher Steuervorteile zur Finanzierung der Gesundheitsversorgung im Alter. Ein dritter Termin ist erst für Abschluss und offene Fragen vorgesehen. Hole den Kunden emotional ab, indem du an seine Aussage anknüpfst. Frage danach, ob er seine Beitragsentwicklung schon einmal so betrachtet hat. Frage noch nicht nach gesetzlich oder privat und noch nicht nach dem Beitrag.";
+    case "need_relevance":
+      return "Sensibilisiere jetzt kurz und menschlich: Es geht um die Beitragsentwicklung zur Gesundheitsversorgung. Beiträge steigen Jahr für Jahr; nenne vorsichtig den Zahlenanker von etwa drei bis fünf Prozent laut PKV-Verband und erwähne mögliche weitere Anpassungen nur ohne Dramatisierung. Frage danach: 'Wie nehmen Sie diese Entwicklung wahr?' Warte auf die Antwort. Erkläre das Beratungskonzept erst, wenn der Kunde danach fragt.";
     case "need_insurance":
       return "Frage ausschließlich, ob der Kunde aktuell gesetzlich oder privat krankenversichert ist. Keine Terminfrage.";
     case "need_contribution":
       return "Frage ausschließlich nach dem aktuellen monatlichen Krankenversicherungsbeitrag. Keine Terminfrage.";
     case "need_projection":
-      return `Rechne jetzt ausschließlich den genannten Monatsbeitrag ${assessment.contributionPhrase || ""} mit rund vier Prozent pro Jahr hoch. Nenne heutigen Betrag, Betrag in zehn Jahren und monatlichen Unterschied. Keine Terminfrage.`;
+      return `Wenn wir von dem genannten heutigen Beitrag ${assessment.contributionPhrase || ""} ausgehen, rechne ihn mit dem vorsichtigen Zahlenanker von rund vier Prozent pro Jahr bis in zehn Jahren hoch. Formuliere das menschlich als Einordnung, nicht als Tabelle: "[Ansprechpartner], wenn wir von Ihrem heutigen Beitrag ausgehen, kommen Sie in zehn Jahren ungefähr auf X Euro. Das wären rund Y Euro im Monat mehr." Frage danach: "Haben Sie Ihre Beitragsentwicklung schon einmal auf diese Weise betrachtet?" Keine Terminfrage und keine reine Zahlenaufzählung.`;
     case "need_retirement_reflection":
       return "Frage jetzt ausschließlich: 'Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?' Warte danach auf die Antwort. Keine Terminfrage.";
     case "need_interest":
-      return "Erkläre knapp den persönlichen Nutzen und mögliche prüfbare Optionen. Hole danach mit der Frage 'Wäre diese Klarheit für Sie hilfreich?' eine eindeutige Zustimmung ein. Keine Terminfrage und noch keine Terminvorschläge.";
+      return "Erkläre knapp das persönliche Analysekonzept: Ersttermin zum Kennenlernen, Einordnung der Beitragsentwicklung und mögliche prüfbare Optionen wie Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile. Hole danach mit der Frage 'Wäre diese Klarheit für Sie hilfreich?' eine eindeutige Zustimmung ein. Keine Terminfrage und noch keine Terminvorschläge.";
     case "ready_to_schedule":
       return "Die fachlichen Voraussetzungen sind erfüllt. Frage zuerst nur nach Vormittag oder Nachmittag und biete anschließend genau zwei echte freie Slots an verschiedenen Tagen an.";
   }

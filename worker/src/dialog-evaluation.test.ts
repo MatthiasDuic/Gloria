@@ -8,6 +8,7 @@ test("passes a clean deterministic PKV stage scenario", () => {
     id: "clean-stage",
     category: "flow",
     turns: [
+      { role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?" },
       { role: "user", text: "Ich bin privat versichert." },
       { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." },
     ],

@@ -312,8 +312,8 @@ function hasContributionSignal(text: string): boolean {
 }
 
 function parseGermanEuroAmount(text: string): number | undefined {
-  const direct = text.match(/\b(\d{2,5})(?:[.,]\d{1,2})?\s*(?:euro|€)\b/i);
-  if (direct) return Number.parseInt(direct[1], 10);
+  const direct = text.match(/\b(\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)\b/i);
+  if (direct) return Number.parseInt(direct[1].replace(/\./g, ""), 10);
   const words = text.match(/\b(?:[a-zäöüß-]*tausend[a-zäöüß-]*|[a-zäöüß-]*hundert[a-zäöüß-]*)(?:\s+[a-zäöüß-]+){0,3}/i)?.[0];
   if (!words) return undefined;
   const normalized = words
