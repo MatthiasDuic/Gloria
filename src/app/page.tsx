@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
+import topicPolicyDefaults from "../../data/topic-policies.json";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
 Musterbau GmbH,Herr Neumann,+49 2339 555100,neumann@musterbau.de,betriebliche Krankenversicherung,120 Mitarbeitende; Recruiting Thema,
@@ -421,6 +422,13 @@ function normalizeLineCount(value?: string) {
 
 function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfig> {
   const normalized = topic.trim().toLowerCase();
+  const completeDefault = topicPolicyDefaults.find(
+    (policy) => policy.topic.trim().toLowerCase() === normalized,
+  );
+
+  if (completeDefault) {
+    return completeDefault;
+  }
 
   const commonTransfer = [
     "Nur dann an einen Menschen weiterleiten, wenn der Interessent das ausdrücklich wünscht oder die KI klar ablehnt.",
@@ -716,11 +724,9 @@ function buildRecommendedAccountDraft(topic: Topic, existing?: TopicPolicyConfig
 
   return {
     ...baseline,
-    callObjective: pickText(preset.callObjective, baseline.callObjective),
-    topicSummary: pickText(preset.topicSummary, baseline.topicSummary),
-    behavior: pickText(preset.behavior, baseline.behavior),
-    conversationGuardrails: pickText(preset.conversationGuardrails, baseline.conversationGuardrails),
-    requiredQuestions: pickText(preset.requiredQuestions, baseline.requiredQuestions),
+    ...preset,
+    id: baseline.id,
+    topic,
   };
 }
 
@@ -3120,7 +3126,7 @@ export default function HomePage() {
                     </p>
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void applyRecommendedPlaybooksToAccount()} disabled={busy}>
-                        Empfohlene Standards für dieses Konto speichern
+                        Alle Topic Policies vorbefüllen
                       </button>
                     </div>
                   </div>

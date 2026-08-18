@@ -11,6 +11,31 @@ export type TopicPolicyFields = {
   requiredData?: string;
   pkvHealthQuestions?: string;
   exampleSentences?: string;
+  greetingDecisionMaker?: string;
+  greetingGatekeeper?: string;
+  reasonForCall?: string;
+  relevanceQuestion?: string;
+  contributionQuestion?: string;
+  projectionText?: string;
+  opener?: string;
+  discovery?: string;
+  objectionHandling?: string;
+  close?: string;
+  knowledge?: string;
+  proofPoints?: string;
+  objectionResponses?: string;
+  transferHandling?: string;
+  decisionMakerTask?: string;
+  decisionMakerBehavior?: string;
+  decisionMakerContext?: string;
+  appointmentGoal?: string;
+  receptionTopicReason?: string;
+  problemBuildup?: string;
+  conceptTransition?: string;
+  gatekeeperTask?: string;
+  gatekeeperBehavior?: string;
+  aiKeyInfo?: string;
+  appointmentConfirmation?: string;
 };
 
 export async function loadTopicPolicy(opts: {
@@ -75,6 +100,27 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
   const requiredQuestions = (policy.requiredQuestions || policy.requiredData || "").trim();
   const exampleSentences = (policy.exampleSentences || "").trim();
+  const opening = (policy.greetingDecisionMaker || policy.opener || "").trim();
+  const gatekeeperOpening = (policy.greetingGatekeeper || "").trim();
+  const reasonForCall = (policy.reasonForCall || policy.receptionTopicReason || "").trim();
+  const relevanceQuestion = (policy.relevanceQuestion || policy.discovery || "").trim();
+  const objectionResponses = (policy.objectionResponses || policy.objectionHandling || "").trim();
+  const decisionMakerContext = (policy.decisionMakerContext || "").trim();
+  const decisionMakerTask = (policy.decisionMakerTask || "").trim();
+  const decisionMakerBehavior = (policy.decisionMakerBehavior || "").trim();
+  const problemBuildup = (policy.problemBuildup || "").trim();
+  const conceptTransition = (policy.conceptTransition || "").trim();
+  const appointmentGoal = (policy.appointmentGoal || "").trim();
+  const knowledge = (policy.knowledge || "").trim();
+  const proofPoints = (policy.proofPoints || "").trim();
+  const transferHandling = (policy.transferHandling || "").trim();
+  const gatekeeperTask = (policy.gatekeeperTask || "").trim();
+  const gatekeeperBehavior = (policy.gatekeeperBehavior || "").trim();
+  const contributionQuestion = (policy.contributionQuestion || "").trim();
+  const projectionText = (policy.projectionText || "").trim();
+  const close = (policy.close || "").trim();
+  const aiKeyInfo = (policy.aiKeyInfo || "").trim();
+  const appointmentConfirmation = (policy.appointmentConfirmation || "").trim();
 
   if (
     !topicSummary &&
@@ -89,7 +135,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const parts: string[] = [];
   parts.push("TOPIC POLICY – fachliche Leitlinie für dieses Gespräch:");
   parts.push(
-    "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über dieser Topic Policy. Nutze die Topic Policy als Orientierung für Inhalt und Richtung, aber antworte immer situativ auf die letzte Kundenaussage und nicht als Skript.",
+    "VORRANGREGEL: Die universellen Erstkontakt-, Transparenz-, Freiwilligkeits- und Datenschutzregeln im Hauptprompt stehen über dieser Topic Policy. Diese Topic Policy steuert jedoch fachlichen Anlass, Nutzen, Einwände und Gesprächsführung. Antworte immer zuerst situativ auf die letzte Kundenaussage und nutze keinen Fragenkatalog.",
   );
   if (topic) parts.push(`THEMA: ${topic}`);
   if (callObjective) {
@@ -103,6 +149,44 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   }
   if (conversationGuardrails) {
     parts.push("", "THEMENSPEZIFISCHE GRENZEN & HINWEISE (nicht als Skript vorlesen):", conversationGuardrails);
+  }
+  if (opening || gatekeeperOpening || reasonForCall || relevanceQuestion) {
+    parts.push("", "ERÖFFNUNG UND ERSTE RELEVANZ (sinngemäß, kurz und erst nach bestätigtem Entscheider):");
+    if (opening) parts.push(`Mögliche Begrüßung: ${opening}`);
+    if (gatekeeperOpening) parts.push(`Mögliche Begrüßung am Empfang: ${gatekeeperOpening}`);
+    if (reasonForCall) parts.push(`Kurzer Anlass am Empfang oder auf Nachfrage: ${reasonForCall}`);
+    if (relevanceQuestion) parts.push(`Mögliche erste Relevanzfrage: ${relevanceQuestion}`);
+  }
+  if (gatekeeperTask || gatekeeperBehavior) {
+    parts.push("", "GATEKEEPER-FÜHRUNG (nur bis die Zielperson bestätigt ist):");
+    if (gatekeeperTask) parts.push(gatekeeperTask);
+    if (gatekeeperBehavior) parts.push(gatekeeperBehavior);
+  }
+  if (decisionMakerContext || decisionMakerTask || decisionMakerBehavior || problemBuildup || conceptTransition || appointmentGoal) {
+    parts.push("", "FÜHRUNG NACH BESTÄTIGTEM ENTSCHEIDER (situativ, niemals als Monolog):");
+    if (decisionMakerContext) parts.push(`Kontext: ${decisionMakerContext}`);
+    if (decisionMakerTask) parts.push(`Zielablauf: ${decisionMakerTask}`);
+    if (decisionMakerBehavior) parts.push(`Haltung: ${decisionMakerBehavior}`);
+    if (problemBuildup) parts.push(`Relevanzargument: ${problemBuildup}`);
+    if (conceptTransition) parts.push(`Nutzen- und Terminbrücke: ${conceptTransition}`);
+    if (appointmentGoal) parts.push(`Ziel des Termins: ${appointmentGoal}`);
+    if (contributionQuestion) parts.push(`Mögliche Beitragsfrage: ${contributionQuestion}`);
+    if (projectionText) parts.push(`Mögliche Einordnung nach einer Beitragsangabe: ${projectionText}`);
+    if (close) parts.push(`Mögliche Terminbrücke: ${close}`);
+  }
+  if (objectionResponses) {
+    parts.push("", "EINWÄNDE:", "Nutze die passende Antwort nur als inhaltliche Orientierung. Beantworte den Einwand zuerst, ohne ihn zu widerlegen oder dieselbe Frage zu wiederholen:", objectionResponses);
+  }
+  if (knowledge || proofPoints) {
+    parts.push("", "FACHLICHE FAKTEN UND GRENZEN:");
+    if (knowledge) parts.push(knowledge);
+    if (proofPoints) parts.push(`Belegbare Anhaltspunkte nur vorsichtig und passend verwenden, niemals als Garantie: ${proofPoints}`);
+  }
+  if (transferHandling) {
+    parts.push("", "MENSCHLICHE ÜBERGABE:", transferHandling);
+  }
+  if (aiKeyInfo) {
+    parts.push("", "HINTERGRUND FÜR DIE EINORDNUNG (nicht vorlesen):", aiKeyInfo);
   }
   if (requiredQuestions) {
     parts.push(
@@ -119,14 +203,8 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
       exampleSentences,
     );
   }
-
-  if (/private\s+krankenversicherung|pkv/i.test(topic)) {
-    parts.push(
-      "",
-      "STANDARD-FLOW FÜR PKV-GESPRÄCHE:",
-      "1. Anlass und Beitragsentwicklung verständlich machen.\n2. Relevanz mit einer kurzen Wahrnehmungsfrage abfragen.\n3. Aktuellen Monatsbeitrag erfragen.\n4. Sofort mit rund vier Prozent pro Jahr hochrechnen und ausdrücklich 'in zehn Jahren' nennen.\n5. Die Entwicklung bis zum Ruhestand weiterdenken und nach persönlicher Einschätzung fragen.\n6. Nutzen und mögliche Optionen erklären, inklusive Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und möglicher Steuervorteile.\n7. Interesse mit 'Wäre diese Klarheit für Sie hilfreich?' prüfen.\n8. Erst nach einer klaren positiven Antwort freie Zeitfenster anbieten.\nWenn der Kunde eine eigene Frage, Geschichte oder einen Einwand einbringt, pausiert dieser Rahmen vollständig: zuerst die Kundenäußerung beantworten, dann bei natürlicher Gelegenheit zurückkehren. Beitragsentlastungstarife und mögliche steuerliche Gegenfinanzierung nur als mögliche Prüfoptionen nennen, niemals als Empfehlung oder Garantie.",
-      "Nutze ausschließlich die Umlaute ä, ö und ü. Schreibe niemals ae, oe oder ue.",
-    );
+  if (appointmentConfirmation) {
+    parts.push("", "NACH ERFOLGREICHER TERMINBESTÄTIGUNG (sinngemäß):", appointmentConfirmation);
   }
 
   return parts.join("\n");
