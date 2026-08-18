@@ -280,6 +280,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const playback = new TelnyxPlayback({
+    prebufferFrames: 6,
     sendFrame: (frame) => sendTelnyx({
       event: "media",
       stream_id: streamId,
