@@ -15,6 +15,10 @@
     {
       "path": "/api/learning/optimize/cron",
       "schedule": "0 4 * * 1"
+    },
+    {
+      "path": "/api/jobs/process",
+      "schedule": "*/1 * * * *"
     }
   ]
 }
