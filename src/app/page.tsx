@@ -995,6 +995,18 @@ export default function HomePage() {
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<DashboardData["leads"][number] | null>(null);
   const [leadSearch, setLeadSearch] = useState("");
   const [leadStatusFilter, setLeadStatusFilter] = useState("");
+  const [crmTab, setCrmTab] = useState<"customers" | "pipeline" | "callbacks">("customers");
+  const [crmSearch, setCrmSearch] = useState("");
+  const [crmTypeFilter, setCrmTypeFilter] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
+  const [crmStatusFilter, setCrmStatusFilter] = useState("");
+  const [selectedCrmLeads, setSelectedCrmLeads] = useState<Set<string>>(new Set());
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [addCustomerDraft, setAddCustomerDraft] = useState({
+    company: "", contactName: "", phone: "", email: "", topic: TOPICS[0] as Topic, customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", note: "",
+  });
+  const [showCampaignFromSelectionModal, setShowCampaignFromSelectionModal] = useState(false);
+  const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
+  const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -2094,6 +2106,69 @@ export default function HomePage() {
     }
   }
 
+  function getCrmCustomerType(lead: DashboardData["leads"][number]): "BarmeniaGothaer" | "Agentur-Duic" | "Unbekannt" {
+    const listName = (lead.listName || "").toLowerCase();
+    if (/barmen|gothaer/.test(listName)) return "BarmeniaGothaer";
+    if (/agentur[-\s]?duic/.test(listName)) return "Agentur-Duic";
+    // Fall back to listId prefix convention set at import time
+    const listId = (lead.listId || "").toLowerCase();
+    if (/barmen|gothaer/.test(listId)) return "BarmeniaGothaer";
+    if (/agentur|duic/.test(listId)) return "Agentur-Duic";
+    return "Unbekannt";
+  }
+
+  async function addCustomerManually() {
+    const d = addCustomerDraft;
+    if (!d.company.trim() || !d.phone.trim()) {
+      setNotice("Firma und Telefonnummer sind Pflichtfelder.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const csvRow = `company,contactName,phone,email,topic,note\n"${d.company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${d.phone}","${d.email}","${d.topic}","${d.note.replace(/"/g, '""')}"`;
+      const listName = `${d.customerType} | Manuell hinzugefügt`;
+      const res = await fetch("/api/campaigns/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvText: csvRow, listName }),
+      });
+      const payload = (await res.json()) as { imported?: number; error?: string };
+      if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
+      setNotice(`Kunde "${d.company}" angelegt.`);
+      setShowAddCustomerModal(false);
+      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: TOPICS[0] as Topic, customerType: "Agentur-Duic", note: "" });
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
+    finally { setBusy(false); }
+  }
+
+  async function createCampaignFromSelection() {
+    if (selectedCrmLeads.size === 0 || !campaignFromSelectionName.trim()) return;
+    setBusy(true);
+    try {
+      const selected = data.leads.filter(l => selectedCrmLeads.has(l.id));
+      const rows = selected.map(l =>
+        `"${(l.company || "").replace(/"/g, '""')}","${(l.contactName || "").replace(/"/g, '""')}","${l.phone || l.directDial || ""}","${l.email || ""}","${campaignFromSelectionTopic}","${(l.note || "").replace(/"/g, '""')}"`
+      );
+      const csvText = `company,contactName,phone,email,topic,note\n${rows.join("\n")}`;
+      const res = await fetch("/api/campaigns/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvText, listName: campaignFromSelectionName }),
+      });
+      const payload = (await res.json()) as { imported?: number; error?: string };
+      if (!res.ok) throw new Error(payload.error || "Fehler beim Erstellen");
+      setNotice(`Kampagne "${campaignFromSelectionName}" mit ${payload.imported ?? selected.length} Kontakten erstellt.`);
+      setShowCampaignFromSelectionModal(false);
+      setSelectedCrmLeads(new Set());
+      setCampaignFromSelectionName("");
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
+    finally { setBusy(false); }
+  }
+
   async function deleteAllReports() {
     if (
       !confirm(
@@ -2702,94 +2777,365 @@ export default function HomePage() {
           if (r.outcome !== "Wiedervorlage" || !r.nextCallAt) return false;
           return new Date(r.nextCallAt).toDateString() === new Date().toDateString();
         });
+
+        // Customer list with filters
+        const filteredCrmLeads = data.leads.filter((lead) => {
+          if (crmTypeFilter && getCrmCustomerType(lead) !== crmTypeFilter) return false;
+          if (crmStatusFilter && lead.status !== crmStatusFilter) return false;
+          if (crmSearch) {
+            const q = crmSearch.toLowerCase();
+            return (
+              lead.company.toLowerCase().includes(q) ||
+              (lead.contactName || "").toLowerCase().includes(q) ||
+              (lead.phone || "").includes(q) ||
+              (lead.directDial || "").includes(q) ||
+              (lead.email || "").toLowerCase().includes(q) ||
+              lead.topic.toLowerCase().includes(q)
+            );
+          }
+          return true;
+        });
+
+        const allFilteredSelected = filteredCrmLeads.length > 0 && filteredCrmLeads.every(l => selectedCrmLeads.has(l.id));
+
+        const typeColors: Record<string, { bg: string; color: string }> = {
+          "BarmeniaGothaer": { bg: "#fef3c7", color: "#92400e" },
+          "Agentur-Duic": { bg: "#dbeafe", color: "#1e40af" },
+          "Unbekannt": { bg: "#f3f4f6", color: "#6b7280" },
+        };
+
         return (
           <section className="stack top-section">
-            <CollapsiblePanel title="Wiedervorlagen heute" defaultOpen>
-              {todayCallbacks.length === 0 ? (
-                <p className="subtle">Keine fälligen Wiedervorlagen für heute.</p>
-              ) : (
-                <table>
-                  <thead><tr><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Fällig</th><th>Notiz</th><th></th></tr></thead>
-                  <tbody>
-                    {todayCallbacks.map((r) => (
-                      <tr key={r.id}>
-                        <td><strong>{r.company}</strong></td>
-                        <td>{r.contactName || "-"}</td>
-                        <td>{r.topic}</td>
-                        <td>{formatDate(r.nextCallAt)}</td>
-                        <td className="subtle" style={{ maxWidth: 200 }}>{(r.summary || "").slice(0, 80)}{(r.summary || "").length > 80 ? "..." : ""}</td>
-                        <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </CollapsiblePanel>
+            {/* Sub-navigation */}
+            <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e5e7eb", marginBottom: -1 }}>
+              {(["customers", "pipeline", "callbacks"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setCrmTab(tab)}
+                  style={{ padding: "8px 16px", border: "none", background: crmTab === tab ? "white" : "transparent", borderBottom: crmTab === tab ? "2px solid #2563eb" : "2px solid transparent", color: crmTab === tab ? "#2563eb" : "#6b7280", fontWeight: crmTab === tab ? 600 : 400, cursor: "pointer", fontSize: "0.9rem" }}
+                >
+                  {tab === "customers" ? `Kundenverwaltung (${data.leads.length})` : tab === "pipeline" ? "Sales Pipeline" : "Wiedervorlagen"}
+                </button>
+              ))}
+            </div>
 
-            <CollapsiblePanel title="Sales Pipeline" defaultOpen>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, overflowX: "auto", minWidth: 0 }}>
-                {stages.map((stage) => {
-                  const leadsInStage = data.leads.filter((l) => (l.status || "neu") === stage.key);
-                  return (
-                    <div key={stage.key} style={{ background: "#f8fafc", borderRadius: 8, padding: 12, borderTop: `3px solid ${stage.color}` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                        <strong style={{ fontSize: "0.9rem" }}>{stage.label}</strong>
-                        <span style={{ background: stage.color, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: "0.8rem" }}>{leadsInStage.length}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
-                        {leadsInStage.slice(0, 20).map((lead) => (
-                          <button
-                            key={lead.id}
-                            className="link-button"
-                            onClick={() => setSelectedLeadForHistory(lead)}
-                            style={{ textAlign: "left", background: "white", padding: "8px 10px", borderRadius: 6, border: "1px solid #e5e7eb", width: "100%" }}
-                          >
-                            <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{lead.company}</div>
-                            <div style={{ color: "#6b7280", fontSize: "0.78rem", marginTop: 2 }}>{lead.contactName || lead.topic}</div>
-                            {lead.nextCallAt ? <div style={{ color: stage.color, fontSize: "0.75rem", marginTop: 2 }}>↻ {formatDate(lead.nextCallAt)}</div> : null}
-                          </button>
-                        ))}
-                        {leadsInStage.length > 20 ? <p className="subtle" style={{ fontSize: "0.8rem" }}>+{leadsInStage.length - 20} weitere</p> : null}
-                        {leadsInStage.length === 0 ? <p className="subtle" style={{ fontSize: "0.82rem" }}>Leer</p> : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CollapsiblePanel>
+            {/* === KUNDENVERWALTUNG === */}
+            {crmTab === "customers" && (
+              <div className="mini-panel">
+                {/* Toolbar */}
+                <div className="row spread" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap", flex: 1 }}>
+                    <input
+                      type="text"
+                      placeholder="Suche: Firma, Kontakt, Tel, Email, Thema..."
+                      value={crmSearch}
+                      onChange={e => setCrmSearch(e.target.value)}
+                      style={{ flex: 1, minWidth: 200 }}
+                    />
+                    <select value={crmTypeFilter} onChange={e => setCrmTypeFilter(e.target.value as typeof crmTypeFilter)} style={{ minWidth: 170 }}>
+                      <option value="">Alle Kundentypen</option>
+                      <option value="BarmeniaGothaer">🏢 BarmeniaGothaer</option>
+                      <option value="Agentur-Duic">🏬 Agentur-Duic</option>
+                    </select>
+                    <select value={crmStatusFilter} onChange={e => setCrmStatusFilter(e.target.value)} style={{ minWidth: 140 }}>
+                      <option value="">Alle Status</option>
+                      <option value="neu">Neu</option>
+                      <option value="angerufen">Angerufen</option>
+                      <option value="wiedervorlage">Wiedervorlage</option>
+                      <option value="termin">Termin</option>
+                      <option value="absage">Absage</option>
+                    </select>
+                  </div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="btn" onClick={() => setShowAddCustomerModal(true)}>+ Kunde anlegen</button>
+                    {selectedCrmLeads.size > 0 && (
+                      <button
+                        className="btn"
+                        style={{ background: "#059669" }}
+                        onClick={() => setShowCampaignFromSelectionModal(true)}
+                      >
+                        📞 Kampagne aus Auswahl ({selectedCrmLeads.size})
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-            <CollapsiblePanel title="Alle Wiedervorlagen (offen)" defaultOpen={false}>
-              {(() => {
-                const all = data.reports
-                  .filter((r) => r.outcome === "Wiedervorlage" && r.nextCallAt)
-                  .sort((a, b) => Date.parse(a.nextCallAt || "0") - Date.parse(b.nextCallAt || "0"));
-                if (all.length === 0) return <p className="subtle">Keine offenen Wiedervorlagen.</p>;
-                return (
+                {/* Customer Table */}
+                <div style={{ overflowX: "auto" }}>
                   <table>
-                    <thead><tr><th>Fällig</th><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Zusammenfassung</th><th></th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 32 }}>
+                          <input
+                            type="checkbox"
+                            checked={allFilteredSelected}
+                            onChange={e => {
+                              const next = new Set(selectedCrmLeads);
+                              filteredCrmLeads.forEach(l => e.target.checked ? next.add(l.id) : next.delete(l.id));
+                              setSelectedCrmLeads(next);
+                            }}
+                          />
+                        </th>
+                        <th>Kundentyp</th>
+                        <th>Firma</th>
+                        <th>Ansprechpartner</th>
+                        <th>Telefon</th>
+                        <th>Email</th>
+                        <th>Thema</th>
+                        <th>Status</th>
+                        <th>Liste</th>
+                        <th></th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {all.map((r) => {
-                        const isOverdue = Date.parse(r.nextCallAt || "0") < Date.now();
+                      {filteredCrmLeads.length === 0 && (
+                        <tr><td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
+                      )}
+                      {filteredCrmLeads.map((lead) => {
+                        const custType = getCrmCustomerType(lead);
+                        const typeStyle = typeColors[custType] || typeColors["Unbekannt"];
+                        const isSelected = selectedCrmLeads.has(lead.id);
                         return (
-                          <tr key={r.id} style={{ background: isOverdue ? "#fff5f5" : undefined }}>
-                            <td style={{ color: isOverdue ? "#dc2626" : undefined, whiteSpace: "nowrap" }}>{formatDate(r.nextCallAt)}</td>
-                            <td><strong>{r.company}</strong></td>
-                            <td>{r.contactName || "-"}</td>
-                            <td>{r.topic}</td>
-                            <td className="subtle" style={{ maxWidth: 220 }}>{(r.summary || "").slice(0, 100)}{(r.summary || "").length > 100 ? "..." : ""}</td>
-                            <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                          <tr key={lead.id} style={{ background: isSelected ? "#eff6ff" : undefined }}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={e => {
+                                  const next = new Set(selectedCrmLeads);
+                                  e.target.checked ? next.add(lead.id) : next.delete(lead.id);
+                                  setSelectedCrmLeads(next);
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <span style={{ ...typeStyle, borderRadius: 999, padding: "2px 8px", fontSize: "0.78rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+                                {custType === "BarmeniaGothaer" ? "🏢" : custType === "Agentur-Duic" ? "🏬" : "❓"} {custType}
+                              </span>
+                            </td>
+                            <td>
+                              <button className="link-button" onClick={() => setSelectedLeadForHistory(lead)}>
+                                <strong>{lead.company}</strong>
+                              </button>
+                            </td>
+                            <td>{lead.contactName || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
+                            <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.email || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.topic}</td>
+                            <td>
+                              <span className={`auftrag-ampel ${leadAmpelById[lead.id]?.tone || "info"}`} title={leadAmpelById[lead.id]?.text || ""}>
+                                {lead.status}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: "0.8rem", color: "#6b7280" }}>{lead.listName || "-"}</td>
+                            <td>
+                              <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
+                                Historie
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                );
-              })()}
-            </CollapsiblePanel>
+                </div>
+
+                {selectedCrmLeads.size > 0 && (
+                  <div style={{ marginTop: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ color: "#1e40af", fontWeight: 600 }}>{selectedCrmLeads.size} Kunden ausgewählt</span>
+                    <button className="btn" style={{ background: "#059669", padding: "6px 14px", fontSize: "0.85rem" }} onClick={() => setShowCampaignFromSelectionModal(true)}>
+                      📞 Kampagne für Gloria erstellen
+                    </button>
+                    <button className="btn ghost" style={{ fontSize: "0.85rem" }} onClick={() => setSelectedCrmLeads(new Set())}>Auswahl aufheben</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* === SALES PIPELINE === */}
+            {crmTab === "pipeline" && (
+              <CollapsiblePanel title="Sales Pipeline" defaultOpen>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, overflowX: "auto", minWidth: 0 }}>
+                  {stages.map((stage) => {
+                    const leadsInStage = data.leads.filter((l) => (l.status || "neu") === stage.key);
+                    return (
+                      <div key={stage.key} style={{ background: "#f8fafc", borderRadius: 8, padding: 12, borderTop: `3px solid ${stage.color}` }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                          <strong style={{ fontSize: "0.9rem" }}>{stage.label}</strong>
+                          <span style={{ background: stage.color, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: "0.8rem" }}>{leadsInStage.length}</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+                          {leadsInStage.slice(0, 20).map((lead) => {
+                            const custType = getCrmCustomerType(lead);
+                            const typeStyle = typeColors[custType] || typeColors["Unbekannt"];
+                            return (
+                              <button
+                                key={lead.id}
+                                className="link-button"
+                                onClick={() => setSelectedLeadForHistory(lead)}
+                                style={{ textAlign: "left", background: "white", padding: "8px 10px", borderRadius: 6, border: "1px solid #e5e7eb", width: "100%" }}
+                              >
+                                <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{lead.company}</div>
+                                <div style={{ color: "#6b7280", fontSize: "0.78rem", marginTop: 2 }}>{lead.contactName || lead.topic}</div>
+                                <span style={{ ...typeStyle, borderRadius: 999, padding: "1px 6px", fontSize: "0.7rem", fontWeight: 600 }}>{custType}</span>
+                                {lead.nextCallAt ? <div style={{ color: stage.color, fontSize: "0.75rem", marginTop: 2 }}>↻ {formatDate(lead.nextCallAt)}</div> : null}
+                              </button>
+                            );
+                          })}
+                          {leadsInStage.length > 20 && <p className="subtle" style={{ fontSize: "0.8rem" }}>+{leadsInStage.length - 20} weitere</p>}
+                          {leadsInStage.length === 0 && <p className="subtle" style={{ fontSize: "0.82rem" }}>Leer</p>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CollapsiblePanel>
+            )}
+
+            {/* === WIEDERVORLAGEN === */}
+            {crmTab === "callbacks" && (
+              <>
+                <CollapsiblePanel title="Wiedervorlagen heute" defaultOpen>
+                  {todayCallbacks.length === 0 ? (
+                    <p className="subtle">Keine fälligen Wiedervorlagen für heute.</p>
+                  ) : (
+                    <table>
+                      <thead><tr><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Fällig</th><th>Notiz</th><th></th></tr></thead>
+                      <tbody>
+                        {todayCallbacks.map((r) => (
+                          <tr key={r.id}>
+                            <td><strong>{r.company}</strong></td>
+                            <td>{r.contactName || "-"}</td>
+                            <td>{r.topic}</td>
+                            <td>{formatDate(r.nextCallAt)}</td>
+                            <td className="subtle" style={{ maxWidth: 200 }}>{(r.summary || "").slice(0, 80)}{(r.summary || "").length > 80 ? "..." : ""}</td>
+                            <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </CollapsiblePanel>
+                <CollapsiblePanel title="Alle offenen Wiedervorlagen" defaultOpen={false}>
+                  {(() => {
+                    const all = data.reports.filter((r) => r.outcome === "Wiedervorlage" && r.nextCallAt).sort((a, b) => Date.parse(a.nextCallAt || "0") - Date.parse(b.nextCallAt || "0"));
+                    if (all.length === 0) return <p className="subtle">Keine offenen Wiedervorlagen.</p>;
+                    return (
+                      <table>
+                        <thead><tr><th>Fällig</th><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Zusammenfassung</th><th></th></tr></thead>
+                        <tbody>
+                          {all.map((r) => {
+                            const isOverdue = Date.parse(r.nextCallAt || "0") < Date.now();
+                            return (
+                              <tr key={r.id} style={{ background: isOverdue ? "#fff5f5" : undefined }}>
+                                <td style={{ color: isOverdue ? "#dc2626" : undefined, whiteSpace: "nowrap" }}>{formatDate(r.nextCallAt)}</td>
+                                <td><strong>{r.company}</strong></td>
+                                <td>{r.contactName || "-"}</td>
+                                <td>{r.topic}</td>
+                                <td className="subtle" style={{ maxWidth: 220 }}>{(r.summary || "").slice(0, 100)}{(r.summary || "").length > 100 ? "..." : ""}</td>
+                                <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+                </CollapsiblePanel>
+              </>
+            )}
+
+            {/* === MODAL: Kunde anlegen === */}
+            {showAddCustomerModal && (
+              <div className="modal-overlay" onClick={() => setShowAddCustomerModal(false)}>
+                <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                  <button className="modal-close" onClick={() => setShowAddCustomerModal(false)}>✕</button>
+                  <h2>Kunde anlegen</h2>
+                  <div className="report-detail-grid top-gap">
+                    <div className="report-detail-field">
+                      <label>Kundentyp *</label>
+                      <select value={addCustomerDraft.customerType} onChange={e => setAddCustomerDraft(d => ({ ...d, customerType: e.target.value as "BarmeniaGothaer" | "Agentur-Duic" }))}>
+                        <option value="Agentur-Duic">🏬 Agentur-Duic Kunde</option>
+                        <option value="BarmeniaGothaer">🏢 BarmeniaGothaer Kunde</option>
+                      </select>
+                    </div>
+                    <div className="report-detail-field">
+                      <label>Firma *</label>
+                      <input value={addCustomerDraft.company} onChange={e => setAddCustomerDraft(d => ({ ...d, company: e.target.value }))} placeholder="Musterbau GmbH" />
+                    </div>
+                    <div className="report-detail-field">
+                      <label>Ansprechpartner</label>
+                      <input value={addCustomerDraft.contactName} onChange={e => setAddCustomerDraft(d => ({ ...d, contactName: e.target.value }))} placeholder="Herr Neumann" />
+                    </div>
+                    <div className="report-detail-field">
+                      <label>Telefon *</label>
+                      <input value={addCustomerDraft.phone} onChange={e => setAddCustomerDraft(d => ({ ...d, phone: e.target.value }))} placeholder="+492339123456" />
+                    </div>
+                    <div className="report-detail-field">
+                      <label>Email</label>
+                      <input value={addCustomerDraft.email} onChange={e => setAddCustomerDraft(d => ({ ...d, email: e.target.value }))} placeholder="info@firma.de" />
+                    </div>
+                    <div className="report-detail-field">
+                      <label>Thema / Anlass</label>
+                      <select value={addCustomerDraft.topic} onChange={e => setAddCustomerDraft(d => ({ ...d, topic: e.target.value as Topic }))}>
+                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div className="report-detail-field report-detail-full">
+                      <label>Notiz / Kontext</label>
+                      <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={3} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
+                    </div>
+                  </div>
+                  <div className="row top-gap" style={{ gap: 8 }}>
+                    <button className="btn" onClick={() => void addCustomerManually()} disabled={busy || !addCustomerDraft.company.trim() || !addCustomerDraft.phone.trim()}>
+                      {busy ? "Speichert..." : "Kunde anlegen"}
+                    </button>
+                    <button className="btn ghost" onClick={() => setShowAddCustomerModal(false)}>Abbrechen</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* === MODAL: Kampagne aus Selektion === */}
+            {showCampaignFromSelectionModal && (
+              <div className="modal-overlay" onClick={() => setShowCampaignFromSelectionModal(false)}>
+                <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                  <button className="modal-close" onClick={() => setShowCampaignFromSelectionModal(false)}>✕</button>
+                  <h2>Kampagne für Gloria erstellen</h2>
+                  <p className="subtle" style={{ marginTop: 6 }}>{selectedCrmLeads.size} Kunden werden an Gloria übergeben.</p>
+                  <div className="report-detail-grid top-gap">
+                    <div className="report-detail-field report-detail-full">
+                      <label>Kampagnenname *</label>
+                      <input value={campaignFromSelectionName} onChange={e => setCampaignFromSelectionName(e.target.value)} placeholder="z. B. Jahresgespräche August 2026" />
+                    </div>
+                    <div className="report-detail-field report-detail-full">
+                      <label>Thema / Anlass für Gloria</label>
+                      <select value={campaignFromSelectionTopic} onChange={e => setCampaignFromSelectionTopic(e.target.value as Topic)}>
+                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="subtle top-gap" style={{ background: "#f8fafc", padding: "10px 12px", borderRadius: 6, fontSize: "0.85rem" }}>
+                    <strong>Ausgewählte Kunden:</strong>
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 16 }}>
+                      {data.leads.filter(l => selectedCrmLeads.has(l.id)).slice(0, 8).map(l => (
+                        <li key={l.id}>{l.company}{l.contactName ? ` – ${l.contactName}` : ""}</li>
+                      ))}
+                      {selectedCrmLeads.size > 8 && <li>... und {selectedCrmLeads.size - 8} weitere</li>}
+                    </ul>
+                  </div>
+                  <div className="row top-gap" style={{ gap: 8 }}>
+                    <button className="btn" style={{ background: "#059669" }} onClick={() => void createCampaignFromSelection()} disabled={busy || !campaignFromSelectionName.trim()}>
+                      {busy ? "Erstelle..." : "📞 Kampagne starten"}
+                    </button>
+                    <button className="btn ghost" onClick={() => setShowCampaignFromSelectionModal(false)}>Abbrechen</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         );
       })() : null}
-
       {activeView === "calls" ? (
       <section className="stack top-section">
         <CollapsiblePanel title="Manueller Anruf" defaultOpen={false}>
