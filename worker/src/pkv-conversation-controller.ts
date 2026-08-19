@@ -39,10 +39,11 @@ export function extractContributionPhrase(userText: string): string | undefined 
 // STEP-BASED STATE MACHINE
 // Step 0: awaiting permission after greeting
 // Step 1: RELEVANZ - explain rising costs, open question
-// Step 2: BEITRAG - ask for current monthly contribution
-// Step 3: HOCHRECHNUNG - present 10-year + retirement projection
-// Step 4: KONZEPT - explain Herr Duic approach, ask for interest
-// Step 5: TERMIN - schedule appointment
+// Step 2: VERTIEFUNG - emotional follow-up to understand customer's pain
+// Step 3: BEITRAG - ask for current monthly contribution
+// Step 4: HOCHRECHNUNG - present 10-year + retirement projection
+// Step 5: KONZEPT - explain Herr Duic approach (emotionally), ask for interest
+// Step 6: TERMIN - schedule appointment
 // ============================================================================
 
 export function instructionForPkvStep(step: number, contributionPhrase?: string): string {
@@ -57,19 +58,30 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
 
     case 1:
       return (
-        "Der Kunde hat zugestimmt. Erkläre jetzt in 2 kurzen Sätzen in eigenen Worten, dass PKV-Beiträge " +
+        "Der Kunde hat zugestimmt. Erkläre in 2 kurzen Sätzen in eigenen Worten, dass PKV-Beiträge " +
         "jährlich steigen und das langfristig spürbar wird. Stelle dann genau eine offene Frage wie " +
         "'Merken Sie das bei sich?' oder 'Wie erleben Sie das?'. Warte vollständig auf die Antwort."
       );
 
     case 2:
+      // VERTIEFUNG: emotional follow-up before asking for contribution
       return (
-        "Reagiere kurz wertschätzend auf das was der Kunde gesagt hat (ein Satz). " +
-        "Biete dann an, das konkret durchzurechnen: 'Wie hoch ist Ihr aktueller monatlicher Beitrag?' " +
-        "Nur diese eine Frage. Warte auf die Antwort."
+        "Gehe jetzt emotional auf die Antwort des Kunden ein: Benenne in einem Satz konkret, was er gesagt hat und zeige echtes Verständnis " +
+        "(z.B. 'Das kenne ich — wenn man jedes Jahr einfach mehr zahlt und nicht weiß wo das endet, ist das ein echtes Unbehagen.'). " +
+        "Stelle dann genau eine vertiefende emotionale Frage, z.B.: " +
+        "'Was belastet Sie dabei mehr — die Unplanbarkeit, oder ist es der tatsachliche Mehrbetrag der sich aufaddiert?' " +
+        "Oder: 'Haben Sie das Gefühl dass Sie das einfach hinnehmen müssen, oder suchen Sie aktiv nach Möglichkeiten da etwas zu tun?' " +
+        "Wähle die Frage die am besten zur Aussage des Kunden passt. Nur diese eine Frage. Warte auf Antwort."
       );
 
-    case 3: {
+    case 3:
+      return (
+        "Greife die Antwort des Kunden kurz auf (ein Satz). " +
+        "Leite dann über: 'Ich kann das für Sie einmal konkret durchrechnen, wenn Sie mögen — so sehen Sie schwarz auf weiß, was das langfristig bedeutet. " +
+        "Wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage. Warte auf die Antwort."
+      );
+
+    case 4: {
       const phrase = contributionPhrase || "den genannten Beitrag";
       let hint = "";
       if (contributionPhrase) {
@@ -90,15 +102,19 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
       );
     }
 
-    case 4:
+    case 5:
+      // KONZEPT: emotionally warm, connect to customer's specific pain
       return (
-        "Greife die Reaktion des Kunden kurz auf. Erkläre dann das Konzept von Herrn Duic: " +
-        "Er analysiert die Beitragsentwicklung individuell, rechnet bis zum Ruhestand hoch und zeigt " +
-        "Möglichkeiten den Beitrag zu senken — Altersrückstellungen, Beitragsentlastungstarife, Steuervorteile. " +
-        "Schließe mit einer direkten Frage: 'Klingt das interessant für Sie?' Warte auf Ja oder Nein."
+        "Greife jetzt die konkreten Sorgen und Aussagen des Kunden aus diesem Gespräch auf — nicht generisch, sondern persönlich. " +
+        "Starte mit einer kurzen Validierung seiner Situation (z.B. 'Genau das, was Sie beschrieben haben — diese Mischung aus " +
+        "Unplanbarkeit und dem Gefühl keinen Einfluss zu haben — das ist es, womit Herr Duic täglich arbeitet.'). " +
+        "Erkläre dann warm und konkret: Herr Duic schaut sich die Beitragsentwicklung individuell an, rechnet vorsichtig bis zum Ruhestand " +
+        "und zeigt ganz konkret welche Stellschrauben es gibt — Altersrückstellungen, Beitragsentlastungstarife, Steuervorteile. " +
+        "Keine Verkaufsphrasen, kein Druck. Stelle dann eine offene Frage: 'Klingt das nach etwas, das für Sie relevant sein könnte?' " +
+        "Warte auf klares Ja oder Nein."
       );
 
-    case 5:
+    case 6:
       return (
         "Der Kunde hat Interesse bestätigt. Terminvereinbarung: Frage zuerst ob Vormittag oder Nachmittag " +
         "besser passt. Dann zwei konkrete Terminoptionen anbieten. Nach Bestätigung: Gesundheitsfragen aus " +
@@ -128,26 +144,29 @@ export function advancePkvStep(
     }
 
     case 1:
-      // Any user response to relevance question → advance to asking for Beitrag
+      // Any response to relevance question → emotional follow-up
       return { nextStep: 2, shouldEnd: false };
 
-    case 2: {
+    case 2:
+      // Any response to emotional follow-up → ask for contribution
+      return { nextStep: 3, shouldEnd: false };
+
+    case 3: {
       const hasAmount = /\b(?:\d{2,5}|hundert|tausend|euro|€)\b/i.test(text);
-      if (hasAmount) return { nextStep: 3, shouldEnd: false };
-      // No amount given — stay (Gloria will try again)
-      return { nextStep: 2, shouldEnd: false };
+      if (hasAmount) return { nextStep: 4, shouldEnd: false };
+      return { nextStep: 3, shouldEnd: false };
     }
 
-    case 3:
-      // Any response to projection → advance to concept
-      return { nextStep: 4, shouldEnd: false };
+    case 4:
+      // Any response to projection → concept
+      return { nextStep: 5, shouldEnd: false };
 
-    case 4: {
-      const interested = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|sicher\b|natürlich\b|m[oö]chte|sehr\s+gerne|würde\s+gerne)\b/i.test(text);
+    case 5: {
+      const interested = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|sicher\b|natürlich\b|m[oö]chte|sehr\s+gerne|würde\s+gerne|relevant\b|schon\b)\b/i.test(text);
       const notInterested = /\b(?:nein\b|nicht\s+interessiert|kein\s+interesse|lieber\s+nicht|danke\s+nein|eher\s+nicht)\b/i.test(text);
-      if (interested) return { nextStep: 5, shouldEnd: false };
-      if (notInterested) return { nextStep: 4, shouldEnd: true };
-      return { nextStep: 4, shouldEnd: false };
+      if (interested) return { nextStep: 6, shouldEnd: false };
+      if (notInterested) return { nextStep: 5, shouldEnd: true };
+      return { nextStep: 5, shouldEnd: false };
     }
 
     default:
@@ -179,10 +198,10 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
 
 export function instructionForPkvStage(assessment: PkvConversationAssessment): string {
   return instructionForPkvStep(
-    assessment.stage === "ready_to_schedule" ? 5
-      : assessment.stage === "need_interest" || assessment.stage === "need_concept" ? 4
-      : assessment.stage === "need_projection" ? 3
-      : assessment.stage === "need_contribution" ? 2
+    assessment.stage === "ready_to_schedule" ? 6
+      : assessment.stage === "need_interest" || assessment.stage === "need_concept" ? 5
+      : assessment.stage === "need_projection" ? 4
+      : assessment.stage === "need_contribution" ? 3
       : 1,
     assessment.contributionPhrase,
   );

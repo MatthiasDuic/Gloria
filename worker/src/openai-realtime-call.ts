@@ -131,7 +131,7 @@ function buildKnownConversationFacts(ctx: CallContext): string {
 
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
-  if (ctx.dialogState.pkvStep >= 5) return "";
+  if (ctx.dialogState.pkvStep >= 6) return "";
   const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
   const contributionPhrase = extractContributionPhrase(userText);
   return `AKTUELLER GESPRÄCHSSCHRITT: ${instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase)}`;
@@ -176,7 +176,7 @@ const DECISION_MAKER_INTRO = "Guten Tag, mein Name ist Gloria. Ich bin die digit
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
-  if (ctx.dialogState.pkvStep >= 5) return { ok: true };
+  if (ctx.dialogState.pkvStep >= 6) return { ok: true };
   const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
   const contributionPhrase = extractContributionPhrase(userText);
   return { ok: false, reason: instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase) };
@@ -230,14 +230,15 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-GESPRÄCHSZIEL: Führe das Gespräch natürlich durch diese Phasen:\n" +
+      "PKV-GESPRÄCHSZIEL: Führe das Gespräch warm, professionell und empathisch durch diese Phasen:\n" +
       "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht. Warte auf Zustimmung.\n" +
-      "2. RELEVANZ: Erwähne kurz, dass PKV-Beiträge jährlich steigen, und frage wie der Kunde das erlebt. Warte auf Antwort.\n" +
-      "3. BEITRAG: Biete Hochrechnung an und frage nach aktuellem Monatsbeitrag. Warte.\n" +
-      "4. HOCHRECHNUNG: Rechne Beitrag auf 10 Jahre und Ruhestand hoch. Frage ob der Kunde das so schon betrachtet hat.\n" +
-      "5. KONZEPT: Erkläre Herrn Duics Ansatz (Beitragsanalyse, Altersrückstellungen, Steuervorteile). Frage ob das interessant ist.\n" +
-      "6. TERMIN: Bei Ja → Terminvorschläge, Gesundheitsfragen (oder per Mail), freundliche Verabschiedung.\n" +
-      "REGEL: Nur eine Frage pro Turn. Nie dieselbe Frage wiederholen. In eigenen natürlichen Worten formulieren.",
+      "2. RELEVANZ: Erwähne steigende PKV-Beiträge, frage wie der Kunde das erlebt. Warte auf Antwort.\n" +
+      "3. VERTIEFUNG: Gehe emotional auf die Antwort ein, zeige echtes Verständnis, stelle eine vertiefende Frage zur Situation des Kunden.\n" +
+      "4. BEITRAG: Leite natürlich über, biete konkrete Hochrechnung an, frage nach aktuellem Monatsbeitrag.\n" +
+      "5. HOCHRECHNUNG: Rechne auf 10 Jahre und Ruhestand hoch, stelle nachdenkliche Frage.\n" +
+      "6. KONZEPT: Verbinde persönlich mit den Sorgen des Kunden, erkläre Herrn Duics Ansatz warmherzig, frage ob das relevant sein könnte.\n" +
+      "7. TERMIN: Terminvorschläge, Gesundheitsfragen (oder per Mail), freundliche Verabschiedung.\n" +
+      "REGEL: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch und echt bleiben.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -663,14 +664,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
 
-        const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 5;
+        const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 5 | 6;
         if (nextStep !== currentStep) {
           currentContext.dialogState.pkvStep = nextStep;
           log.info("realtime.pkv_step_advanced", { callSid: currentContext.callSid, from: currentStep, to: nextStep });
         }
 
-        // Step 5: appointment scheduling — use existing appointment logic
-        if (currentContext.dialogState.pkvStep === 5) {
+        // Step 6: appointment scheduling — use existing appointment logic
+        if (currentContext.dialogState.pkvStep === 6) {
           const offer = appointmentOfferInstruction(
             currentContext.freeSlotsPrompt,
             detectAppointmentPreference(currentContext.transcript),

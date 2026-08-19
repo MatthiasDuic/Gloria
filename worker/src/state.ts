@@ -16,7 +16,7 @@ export type DialogPhase = "opener" | "discovery" | "objection" | "close" | "done
  * 4 = KONZEPT (explain Herr Duic's approach, ask for interest)
  * 5 = TERMIN (schedule appointment)
  */
-export type PkvStep = 0 | 1 | 2 | 3 | 4 | 5;
+export type PkvStep = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export type DialogState = {
   phase: DialogPhase;
