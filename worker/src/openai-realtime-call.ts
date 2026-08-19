@@ -245,6 +245,17 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.confirmedSlotPhrase) {
     parts.push(`Bereits bestätigter Termin: ${ctx.confirmedSlotPhrase}. Diesen Termin nicht verändern.`);
   }
+  
+  // Dialog state: Track which questions have been asked to prevent repetition
+  if (ctx.dialogState.askedQuestions.size > 0) {
+    const askedCount = ctx.dialogState.askedQuestions.size;
+    parts.push(
+      `BEREITS GESTELLTE FRAGEN (${askedCount}): Du hast bereits ${askedCount} Frage(n) gestellt. ` +
+      `Stelle diese Fragen nicht erneut. Wenn der Kunde die Antwort wiederholt oder zu einer anderen Frage überleitet, ` +
+      `akzeptiere das und stelle nur neue Fragen, die noch nicht geklärt sind.`,
+    );
+  }
+  
   parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf gebeten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
 
   const instructions = parts.join("\n\n");
