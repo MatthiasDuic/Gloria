@@ -228,12 +228,16 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-ABLAUF: Nach der Zustimmung zur Frage, worum es geht, erkläre zuerst unser Konzept menschlich und ohne Fachvortrag: Ersttermin zum Kennenlernen, Erklärung der Arbeitsweise und Aufnahme des Ist-Zustands; Zweittermin mit einem individuell zugeschnittenen Konzept für Beitragsstabilität und Bezahlbarkeit im Alter inklusive Tarifoptimierung, Altersrückstellungen, Beitragsentlastungskomponenten und möglicher Steuervorteile; dritter Termin für Abschluss und offene Fragen. Der Versicherungsstatus ist kein Gate und darf niemals eine GKV-Beratung auslösen. Frage erst nach dem Konzept und seiner Wirkung nach dem aktuellen Beitrag, wenn dieser für die persönliche Einordnung gebraucht wird.",
-      "MÖGLICHE PRÜFOPTIONEN: Tarifoptimierung, Altersrückstellungen, Beitragsentlastungstarife und mögliche Steuervorteile dürfen nur als mögliche Prüfoptionen nach persönlicher Analyse genannt werden, nie als Empfehlung oder Garantie. Den Ablauf des Analyse-Termins oder diese Optionen erklärst du nur auf konkrete Kundenfrage ausführlicher.",
-      "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen die Konzept-Erklärung, der heutige Beitrag, eine nachvollziehbare Einordnung der langfristigen Beitragsentwicklung und eine klare, auf den Nutzen bezogene Zustimmung vorliegen. Der Versicherungsstatus ist für diesen Gesprächspfad irrelevant und darf nicht als Voraussetzung behandelt werden. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
-      "PKV-HARTE GESPRÄCHSREGEL: Erkläre nach der Zustimmung zum Gesprächsanlass zuerst persönlich und verständlich das Analysekonzept und frage, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Erst wenn dieses Konzept erklärt und beantwortet wurde, darfst du nach gesetzlich oder privat fragen. Sprich niemals über Kassenwahl, Einkommen, Zusatzleistungen, Bonusprogramme oder Wahltarife; das ist nicht das Ziel dieses PKV-Anrufs.",
-      "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für Ersparnisse oder stabile Beiträge und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Mögliche Instrumente nur als Prüfoption nach persönlicher Analyse nennen.",
-      "Nach einem bestätigten Termin bedeutet ein Nein auf eine einzelne Vorbereitungs- oder Gesundheitsfrage: 'Kein Problem, dann lassen wir diesen Punkt für den Termin offen.' Stelle diese Frage nicht erneut, sondern fahre mit der nächsten Frage fort. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
+      "PKV-GESPRÄCHSABLAUF – folge IMMER dieser Reihenfolge, ein Schritt nach dem anderen:\n" +
+      "SCHRITT 1: Vorstellen – 'Guten Tag, mein Name ist Gloria...' (bereits erledigt durch Begrüßung).\n" +
+      "SCHRITT 2: Erlaubnis – 'Darf ich kurz sagen worum es geht?' Warte auf Zustimmung.\n" +
+      "SCHRITT 3: Relevanz – Nach Zustimmung: 2-3 Sätze zur steigenden Beitragsentwicklung (PKV-Verband, 3-5% p.a.), dann NUR EINE Frage: 'Wie wirkt sich das bei Ihnen aus?' Warte auf Antwort.\n" +
+      "SCHRITT 4: Beitrag – Gehe kurz auf die Antwort ein, dann: 'Ich kann das konkret für Sie hochrechnen – wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage.\n" +
+      "SCHRITT 5: Hochrechnung – Rechne den genannten Beitrag mit 4% p.a. auf 10 Jahre hoch (und vorsichtig bis Ruhestand). Formuliere menschlich: 'Bei X Euro wären das in 10 Jahren rund Y Euro – also Z Euro mehr pro Monat. Wenn Sie das bis zum Ruhestand durchrechnen, kommen erhebliche Mehrbeträge zusammen.' Dann: 'Haben Sie Ihre Beitragsentwicklung schon einmal so betrachtet?'\n" +
+      "SCHRITT 6: Antwort abwarten – Lass den Kunden vollständig antworten.\n" +
+      "SCHRITT 7: Konzept erklären – Greife die Antwort auf, dann erkläre: 'Genau da setzt Herr Duic an. Er schaut sich gemeinsam mit Ihnen die Beitragsentwicklung an, rechnet Ihren Beitrag vorsichtig bis zum Ruhestand hoch und zeigt Möglichkeiten, diesen zu senken – Altersrückstellungen, Beitragsentlastungstarife und Steuervorteile.' Abschluss: 'Klingt das interessant für Sie?'\n" +
+      "SCHRITT 8: Termin – Bei klarem Ja: Erst Vormittag oder Nachmittag fragen, dann 2 Terminoptionen nennen. Nach Terminbestätigung: Gesundheitsfragen stellen (aus Topic Policy). Falls Kunde Gesundheitsfragen am Telefon nicht beantworten möchte: 'Kein Problem – ich packe die Fragen in die Terminbestätigungsmail, dann können Sie diese in Ruhe vor dem Termin beantworten.' Nach Termin + Fragen: Wünsche/Anregungen für den Termin fragen, dann freundlich verabschieden.",
+      "PKV-WICHTIGE REGELN: Stelle immer nur EINE Frage pro Turn. Wenn der Kunde eine Frage beantwortet hat, stelle diese Frage NIEMALS nochmals. Gehe zum nächsten Schritt. Frage nicht nach gesetzlich/privat – das ist irrelevant für diesen Ablauf.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -292,24 +296,21 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
 /**
  * Update dialog phase based on call state.
- * Transitions: opener → discovery → objection/close → done
+ * Only checks USER turns for objection detection to avoid false positives from Gloria's own phrasing.
  */
 function updateDialogPhase(ctx: CallContext): void {
   const old = ctx.dialogState.phase;
 
-  // If appointment confirmed, move to close/done
   if (ctx.confirmedSlotPhrase) {
     ctx.dialogState.phase = "done";
-  }
-  // If objection detected in response, mark as objection phase
-  else if (ctx.dialogState.phase === "discovery" && /einwand|problem|bedenken|aber|jedoch|allerdings/i.test(
-    ctx.transcript.slice(-1)[0]?.text || "",
-  )) {
-    ctx.dialogState.phase = "objection";
-  }
-  // Default: start with discovery after opener greeting
-  else if (ctx.dialogState.phase === "opener" && ctx.transcript.length > 3) {
+  } else if (ctx.dialogState.phase === "opener" && ctx.transcript.length > 3) {
     ctx.dialogState.phase = "discovery";
+  } else if (ctx.dialogState.phase === "discovery") {
+    // Only check the last USER turn, not assistant turns (avoids false objection triggers)
+    const lastUserTurn = [...ctx.transcript].reverse().find(t => t.role === "user");
+    if (lastUserTurn && /\b(?:nein|kein interesse|keine zeit|wir haben|bereits|schon|nicht interessiert|ruf.*nicht.*an|keine.*anrufe)\b/i.test(lastUserTurn.text)) {
+      ctx.dialogState.phase = "objection";
+    }
   }
 
   if (old !== ctx.dialogState.phase) {
@@ -627,12 +628,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       return;
     }
 
-    if (currentContext.topicKind === "pkv" && event.type === "answer") {
-      const assessment = cachedAssessPkvConversation(currentContext.transcript);
-      if (!isRelevantPkvStageAnswer(assessment.stage, transcript)) {
-        requestEventResponse("Die letzte Äußerung passt nicht erkennbar zur aktuellen PKV-Frage. Leite daraus keine neue Tatsache ab. Bitte die aktuelle Frage kurz und freundlich noch einmal stellen und auf die Antwort warten.");
-        return;
-      }
+    if (currentContext.topicKind === "pkv") {
+      // For PKV: invalidate the assessment cache since transcript changed
+      lastPkvAssessmentTranscriptLength = -1;
     }
 
     if (preparationState.stage === "inactive") {

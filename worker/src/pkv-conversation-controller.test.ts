@@ -17,7 +17,7 @@ test("derives one deterministic next step from the PKV transcript", () => {
   assert.match(instructionForPkvStage(projection), /1000 Euro/);
 
   turns.push({ role: "assistant", text: "Bei vier Prozent pro Jahr werden aus 1000 Euro in zehn Jahren ungefähr 1480 Euro." });
-  assert.equal(assessPkvConversation(turns).stage, "need_retirement_reflection");
+  assert.equal(assessPkvConversation(turns).stage, "need_concept");
 
   turns.push({ role: "assistant", text: "Wenn Sie diese Entwicklung bis zum Ruhestand weiterdenken: Wie fühlt sich das für Sie an und was bedeutet das für Ihre Planung?" });
   turns.push({ role: "user", text: "Das wäre auf Dauer schon viel." });

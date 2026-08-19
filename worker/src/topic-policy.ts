@@ -23,9 +23,9 @@ export type CallFlowState = {
   stage:
     | "opener"
     | "need_relevance"
-    | "need_insurance"
     | "need_contribution"
     | "need_projection"
+    | "need_concept"
     | "need_interest"
     | "ready_for_schedule"
     | "scheduling"
@@ -207,7 +207,6 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
 
   if (/\b(normal|schon normal|ist ja auch normal|hoechstbeitrag|höchstbeitrag)\b/i.test(text)) {
     next.lastUserSignal = "normalized_risk";
-    if (next.topicKind === "pkv" && next.stage === "need_relevance") next.stage = "need_insurance";
   }
 
   if (/was\s+hab\s+ich\s+davon|was\s+bringt\s+mir|warum\s+sollte\s+ich\s+einen\s+termin\s+machen|welchen\s+vorteil/i.test(text)) {
@@ -220,13 +219,13 @@ export function observeUserFlowState(state: CallFlowState, userText: string): Ca
 
   if (/\b(privat(?:e[nrsm]?\s+krankenversicherung)?|pkv|gesetzlich(?:e[nrsm]?\s+krankenversicherung)?|gkv)\b/i.test(text)) {
     next.insuranceKnown = true;
-    if (next.topicKind === "pkv" && (next.stage === "need_relevance" || next.stage === "need_insurance")) next.stage = "need_contribution";
+    if (next.topicKind === "pkv" && next.stage === "need_relevance") next.stage = "need_contribution";
     next.lastUserSignal = "insurance";
   }
 
   if (hasContributionSignal(text) && next.lastAssistantSignal === "current_contribution_question") {
     next.contributionKnown = true;
-    if (next.topicKind === "pkv" && (next.stage === "need_insurance" || next.stage === "need_contribution")) {
+    if (next.topicKind === "pkv" && next.stage === "need_contribution") {
       next.stage = "need_projection";
     }
     next.lastUserSignal = "contribution";

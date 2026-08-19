@@ -26,7 +26,7 @@ export const DIALOG_EVALUATION_SCENARIOS: DialogScenario[] = [
     { role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." },
     { role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." },
     { role: "assistant", text: "Bei vier Prozent pro Jahr wären es in zehn Jahren ungefähr 1480 Euro." },
-  ], expected: { pkvStage: "need_retirement_reflection" } },
+  ], expected: { pkvStage: "need_concept" } },
   { id: "flow-after-retirement-answer", category: "pkv-flow", turns: [
     { role: "assistant", text: "Wie nehmen Sie diese Entwicklung wahr?" },
     { role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." },
