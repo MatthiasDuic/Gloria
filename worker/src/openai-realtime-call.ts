@@ -255,8 +255,36 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       `akzeptiere das und stelle nur neue Fragen, die noch nicht geklärt sind.`,
     );
   }
+
+  // Phase-specific instructions to keep conversation on track
+  const phase = ctx.dialogState.phase;
+  if (phase === "opener") {
+    parts.push(
+      "PHASE: ERÖFFNUNG - Du befindest dich in der Eröffnungsphase. Deine Aufgabe: " +
+      "Freundliche Begrüßung, kurze Erklärung warum du anrufst, und Zustimmung zum Gespräch bekommen. " +
+      "Stelle KEINE inhaltlichen Fragen zu Versicherung, Beiträgen oder Kundensituation.",
+    );
+  } else if (phase === "discovery") {
+    parts.push(
+      "PHASE: BEDARFSKLÄRUNG - Du befindest dich in der Discovery-Phase. Deine Aufgabe: " +
+      "Verstehe die aktuelle Situation des Kunden (Alter, Beitrag, Versicherungsstatus, Bedenken). " +
+      "Stelle gezielt Fragen die den Nutzen unserer Analyse erklären. Keine Termin-Angebote in dieser Phase.",
+    );
+  } else if (phase === "objection") {
+    parts.push(
+      "PHASE: EINWAND-HANDLING - Du befindest dich in der Objection-Handling-Phase. Deine Aufgabe: " +
+      "Der Kunde hat einen Einwand oder Bedenken. Nimm ihn ernst, verstehe die konkrete Sorge, " +
+      "und beantworte ihn sachlich mit Fokus auf den Nutzen des Termins. Nach Einwand-Handling, zurück zu Discovery.",
+    );
+  } else if (phase === "close" || phase === "done") {
+    parts.push(
+      "PHASE: TERMIN/ABSCHLUSS - Du befindest dich in der Abschlussphase. Deine Aufgabe: " +
+      "Termin anbieten und bestätigen, oder bei Ablehnung respektvoll verabschieden. " +
+      "Keine neuen Discovery-Fragen mehr.",
+    );
+  }
   
-  parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf gebeten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
+  parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf geboten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
 
   const instructions = parts.join("\n\n");
   return convertNumbersForSpeech(instructions);
@@ -324,11 +352,15 @@ function rotateTranscriptIfNeeded(ctx: CallContext): void {
     const discardedTurns = ctx.transcript.slice(0, ctx.transcript.length - RETENTION_AFTER_ROTATION);
     const retainedTurns = ctx.transcript.slice(ctx.transcript.length - RETENTION_AFTER_ROTATION);
     
-    // Create brief summary of discarded turns
+    // Create brief summary of discarded turns (including dialog state info)
     const userTurnsCount = discardedTurns.filter(t => t.role === "user").length;
     const assistantTurnsCount = discardedTurns.filter(t => t.role === "assistant").length;
+    const askedQuestionsCount = ctx.dialogState.askedQuestions.size;
     
-    const summaryText = `[Transcript Rotation: ${discardedTurns.length} älteren Turns gerotiert (${userTurnsCount} Kunde, ${assistantTurnsCount} Gloria). Gesprächsverlauf bis hierher: Termin-Qualifizierung fortlaufend.]`;
+    const summaryText = 
+      `[Transcript Rotation: ${discardedTurns.length} älteren Turns gerotiert (${userTurnsCount} Kunde, ${assistantTurnsCount} Gloria). ` +
+      `Gesprächsverlauf bis hierher: Termin-Qualifizierung fortlaufend. ` +
+      `Aktuelles Dialog-Fortschritt: Phase=${ctx.dialogState.phase}, ${askedQuestionsCount} Fragen bereits gestellt.]`;
     
     ctx.transcript = [
       { role: "assistant", text: summaryText, at: discardedTurns[0]?.at || Date.now() },
@@ -339,6 +371,8 @@ function rotateTranscriptIfNeeded(ctx: CallContext): void {
       callSid: ctx.callSid,
       discarded: discardedTurns.length,
       retained: retainedTurns.length,
+      dialogPhase: ctx.dialogState.phase,
+      askedQuestions: askedQuestionsCount,
     });
   }
 }
