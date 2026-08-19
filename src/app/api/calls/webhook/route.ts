@@ -8,6 +8,7 @@ import {
   releaseCampaignCallLock,
   type TranscriptEvent,
 } from "@/lib/report-db";
+import { globalJobQueue } from "@/lib/job-queue";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -445,18 +446,17 @@ export async function POST(request: Request) {
   });
 
   let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
-  // Only send report email if recording consent was obtained
+  // Enqueue email job asynchronously instead of blocking
   if (report.recordingConsent === true) {
-    try {
-      emailResult = await sendReportEmail(report);
-    } catch (error) {
-      console.error("Report email delivery failed", error);
-      emailResult = {
-        delivered: false,
-        to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
-        reason: "Report gespeichert, aber E-Mail-Versand fehlgeschlagen.",
-      };
-    }
+    const jobId = globalJobQueue.enqueue("send_email", report.callSid || "unknown", {
+      reportId: report.id,
+      report,
+    });
+    emailResult = {
+      delivered: true,
+      to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
+      reason: `Email queued for delivery (jobId: ${jobId})`,
+    };
   } else {
     console.info(`Report for call ${report.callSid} stored without email: recording consent not obtained`);
     emailResult = {
@@ -471,30 +471,17 @@ export async function POST(request: Request) {
     | undefined;
 
   if (report.outcome === "Termin" && report.appointmentAt) {
-    const lead = report.leadId
-      ? await getLeadById(report.leadId, report.userId)
-      : undefined;
-    const user = report.userId ? await findUserById(report.userId) : null;
-    const transcriptEvents = report.callSid
-      ? await listCallTranscriptEventsFromPostgres(report.callSid)
-      : [];
-    const missingBasisQuestions = collectMissingBasisQuestions(transcriptEvents);
-    const transcriptEmail = inferAttendeeEmailFromTranscript(transcriptEvents);
-
-    try {
-      inviteResult = await sendAppointmentInvite({
-        report,
-        attendeeEmail: lead?.email || transcriptEmail,
-        organizerName: user?.realName || user?.companyName,
-        missingBasisQuestions,
-      });
-    } catch (error) {
-      console.error("Appointment invite delivery failed", error);
-      inviteResult = {
-        delivered: false,
-        reason: "Termin gespeichert, aber die Kalendereinladung konnte nicht versendet werden.",
-      };
-    }
+    // Enqueue appointment invite job asynchronously
+    const jobId = globalJobQueue.enqueue("send_invite", report.callSid || "unknown", {
+      reportId: report.id,
+      report,
+      leadId: report.leadId,
+      userId: report.userId,
+    });
+    inviteResult = {
+      delivered: true,
+      reason: `Appointment invite queued for delivery (jobId: ${jobId})`,
+    };
   }
 
   return NextResponse.json({
