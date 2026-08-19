@@ -143,7 +143,7 @@ export function buildRealtimeResponseInstructions(
 ): string {
   const facts = buildKnownConversationFacts(ctx);
   const sequence = includeSequence ? buildRequiredPkvSequenceInstruction(ctx) : "";
-  return [facts, instructions, sequence].filter(Boolean).join("\n\n");
+  return convertNumbersForSpeech([facts, instructions, sequence].filter(Boolean).join("\n\n"));
 }
 
 export function shouldRestoreDecisionMakerIntro(params: {

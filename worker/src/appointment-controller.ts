@@ -90,6 +90,14 @@ export function decideAppointment(params: {
   }
 
   const slotPhrase = params.slotPhrase?.trim() || "";
+  const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
+  if (/^(?:hallo|hallo\?|bitte\??|ja\?+|mhm|aha|okay\??|ok\??)[.!?]*$/i.test(latestUserText)) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Die letzte Kundenaussage war keine eindeutige Terminbestätigung. Frage kurz nach, welcher der angebotenen Termine gemeint ist, und bestätige erst nach einer klaren Auswahl.",
+    };
+  }
   if (!slotPhrase) {
     return {
       ok: false,

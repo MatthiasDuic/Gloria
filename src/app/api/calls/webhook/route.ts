@@ -454,12 +454,20 @@ export async function POST(request: Request) {
     const missingBasisQuestions = collectMissingBasisQuestions(transcriptEvents);
     const transcriptEmail = inferAttendeeEmailFromTranscript(transcriptEvents);
 
-    inviteResult = await sendAppointmentInvite({
-      report,
-      attendeeEmail: lead?.email || transcriptEmail,
-      organizerName: user?.realName || user?.companyName,
-      missingBasisQuestions,
-    });
+    try {
+      inviteResult = await sendAppointmentInvite({
+        report,
+        attendeeEmail: lead?.email || transcriptEmail,
+        organizerName: user?.realName || user?.companyName,
+        missingBasisQuestions,
+      });
+    } catch (error) {
+      console.error("Appointment invite delivery failed", error);
+      inviteResult = {
+        delivered: false,
+        reason: "Termin gespeichert, aber die Kalendereinladung konnte nicht versendet werden.",
+      };
+    }
   }
 
   return NextResponse.json({

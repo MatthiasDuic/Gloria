@@ -78,6 +78,14 @@ test("rejects invented slots and accepts exact supplied slots", () => {
   assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
+test("formats times and Euro amounts in dynamic response instructions", () => {
+  const ctx = buildPkvContext();
+  const response = buildRealtimeResponseInstructions(ctx, "Biete Donnerstag, 3. September um 18:00 Uhr und 1.800 Euro an.", false);
+  assert.match(response, /achtzehn Uhr/);
+  assert.match(response, /eintausendachthundert Euro/);
+  assert.doesNotMatch(response, /18:00|1\.800 Euro/);
+});
+
 test("includes the required decision-maker and gatekeeper opening lines", () => {
   const ctx = newContext({
     callSid: "test-realtime-opening",

@@ -53,3 +53,14 @@ test("returns one successful decision for a supplied slot", () => {
     },
   );
 });
+
+test("does not lock a slot from a delayed greeting transcript", () => {
+  const decision = decideAppointment({
+    turns: [...readyPkvTurns(), { role: "assistant", text: "Meinen Sie Donnerstag, 27. August um 15:30 Uhr?" }, { role: "user", text: "Hallo?" }],
+    topicKind: "pkv",
+    freeSlotsPrompt: freeSlots,
+    slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",
+  });
+  assert.equal(decision.ok, false);
+  if (!decision.ok) assert.equal(decision.error, "conversation_not_ready");
+});

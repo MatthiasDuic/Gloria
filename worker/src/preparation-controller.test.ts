@@ -50,6 +50,15 @@ test("repeats the current question when the answer does not fit", () => {
   assert.match(transition.instruction, /dieselbe Vorbereitungsfrage noch einmal/);
 });
 
+test("asks the configured follow-up after yes to a hospital question", () => {
+  const hospitalPolicy = { topic: "PKV", requiredQuestions: "Gab es stationäre Aufenthalte im Krankenhaus?" };
+  let transition = beginPreparation(createPreparationState(hospitalPolicy), "Donnerstag um 15 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.equal(transition.state.stage, "asking");
+  assert.match(transition.instruction, /Grund für den stationären Aufenthalt/);
+});
+
 test("completes the list and moves to the confirmation email", () => {
   const oneQuestionPolicy = { topic: "PKV", requiredQuestions: "Wie groß sind Sie?" };
   let transition = beginPreparation(createPreparationState(oneQuestionPolicy), "Donnerstag um 15 Uhr", []);
