@@ -28,7 +28,7 @@ export class RealtimeResponseController {
     this.sendResponse = options.sendResponse;
     this.isPlaybackPending = options.isPlaybackPending;
     this.onDeferred = options.onDeferred;
-    this.cooldownMs = options.cooldownMs ?? 180;
+    this.cooldownMs = options.cooldownMs ?? 100;
     this.now = options.now ?? Date.now;
     this.schedule = options.schedule ?? setTimeout;
     this.cancelSchedule = options.cancelSchedule ?? clearTimeout;

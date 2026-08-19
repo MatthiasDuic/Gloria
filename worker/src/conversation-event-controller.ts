@@ -17,7 +17,7 @@ export function isUnclearConversationText(text: string): boolean {
 }
 
 export function isConversationEndingText(text: string): boolean {
-  return /\b(?:kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+(?:mich\s+)?nicht\s+(?:mehr\s+)?an|nicht\s+mehr\s+anrufen|möchte\s+keinen\s+termin|will\s+keinen\s+termin|beenden\s+sie\s+das\s+gespräch|legen\s+sie\s+auf|bitte\s+nicht\s+mehr|streichen\s+sie\s+mich|auf\s+wiederhören|tschüss)\b/i.test(text);
+  return /\b(?:kein[e]?\s+interesse|nicht\s+interessiert|rufen\s+sie|nicht\s+an|anrufen|m[oe]chte\s+(?:kein|keinen)\s+termin|beende\s+(?:das\s+)?gespr[ae]ch|legen\s+sie\s+auf|auf\s+wiedersehen|tsch[ue]ss|streichen\s+mich|interessiert\s+mich\s+nicht|kommt\s+nicht\s+infrage)\b/i.test(text);
 }
 
 function isCustomerQuestion(text: string): boolean {

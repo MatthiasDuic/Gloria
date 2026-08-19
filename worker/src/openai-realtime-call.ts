@@ -11,7 +11,7 @@ import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { assessPkvConversation, instructionForPkvStage } from "./pkv-conversation-controller.js";
+import { assessPkvConversation, instructionForPkvStage, type PkvConversationAssessment, type ConversationTurn } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -297,6 +297,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
   let userIsSpeaking = false;
+  let transferWaitingStartedAt: number | null = null;
+  let lastPkvAssessment: PkvConversationAssessment | null = null;
+  let lastPkvAssessmentTranscriptLength = -1;
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -421,6 +424,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
+  const cachedAssessPkvConversation = (transcript: ConversationTurn[]): PkvConversationAssessment => {
+    // Cache result if transcript length hasn't changed
+    if (lastPkvAssessmentTranscriptLength === transcript.length && lastPkvAssessment) {
+      return lastPkvAssessment;
+    }
+    lastPkvAssessment = assessPkvConversation(transcript);
+    lastPkvAssessmentTranscriptLength = transcript.length;
+    return lastPkvAssessment;
+  };
+
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
     requestResponse("Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, Versicherung oder Termin.");
@@ -489,7 +502,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
         void notifyCallAction(currentContext, "hangup");
         return;
       }
-      if (contactRouting.stage === "waiting_for_transfer") return;
+      if (contactRouting.stage === "waiting_for_transfer") {
+        transferWaitingStartedAt = transferWaitingStartedAt || Date.now();
+        return;
+      }
       if (contactRouting.stage !== "decision_maker") {
         requestEventResponse(instructionForContactRouting(contactRouting));
         return;
@@ -499,7 +515,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (currentContext.topicKind === "pkv" && event.type === "answer") {
-      const assessment = assessPkvConversation(currentContext.transcript);
+      const assessment = cachedAssessPkvConversation(currentContext.transcript);
       if (!isRelevantPkvStageAnswer(assessment.stage, transcript)) {
         requestEventResponse("Die letzte Äußerung passt nicht erkennbar zur aktuellen PKV-Frage. Leite daraus keine neue Tatsache ab. Bitte die aktuelle Frage kurz und freundlich noch einmal stellen und auf die Antwort warten.");
         return;
@@ -507,11 +523,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (preparationState.stage === "inactive") {
-      const resumeInstruction = currentContext.topicKind === "pkv"
-        ? instructionForPkvStage(assessPkvConversation(currentContext.transcript), currentContext.contactName)
-        : undefined;
       const assessment = currentContext.topicKind === "pkv"
-        ? assessPkvConversation(currentContext.transcript)
+        ? cachedAssessPkvConversation(currentContext.transcript)
+        : undefined;
+      const resumeInstruction = currentContext.topicKind === "pkv" && assessment
+        ? instructionForPkvStage(assessment, currentContext.contactName)
         : undefined;
       if (assessment?.stage === "ready_to_schedule") {
         const offer = appointmentOfferInstruction(
@@ -638,6 +654,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "input_audio_buffer.speech_started") {
         userIsSpeaking = true;
+        // Check transfer timeout: if waiting for transfer >45 seconds, auto-hangup
+        if (contactRouting?.stage === "waiting_for_transfer" && transferWaitingStartedAt) {
+          const waitingMs = Date.now() - transferWaitingStartedAt;
+          const TRANSFER_TIMEOUT_MS = 45000; // 45 seconds
+          if (waitingMs > TRANSFER_TIMEOUT_MS) {
+            log.info("realtime.transfer_timeout", { callSid: ctx?.callSid, waitingMs });
+            void notifyCallAction(ctx!, "hangup");
+            return;
+          }
+        }
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
         ttsTurn += 1;
@@ -930,6 +956,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     responses.stop();
     playback.stop();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
+    transferWaitingStartedAt = null;
     try {
       openaiSession?.close(1000, "telnyx_closed");
     } catch {

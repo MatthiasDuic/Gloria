@@ -22,7 +22,7 @@ export type PkvConversationAssessment = {
   interestConfirmed: boolean;
 };
 
-const CONTRIBUTION_PATTERN = /\b(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro\b/i;
+const CONTRIBUTION_PATTERN = /\b(?:ca\.?|circa|rund|etwa)?\s*(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend|dreizehnhundert|vierzehnhundert|fünfzehnhundert|sechzehnhundert|siebzehnhundert|achtzehnhundert|neunzehnhundert)[a-zäöüß-]*\s+euro\b/i;
 
 /** Extrahiert den numerischen Eurobetrag aus einer Contributionphrase wie "1.234 Euro" oder "achthundert Euro". */
 function extractEuroAmount(phrase: string): number | undefined {
@@ -55,12 +55,15 @@ function roundToFive(n: number): number {
 
 function findInterestAnswer(turns: ConversationTurn[]): string {
   let questionIndex = -1;
+  // Look for explicit interest question patterns — allow multiple phrasings.
+  const interestQuestionPatterns = [
+    /(?:w[aä]re|ist)\s+(?:diese\s+)?klarheit[^.?!]*(?:hilfreich|sinnvoll)|(?:hilfreich|sinnvoll)[^.?!]*f[uüür]\s+sie/i,
+    /(?:w[aä]re)\s+(?:das\s+)?(?:interessant|hilfreich|n[uüützlich])[^.?!]*f[uüür]\s+sie/i,
+    /soll ich\s+(?:einen|einen\s+termin)/i,
+  ];
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (
-      turn.role === "assistant"
-      && /(?:wäre|ist)\s+(?:diese\s+)?klarheit[^.?!]*(?:hilfreich|sinnvoll)|(?:hilfreich|sinnvoll)[^.?!]*für\s+sie/i.test(turn.text)
-    ) {
+    if (turn.role === "assistant" && interestQuestionPatterns.some(p => p.test(turn.text))) {
       questionIndex = index;
       break;
     }
