@@ -2227,6 +2227,10 @@ export async function acquireCampaignCallLock(params: {
     try {
       await ensureSchema();
       const db = getPool();
+      
+      // Cleanup expired locks first
+      await db.query(`DELETE FROM campaign_call_locks WHERE expires_at <= NOW();`);
+      
       const result = await db.query(
         `
         INSERT INTO campaign_call_locks (user_id, lead_id, lock_token, expires_at)

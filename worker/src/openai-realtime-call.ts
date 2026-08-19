@@ -270,6 +270,37 @@ async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup")
   }
 }
 
+/**
+ * Rotate transcript to prevent memory leak in long-running calls.
+ * Keeps only recent turns + summary of oldest turns when length exceeds threshold.
+ */
+function rotateTranscriptIfNeeded(ctx: CallContext): void {
+  const MAX_TRANSCRIPT_LENGTH = 250;
+  const RETENTION_AFTER_ROTATION = 120;
+  
+  if (ctx.transcript.length > MAX_TRANSCRIPT_LENGTH) {
+    const discardedTurns = ctx.transcript.slice(0, ctx.transcript.length - RETENTION_AFTER_ROTATION);
+    const retainedTurns = ctx.transcript.slice(ctx.transcript.length - RETENTION_AFTER_ROTATION);
+    
+    // Create brief summary of discarded turns
+    const userTurnsCount = discardedTurns.filter(t => t.role === "user").length;
+    const assistantTurnsCount = discardedTurns.filter(t => t.role === "assistant").length;
+    
+    const summaryText = `[Transcript Rotation: ${discardedTurns.length} älteren Turns gerotiert (${userTurnsCount} Kunde, ${assistantTurnsCount} Gloria). Gesprächsverlauf bis hierher: Termin-Qualifizierung fortlaufend.]`;
+    
+    ctx.transcript = [
+      { role: "assistant", text: summaryText, at: discardedTurns[0]?.at || Date.now() },
+      ...retainedTurns,
+    ];
+    
+    log.info("realtime.transcript_rotated", {
+      callSid: ctx.callSid,
+      discarded: discardedTurns.length,
+      retained: retainedTurns.length,
+    });
+  }
+}
+
 export async function handleOpenAiRealtimeTelnyxStream(
   telnyx: ServerWebSocket,
   _req: IncomingMessage,
@@ -465,6 +496,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     assistantContinuationRequested = false;
     currentContext.lastUserFinalAt = Date.now();
     currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
+    rotateTranscriptIfNeeded(currentContext);
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
     const event = classifyConversationEvent(transcript);
@@ -803,6 +835,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
+          rotateTranscriptIfNeeded(ctx);
           currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }

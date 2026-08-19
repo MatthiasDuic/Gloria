@@ -48,6 +48,45 @@ const SCRIPTS_FILE = path.join(DATA_DIR, "topic-policies.json");
 const LEGACY_SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 const CAMPAIGN_STATE_FILE = path.join(DATA_DIR, "campaign-state.json");
 
+/** Retry configuration for transient PostgreSQL errors */
+const POSTGRES_RETRY_CONFIG = {
+  maxAttempts: 3,
+  delayMs: [200, 500, 1000], // exponential backoff: 200ms, 500ms, 1000ms
+};
+
+/**
+ * Retry wrapper for PostgreSQL operations that may fail transiently.
+ * Logs failures and alerts on final failure.
+ */
+async function withPostgresRetry<T>(
+  operation: () => Promise<T | null>,
+  operationName: string,
+): Promise<T | null> {
+  for (let attempt = 1; attempt <= POSTGRES_RETRY_CONFIG.maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const isLastAttempt = attempt === POSTGRES_RETRY_CONFIG.maxAttempts;
+      const message = error instanceof Error ? error.message : String(error);
+      const delayMs = POSTGRES_RETRY_CONFIG.delayMs[attempt - 1] || 1000;
+
+      if (isLastAttempt) {
+        console.error(
+          `[ALERT] PostgreSQL ${operationName} failed after ${attempt} attempts: ${message}`,
+        );
+        // Will fall back to file storage
+        return null;
+      }
+
+      console.warn(
+        `PostgreSQL ${operationName} attempt ${attempt} failed (${message}), retrying in ${delayMs}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
+}
+
 interface CampaignListState {
   userId?: string;
   listId: string;
@@ -203,12 +242,16 @@ async function readReportDatabaseWithMode(userId?: string): Promise<{
   data: ReportDatabase;
   mode: "postgres" | "file";
 }> {
-  const postgresData = await readReportDatabaseFromPostgres(userId);
+  const postgresData = await withPostgresRetry(
+    () => readReportDatabaseFromPostgres(userId),
+    `readReportDatabase(userId=${userId})`,
+  );
 
   if (postgresData) {
     return { data: postgresData, mode: "postgres" };
   }
 
+  console.info("Falling back to file storage for report database");
   const fileData = await readReportDatabase(userId);
   return { data: fileData, mode: "file" };
 }
@@ -479,7 +522,10 @@ async function readScriptsWithMode(userId?: string): Promise<{
   mode: "postgres" | "file";
 }> {
   if (userId) {
-    const userScripts = await readUserScriptsFromPostgres(userId);
+    const userScripts = await withPostgresRetry(
+      () => readUserScriptsFromPostgres(userId),
+      `readUserScripts(userId=${userId})`,
+    );
 
     if (userScripts && userScripts.length > 0) {
       return {
@@ -490,7 +536,10 @@ async function readScriptsWithMode(userId?: string): Promise<{
 
     const bootstrapped = await bootstrapUserScriptsFromDefaults(userId, defaultScripts);
     if (bootstrapped) {
-      const afterBootstrap = await readUserScriptsFromPostgres(userId);
+      const afterBootstrap = await withPostgresRetry(
+        () => readUserScriptsFromPostgres(userId),
+        `readUserScripts(userId=${userId}) after bootstrap`,
+      );
       if (afterBootstrap && afterBootstrap.length > 0) {
         return {
           data: await filterScriptsByUserAccess(normalizeTopicPolicies(afterBootstrap), userId),
@@ -500,7 +549,10 @@ async function readScriptsWithMode(userId?: string): Promise<{
     }
   }
 
-  const postgresData = await readScriptsFromPostgres();
+  const postgresData = await withPostgresRetry(
+    () => readScriptsFromPostgres(),
+    "readScripts(global)",
+  );
 
   if (postgresData) {
     return {
@@ -509,6 +561,7 @@ async function readScriptsWithMode(userId?: string): Promise<{
     };
   }
 
+  console.info("Falling back to file storage for topic policies");
   const fallbackScripts = await readJson(SCRIPTS_FILE, await readLegacyPlaybooksFile());
   const bootstrappedToPostgres = await writeScriptsToPostgres(fallbackScripts);
 
@@ -732,26 +785,49 @@ function buildMetrics(
 }
 
 function deduplicateReports(reports: CallReport[]): CallReport[] {
-  const byKey = new Map<string, CallReport>();
+  // First pass: Deduplicate by callSid (most reliable key)
+  const byCallSid = new Map<string, CallReport>();
+  const withoutCallSid: CallReport[] = [];
 
   for (const report of reports) {
-    const key = report.callSid?.trim() || report.leadId?.trim() || `${report.company}::${report.topic}::${report.conversationDate}`;
-    if (!key) continue;
-
-    const previous = byKey.get(key);
-    if (!previous) {
-      byKey.set(key, report);
-      continue;
-    }
-
-    const previousTimestamp = Date.parse(previous.conversationDate || "") || 0;
-    const incomingTimestamp = Date.parse(report.conversationDate || "") || 0;
-    if (incomingTimestamp > previousTimestamp) {
-      byKey.set(key, report);
+    if (report.callSid?.trim()) {
+      const callSid = report.callSid.trim();
+      const existing = byCallSid.get(callSid);
+      if (!existing) {
+        byCallSid.set(callSid, report);
+      } else {
+        // Keep the one with the later timestamp (most complete report)
+        const existingTime = Date.parse(existing.conversationDate || "") || 0;
+        const reportTime = Date.parse(report.conversationDate || "") || 0;
+        if (reportTime > existingTime) {
+          byCallSid.set(callSid, report);
+        }
+      }
+    } else {
+      withoutCallSid.push(report);
     }
   }
 
-  return [...byKey.values()].sort((a, b) => {
+  // Second pass: Deduplicate remaining reports without callSid by leadId or composite key
+  const byFallbackKey = new Map<string, CallReport>();
+  for (const report of withoutCallSid) {
+    const key = report.leadId?.trim() || `${report.company || "?"}::${report.topic || "?"}::${report.conversationDate || "?"}`;
+    if (!key) continue;
+
+    const existing = byFallbackKey.get(key);
+    if (!existing) {
+      byFallbackKey.set(key, report);
+    } else {
+      const existingTime = Date.parse(existing.conversationDate || "") || 0;
+      const reportTime = Date.parse(report.conversationDate || "") || 0;
+      if (reportTime > existingTime) {
+        byFallbackKey.set(key, report);
+      }
+    }
+  }
+
+  const allReports = [...byCallSid.values(), ...byFallbackKey.values()];
+  return allReports.sort((a, b) => {
     const aTime = Date.parse(a.conversationDate || "") || 0;
     const bTime = Date.parse(b.conversationDate || "") || 0;
     return bTime - aTime;

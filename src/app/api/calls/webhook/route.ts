@@ -445,14 +445,24 @@ export async function POST(request: Request) {
   });
 
   let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
-  try {
-    emailResult = await sendReportEmail(report);
-  } catch (error) {
-    console.error("Report email delivery failed", error);
+  // Only send report email if recording consent was obtained
+  if (report.recordingConsent === true) {
+    try {
+      emailResult = await sendReportEmail(report);
+    } catch (error) {
+      console.error("Report email delivery failed", error);
+      emailResult = {
+        delivered: false,
+        to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
+        reason: "Report gespeichert, aber E-Mail-Versand fehlgeschlagen.",
+      };
+    }
+  } else {
+    console.info(`Report for call ${report.callSid} stored without email: recording consent not obtained`);
     emailResult = {
       delivered: false,
       to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
-      reason: "Report gespeichert, aber E-Mail-Versand fehlgeschlagen.",
+      reason: "Email nicht versendet: keine Aufnahmezustimmung des Gesprächspartners.",
     };
   }
 

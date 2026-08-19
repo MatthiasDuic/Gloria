@@ -59,12 +59,22 @@ export async function streamElevenLabsAudio(
   }
   if (!response.body) throw new Error("ElevenLabs TTS lieferte keinen Audiostream");
 
-  const STALL_TIMEOUT_MS = 8_000;
-  const readWithTimeout = (): Promise<{ done: boolean; value?: Uint8Array }> =>
+  // Dynamic timeout: allow longer initial latency (connection setup) but stricter on subsequent chunks
+  const INITIAL_STALL_TIMEOUT_MS = 10_000;  // 10s for first chunk (connection setup)
+  const CHUNK_STALL_TIMEOUT_MS = 4_000;     // 4s for subsequent chunks (normal network jitter)
+  const MAX_STREAM_TIME_MS = 30_000;        // 30s max total stream time
+  
+  const streamStartTime = Date.now();
+  
+  const readWithTimeout = (isFirstChunk: boolean): Promise<{ done: boolean; value?: Uint8Array }> =>
     new Promise((resolve, reject) => {
+      const timeoutMs = isFirstChunk ? INITIAL_STALL_TIMEOUT_MS : CHUNK_STALL_TIMEOUT_MS;
+      const remainingTime = Math.max(100, MAX_STREAM_TIME_MS - (Date.now() - streamStartTime));
+      const effectiveTimeout = Math.min(timeoutMs, remainingTime);
+      
       const id = setTimeout(
-        () => reject(new Error(`ElevenLabs stream stalled after ${STALL_TIMEOUT_MS / 1000}s`)),
-        STALL_TIMEOUT_MS,
+        () => reject(new Error(`ElevenLabs stream stalled after ${effectiveTimeout / 1000}s`)),
+        effectiveTimeout,
       );
       reader.read().then(
         (v) => { clearTimeout(id); resolve(v); },
@@ -74,8 +84,10 @@ export async function streamElevenLabsAudio(
 
   const reader = response.body.getReader();
   try {
+    let chunkCount = 0;
     while (true) {
-      const result = await readWithTimeout();
+      const result = await readWithTimeout(chunkCount === 0);
+      chunkCount += 1;
       if (result.done) return;
       if (result.value?.length) onChunk(Buffer.from(result.value));
     }
