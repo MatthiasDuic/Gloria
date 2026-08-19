@@ -161,7 +161,8 @@ export function shouldRestoreDecisionMakerIntro(params: {
   decisionMakerIntroWasLastResponse: boolean;
   playbackPending: boolean;
 }): boolean {
-  return false;
+  // Re-trigger intro if it was interrupted mid-playback by a barge-in.
+  return params.decisionMakerIntroWasLastResponse && params.playbackPending;
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -215,7 +216,6 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Bei 'Der Donnerstag' oder 'der zweite Termin' frage zuerst kurz zurück: 'Meinen Sie Donnerstag, den ... um ... Uhr?' Rufe confirm_appointment erst nach einem klaren 'Ja, das passt' oder einer vollständigen eindeutigen Bestätigung auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
-      "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
@@ -233,7 +233,6 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       "PKV-QUALIFIKATION: Die konkrete Reihenfolge und Formulierung liefert die Topic Policy. Vor einem Termin müssen die Konzept-Erklärung, der heutige Beitrag, eine nachvollziehbare Einordnung der langfristigen Beitragsentwicklung und eine klare, auf den Nutzen bezogene Zustimmung vorliegen. Der Versicherungsstatus ist für diesen Gesprächspfad irrelevant und darf nicht als Voraussetzung behandelt werden. Ein unklarer ASR-Text, ein bloßes 'ja', ein Füllwort oder ein missverstandenes Wort ist niemals eine Zustimmung. Frage dann kurz nach, statt fortzufahren.",
       "PKV-HARTE GESPRÄCHSREGEL: Erkläre nach der Zustimmung zum Gesprächsanlass zuerst persönlich und verständlich das Analysekonzept und frage, ob der Kunde seine Beitragsentwicklung schon einmal so betrachtet hat. Erst wenn dieses Konzept erklärt und beantwortet wurde, darfst du nach gesetzlich oder privat fragen. Sprich niemals über Kassenwahl, Einkommen, Zusatzleistungen, Bonusprogramme oder Wahltarife; das ist nicht das Ziel dieses PKV-Anrufs.",
       "COMPLIANCE: Keine pauschalen Erfolgsversprechen, keine Garantie für Ersparnisse oder stabile Beiträge und keine individuelle Steuer-, Rechts- oder Tarifempfehlung am Telefon. Mögliche Instrumente nur als Prüfoption nach persönlicher Analyse nennen.",
-      "Nach einem bestätigten Termin bedeutet ein Nein auf eine einzelne Vorbereitungs- oder Gesundheitsfrage: 'Kein Problem, dann lassen wir diesen Punkt für den Termin offen.' Stelle diese Frage nicht erneut, sondern fahre mit der nächsten Frage fort. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
       "Nach einem bestätigten Termin bedeutet ein Nein auf eine einzelne Vorbereitungs- oder Gesundheitsfrage: 'Kein Problem, dann lassen wir diesen Punkt für den Termin offen.' Stelle diese Frage nicht erneut, sondern fahre mit der nächsten Frage fort. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     );
   }
@@ -297,6 +296,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let preparationState: PreparationState = createPreparationState();
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
+  let userIsSpeaking = false;
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -311,7 +311,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const playback = new TelnyxPlayback({
-    prebufferFrames: 6,
+    prebufferFrames: 3,
     sendFrame: (frame) => sendTelnyx({
       event: "media",
       stream_id: streamId,
@@ -327,7 +327,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }),
     isPlaybackPending: () => playback.isPending(),
     onDeferred: ({ instructions, playbackPending }) => {
-      log.info("realtime.response_ignored_while_active", {
+      log.info("realtime.response_queued", {
         callSid: ctx?.callSid,
         instructionsPreview: instructions.slice(0, 80) || "none",
         playbackPending,
@@ -637,6 +637,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "input_audio_buffer.speech_started") {
+        userIsSpeaking = true;
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
         ttsTurn += 1;
@@ -669,6 +670,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
             playbackCleared: plan.clearTelnyxPlayback,
           });
         }
+        return;
+      }
+
+      if (message.type === "input_audio_buffer.speech_stopped") {
+        userIsSpeaking = false;
         return;
       }
 
@@ -799,7 +805,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             });
           }
         }
-        const nextUserTranscript = pendingUserTranscripts.splice(0).join(" ").replace(/\s+/g, " ").trim();
+        // Only the latest queued utterance carries the user's current intent.
+        const pending = pendingUserTranscripts.splice(0);
+        const nextUserTranscript = pending.at(-1)?.trim() ?? "";
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
         responses.flush();
         assistantTranscript = "";
@@ -858,17 +866,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
       });
       connectOpenAi();
 
-      void loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
+      const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
           preparationState = createPreparationState(policy);
         }
-        updateSession();
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
       });
 
-      void loadBusySlots({ userId: ctx.userId }).then((slots) => {
+      const calendarTask = loadBusySlots({ userId: ctx.userId }).then((slots) => {
         if (!ctx) return;
         const busySlots = slots || [];
         const free = computeFreeSlots(busySlots, {
@@ -878,13 +885,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
           minLeadDays: 7,
         });
         ctx.freeSlotsPrompt = freeSlotsToPrompt(free);
-        updateSession();
         log.info("realtime.calendar_applied", { callSid: ctx.callSid, busy: busySlots.length, free: free.length });
       }).catch(() => undefined);
 
+      // Single session.update after both background tasks complete.
+      void Promise.allSettled([policyTask, calendarTask]).then(() => { if (ctx) updateSession(); });
+
       const silenceMs = Math.max(2500, Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "4200", 10));
       silenceOpenerTimer = setTimeout(() => {
-        if (!ctx || responses.isActive()) return;
+        if (!ctx || responses.isActive() || userIsSpeaking) return;
         sendOpenAi({
           type: "response.create",
           response: {

@@ -249,7 +249,9 @@ export function advancePreparation(
 
 
   if (state.stage === "awaiting_email") {
-    if (!/@|\b(?:at|punkt)\b/i.test(userText)) {
+    const hasAtIndicator = /@|\bat\b/i.test(userText);
+    const hasDotIndicator = /\.|\bpunkt\b|\bdot\b/i.test(userText);
+    if (!hasAtIndicator || !hasDotIndicator) {
       return { state, instruction: "Frage ausschließlich noch einmal nach der E-Mail-Adresse für die Terminbestätigung." };
     }
     return {

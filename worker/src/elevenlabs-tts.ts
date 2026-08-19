@@ -59,10 +59,23 @@ export async function streamElevenLabsAudio(
   }
   if (!response.body) throw new Error("ElevenLabs TTS lieferte keinen Audiostream");
 
+  const STALL_TIMEOUT_MS = 8_000;
+  const readWithTimeout = (): Promise<{ done: boolean; value?: Uint8Array }> =>
+    new Promise((resolve, reject) => {
+      const id = setTimeout(
+        () => reject(new Error(`ElevenLabs stream stalled after ${STALL_TIMEOUT_MS / 1000}s`)),
+        STALL_TIMEOUT_MS,
+      );
+      reader.read().then(
+        (v) => { clearTimeout(id); resolve(v); },
+        (e) => { clearTimeout(id); reject(e as Error); },
+      );
+    });
+
   const reader = response.body.getReader();
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readWithTimeout();
       if (result.done) return;
       if (result.value?.length) onChunk(Buffer.from(result.value));
     }

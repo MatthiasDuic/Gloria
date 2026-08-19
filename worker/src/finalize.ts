@@ -146,13 +146,10 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
 
 export async function postReport(ctx: CallContext): Promise<void> {
   if (!ctx.company || !ctx.topic) {
-    // Continue posting when we still have correlation IDs; backend can recover
-    // missing company/topic from leadId or existing callSid report.
     if (!ctx.leadId && !ctx.callSid) {
-    log.info("finalize.skip_no_company_or_topic", { callSid: ctx.callSid });
-    return;
+      log.info("finalize.skip_no_company_or_topic", { callSid: ctx.callSid });
+      return;
     }
-
     log.info("finalize.missing_company_or_topic_recoverable", {
       callSid: ctx.callSid,
       hasLeadId: Boolean(ctx.leadId),
@@ -165,48 +162,87 @@ export async function postReport(ctx: CallContext): Promise<void> {
     return;
   }
 
-  const extracted = await extractReport(ctx);
+  const token = process.env.APP_INTERNAL_TOKEN || "";
+  const url = `${baseUrl}/api/calls/webhook`;
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(token ? { "x-gloria-internal-token": token } : {}),
+  };
 
-  // Deterministischer Override: Wenn der Worker bereits eine bestätigte
-  // Slot-Phrase erkannt hat (Phase-7-Termin-Bestätigung), ist outcome=Termin
-  // und das Datum lässt sich aus der Phrase ableiten – unabhängig vom LLM.
-  let outcome: Outcome = extracted?.outcome || "Nicht erreicht / kein Kontakt";
-  let appointmentAt: string | undefined = extracted?.appointmentAt;
-  let summary: string =
-    extracted?.summary ||
-    `Anruf bei ${ctx.company} zum Thema ${ctx.topic}. Keine Auswertung verfügbar.`;
-  const contactEmail: string | undefined = extracted?.contactEmail;
-  const documentation = deriveReportDocumentation(ctx, extracted);
+  const recordingConsent = detectRecordingConsent(ctx.transcript);
+  const documentation = deriveReportDocumentation(ctx, null);
+
+  // Preliminary summary text used as summaryChunk in Phase 1 (transcript-only post).
+  const prelimSummaryText = ctx.confirmedSlotPhrase
+    ? `Termin vereinbart: ${ctx.confirmedSlotPhrase}. Vollständige Auswertung folgt.`
+    : `Anruf bei ${ctx.company || "?"} zum Thema ${ctx.topic || "?"}. Auswertung folgt.`;
+
+  const transcriptEntries = ctx.transcript.map((entry) => ({
+    role: entry.role,
+    speaker: entry.role === "assistant" ? "Gloria" : "Interessent",
+    text: entry.text,
+    at: entry.at,
+    latencyMs: entry.latencyMs,
+  }));
+
+  // Phase 1: Sofort-Post sichert Transkript und Basisdaten — kein E-Mail-Versand.
+  // summaryChunk statt summary/outcome, damit der Webhook keine E-Mail auslöst.
+  log.info("finalize.posting_preliminary", {
+    callSid: ctx.callSid,
+    url,
+    hasSlot: Boolean(ctx.confirmedSlotPhrase),
+    transcriptTurns: transcriptEntries.length,
+    hasUserId: Boolean(ctx.userId),
+    hasLeadId: Boolean(ctx.leadId),
+  });
+
+  const phase1Ok = await postWithRetry(url, headers, {
+    userId: ctx.userId,
+    leadId: ctx.leadId,
+    callSid: ctx.callSid,
+    company: ctx.company,
+    contactName: ctx.contactName,
+    topic: ctx.topic,
+    // summaryChunk triggers transcript-only storage path (no email sent).
+    summaryChunk: prelimSummaryText,
+    recordingConsent,
+    transcript: transcriptEntries,
+  });
+
+  if (!phase1Ok) {
+    log.error("finalize.preliminary_post_failed", { callSid: ctx.callSid });
+    return;
+  }
+  log.info("finalize.preliminary_posted", { callSid: ctx.callSid });
+
+  // Phase 2: LLM-Auswertung; updated existierenden Report per callSid.
+  const extracted = await extractReport(ctx);
+  if (!extracted) {
+    log.info("finalize.no_llm_extraction", { callSid: ctx.callSid });
+    return;
+  }
+
+  let outcome: Outcome = extracted.outcome;
+  let appointmentAt: string | undefined = extracted.appointmentAt;
+  let summary = extracted.summary;
 
   if (ctx.confirmedSlotPhrase) {
     outcome = "Termin";
-    // Bevorzuge die gelockte Slot-Phrase – das LLM kann in der Schluss-
-    // Zusammenfassung halluzinieren (anderer Tag/Uhrzeit). Die ge-lockte
-    // Phrase stammt aus Glorias eigener Bestätigung in Phase 7 und ist
-    // damit die zuverlaessigere Quelle.
     const parsed = parseSlotPhraseToIso(ctx.confirmedSlotPhrase);
-    if (parsed) {
-      appointmentAt = parsed;
-    } else if (!appointmentAt) {
-      // kein Parse-Ergebnis und LLM hat auch nichts geliefert -> nichts setzen
-    }
-    if (!extracted) {
-      summary = `Termin vereinbart: ${ctx.confirmedSlotPhrase}.`;
-    }
+    if (parsed) appointmentAt = parsed;
   }
 
-  summary = withDocumentationHeader(summary, outcome, documentation);
+  const fullDocumentation = deriveReportDocumentation(ctx, extracted);
+  summary = withDocumentationHeader(summary, outcome, fullDocumentation);
 
-  const token = process.env.APP_INTERNAL_TOKEN || "";
-  const url = `${baseUrl}/api/calls/webhook`;
+  log.info("finalize.posting_final", {
+    callSid: ctx.callSid,
+    outcome,
+    appointmentAt,
+    email: extracted.contactEmail,
+  });
 
-  // Aufzeichnungs-Einwilligung strikt aus dem Transkript ableiten:
-  // Erste klare NEIN-Antwort des Anrufers nach Glorias Aufzeichnungs-Frage
-  // gewinnt – auch wenn später ein "Ja" auf eine andere Frage kommt. DSGVO-
-  // konform: ohne explizites Ja KEINE Aufzeichnung.
-  const recordingConsent = detectRecordingConsent(ctx.transcript);
-
-  const body = {
+  await postWithRetry(url, headers, {
     userId: ctx.userId,
     leadId: ctx.leadId,
     callSid: ctx.callSid,
@@ -215,81 +251,42 @@ export async function postReport(ctx: CallContext): Promise<void> {
     topic: ctx.topic,
     summary,
     outcome,
-    conversationOccurred: documentation.conversationOccurred,
-    callDisposition: documentation.callDisposition,
-    followUpPlanned: documentation.followUpPlanned,
-    followUpAt: documentation.followUpAt,
+    conversationOccurred: fullDocumentation.conversationOccurred,
+    callDisposition: fullDocumentation.callDisposition,
+    followUpPlanned: fullDocumentation.followUpPlanned,
+    followUpAt: fullDocumentation.followUpAt,
     appointmentAt,
-    nextCallAt: extracted?.nextCallAt,
-    directDial: extracted?.directDial,
+    nextCallAt: extracted.nextCallAt,
+    directDial: extracted.directDial,
     recordingConsent,
-    // Vollständiges Wort-für-Wort-Protokoll inklusive Reaktionszeit pro Gloria-
-    // Antwort. Wird im Backend in call_transcript_events gespeichert und im
-    // Report-Detail angezeigt – auch wenn keine Aufzeichnung vorhanden ist.
-    transcript: ctx.transcript.map((entry) => ({
-      role: entry.role,
-      speaker: entry.role === "assistant" ? "Gloria" : "Interessent",
-      text: entry.text,
-      at: entry.at,
-      latencyMs: entry.latencyMs,
-    })),
-  };
-
-  log.info("finalize.posting", {
-    callSid: ctx.callSid,
-    url,
-    outcome,
-    appointmentAt,
-    hasSlot: Boolean(ctx.confirmedSlotPhrase),
-    hasUserId: Boolean(ctx.userId),
-    hasLeadId: Boolean(ctx.leadId),
+    transcript: transcriptEntries,
   });
+  log.info("finalize.final_posted", { callSid: ctx.callSid, outcome });
+}
 
+async function postWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+): Promise<boolean> {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { "x-gloria-internal-token": token } : {}),
-        },
-        body: JSON.stringify(body),
-      });
-
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
       const text = await res.text();
-      if (res.ok) {
-        log.info("finalize.posted", {
-          callSid: ctx.callSid,
-          outcome,
-          appointmentAt,
-          email: contactEmail,
-          response: text.slice(0, 200),
-          attempt,
-        });
-        return;
-      }
-
+      if (res.ok) return true;
       const retryable = res.status >= 500 || res.status === 429;
-      log.error("finalize.post_failed", {
-        status: res.status,
-        body: text.slice(0, 400),
-        attempt,
-        retryable,
-      });
-      if (!retryable || attempt >= maxAttempts) {
-        return;
-      }
+      log.error("finalize.post_failed", { status: res.status, body: text.slice(0, 400), attempt, retryable });
+      if (!retryable || attempt >= maxAttempts) return false;
       await wait(250 * attempt);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error("finalize.post_error", { error: message, attempt });
-      if (attempt >= maxAttempts) {
-        return;
-      }
+      if (attempt >= maxAttempts) return false;
       await wait(250 * attempt);
     }
   }
+  return false;
 }
 
 function deriveReportDocumentation(

@@ -47,6 +47,10 @@ export class OpenAiRealtimeSession {
   private readonly queuedAudio: string[] = [];
   private socket: RealtimeSocket | null = null;
   private ready = false;
+  private deliberatelyClosed = false;
+  private reconnectAttempts = 0;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 3;
+  private static readonly RECONNECT_BASE_MS = 500;
 
   constructor(options: OpenAiRealtimeSessionOptions) {
     this.options = options;
@@ -58,6 +62,7 @@ export class OpenAiRealtimeSession {
     const factory = this.options.socketFactory ?? ((socketUrl, headers) => new WebSocket(socketUrl, { headers }) as RealtimeSocket);
     this.socket = factory(url, { Authorization: `Bearer ${this.options.apiKey}` });
     this.socket.on("open", () => {
+      this.reconnectAttempts = 0;
       this.ready = true;
       this.options.onOpen?.();
       for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
@@ -71,7 +76,21 @@ export class OpenAiRealtimeSession {
     });
     this.socket.on("close", (code, reason) => {
       this.ready = false;
-      this.options.onClose?.(code, reason.toString());
+      this.socket = null;
+      if (this.deliberatelyClosed) {
+        this.options.onClose?.(code, reason.toString());
+        return;
+      }
+      if (this.reconnectAttempts < OpenAiRealtimeSession.MAX_RECONNECT_ATTEMPTS) {
+        const delay = OpenAiRealtimeSession.RECONNECT_BASE_MS * (2 ** this.reconnectAttempts);
+        this.reconnectAttempts += 1;
+        this.options.onError?.(
+          new Error(`openai_ws_dropped code=${code}; reconnect ${this.reconnectAttempts}/${OpenAiRealtimeSession.MAX_RECONNECT_ATTEMPTS} in ${delay}ms`),
+        );
+        setTimeout(() => this.connect(), delay);
+      } else {
+        this.options.onClose?.(code, reason.toString());
+      }
     });
     this.socket.on("error", (error) => this.options.onError?.(error));
   }
@@ -97,6 +116,7 @@ export class OpenAiRealtimeSession {
   }
 
   close(code = 1000, reason = "session_closed"): void {
+    this.deliberatelyClosed = true;
     this.ready = false;
     this.queuedAudio.length = 0;
     this.socket?.close(code, reason);

@@ -60,15 +60,26 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
     && /(?:ja\b|klar\b|gerne\b|selbstverständlich|darf\s+sie|darf\s+ich\s+es\s+erklären)/i.test(userText);
 
   let stage: PkvConversationStage = "ready_to_schedule";
-  if (!interestConfirmed && retirementReflectionAsked && !interestConfirmed) stage = "need_interest";
-  else if (projectionDelivered && !retirementReflectionAsked) stage = "need_retirement_reflection";
-  else if (contributionPhrase && !projectionDelivered) stage = "need_projection";
-  else if (permissionToExplain && !relevanceAsked) stage = "need_relevance";
-  else if (!relevanceAsked) stage = "need_relevance";
-  else if (!contributionPhrase) stage = "need_contribution";
-  else if (!projectionDelivered) stage = "need_projection";
-  else if (!retirementReflectionAsked) stage = "need_retirement_reflection";
-  else if (!interestConfirmed) stage = "need_interest";
+  if (!conceptDelivered) {
+    // Concept hasn't been delivered yet — always start from the beginning.
+    stage = "need_relevance";
+  } else if (!interestConfirmed && retirementReflectionAsked) {
+    stage = "need_interest";
+  } else if (projectionDelivered && !retirementReflectionAsked) {
+    stage = "need_retirement_reflection";
+  } else if (contributionPhrase && !projectionDelivered) {
+    stage = "need_projection";
+  } else if (!relevanceAsked) {
+    stage = "need_relevance";
+  } else if (!contributionPhrase) {
+    stage = "need_contribution";
+  } else if (!projectionDelivered) {
+    stage = "need_projection";
+  } else if (!retirementReflectionAsked) {
+    stage = "need_retirement_reflection";
+  } else if (!interestConfirmed) {
+    stage = "need_interest";
+  }
 
   return {
     stage,

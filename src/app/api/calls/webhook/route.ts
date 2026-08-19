@@ -10,6 +10,8 @@ import {
 } from "@/lib/report-db";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
+export const maxDuration = 60;
+
 const BASIS_FIELD_RULES: Array<{
   key:
     | "birthDate"
@@ -276,15 +278,25 @@ export async function POST(request: Request) {
     recordingConsent?: boolean;
     recordingUrl?: string;
     transcript?: IncomingTranscriptEntry[];
+    conversationOccurred?: boolean;
+    callDisposition?: string;
+    followUpPlanned?: boolean;
+    followUpAt?: string;
   };
 
   if (payload.callSid) {
     await releaseCampaignCallLock(payload.callSid);
   }
 
-  // Persistiere das vollständige Wort-für-Wort-Protokoll IMMER, sobald es vom
-  // Worker mitkommt – unabhängig davon, ob der Anrufer der Aufnahme zugestimmt
-  // hat. Damit ist das Gespräch im Report-Detail auswertbar, auch ohne Audio.
+  const internalToken = process.env.APP_INTERNAL_TOKEN?.trim();
+  if (internalToken) {
+    const provided = request.headers.get("x-gloria-internal-token");
+    if (provided !== internalToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
+  // Transcript always persisted regardless of recording consent (for report detail).
   await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
