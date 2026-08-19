@@ -28,8 +28,9 @@ export async function streamElevenLabsAudio(
   const voiceId = getVoiceId();
   if (!apiKey || !voiceId) throw new Error("ELEVENLABS_API_KEY oder ELEVENLABS_VOICE_ID fehlt");
 
+  const streamingLatency = Number.parseInt(process.env.ELEVENLABS_STREAMING_LATENCY?.trim() || "2", 10);
   const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${outputFormat}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${outputFormat}&optimize_streaming_latency=${streamingLatency}`,
     {
       method: "POST",
       headers: {
@@ -60,8 +61,8 @@ export async function streamElevenLabsAudio(
   if (!response.body) throw new Error("ElevenLabs TTS lieferte keinen Audiostream");
 
   // Dynamic timeout: allow longer initial latency (connection setup) but stricter on subsequent chunks
-  const INITIAL_STALL_TIMEOUT_MS = 10_000;  // 10s for first chunk (connection setup)
-  const CHUNK_STALL_TIMEOUT_MS = 4_000;     // 4s for subsequent chunks (normal network jitter)
+  const INITIAL_STALL_TIMEOUT_MS = 6_000;   // reduced from 10s — fail faster on real outages
+  const CHUNK_STALL_TIMEOUT_MS = 4_000;
   const MAX_STREAM_TIME_MS = 30_000;        // 30s max total stream time
   
   const streamStartTime = Date.now();
