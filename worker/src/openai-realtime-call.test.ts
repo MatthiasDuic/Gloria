@@ -204,8 +204,8 @@ test("requires the sensibilization and relevance question after permission to ex
   assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
 });
 
-test("restores the decision-maker introduction only when playback was interrupted", () => {
-  assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: true }), true);
+test("does not restore the full decision-maker introduction after interruption", () => {
+  assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: true }), false);
   assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: false }), false);
   assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: false, playbackPending: true }), false);
 });

@@ -136,6 +136,17 @@ export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
 }
 
+function isRelevantPkvStageAnswer(stage: string, text: string): boolean {
+  const normalized = text.toLowerCase();
+  if (stage === "need_relevance") {
+    return /\b(?:ja|nein|entwicklung|beitrag|steiger|belast|sorge|ruhestand|rente|planung|teuer|hoch|spür|sp[uü]r|wahrnehm|angst|problem)\b/i.test(normalized);
+  }
+  if (stage === "need_contribution") {
+    return /\b(?:\d{2,5}|euro|€|beitrag|monatlich|monat|zahlen|kost|weiß\s+ich\s+nicht|weiss\s+ich\s+nicht|keine\s+ahnung)\b/i.test(normalized);
+  }
+  return true;
+}
+
 export function buildRealtimeResponseInstructions(
   ctx: CallContext,
   instructions?: string,
@@ -150,7 +161,7 @@ export function shouldRestoreDecisionMakerIntro(params: {
   decisionMakerIntroWasLastResponse: boolean;
   playbackPending: boolean;
 }): boolean {
-  return params.decisionMakerIntroWasLastResponse && params.playbackPending;
+  return false;
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -195,6 +206,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
     "Die Topic Policy steuert Anlass, Kundennutzen, Einwandbehandlung und Gesprächsführung für dieses Thema. Universell verbindlich bleiben nur Transparenz, Freiwilligkeit, Datenschutz, die Terminlogik und fachliche Grenzen.",
     "Sprich menschlich, ruhig, freundlich und auf Augenhöhe. Keine Callcenter-Monologe, keine künstliche Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit.",
+      "Nimm die letzte Aussage des Kunden zuerst emotional und inhaltlich auf: Benenne kurz seine konkrete Perspektive oder Sorge in eigenen Worten, ohne zu dramatisieren. Gib dann genau einen nachvollziehbaren nächsten Schritt und höchstens eine Frage. Keine Standardfloskel wie 'Dann ist das sinnvoll', wenn der Kunde gerade etwas anderes gesagt hat.",
+      "Nach einer Unterbrechung setzt du nur an der offenen Stelle an. Wiederhole weder die komplette Vorstellung noch den bereits gesprochenen Satz. Wenn die Äußerung unklar war, frage kurz nach; wenn sie verständlich war, antworte direkt auf ihren Inhalt.",
     "Gib niemals zu, dass du etwas erfunden hast, dass deine Information ungenau ist, oder dass du dich geirrt hast. Wenn du einen Fehler bemerkst oder unsicher bist, korrigiere dich diskret und fahre mit Sicherheit fort—Beispiel: nicht 'Ich kann das nicht sauber herleiten, ohne etwas zu erfinden', sondern 'Lass mich das anders erklären' oder direkt die nächste passende Frage. Vertrauen bauen heißt: immer kompetent wirken, auch wenn du eine Aussage anpasst.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
@@ -409,6 +422,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestResponse("Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, Versicherung oder Termin.");
   };
 
+  const requestInterruptedIntroContinuation = () => {
+    decisionMakerIntroPending = false;
+    requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und frage nur: 'Darf ich Ihnen kurz sagen, worum es geht?' Danach vollständig warten.");
+  };
+
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
     sendOpenAi({
       type: "conversation.item.create",
@@ -443,7 +461,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     unclearClarificationPending = false;
 
     if (contactRouting?.stage === "decision_maker" && decisionMakerIntroPending) {
-      requestDecisionMakerIntro();
+        requestInterruptedIntroContinuation();
       return;
     }
 
@@ -474,6 +492,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       requestDecisionMakerIntro();
       return;
+    }
+
+    if (currentContext.topicKind === "pkv" && event.type === "answer") {
+      const assessment = assessPkvConversation(currentContext.transcript);
+      if (!isRelevantPkvStageAnswer(assessment.stage, transcript)) {
+        requestEventResponse("Die letzte Äußerung passt nicht erkennbar zur aktuellen PKV-Frage. Leite daraus keine neue Tatsache ab. Bitte die aktuelle Frage kurz und freundlich noch einmal stellen und auf die Antwort warten.");
+        return;
+      }
     }
 
     if (preparationState.stage === "inactive") {
