@@ -1036,7 +1036,9 @@ export default function HomePage() {
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   void settingsOpen; void setSettingsOpen;
-  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "settings" | "compliance">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "crm" | "settings" | "compliance">("overview");
+  const [leadNoteEdit, setLeadNoteEdit] = useState<string>("");
+  useEffect(() => { setLeadNoteEdit(selectedLeadForHistory?.note || ""); }, [selectedLeadForHistory]);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2457,6 +2459,13 @@ export default function HomePage() {
             <span className="nav-icon" aria-hidden>▤</span>
             <span>Kalender</span>
           </button>
+          <button
+            className={`nav-item ${activeView === "crm" ? "active" : ""}`}
+            onClick={() => setActiveView("crm")}
+          >
+            <span className="nav-icon" aria-hidden>◈</span>
+            <span>CRM Pipeline</span>
+          </button>
         </nav>
         <div className="sidebar-footer">
           <button
@@ -2489,6 +2498,7 @@ export default function HomePage() {
               {activeView === "calls" ? "Anrufe" : null}
               {activeView === "leads" ? "Offene Firmenliste" : null}
               {activeView === "calendar" ? "Kalender" : null}
+              {activeView === "crm" ? "CRM Pipeline" : null}
               {activeView === "settings" ? "Einstellungen" : null}
               {activeView === "compliance" ? "Compliance & Ablauf" : null}
             </h1>
@@ -2679,6 +2689,106 @@ export default function HomePage() {
       </CollapsiblePanel>
       </>
       ) : null}
+
+      {activeView === "crm" ? (() => {
+        const stages: Array<{ key: string; label: string; color: string }> = [
+          { key: "neu", label: "Neu / Offen", color: "#6b7280" },
+          { key: "angerufen", label: "Angerufen", color: "#2563eb" },
+          { key: "wiedervorlage", label: "Wiedervorlage", color: "#d97706" },
+          { key: "termin", label: "Termin", color: "#059669" },
+          { key: "absage", label: "Absage", color: "#dc2626" },
+        ];
+        const todayCallbacks = data.reports.filter((r) => {
+          if (r.outcome !== "Wiedervorlage" || !r.nextCallAt) return false;
+          return new Date(r.nextCallAt).toDateString() === new Date().toDateString();
+        });
+        return (
+          <section className="stack top-section">
+            <CollapsiblePanel title="Wiedervorlagen heute" defaultOpen>
+              {todayCallbacks.length === 0 ? (
+                <p className="subtle">Keine fälligen Wiedervorlagen für heute.</p>
+              ) : (
+                <table>
+                  <thead><tr><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Fällig</th><th>Notiz</th><th></th></tr></thead>
+                  <tbody>
+                    {todayCallbacks.map((r) => (
+                      <tr key={r.id}>
+                        <td><strong>{r.company}</strong></td>
+                        <td>{r.contactName || "-"}</td>
+                        <td>{r.topic}</td>
+                        <td>{formatDate(r.nextCallAt)}</td>
+                        <td className="subtle" style={{ maxWidth: 200 }}>{(r.summary || "").slice(0, 80)}{(r.summary || "").length > 80 ? "..." : ""}</td>
+                        <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Sales Pipeline" defaultOpen>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, overflowX: "auto", minWidth: 0 }}>
+                {stages.map((stage) => {
+                  const leadsInStage = data.leads.filter((l) => (l.status || "neu") === stage.key);
+                  return (
+                    <div key={stage.key} style={{ background: "#f8fafc", borderRadius: 8, padding: 12, borderTop: `3px solid ${stage.color}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                        <strong style={{ fontSize: "0.9rem" }}>{stage.label}</strong>
+                        <span style={{ background: stage.color, color: "white", borderRadius: 999, padding: "2px 8px", fontSize: "0.8rem" }}>{leadsInStage.length}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+                        {leadsInStage.slice(0, 20).map((lead) => (
+                          <button
+                            key={lead.id}
+                            className="link-button"
+                            onClick={() => setSelectedLeadForHistory(lead)}
+                            style={{ textAlign: "left", background: "white", padding: "8px 10px", borderRadius: 6, border: "1px solid #e5e7eb", width: "100%" }}
+                          >
+                            <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{lead.company}</div>
+                            <div style={{ color: "#6b7280", fontSize: "0.78rem", marginTop: 2 }}>{lead.contactName || lead.topic}</div>
+                            {lead.nextCallAt ? <div style={{ color: stage.color, fontSize: "0.75rem", marginTop: 2 }}>↻ {formatDate(lead.nextCallAt)}</div> : null}
+                          </button>
+                        ))}
+                        {leadsInStage.length > 20 ? <p className="subtle" style={{ fontSize: "0.8rem" }}>+{leadsInStage.length - 20} weitere</p> : null}
+                        {leadsInStage.length === 0 ? <p className="subtle" style={{ fontSize: "0.82rem" }}>Leer</p> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Alle Wiedervorlagen (offen)" defaultOpen={false}>
+              {(() => {
+                const all = data.reports
+                  .filter((r) => r.outcome === "Wiedervorlage" && r.nextCallAt)
+                  .sort((a, b) => Date.parse(a.nextCallAt || "0") - Date.parse(b.nextCallAt || "0"));
+                if (all.length === 0) return <p className="subtle">Keine offenen Wiedervorlagen.</p>;
+                return (
+                  <table>
+                    <thead><tr><th>Fällig</th><th>Firma</th><th>Kontakt</th><th>Thema</th><th>Zusammenfassung</th><th></th></tr></thead>
+                    <tbody>
+                      {all.map((r) => {
+                        const isOverdue = Date.parse(r.nextCallAt || "0") < Date.now();
+                        return (
+                          <tr key={r.id} style={{ background: isOverdue ? "#fff5f5" : undefined }}>
+                            <td style={{ color: isOverdue ? "#dc2626" : undefined, whiteSpace: "nowrap" }}>{formatDate(r.nextCallAt)}</td>
+                            <td><strong>{r.company}</strong></td>
+                            <td>{r.contactName || "-"}</td>
+                            <td>{r.topic}</td>
+                            <td className="subtle" style={{ maxWidth: 220 }}>{(r.summary || "").slice(0, 100)}{(r.summary || "").length > 100 ? "..." : ""}</td>
+                            <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </CollapsiblePanel>
+          </section>
+        );
+      })() : null}
 
       {activeView === "calls" ? (
       <section className="stack top-section">
@@ -4055,7 +4165,37 @@ export default function HomePage() {
                 </div>
                 <div className="report-detail-field report-detail-full">
                   <label>Notiz</label>
-                  <p>{selectedLeadForHistory.note || "-"}</p>
+                  <textarea
+                    value={leadNoteEdit}
+                    onChange={(e) => setLeadNoteEdit(e.target.value)}
+                    rows={3}
+                    style={{ width: "100%", marginTop: 4, resize: "vertical" }}
+                    placeholder="Notiz hinzufügen..."
+                  />
+                  <button
+                    className="btn"
+                    style={{ marginTop: 8 }}
+                    disabled={busy || leadNoteEdit === (selectedLeadForHistory.note || "")}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const res = await fetch("/api/campaigns/lists", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "update_note", leadId: selectedLeadForHistory.id, note: leadNoteEdit }),
+                        });
+                        if (res.ok) {
+                          setSelectedLeadForHistory({ ...selectedLeadForHistory, note: leadNoteEdit });
+                          setNotice("Notiz gespeichert.");
+                        } else {
+                          setNotice("Notiz konnte nicht gespeichert werden.");
+                        }
+                      } catch { setNotice("Fehler beim Speichern."); }
+                      finally { setBusy(false); }
+                    }}
+                  >
+                    Notiz speichern
+                  </button>
                 </div>
               </div>
 
