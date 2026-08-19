@@ -2105,8 +2105,17 @@ export async function appendCallTranscriptEventToPostgres(payload: {
     await db.query(
       `
       INSERT INTO call_transcript_events (id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-      ON CONFLICT (id) DO NOTHING;
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, NOW()
+      FROM (SELECT pg_advisory_xact_lock(hashtext(concat_ws('|', $2, $4, $5, $7::text, $8::text)))) AS transcript_lock
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM call_transcript_events
+        WHERE call_sid = $2
+          AND speaker = $4
+          AND text_value = $5
+          AND latency_ms IS NOT DISTINCT FROM $7
+          AND spoken_at IS NOT DISTINCT FROM $8
+      );
       `,
       [
         `tx-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
@@ -2157,14 +2166,21 @@ export async function listCallTranscriptEventsFromPostgres(
     const db = getPool();
     const result = await db.query(
       `
-      SELECT id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at
+      SELECT DISTINCT ON (call_sid, speaker, text_value, latency_ms, spoken_at)
+        id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at
       FROM call_transcript_events
       WHERE call_sid = $1
-      ORDER BY COALESCE(spoken_at, created_at) ASC, created_at ASC
+      ORDER BY call_sid, speaker, text_value, latency_ms, spoken_at, created_at ASC
       `,
       [sid],
     );
-    return result.rows.map((row) => ({
+    return result.rows
+      .sort((left, right) => {
+        const leftTime = new Date(left.spoken_at || left.created_at).getTime();
+        const rightTime = new Date(right.spoken_at || right.created_at).getTime();
+        return leftTime - rightTime || new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+      })
+      .map((row) => ({
       id: String(row.id),
       callSid: String(row.call_sid),
       userId: row.user_id ? String(row.user_id) : undefined,
@@ -2177,7 +2193,7 @@ export async function listCallTranscriptEventsFromPostgres(
           : undefined,
       spokenAt: row.spoken_at ? new Date(row.spoken_at).toISOString() : undefined,
       createdAt: new Date(row.created_at).toISOString(),
-    }));
+      }));
   } catch (error) {
     console.error("Postgres transcript list failed", error);
     return [];
