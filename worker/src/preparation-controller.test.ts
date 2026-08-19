@@ -72,3 +72,46 @@ test("completes the list and moves to the confirmation email", () => {
   assert.match(transition.instruction, /verabschiede dich freundlich/);
   assert.match(transition.instruction, /keine weitere Frage/);
 });
+
+test("completes the full health preparation flow through farewell", () => {
+  const fullPolicy = {
+    topic: "private Krankenversicherung",
+    pkvHealthQuestions: [
+      "Darf ich Ihr Geburtsdatum aufnehmen?",
+      "Könnten Sie mir Ihre Körpergröße nennen?",
+      "Wie ist Ihr aktuelles Gewicht?",
+      "Bei welchem Krankenversicherer sind Sie versichert?",
+      "Wie hoch ist Ihr Monatsbeitrag?",
+      "Gibt es laufende Behandlungen oder Diagnosen?",
+      "Nehmen Sie regelmäßig Medikamente ein?",
+      "Gab es stationäre Aufenthalte im Krankenhaus?",
+      "Gab es psychische Behandlungen?",
+      "Fehlen Zähne oder ist Zahnersatz geplant?",
+      "Bestehen bekannte Allergien?",
+    ].join("\n"),
+  };
+  let transition = beginPreparation(createPreparationState(fullPolicy), "Donnerstag um 15 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  const answers = [
+    "2. Mai 1987",
+    "Ein Meter achtzig",
+    "80 Kilogramm",
+    "Debeka",
+    "1200 Euro",
+    "Nein",
+    "Nein",
+    "Nein",
+    "Nein",
+    "Nein",
+    "Nein",
+  ];
+  for (const answer of answers) {
+    transition = advancePreparation(transition.state, answer, []);
+  }
+  assert.equal(transition.state.stage, "awaiting_email");
+  assert.match(transition.instruction, /E-Mail-Adresse/);
+
+  transition = advancePreparation(transition.state, "neumann@example.de", []);
+  assert.equal(transition.state.stage, "completed");
+  assert.match(transition.instruction, /verabschiede dich freundlich/);
+});

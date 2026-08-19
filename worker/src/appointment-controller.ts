@@ -91,6 +91,16 @@ export function decideAppointment(params: {
 
   const slotPhrase = params.slotPhrase?.trim() || "";
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
+  const assistantText = params.turns.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
+  const confirmationWasAsked = /(?:meinen\s+sie|passt\s+der|ist\s+das\s+so|richtig\s+verstanden)[^.?!]*(?:uhr|termin|donnerstag|freitag|montag|dienstag|mittwoch)/i.test(assistantText);
+  const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText);
+  if (confirmationWasAsked && !explicitConfirmation) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Die Terminrückfrage ist noch nicht eindeutig bestätigt. Frage nur kurz, ob der konkret genannte Termin so passt.",
+    };
+  }
   if (/^(?:hallo|hallo\?|bitte\??|ja\?+|mhm|aha|okay\??|ok\??)[.!?]*$/i.test(latestUserText)) {
     return {
       ok: false,

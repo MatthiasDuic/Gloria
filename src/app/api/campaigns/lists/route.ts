@@ -9,6 +9,7 @@ import {
 } from "@/lib/storage";
 import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
+import { acquireCampaignCallLock, bindCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 
 export const runtime = "nodejs";
@@ -82,9 +83,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, action, listId, skipped: true, reason: "list_not_active" });
     }
 
+    const lockToken = `campaign-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const lockAcquired = await acquireCampaignCallLock({ userId: sessionUser.id, leadId: listId, lockToken });
+    if (!lockAcquired) {
+      const lists = await getCampaignListsSummary(sessionUser.id);
+      return NextResponse.json({ ok: true, action, listId, skipped: true, reason: "active_call", lists });
+    }
+
     const lead = await pullNextLeadForCampaignList(listId, sessionUser.id);
 
     if (!lead) {
+      await releaseCampaignCallLockByToken(lockToken);
       await setCampaignListActive(listId, false, sessionUser.id);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({ ok: true, action, listId, completed: true, lists });
@@ -94,6 +103,7 @@ export async function POST(request: Request) {
     const to = normalizePhoneForDial(rawTo);
 
     if (!to) {
+      await releaseCampaignCallLockByToken(lockToken);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({
         ok: true,
@@ -136,6 +146,7 @@ export async function POST(request: Request) {
         },
         request,
       );
+      await bindCampaignCallLock(lockToken, call.sid);
 
       await storeCallReport({
         callSid: call.sid,
@@ -163,6 +174,7 @@ export async function POST(request: Request) {
         lists,
       });
     } catch (error) {
+      await releaseCampaignCallLockByToken(lockToken);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json(
         {

@@ -61,7 +61,7 @@ const REALTIME_TOOLS = [
   {
     type: "function",
     name: "confirm_appointment",
-    description: "Speichert einen vom Kunden eindeutig bestätigten Termin. Erst aufrufen, nachdem Datum und Uhrzeit ausdrücklich bestätigt wurden.",
+    description: "Speichert einen vom Kunden eindeutig bestätigten Termin. Erst aufrufen, nachdem der Kunde einen angebotenen Wochentag oder Slot klar ausgewählt und eine Rückbestätigung wie 'ja, das passt' gegeben hat. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
     parameters: {
       type: "object",
       properties: {
@@ -212,7 +212,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag. Biete danach genau zwei Optionen an zwei verschiedenen Kalendertagen an, niemals zwei Uhrzeiten desselben Tages. Wenn der Kunde beide Optionen ablehnt, frage nach seinem gewünschten Zeitraum oder seiner gewünschten Woche und biete danach zwei passende echte Slots aus diesem Zeitraum an. Erfinde niemals einen Termin. Nach eindeutiger Auswahl eines angebotenen Slots rufst du confirm_appointment sofort auf, ohne weitere Bestätigungs- oder Nutzenfragen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Bei 'Der Donnerstag' oder 'der zweite Termin' frage zuerst kurz zurück: 'Meinen Sie Donnerstag, den ... um ... Uhr?' Rufe confirm_appointment erst nach einem klaren 'Ja, das passt' oder einer vollständigen eindeutigen Bestätigung auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
       "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
@@ -337,12 +337,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const updateSession = () => {
     if (!ctx || !openaiSession?.isReady()) return;
+    const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.65");
+    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "1200", 10);
+    const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "400", 10);
+    const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "520", 10);
     sendOpenAi({
       type: "session.update",
       session: {
         type: "realtime",
         output_modalities: ["text"],
-        max_output_tokens: 1000,
+        max_output_tokens: maxOutputTokens,
         instructions: buildRealtimeInstructions(ctx),
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
         tools: REALTIME_TOOLS,
@@ -358,9 +362,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
             turn_detection: {
               type: "server_vad",
-              threshold: 0.7,
-              silence_duration_ms: 1600,
-              prefix_padding_ms: 500,
+              threshold: vadThreshold,
+              silence_duration_ms: silenceDurationMs,
+              prefix_padding_ms: prefixPaddingMs,
               create_response: false,
               interrupt_response: false,
             },

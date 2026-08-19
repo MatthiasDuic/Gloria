@@ -53,3 +53,24 @@ test("does not truncate beyond audio delivered by OpenAI", () => {
     { type: "conversation.item.truncate", item_id: "item_789", content_index: 0, audio_end_ms: 14650 },
   ]);
 });
+
+test("keeps barge-in cancellation bounded to delivered audio and playback state", () => {
+  const startedAt = Date.now();
+  const plan = planBargeIn({
+    responseActive: true,
+    playbackPending: true,
+    assistantItemId: "item_latency",
+    audioEndMs: 5000,
+    assistantAudioBytes: 8 * 1200,
+  });
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(plan.interrupted, true);
+  assert.equal(plan.clearTelnyxPlayback, true);
+  assert.deepEqual(plan.openAiEvents[1], {
+    type: "conversation.item.truncate",
+    item_id: "item_latency",
+    content_index: 0,
+    audio_end_ms: 1200,
+  });
+  assert.ok(elapsedMs < 100);
+});

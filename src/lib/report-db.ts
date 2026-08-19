@@ -408,6 +408,22 @@ async function initializeSchema() {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS campaign_call_locks (
+      user_id TEXT PRIMARY KEY,
+      lead_id TEXT NOT NULL,
+      call_sid TEXT,
+      lock_token TEXT NOT NULL,
+      acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS campaign_call_locks_call_sid_idx
+    ON campaign_call_locks (call_sid);
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS call_transcript_events (
       id TEXT PRIMARY KEY,
       call_sid TEXT NOT NULL,
@@ -2198,6 +2214,74 @@ export async function listCallTranscriptEventsFromPostgres(
     console.error("Postgres transcript list failed", error);
     return [];
   }
+}
+
+export async function acquireCampaignCallLock(params: {
+    userId: string;
+    leadId: string;
+    lockToken: string;
+    ttlMs?: number;
+  }): Promise<boolean> {
+    if (!shouldUsePostgres()) return true;
+    const ttlMs = Math.max(60_000, params.ttlMs ?? 15 * 60_000);
+    try {
+      await ensureSchema();
+      const db = getPool();
+      const result = await db.query(
+        `
+        INSERT INTO campaign_call_locks (user_id, lead_id, lock_token, expires_at)
+        VALUES ($1, $2, $3, NOW() + ($4 * INTERVAL '1 millisecond'))
+        ON CONFLICT (user_id) DO UPDATE
+        SET lead_id = EXCLUDED.lead_id,
+            lock_token = EXCLUDED.lock_token,
+            acquired_at = NOW(),
+            expires_at = EXCLUDED.expires_at,
+            call_sid = NULL
+        WHERE campaign_call_locks.expires_at <= NOW()
+        RETURNING user_id;
+        `,
+        [params.userId, params.leadId, params.lockToken, ttlMs],
+      );
+      return result.rowCount === 1;
+    } catch (error) {
+      console.error("Campaign call lock acquire failed", error);
+      return false;
+    }
+}
+
+export async function bindCampaignCallLock(lockToken: string, callSid: string): Promise<boolean> {
+    if (!shouldUsePostgres()) return true;
+    try {
+      await ensureSchema();
+      const result = await getPool().query(
+        `UPDATE campaign_call_locks SET call_sid = $2 WHERE lock_token = $1 AND expires_at > NOW()`,
+        [lockToken, callSid],
+      );
+      return result.rowCount === 1;
+    } catch (error) {
+      console.error("Campaign call lock bind failed", error);
+      return false;
+    }
+}
+
+export async function releaseCampaignCallLock(callSid: string): Promise<void> {
+    if (!shouldUsePostgres() || !callSid.trim()) return;
+    try {
+      await ensureSchema();
+      await getPool().query(`DELETE FROM campaign_call_locks WHERE call_sid = $1`, [callSid.trim()]);
+    } catch (error) {
+      console.error("Campaign call lock release failed", error);
+    }
+}
+
+export async function releaseCampaignCallLockByToken(lockToken: string): Promise<void> {
+    if (!shouldUsePostgres() || !lockToken.trim()) return;
+    try {
+      await ensureSchema();
+      await getPool().query(`DELETE FROM campaign_call_locks WHERE lock_token = $1`, [lockToken.trim()]);
+    } catch (error) {
+      console.error("Campaign call token lock release failed", error);
+    }
 }
 
 export async function canUserAccessTopic(userId: string, topic: string): Promise<boolean> {

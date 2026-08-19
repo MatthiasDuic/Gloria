@@ -11,7 +11,7 @@ import {
   describeCampaignSchedule,
   isWithinCampaignHours,
 } from "@/lib/campaign-schedule";
-import { findUserById } from "@/lib/report-db";
+import { acquireCampaignCallLock, bindCampaignCallLock, findUserById, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 
 export const runtime = "nodejs";
@@ -97,15 +97,24 @@ async function handle(request: Request) {
     }
 
     const userId = userKey === "__global__" ? undefined : userKey;
+    const lockToken = `campaign-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const user = userId ? await findUserById(userId) : null;
 
     // Versuche die Listen in Reihenfolge, bis eine einen Lead liefert.
     let dialed = false;
 
     for (const list of lists) {
+      if (userId) {
+        const acquired = await acquireCampaignCallLock({ userId, leadId: list.listId, lockToken });
+        if (!acquired) {
+          results.push({ userId: userKey, listId: list.listId, dialed: false, reason: "active_call" });
+          break;
+        }
+      }
       const lead = await pullNextLeadForCampaignList(list.listId, userId);
 
       if (!lead) {
+        if (userId) await releaseCampaignCallLockByToken(lockToken);
         // Keine offenen Leads mehr -> Liste deaktivieren (done).
         await setCampaignListActive(list.listId, false, userId);
         continue;
@@ -114,6 +123,7 @@ async function handle(request: Request) {
       const rawTo = (lead.directDial || lead.phone || "").trim();
       const to = normalizePhoneForDial(rawTo);
       if (!to) {
+        if (userId) await releaseCampaignCallLockByToken(lockToken);
         results.push({
           userId: userKey,
           listId: list.listId,
@@ -127,6 +137,7 @@ async function handle(request: Request) {
       // processing, do not start another call for it.
       const stillActive = await isCampaignListActive(list.listId, userId);
       if (!stillActive) {
+        if (userId) await releaseCampaignCallLockByToken(lockToken);
         results.push({
           userId: userKey,
           listId: list.listId,
@@ -152,6 +163,7 @@ async function handle(request: Request) {
           },
           request,
         );
+        if (userId) await bindCampaignCallLock(lockToken, call.sid);
 
         await storeCallReport({
           callSid: call.sid,
@@ -177,6 +189,7 @@ async function handle(request: Request) {
         dialed = true;
         break;
       } catch (error) {
+        if (userId) await releaseCampaignCallLockByToken(lockToken);
         results.push({
           userId: userKey,
           listId: list.listId,

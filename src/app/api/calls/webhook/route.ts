@@ -5,6 +5,7 @@ import {
   appendCallTranscriptEventToPostgres,
   findUserById,
   listCallTranscriptEventsFromPostgres,
+  releaseCampaignCallLock,
   type TranscriptEvent,
 } from "@/lib/report-db";
 import type { ReportOutcome, Topic } from "@/lib/types";
@@ -276,6 +277,10 @@ export async function POST(request: Request) {
     recordingUrl?: string;
     transcript?: IncomingTranscriptEntry[];
   };
+
+  if (payload.callSid) {
+    await releaseCampaignCallLock(payload.callSid);
+  }
 
   // Persistiere das vollständige Wort-für-Wort-Protokoll IMMER, sobald es vom
   // Worker mitkommt – unabhängig davon, ob der Anrufer der Aufnahme zugestimmt

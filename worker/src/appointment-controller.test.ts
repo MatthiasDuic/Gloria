@@ -64,3 +64,18 @@ test("does not lock a slot from a delayed greeting transcript", () => {
   assert.equal(decision.ok, false);
   if (!decision.ok) assert.equal(decision.error, "conversation_not_ready");
 });
+
+test("requires explicit confirmation after a slot clarification question", () => {
+  const turns: ConversationTurn[] = [
+    ...readyPkvTurns(),
+    { role: "assistant", text: "Meinen Sie Donnerstag, 27. August um 15:30 Uhr?" },
+    { role: "user", text: "Ja, das passt." },
+  ];
+  const decision = decideAppointment({
+    turns,
+    topicKind: "pkv",
+    freeSlotsPrompt: freeSlots,
+    slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",
+  });
+  assert.equal(decision.ok, true);
+});
