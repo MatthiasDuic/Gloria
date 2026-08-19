@@ -11,7 +11,7 @@ import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { assessPkvConversation, instructionForPkvStage, type PkvConversationAssessment, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractContributionPhrase, type PkvConversationAssessment, type ConversationTurn } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -131,9 +131,10 @@ function buildKnownConversationFacts(ctx: CallContext): string {
 
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
-  const assessment = assessPkvConversation(ctx.transcript);
-  if (assessment.stage === "ready_to_schedule") return "";
-  return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment, ctx.contactName)}`;
+  if (ctx.dialogState.pkvStep >= 5) return "";
+  const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
+  const contributionPhrase = extractContributionPhrase(userText);
+  return `AKTUELLER GESPRÄCHSSCHRITT: ${instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase)}`;
 }
 
 function isRelevantPkvStageAnswer(stage: string, text: string): boolean {
@@ -175,9 +176,10 @@ const DECISION_MAKER_INTRO = "Guten Tag, mein Name ist Gloria. Ich bin die digit
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
-  const assessment = assessPkvConversation(ctx.transcript);
-  if (assessment.stage === "ready_to_schedule") return { ok: true };
-  return { ok: false, reason: instructionForPkvStage(assessment, ctx.contactName) };
+  if (ctx.dialogState.pkvStep >= 5) return { ok: true };
+  const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
+  const contributionPhrase = extractContributionPhrase(userText);
+  return { ok: false, reason: instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase) };
 }
 
 export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
@@ -641,27 +643,53 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (preparationState.stage === "inactive") {
-      const assessment = currentContext.topicKind === "pkv"
-        ? cachedAssessPkvConversation(currentContext.transcript)
-        : undefined;
-      const resumeInstruction = currentContext.topicKind === "pkv" && assessment
-        ? instructionForPkvStage(assessment, currentContext.contactName)
-        : undefined;
-      if (assessment?.stage === "ready_to_schedule") {
-        const offer = appointmentOfferInstruction(
-          currentContext.freeSlotsPrompt,
-          detectAppointmentPreference(currentContext.transcript),
-        );
-        if (offer) {
-          requestEventResponse(offer);
+      // ── PKV: step-based state machine ──────────────────────────────────────
+      if (currentContext.topicKind === "pkv") {
+        const currentStep = currentContext.dialogState.pkvStep;
+
+        // Customer asks a question or raises an objection → answer then return to current step
+        if (event.type === "customer_question" || event.type === "objection") {
+          const userTextAll = currentContext.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
+          const returnInstruction = `Nach der Antwort kehre direkt zur aktuellen Aufgabe zurück: ${instructionForPkvStep(currentStep, extractContributionPhrase(userTextAll))}`;
+          requestEventResponse(instructionForConversationEvent(event, returnInstruction));
           return;
         }
-      }
-      if (event.type === "customer_question" || event.type === "objection") {
-        requestEventResponse(instructionForConversationEvent(event, resumeInstruction));
+
+        // Normal answer: advance step
+        const advance = advancePkvStep(currentStep, transcript);
+
+        if (advance.shouldEnd) {
+          requestEventResponse("Bedanke dich beim Kunden für das Gespräch, verabschiede dich freundlich und rufe dann end_call auf.");
+          return;
+        }
+
+        const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 5;
+        if (nextStep !== currentStep) {
+          currentContext.dialogState.pkvStep = nextStep;
+          log.info("realtime.pkv_step_advanced", { callSid: currentContext.callSid, from: currentStep, to: nextStep });
+        }
+
+        // Step 5: appointment scheduling — use existing appointment logic
+        if (currentContext.dialogState.pkvStep === 5) {
+          const offer = appointmentOfferInstruction(
+            currentContext.freeSlotsPrompt,
+            detectAppointmentPreference(currentContext.transcript),
+          );
+          if (offer) { requestEventResponse(offer); return; }
+        }
+
+        const userTextAll = currentContext.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
+        const instruction = instructionForPkvStep(currentContext.dialogState.pkvStep, extractContributionPhrase(userTextAll));
+        requestEventResponse(instruction);
         return;
       }
-      requestEventResponse(instructionForConversationEvent(event, resumeInstruction));
+
+      // ── Non-PKV flow ────────────────────────────────────────────────────────
+      if (event.type === "customer_question" || event.type === "objection") {
+        requestEventResponse(instructionForConversationEvent(event));
+        return;
+      }
+      requestEventResponse(instructionForConversationEvent(event));
       return;
     }
 

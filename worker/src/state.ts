@@ -7,12 +7,23 @@ import {
 
 export type DialogPhase = "opener" | "discovery" | "objection" | "close" | "done";
 
+/**
+ * PKV-specific step counter for explicit state machine flow.
+ * 0 = awaiting permission ("Darf ich sagen worum es geht?")
+ * 1 = RELEVANZ (explain rising costs, open question)
+ * 2 = BEITRAG (ask for current monthly contribution)
+ * 3 = HOCHRECHNUNG (present 10-year projection)
+ * 4 = KONZEPT (explain Herr Duic's approach, ask for interest)
+ * 5 = TERMIN (schedule appointment)
+ */
+export type PkvStep = 0 | 1 | 2 | 3 | 4 | 5;
+
 export type DialogState = {
   phase: DialogPhase;
-  askedQuestions: Set<string>; // Questions Gloria has asked
-  answeredQuestions: Set<string>; // Questions that have been answered
-  lastInstructionHash?: string; // Hash of last injected instruction (for dedup)
-  phaseStartedAt: number; // When current phase started
+  pkvStep: PkvStep; // Current step in PKV conversation flow
+  askedQuestions: Set<string>;
+  answeredQuestions: Set<string>;
+  phaseStartedAt: number;
 };
 
 export type CallContext = {
@@ -89,6 +100,7 @@ export function newContext(initial: Partial<CallContext> & { callSid: string; st
     },
     dialogState: {
       phase: "opener",
+      pkvStep: 0,
       askedQuestions: new Set(),
       answeredQuestions: new Set(),
       phaseStartedAt: Date.now(),
