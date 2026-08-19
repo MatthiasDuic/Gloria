@@ -72,8 +72,13 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
 
   const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
 
-  // Gloria hat Relevanzfrage gestellt (breit gefasst)
-  const relevanceAsked = /(?:wie[^.?!]*(?:entwicklung|erleben|wahrnehm|spür|merken|auswirk)|beitrag[^.?!]*(?:steig|entwickl|belast)|steig[^.?!]*beitrag)/i.test(assistantText);
+  // Broad detection: did Gloria mention anything about rising PKV costs?
+  const relevanceAsked = /(?:merken\s+sie|sp[uü]ren\s+sie|wie\s+wirkt|wie\s+nehmen\s+sie|wie\s+erleben|pkv-verband|drei\s+bis\s+f[uü]nf|beitrag.*steig|steig.*beitrag|beitragsanpass|krankenversicherung.*steig|steig.*krankenversicherung|jedes\s+jahr.*beitrag|beitrag.*jedes\s+jahr)/i.test(assistantText);
+
+  // Stage advances if user has responded to the relevance topic (any meaningful user text after Gloria's relevance question)
+  const userTurns = turns.filter(t => t.role === "user");
+  const assistantTurns = turns.filter(t => t.role === "assistant");
+  const relevanceAddressed = relevanceAsked && userTurns.length >= 1 && assistantTurns.length >= 1;
 
   // Gloria hat konkrete Hochrechnung geliefert
   const projectionDelivered =
@@ -91,7 +96,7 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
     && /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|das\s+macht\s+sinn|m[oö]chte|will\s+ich|sehr\s+gerne|sicher|natürlich)\b/i.test(interestAnswer)
     && !/\b(?:nein|nicht|kein|lieber\s+nicht|eigentlich\s+nicht|eher\s+nicht)\b/i.test(interestAnswer);
 
-  // Sequentielle Stages — kein hartes Reset auf need_relevance
+  // Sequentielle Stages — vorwärts, kein Reset
   let stage: PkvConversationStage;
   if (interestConfirmed) {
     stage = "ready_to_schedule";
@@ -101,7 +106,8 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
     stage = "need_concept";
   } else if (contributionPhrase) {
     stage = "need_projection";
-  } else if (relevanceAsked) {
+  } else if (relevanceAddressed) {
+    // User has responded to the relevance topic — move to asking for current Beitrag
     stage = "need_contribution";
   } else {
     stage = "need_relevance";
@@ -116,19 +122,18 @@ export function instructionForPkvStage(assessment: PkvConversationAssessment, co
   switch (assessment.stage) {
     case "need_relevance":
       return (
-        "SCHRITT 3 – RELEVANZ: Erkläre kurz und ohne Dramatisierung: " +
-        "Viele Menschen bemerken, dass ihre Krankenversicherungsbeiträge Jahr für Jahr steigen. " +
-        "Laut PKV-Verband liegen die Anpassungen im langjährigen Durchschnitt häufig bei etwa drei bis fünf Prozent jährlich. " +
-        "Stelle dann GENAU EINE Frage: 'Wie wirkt sich das bei Ihnen aus?' oder 'Merken Sie das auch bei Ihrem Beitrag?' " +
-        "Warte auf die Antwort. Kein weiterer Text nach der Frage."
+        "SCHRITT 3 – RELEVANZ: Erwähne in ein bis zwei Sätzen, dass PKV-Beiträge jährlich steigen und langfristig eine Herausforderung werden können. " +
+        "Stelle dann GENAU EINE kurze Frage wie: 'Merken Sie das auch bei Ihrem Beitrag?' oder 'Wie erleben Sie das?' " +
+        "Warte auf die Antwort. Sprich NICHT wörtlich das Skript nach — formuliere natürlich in eigenen Worten. " +
+        "Nenne keine konkreten Prozentzahlen wenn du das schon getan hast."
       );
 
     case "need_contribution":
       return (
-        "SCHRITT 4 – BEITRAG ERFRAGEN: Gehe kurz auf die Antwort des Kunden ein (ein Satz), " +
-        "dann biete eine 10-Jahres-Hochrechnung an: " +
-        "'Ich kann das für Sie konkret hochrechnen, wenn Sie mögen. Wie hoch ist Ihr aktueller monatlicher Beitrag?' " +
-        "Nur diese eine Frage stellen. Keine weiteren Details, kein Konzept erklären."
+        "SCHRITT 4 – BEITRAG: Der Kunde hat auf die Beitragsentwicklung reagiert. " +
+        "Gehe in einem Satz auf seine Antwort ein (z.B. 'Das kenne ich.'). " +
+        "Sage dann: 'Ich kann das für Sie konkret hochrechnen, wenn Sie mögen. Wie hoch ist Ihr aktueller monatlicher Beitrag?' " +
+        "Warte. Keine weiteren Fragen."
       );
 
     case "need_projection": {

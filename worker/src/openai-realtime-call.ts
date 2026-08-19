@@ -228,16 +228,14 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
   if (ctx.topicKind === "pkv") {
     parts.push(
-      "PKV-GESPRÄCHSABLAUF – folge IMMER dieser Reihenfolge, ein Schritt nach dem anderen:\n" +
-      "SCHRITT 1: Vorstellen – 'Guten Tag, mein Name ist Gloria...' (bereits erledigt durch Begrüßung).\n" +
-      "SCHRITT 2: Erlaubnis – 'Darf ich kurz sagen worum es geht?' Warte auf Zustimmung.\n" +
-      "SCHRITT 3: Relevanz – Nach Zustimmung: 2-3 Sätze zur steigenden Beitragsentwicklung (PKV-Verband, 3-5% p.a.), dann NUR EINE Frage: 'Wie wirkt sich das bei Ihnen aus?' Warte auf Antwort.\n" +
-      "SCHRITT 4: Beitrag – Gehe kurz auf die Antwort ein, dann: 'Ich kann das konkret für Sie hochrechnen – wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage.\n" +
-      "SCHRITT 5: Hochrechnung – Rechne den genannten Beitrag mit 4% p.a. auf 10 Jahre hoch (und vorsichtig bis Ruhestand). Formuliere menschlich: 'Bei X Euro wären das in 10 Jahren rund Y Euro – also Z Euro mehr pro Monat. Wenn Sie das bis zum Ruhestand durchrechnen, kommen erhebliche Mehrbeträge zusammen.' Dann: 'Haben Sie Ihre Beitragsentwicklung schon einmal so betrachtet?'\n" +
-      "SCHRITT 6: Antwort abwarten – Lass den Kunden vollständig antworten.\n" +
-      "SCHRITT 7: Konzept erklären – Greife die Antwort auf, dann erkläre: 'Genau da setzt Herr Duic an. Er schaut sich gemeinsam mit Ihnen die Beitragsentwicklung an, rechnet Ihren Beitrag vorsichtig bis zum Ruhestand hoch und zeigt Möglichkeiten, diesen zu senken – Altersrückstellungen, Beitragsentlastungstarife und Steuervorteile.' Abschluss: 'Klingt das interessant für Sie?'\n" +
-      "SCHRITT 8: Termin – Bei klarem Ja: Erst Vormittag oder Nachmittag fragen, dann 2 Terminoptionen nennen. Nach Terminbestätigung: Gesundheitsfragen stellen (aus Topic Policy). Falls Kunde Gesundheitsfragen am Telefon nicht beantworten möchte: 'Kein Problem – ich packe die Fragen in die Terminbestätigungsmail, dann können Sie diese in Ruhe vor dem Termin beantworten.' Nach Termin + Fragen: Wünsche/Anregungen für den Termin fragen, dann freundlich verabschieden.",
-      "PKV-WICHTIGE REGELN: Stelle immer nur EINE Frage pro Turn. Wenn der Kunde eine Frage beantwortet hat, stelle diese Frage NIEMALS nochmals. Gehe zum nächsten Schritt. Frage nicht nach gesetzlich/privat – das ist irrelevant für diesen Ablauf.",
+      "PKV-GESPRÄCHSZIEL: Führe das Gespräch natürlich durch diese Phasen:\n" +
+      "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht. Warte auf Zustimmung.\n" +
+      "2. RELEVANZ: Erwähne kurz, dass PKV-Beiträge jährlich steigen, und frage wie der Kunde das erlebt. Warte auf Antwort.\n" +
+      "3. BEITRAG: Biete Hochrechnung an und frage nach aktuellem Monatsbeitrag. Warte.\n" +
+      "4. HOCHRECHNUNG: Rechne Beitrag auf 10 Jahre und Ruhestand hoch. Frage ob der Kunde das so schon betrachtet hat.\n" +
+      "5. KONZEPT: Erkläre Herrn Duics Ansatz (Beitragsanalyse, Altersrückstellungen, Steuervorteile). Frage ob das interessant ist.\n" +
+      "6. TERMIN: Bei Ja → Terminvorschläge, Gesundheitsfragen (oder per Mail), freundliche Verabschiedung.\n" +
+      "REGEL: Nur eine Frage pro Turn. Nie dieselbe Frage wiederholen. In eigenen natürlichen Worten formulieren.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -583,6 +581,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     // Track answered questions (any user response after a question is implicitly answering)
     currentContext.dialogState.answeredQuestions.add(`turn-${currentContext.transcript.length}`);
     updateDialogPhase(currentContext);
+    // Reset deduplication so same instruction can fire again after user speaks
+    responses.clearLastHash();
+    // Invalidate PKV assessment cache to force re-evaluation with new user turn
+    lastPkvAssessmentTranscriptLength = -1;
     
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 

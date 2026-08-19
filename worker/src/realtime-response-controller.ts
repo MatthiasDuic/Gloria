@@ -115,6 +115,11 @@ export class RealtimeResponseController {
     this.flushTimer = null;
   }
 
+  /** Reset after user speaks so same instruction can be re-sent for next turn. */
+  clearLastHash(): void {
+    this.lastSentInstructionHash = "";
+  }
+
   private scheduleFlush(delayMs: number): void {
     if (this.flushTimer || this.stopped) return;
     this.flushTimer = this.schedule(() => {
