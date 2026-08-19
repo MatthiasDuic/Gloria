@@ -231,14 +231,15 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topicKind === "pkv") {
     parts.push(
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch warm, professionell und empathisch durch diese Phasen:\n" +
-      "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht. Warte auf Zustimmung.\n" +
-      "2. RELEVANZ: Erwähne steigende PKV-Beiträge, frage wie der Kunde das erlebt. Warte auf Antwort.\n" +
-      "3. VERTIEFUNG: Gehe emotional auf die Antwort ein, zeige echtes Verständnis, stelle eine vertiefende Frage zur Situation des Kunden.\n" +
-      "4. BEITRAG: Leite natürlich über, biete konkrete Hochrechnung an, frage nach aktuellem Monatsbeitrag.\n" +
-      "5. HOCHRECHNUNG: Rechne auf 10 Jahre und Ruhestand hoch, stelle nachdenkliche Frage.\n" +
-      "6. KONZEPT: Verbinde persönlich mit den Sorgen des Kunden, erkläre Herrn Duics Ansatz warmherzig, frage ob das relevant sein könnte.\n" +
-      "7. TERMIN: Terminvorschläge, Gesundheitsfragen (oder per Mail), freundliche Verabschiedung.\n" +
-      "REGEL: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch und echt bleiben.",
+      "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht.\n" +
+      "2. RELEVANZ: Beitragsentwicklung in der Gesundheitsversorgung ansprechen, offene Frage wie der Kunde damit umgeht.\n" +
+      "3. VERTIEFUNG: Emotional auf Antwort eingehen, vertiefende Frage stellen.\n" +
+      "4. BEITRAG: Hochrechnung anbieten, Monatsbeitrag erfragen.\n" +
+      "5. HOCHRECHNUNG: 10-Jahres-Projektion präsentieren, fragen ob schon so betrachtet.\n" +
+      "6. KONZEPT: Persönlich und emotional — Herrn Duics Ansatz als Lösung des Kundenproblems erklären.\n" +
+      "7. TERMIN: Vor-Ort-Termin vereinbaren (Vor- oder Nachmittag, 2 Optionen, Kundenwunsch akzeptieren).\n" +
+      "SPRACHE: Sprich immer von 'Beitragsentwicklung in der Gesundheitsversorgung', NIEMALS von 'privater Krankenversicherung' oder 'PKV'. Frage NICHT nach gesetzlich oder privat versichert.\n" +
+      "PROFESSIONALITÄT: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch, präzise, zugewandt.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -471,7 +472,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
               prompt: process.env.OPENAI_TRANSCRIBE_PROMPT?.trim()
-                || "Deutsches Telefonat zur privaten Krankenversicherung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Betraege sowie gesetzlich und privat.",
+                || "Deutsches Telefonat zur Beitragsentwicklung in der Gesundheitsversorgung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Betraege.",
             },
             turn_detection: {
               type: "server_vad",
@@ -500,11 +501,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ttsAbortController = controller;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
     let audioBytes = 0;
-    ttsPlaybackStartedAt = Date.now(); // track when TTS starts
 
     try {
       await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
         if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+        if (audioBytes === 0) ttsPlaybackStartedAt = Date.now(); // set on first real audio chunk
         audioBytes += chunk.length;
         playback.appendBase64Audio(chunk.toString("base64"));
       }, ctx?.voiceProfile);
@@ -891,7 +892,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.created") {
         responses.markCreated();
         playback.startResponse();
-        ttsPlaybackStartedAt = Date.now(); // track TTS start for barge-in protection
+        // ttsPlaybackStartedAt is set on first audio chunk in speakWithElevenLabs
         activeAssistantItemId = "";
         assistantAudioBytes = 0;
         responseInterrupted = false;

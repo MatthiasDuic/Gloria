@@ -58,26 +58,27 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
 
     case 1:
       return (
-        "Der Kunde hat zugestimmt. Erkläre in 2 kurzen Sätzen in eigenen Worten, dass PKV-Beiträge " +
-        "jährlich steigen und das langfristig spürbar wird. Stelle dann genau eine offene Frage wie " +
-        "'Merken Sie das bei sich?' oder 'Wie erleben Sie das?'. Warte vollständig auf die Antwort."
+        "Der Kunde hat zugestimmt. Erkläre in 1-2 eigenen, natürlichen Sätzen, dass die Beiträge in der " +
+        "Gesundheitsversorgung laut PKV-Verbänden jährlich im Durchschnitt 3-5% steigen — und das über die Jahre erheblich wird. " +
+        "Sprich NICHT von 'privater Krankenversicherung' oder 'PKV' — sage 'Beiträge in der Gesundheitsversorgung'. " +
+        "Frage dann genau einmal wie der Kunde damit umgeht oder wie er das erlebt. Warte vollständig auf die Antwort."
       );
 
     case 2:
       // VERTIEFUNG: emotional follow-up before asking for contribution
       return (
-        "Gehe jetzt emotional auf die Antwort des Kunden ein: Benenne in einem Satz konkret, was er gesagt hat und zeige echtes Verständnis " +
-        "(z.B. 'Das kenne ich — wenn man jedes Jahr einfach mehr zahlt und nicht weiß wo das endet, ist das ein echtes Unbehagen.'). " +
-        "Stelle dann genau eine vertiefende emotionale Frage, z.B.: " +
-        "'Was belastet Sie dabei mehr — die Unplanbarkeit, oder ist es der tatsachliche Mehrbetrag der sich aufaddiert?' " +
-        "Oder: 'Haben Sie das Gefühl dass Sie das einfach hinnehmen müssen, oder suchen Sie aktiv nach Möglichkeiten da etwas zu tun?' " +
-        "Wähle die Frage die am besten zur Aussage des Kunden passt. Nur diese eine Frage. Warte auf Antwort."
+        "Gehe persönlich auf die Antwort des Kunden ein. Benenne konkret was er gesagt hat und zeige echtes Verständnis " +
+        "(z.B. 'Das kenne ich — wenn man jedes Jahr mehr zahlt und das Gefühl hat darauf keinen Einfluss zu haben...'). " +
+        "Stelle dann genau eine vertiefende Frage die zur Antwort des Kunden passt, z.B.: " +
+        "'Was belastet Sie dabei mehr — die Unplanbarkeit, oder ist es der Betrag der sich aufsummiert?' " +
+        "oder 'Haben Sie das Gefühl, das einfach hinnehmen zu müssen, oder schauen Sie aktiv nach Möglichkeiten?' " +
+        "Nur diese eine Frage. Warte vollständig auf die Antwort."
       );
 
     case 3:
       return (
         "Greife die Antwort des Kunden kurz auf (ein Satz). " +
-        "Leite dann über: 'Ich kann das für Sie einmal konkret durchrechnen, wenn Sie mögen — so sehen Sie schwarz auf weiß, was das langfristig bedeutet. " +
+        "Leite dann über: 'Ich kann das für Sie einmal konkret hochrechnen — so sehen Sie schwarz auf weiß, was das in den nächsten Jahren bedeutet. " +
         "Wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage. Warte auf die Antwort."
       );
 
@@ -89,39 +90,39 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         if (amount) {
           const y10 = roundToFive(Math.round(amount * (1.04 ** 10)));
           const d10 = roundToFive(y10 - amount);
-          const y25 = roundToFive(Math.round(amount * (1.04 ** 25)));
-          const d25 = roundToFive(y25 - amount);
-          hint = ` RECHENWERTE: ${amount}€ heute → ${y10}€ in 10 Jahren (+${d10}€/Mo) → ${y25}€ in 25 Jahren (+${d25}€/Mo). Exakt so verwenden.`;
+          hint = ` RECHENWERTE (exakt so verwenden): ${amount}€ heute → ca. ${y10}€ in 10 Jahren (+${d10}€/Mo).`;
         }
       }
       return (
-        `Rechne ${phrase} mit rund 4% Steigerung pro Jahr auf 10 Jahre und bis zum Ruhestand (ca. 25 Jahre) hoch.${hint} ` +
-        "Formuliere das kurz und menschlich: 'Bei Ihrem Beitrag wären das in 10 Jahren rund X Euro mehr — " +
-        "und bis zum Ruhestand kommen erhebliche Mehrbeträge zusammen.' " +
-        "Stelle danach genau eine Frage: 'Haben Sie das schon so betrachtet?' Warte vollständig auf die Antwort."
+        `Rechne ${phrase} mit rund 4% Steigerung pro Jahr auf 10 Jahre hoch.${hint} ` +
+        "Formuliere das kurz und menschlich: 'Bei Ihrem Beitrag wären das in 10 Jahren rund X Euro mehr — das ist schon eine spürbare Veränderung.' " +
+        "Stelle danach GENAU EINE Frage: 'Haben Sie das schon mal so im Detail angeschaut?' Warte vollständig auf die Antwort. " +
+        "KEIN Ruhestand, KEINE 25-Jahres-Berechnung — nur 10 Jahre."
       );
     }
 
     case 5:
-      // KONZEPT: emotionally warm, connect to customer's specific pain
+      // KONZEPT: emotionally warm, personal, professional
       return (
-        "Greife jetzt die konkreten Sorgen und Aussagen des Kunden aus diesem Gespräch auf — nicht generisch, sondern persönlich. " +
-        "Starte mit einer kurzen Validierung seiner Situation (z.B. 'Genau das, was Sie beschrieben haben — diese Mischung aus " +
-        "Unplanbarkeit und dem Gefühl keinen Einfluss zu haben — das ist es, womit Herr Duic täglich arbeitet.'). " +
-        "Erkläre dann warm und konkret: Herr Duic schaut sich die Beitragsentwicklung individuell an, rechnet vorsichtig bis zum Ruhestand " +
-        "und zeigt ganz konkret welche Stellschrauben es gibt — Altersrückstellungen, Beitragsentlastungstarife, Steuervorteile. " +
-        "Keine Verkaufsphrasen, kein Druck. Stelle dann eine offene Frage: 'Klingt das nach etwas, das für Sie relevant sein könnte?' " +
+        "Greife die konkreten Sorgen und Aussagen des Kunden aus diesem Gespräch auf — nicht generisch, sondern persönlich. " +
+        "Validiere zuerst kurz: was der Kunde beschrieben hat, ist real und berechtigt. " +
+        "Erkläre dann mit echter Wärme: Genau das ist es, womit Herr Duic täglich arbeitet. " +
+        "Er schaut sich die Beitragsentwicklung gemeinsam mit dem Kunden an, rechnet den Beitrag konkret hoch " +
+        "und zeigt persönlich welche Stellschrauben es gibt, um langfristig mehr Kontrolle zu haben. " +
+        "Stelle dann eine offene, einladende Frage: 'Wäre es nicht sinnvoll, das einmal zusammen im Detail anzuschauen?' " +
+        "Kein Verkaufsdruck, kein Pitch. KEINE Erwähnung von Termindauer oder Anzahl Termine — nur wenn der Kunde fragt. " +
         "Warte auf klares Ja oder Nein."
       );
 
     case 6:
       return (
-        "Der Kunde hat Interesse bestätigt. Führe jetzt die Terminvereinbarung durch:\n" +
-        "1. Frage zuerst: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
-        "2. Biete je nach Antwort genau zwei passende Termine aus den freien Slots an. Beispiel: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
-        "3. Wenn keiner der Termine passt, frage: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Kundenwunsch.\n" +
-        "4. Nach Terminbestätigung: Stelle die Gesundheitsfragen aus der Topic Policy einzeln. Falls der Kunde sie nicht am Telefon beantworten möchte: 'Kein Problem, ich lege die Fragen in die Bestätigungsmail.' \n" +
-        "5. Frage am Ende ob der Kunde noch Wünsche oder Anregungen für den Termin hat, dann freundlich verabschieden."
+        "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Vor-Ort-Termin bei Ihm. Geh professionell vor:\n" +
+        "1. Frage: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
+        "2. Biete zwei passende Termine an: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
+        "3. Falls keiner passt: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Wunsch.\n" +
+        "4. Nach Bestätigung: Gesundheitsfragen einzeln stellen. Bei Ablehnung am Telefon: 'Kein Problem, ich lege die Fragen in die Bestätigungsmail.'\n" +
+        "5. Frage ob der Kunde noch Wünsche für den Termin hat, dann professionell verabschieden.\n" +
+        "NUR WENN GEFRAGT: Ersttermin ca. 20 Minuten. NUR WENN GEFRAGT: Es gibt drei Termine insgesamt."
       );
 
     default:
