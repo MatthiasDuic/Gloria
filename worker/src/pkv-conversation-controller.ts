@@ -116,11 +116,12 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
 
     case 6:
       return (
-        "Der Kunde hat Interesse bestätigt. Terminvereinbarung: Frage zuerst ob Vormittag oder Nachmittag " +
-        "besser passt. Dann zwei konkrete Terminoptionen anbieten. Nach Bestätigung: Gesundheitsfragen aus " +
-        "Topic Policy einzeln stellen. Falls der Kunde nicht am Telefon antworten möchte: " +
-        "'Kein Problem, ich lege die Fragen in die Bestätigungsmail.' " +
-        "Frage am Ende nach Wünschen für den Termin und verabschiede dich."
+        "Der Kunde hat Interesse bestätigt. Führe jetzt die Terminvereinbarung durch:\n" +
+        "1. Frage zuerst: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
+        "2. Biete je nach Antwort genau zwei passende Termine aus den freien Slots an. Beispiel: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
+        "3. Wenn keiner der Termine passt, frage: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Kundenwunsch.\n" +
+        "4. Nach Terminbestätigung: Stelle die Gesundheitsfragen aus der Topic Policy einzeln. Falls der Kunde sie nicht am Telefon beantworten möchte: 'Kein Problem, ich lege die Fragen in die Bestätigungsmail.' \n" +
+        "5. Frage am Ende ob der Kunde noch Wünsche oder Anregungen für den Termin hat, dann freundlich verabschieden."
       );
 
     default:

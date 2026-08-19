@@ -117,10 +117,19 @@ export function decideAppointment(params: {
   }
   const suppliedSlot = findSuppliedAppointmentSlot(params.freeSlotsPrompt, slotPhrase);
   if (!suppliedSlot) {
+    // Check if Gloria already asked for the customer's own preferred time.
+    // If so, accept any slot with a plausible date/time as customer-proposed.
+    const gloriaAskedForCustomerSlot = /(?:welchen\s+termin\s+w[uü]rden\s+sie|welcher\s+termin\s+passt\s+f[uü]r\s+sie|welcher\s+w[aä]re\s+f[uü]r\s+sie|was\s+w[aä]re\s+f[uü]r\s+sie|nennen\s+sie\s+mir\s+einen\s+termin|machen\s+wir\s+einen\s+termin\s+nach\s+ihren\s+w[uü]nschen)/i.test(assistantText);
+    const hasDateTime = /\b(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag)\b/i.test(slotPhrase)
+      || /\b\d{1,2}\.\s*(?:januar|februar|m[aä]rz|april|mai|juni|juli|august|september|oktober|november|dezember)\b/i.test(slotPhrase)
+      || /\b\d{1,2}:\d{2}\b/.test(slotPhrase);
+    if (gloriaAskedForCustomerSlot && hasDateTime) {
+      return { ok: true, preference: detectAppointmentPreference(params.turns), slotPhrase: slotPhrase.trim() };
+    }
     return {
       ok: false,
       error: "slot_not_offered",
-      instruction: "Dieser Termin steht nicht in der bereitgestellten freien Slotliste. Biete nur zwei echte freie Slots aus der Liste an.",
+      instruction: "Dieser Termin steht nicht in der freien Slotliste und der Kunde wurde noch nicht nach seinem eigenen Wunschtermin gefragt. Biete zuerst die zwei freien Termine an. Falls keiner passt, frage: 'Welchen Termin würden Sie vorschlagen?'",
     };
   }
 

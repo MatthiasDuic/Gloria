@@ -723,7 +723,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (!decision.ok && decision.error === "slot_not_offered") {
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
-        requestResponse("Der gewünschte Termin steht so nicht in den freien Vorschlägen. Biete bitte ausschließlich zwei konkrete freie Termine aus der bereitgestellten Liste an.");
+        requestResponse(decision.instruction);
       } else if (!decision.ok) {
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
