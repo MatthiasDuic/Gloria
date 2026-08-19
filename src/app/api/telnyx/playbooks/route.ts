@@ -49,8 +49,8 @@ export async function GET(request: Request) {
     const data = await getDashboardData({ userId, role: userId ? "user" : "master" });
     return NextResponse.json(
       {
-        playbooks: data.playbooks,
-        playbooksStorageMode: data.playbooksStorageMode,
+        playbooks: data.topicPolicies,
+        playbooksStorageMode: data.topicPoliciesStorageMode,
       },
       {
         headers: {
