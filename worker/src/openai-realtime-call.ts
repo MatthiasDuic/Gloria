@@ -406,6 +406,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let unclearClarificationPending = false;
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
+  let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
   let lastPkvAssessment: PkvConversationAssessment | null = null;
   let lastPkvAssessmentTranscriptLength = -1;
   const pendingUserTranscripts: string[] = [];
@@ -448,8 +449,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const updateSession = () => {
     if (!ctx || !openaiSession?.isReady()) return;
-    const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.65");
-    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "1200", 10);
+    const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.75");
+    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "1400", 10);
     const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "400", 10);
     const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "520", 10);
     sendOpenAi({
@@ -498,6 +499,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ttsAbortController = controller;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
     let audioBytes = 0;
+    ttsPlaybackStartedAt = Date.now(); // track when TTS starts
 
     try {
       await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
@@ -507,7 +509,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }, ctx?.voiceProfile);
       if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
         playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
-        if (audioBytes === 0) playback.interrupt();
+        if (audioBytes === 0) {
+          log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
+          playback.interrupt();
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -777,21 +782,34 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
-        ttsTurn += 1;
-        ttsAbortController?.abort();
+
+        // Minimum TTS protection: don't interrupt ElevenLabs within first 800ms of playback
+        // This prevents echo/noise false positives from silencing Gloria's greeting
+        const MIN_TTS_PLAY_MS = 800;
+        const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
         const playbackPending = playback.isPending();
+
         if (shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse, playbackPending })) {
           decisionMakerIntroPending = true;
         }
-        const interruption = playback.interrupt();
+
+        // Compute audioEndMs WITHOUT interrupting first
+        const sentBytes = playback.bytesSent();
+        const audioEndMs = Math.ceil(sentBytes / 160) * 20;
+
         const plan = planBargeIn({
           responseActive: responses.isActive(),
           playbackPending,
           assistantItemId: activeAssistantItemId || undefined,
-          audioEndMs: interruption.audioEndMs,
+          audioEndMs,
           assistantAudioBytes,
         });
-        if (plan.interrupted) {
+
+        // Only actually interrupt if: plan says to AND TTS has played long enough
+        if (plan.interrupted && ttsAge >= MIN_TTS_PLAY_MS) {
+          ttsTurn += 1;
+          ttsAbortController?.abort();
+          const interruption = playback.interrupt();
           responseInterrupted = true;
           responses.markInterruptRequested();
           if (plan.clearTelnyxPlayback) sendTelnyx({ event: "clear" });
@@ -800,11 +818,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
             ctx.transcript.splice(currentAssistantTurnIndex, 1);
             currentAssistantTurnIndex = undefined;
           }
+          ttsPlaybackStartedAt = null;
           log.info("realtime.barge_in", {
             callSid: ctx?.callSid,
             itemId: activeAssistantItemId || undefined,
             audioEndMs: interruption.audioEndMs,
             playbackCleared: plan.clearTelnyxPlayback,
+            ttsAgeMs: Math.round(ttsAge),
+          });
+        } else if (plan.interrupted && ttsAge < MIN_TTS_PLAY_MS) {
+          log.info("realtime.barge_in_suppressed", {
+            callSid: ctx?.callSid,
+            ttsAgeMs: Math.round(ttsAge),
+            reason: "tts_too_new",
           });
         }
         return;
@@ -834,6 +860,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.created") {
         responses.markCreated();
         playback.startResponse();
+        ttsPlaybackStartedAt = Date.now(); // track TTS start for barge-in protection
         activeAssistantItemId = "";
         assistantAudioBytes = 0;
         responseInterrupted = false;

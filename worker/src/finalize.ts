@@ -235,6 +235,14 @@ export async function postReport(ctx: CallContext): Promise<void> {
   const fullDocumentation = deriveReportDocumentation(ctx, extracted);
   summary = withDocumentationHeader(summary, outcome, fullDocumentation);
 
+  // Append raw transcript to summary so it's visible even without Postgres transcript events table
+  if (ctx.transcript.length > 0) {
+    const transcriptText = ctx.transcript
+      .map((t) => `${t.role === "assistant" ? "Gloria" : "Interessent"}: ${t.text}`)
+      .join("\n");
+    summary = `${summary}\n\n--- GESPRÄCHSVERLAUF ---\n${transcriptText}`;
+  }
+
   log.info("finalize.posting_final", {
     callSid: ctx.callSid,
     outcome,

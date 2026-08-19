@@ -4748,17 +4748,46 @@ export default function HomePage() {
                   {transcriptLoading ? (
                     <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
                   ) : transcriptEvents.length === 0 ? (
-                    conversationLines.length > 0 ? (
-                      <p className="subtle" style={{ marginTop: 6 }}>
-                        Kein technischer Live-Mitschnitt gespeichert. Es liegt aber ein Gesprächsverlauf in der
-                        Zusammenfassung vor (oben angezeigt).
-                      </p>
-                    ) : (
-                      <p className="subtle" style={{ marginTop: 6 }}>
-                        Für diesen Anruf liegt kein Live-Mitschnitt vor. Das passiert typischerweise bei älteren
-                        Calls ohne Streaming oder wenn die Pipeline vorzeitig beendet wurde.
-                      </p>
-                    )
+                    (() => {
+                      // Fallback: parse transcript from summary field (stored by finalize.ts)
+                      const lines = (selectedReport?.summary || "").split("\n");
+                      const transcriptStart = lines.findIndex(l => l.startsWith("--- GESPRÄCHSVERLAUF ---"));
+                      const summaryLines = transcriptStart >= 0
+                        ? lines.slice(transcriptStart + 1).filter(l => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
+                        : lines.filter(l => l.startsWith("Gloria:") || l.startsWith("Interessent:"));
+                      if (summaryLines.length > 0) {
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                            {summaryLines.map((line, i) => {
+                              const isGloria = line.startsWith("Gloria:");
+                              const text = line.replace(/^(Gloria|Interessent):\s*/, "");
+                              return (
+                                <div
+                                  key={i}
+                                  style={{
+                                    padding: "8px 10px",
+                                    borderRadius: 6,
+                                    background: isGloria ? "rgba(40, 92, 180, 0.06)" : "rgba(190, 130, 30, 0.06)",
+                                    borderLeft: `3px solid ${isGloria ? "var(--blue-600, #2563eb)" : "var(--gold-600, #b45309)"}`,
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 700, fontSize: "0.78rem", color: isGloria ? "#2563eb" : "#b45309", marginBottom: 4 }}>
+                                    {isGloria ? "Gloria" : "Interessent"}
+                                  </div>
+                                  <div style={{ fontSize: "0.92rem" }}>{text}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
+                      return (
+                        <p className="subtle" style={{ marginTop: 6 }}>
+                          Für diesen Anruf liegt kein Live-Mitschnitt vor. Das passiert typischerweise bei älteren
+                          Calls ohne Streaming oder wenn die Pipeline vorzeitig beendet wurde.
+                        </p>
+                      );
+                    })()
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
                       {transcriptEvents.map((entry) => {
