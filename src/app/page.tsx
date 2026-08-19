@@ -2682,6 +2682,50 @@ export default function HomePage() {
 
       {activeView === "calls" ? (
       <section className="stack top-section">
+        <CollapsiblePanel title="Manueller Anruf" defaultOpen={false}>
+          <div className="field-grid">
+            <div>
+              <label>Ausgangsnummer</label>
+              <select
+                value={anrufEinzelfirmaFrom}
+                onChange={(event) => setAnrufEinzelfirmaFrom(event.target.value)}
+                disabled={anrufEinzelfirmaFromOptions.length === 0}
+              >
+                {anrufEinzelfirmaFromOptions.length === 0 ? (
+                  <option value="">Keine Nummer konfiguriert</option>
+                ) : (
+                  anrufEinzelfirmaFromOptions.map((option) => (
+                    <option key={option.number} value={option.number}>{option.label} ({option.number})</option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div>
+              <label>Zielnummer</label>
+              <input value={anrufEinzelfirmaTarget} onChange={(event) => setAnrufEinzelfirmaTarget(event.target.value)} placeholder="+492339123456" />
+            </div>
+            <div>
+              <label>Firma</label>
+              <input value={anrufEinzelfirmaCompany} onChange={(event) => setAnrufEinzelfirmaCompany(event.target.value)} />
+            </div>
+            <div>
+              <label>Ansprechpartner</label>
+              <input value={anrufEinzelfirmaContactName} onChange={(event) => setAnrufEinzelfirmaContactName(event.target.value)} />
+            </div>
+            <div>
+              <label>Thema</label>
+              <select value={anrufEinzelfirmaTopic} onChange={(event) => setAnrufEinzelfirmaTopic(event.target.value as Topic)}>
+                {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="row top-gap">
+            <button className="btn" onClick={() => void startAnrufEinzelfirma()} disabled={busy || !anrufEinzelfirmaTarget.trim()}>
+              {busy ? "Anruf startet ..." : "Anruf starten"}
+            </button>
+          </div>
+        </CollapsiblePanel>
+
         <CollapsiblePanel title="Gesprächsreports" defaultOpen>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <span className="subtle">
