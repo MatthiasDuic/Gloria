@@ -133,7 +133,7 @@ export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
   const assessment = assessPkvConversation(ctx.transcript);
   if (assessment.stage === "ready_to_schedule") return "";
-  return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment)}`;
+  return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStage(assessment, ctx.contactName)}`;
 }
 
 function isRelevantPkvStageAnswer(stage: string, text: string): boolean {
@@ -177,7 +177,7 @@ export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | 
   if (ctx.topicKind !== "pkv") return { ok: true };
   const assessment = assessPkvConversation(ctx.transcript);
   if (assessment.stage === "ready_to_schedule") return { ok: true };
-  return { ok: false, reason: instructionForPkvStage(assessment) };
+  return { ok: false, reason: instructionForPkvStage(assessment, ctx.contactName) };
 }
 
 export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
@@ -508,7 +508,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (preparationState.stage === "inactive") {
       const resumeInstruction = currentContext.topicKind === "pkv"
-        ? instructionForPkvStage(assessPkvConversation(currentContext.transcript))
+        ? instructionForPkvStage(assessPkvConversation(currentContext.transcript), currentContext.contactName)
         : undefined;
       const assessment = currentContext.topicKind === "pkv"
         ? assessPkvConversation(currentContext.transcript)
