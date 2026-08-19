@@ -1005,6 +1005,11 @@ export default function HomePage() {
     company: "", contactName: "", phone: "", email: "", topic: TOPICS[0] as Topic, customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", note: "",
   });
   const [showCampaignFromSelectionModal, setShowCampaignFromSelectionModal] = useState(false);
+  const [showCrmImport, setShowCrmImport] = useState(false);
+  const [crmImportFile, setCrmImportFile] = useState<File | null>(null);
+  const [crmImportListName, setCrmImportListName] = useState("");
+  const [crmImportTopic, setCrmImportTopic] = useState<Topic | "">("" as Topic | "");
+  const [crmImportCustomerType, setCrmImportCustomerType] = useState<"BarmeniaGothaer" | "Agentur-Duic">("Agentur-Duic");
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
@@ -2847,6 +2852,7 @@ export default function HomePage() {
                     </select>
                   </div>
                   <div className="row" style={{ gap: 8 }}>
+                    <button className="btn ghost" onClick={() => setShowCrmImport(v => !v)}>📥 Importieren</button>
                     <button className="btn" onClick={() => setShowAddCustomerModal(true)}>+ Kunde anlegen</button>
                     {selectedCrmLeads.size > 0 && (
                       <button
@@ -2859,6 +2865,71 @@ export default function HomePage() {
                     )}
                   </div>
                 </div>
+
+                {/* Import Panel */}
+                {showCrmImport && (
+                  <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 8, padding: "16px", marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <strong>CSV / Excel importieren</strong>
+                      <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setShowCrmImport(false)}>✕</button>
+                    </div>
+                    <div className="field-grid">
+                      <div>
+                        <label>Kundentyp</label>
+                        <select value={crmImportCustomerType} onChange={e => setCrmImportCustomerType(e.target.value as typeof crmImportCustomerType)}>
+                          <option value="Agentur-Duic">🏬 Agentur-Duic Kunden</option>
+                          <option value="BarmeniaGothaer">🏢 BarmeniaGothaer Kunden</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label>Listenname</label>
+                        <input value={crmImportListName} onChange={e => setCrmImportListName(e.target.value)} placeholder="z. B. Jahresgespräche August" />
+                      </div>
+                      <div>
+                        <label>Thema (optional, überschreibt Datei)</label>
+                        <select value={crmImportTopic} onChange={e => setCrmImportTopic(e.target.value as Topic | "")}>
+                          <option value="">-- Thema aus Datei --</option>
+                          {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label>Datei (CSV / XLSX / XLS)</label>
+                        <input type="file" accept=".csv,.xlsx,.xls" onChange={e => setCrmImportFile(e.target.files?.[0] || null)} />
+                      </div>
+                    </div>
+                    <p className="subtle" style={{ fontSize: "0.82rem", margin: "8px 0" }}>Format: company, contactName, phone, email, topic, note, nextCallAt</p>
+                    <div className="row top-gap" style={{ gap: 8 }}>
+                      <button
+                        className="btn"
+                        disabled={busy || !crmImportFile}
+                        onClick={async () => {
+                          if (!crmImportFile) return;
+                          setBusy(true);
+                          try {
+                            const form = new FormData();
+                            form.set("file", crmImportFile);
+                            const resolvedListName = crmImportListName.trim() || crmImportFile.name.replace(/\.[^.]+$/, "");
+                            form.set("listName", `${crmImportCustomerType} | ${resolvedListName}`);
+                            if (crmImportTopic) form.set("topic", crmImportTopic);
+                            const res = await fetch("/api/campaigns/import", { method: "POST", body: form, credentials: "same-origin" });
+                            const payload = (await res.json()) as { imported?: number; error?: string; listName?: string };
+                            if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
+                            setNotice(`${payload.imported ?? 0} Kunden importiert in "${payload.listName || resolvedListName}"`);
+                            setCrmImportFile(null);
+                            setCrmImportListName("");
+                            setShowCrmImport(false);
+                            await loadDashboard();
+                            await loadCampaignLists();
+                          } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
+                          finally { setBusy(false); }
+                        }}
+                      >
+                        {busy ? "Importiert..." : "Importieren"}
+                      </button>
+                      {crmImportFile && <span className="subtle">{crmImportFile.name}</span>}
+                    </div>
+                  </div>
+                )}
 
                 {/* Customer Table */}
                 <div style={{ overflowX: "auto" }}>
