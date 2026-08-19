@@ -815,9 +815,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
         silenceOpenerTimer = null;
 
-        // Minimum TTS protection: don't interrupt ElevenLabs within first 800ms of playback
-        // This prevents echo/noise false positives from silencing Gloria's greeting
-        const MIN_TTS_PLAY_MS = 800;
+        // Greeting gets longer protection (2500ms) — it's ~4s long and must not be cut off
+        const MIN_TTS_PLAY_MS = decisionMakerIntroWasLastResponse ? 2500 : 900;
         const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
         const playbackPending = playback.isPending();
 
@@ -1095,13 +1094,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
       // Single session.update after both background tasks complete.
       void Promise.allSettled([policyTask, calendarTask]).then(() => { if (ctx) updateSession(); });
 
-      const silenceMs = Math.max(2500, Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "4200", 10));
+      const silenceMs = Math.max(2500, Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "8000", 10));
       silenceOpenerTimer = setTimeout(() => {
         if (!ctx || responses.isActive() || userIsSpeaking) return;
+        // Only play a very short signal — never the full intro proactively
         sendOpenAi({
           type: "response.create",
           response: {
-            instructions: "Am anderen Ende ist noch niemand hörbar. Begrüße jetzt kurz, stelle dich transparent vor und frage nach dem gewünschten Ansprechpartner. Dann warte.",
+            instructions: "Sage nur 'Guten Tag?' und warte vollständig schweigend. Keine weitere Vorstellung.",
           },
         });
       }, silenceMs);
