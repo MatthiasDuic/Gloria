@@ -5,6 +5,16 @@ import {
   type VoiceProfile,
 } from "./topic-policy.js";
 
+export type DialogPhase = "opener" | "discovery" | "objection" | "close" | "done";
+
+export type DialogState = {
+  phase: DialogPhase;
+  askedQuestions: Set<string>; // Questions Gloria has asked
+  answeredQuestions: Set<string>; // Questions that have been answered
+  lastInstructionHash?: string; // Hash of last injected instruction (for dedup)
+  phaseStartedAt: number; // When current phase started
+};
+
 export type CallContext = {
   callSid: string;
   streamSid: string;
@@ -46,6 +56,8 @@ export type CallContext = {
     preferences: string[];
     tone: "neutral" | "skeptical" | "open" | "rushed";
   };
+  // Dialog State Machine – tracks phase, asked/answered questions, prevents repetition
+  dialogState: DialogState;
   transcript: Array<{
     role: "user" | "assistant";
     text: string;
@@ -74,6 +86,12 @@ export function newContext(initial: Partial<CallContext> & { callSid: string; st
       concerns: [],
       preferences: [],
       tone: "neutral",
+    },
+    dialogState: {
+      phase: "opener",
+      askedQuestions: new Set(),
+      answeredQuestions: new Set(),
+      phaseStartedAt: Date.now(),
     },
     transcript: [],
     speaking: false,

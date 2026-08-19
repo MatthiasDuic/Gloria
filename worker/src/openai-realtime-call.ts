@@ -251,6 +251,37 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   return convertNumbersForSpeech(instructions);
 }
 
+/**
+ * Update dialog phase based on call state.
+ * Transitions: opener → discovery → objection/close → done
+ */
+function updateDialogPhase(ctx: CallContext): void {
+  const old = ctx.dialogState.phase;
+
+  // If appointment confirmed, move to close/done
+  if (ctx.confirmedSlotPhrase) {
+    ctx.dialogState.phase = "done";
+  }
+  // If objection detected in response, mark as objection phase
+  else if (ctx.dialogState.phase === "discovery" && /einwand|problem|bedenken|aber|jedoch|allerdings/i.test(
+    ctx.transcript.slice(-1)[0]?.text || "",
+  )) {
+    ctx.dialogState.phase = "objection";
+  }
+  // Default: start with discovery after opener greeting
+  else if (ctx.dialogState.phase === "opener" && ctx.transcript.length > 3) {
+    ctx.dialogState.phase = "discovery";
+  }
+
+  if (old !== ctx.dialogState.phase) {
+    log.info("realtime.dialog_phase_changed", {
+      callSid: ctx.callSid,
+      from: old,
+      to: ctx.dialogState.phase,
+    });
+  }
+}
+
 async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<void> {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN || "";
@@ -497,6 +528,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     currentContext.lastUserFinalAt = Date.now();
     currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
     rotateTranscriptIfNeeded(currentContext);
+    
+    // Track answered questions (any user response after a question is implicitly answering)
+    currentContext.dialogState.answeredQuestions.add(`turn-${currentContext.transcript.length}`);
+    updateDialogPhase(currentContext);
+    
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
     const event = classifyConversationEvent(transcript);
@@ -836,6 +872,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
           rotateTranscriptIfNeeded(ctx);
+          
+          // Track asked questions (any question-like assistant turn)
+          if (/\?/.test(transcript)) {
+            ctx.dialogState.askedQuestions.add(`turn-${ctx.transcript.length}`);
+          }
+          updateDialogPhase(ctx);
+          
           currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }

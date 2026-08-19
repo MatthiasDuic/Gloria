@@ -1,5 +1,13 @@
 export type ResponseTimer = ReturnType<typeof setTimeout>;
 
+function hashInstruction(instr: string): string {
+  // Simple hash based on first 50 chars + word count + key phrases
+  // Prevents duplicate questions from being queued multiple times
+  const trimmed = instr.slice(0, 100).toLowerCase();
+  const wordCount = instr.split(/\s+/).length;
+  return `${trimmed}|${wordCount}`;
+}
+
 export type RealtimeResponseControllerOptions = {
   sendResponse: (instructions: string) => boolean;
   isPlaybackPending: () => boolean;
@@ -20,6 +28,7 @@ export class RealtimeResponseController {
   private readonly cancelSchedule: (timer: ResponseTimer) => void;
   private active = false;
   private queuedInstructions: string | null = null;
+  private lastSentInstructionHash: string = "";
   private createNotBefore = 0;
   private flushTimer: ResponseTimer | null = null;
   private stopped = false;
@@ -40,6 +49,14 @@ export class RealtimeResponseController {
 
   request(instructions: string): boolean {
     if (this.stopped) return false;
+
+    // Deduplication: skip if same instruction is already queued or just sent
+    const instrHash = hashInstruction(instructions);
+    const queuedHash = this.queuedInstructions ? hashInstruction(this.queuedInstructions) : "";
+    if (instrHash === this.lastSentInstructionHash || instrHash === queuedHash) {
+      return false; // Skip duplicate
+    }
+
     const delayMs = Math.max(0, this.createNotBefore - this.now());
     const playbackPending = this.isPlaybackPending();
     if (this.active || playbackPending || delayMs > 0) {
@@ -48,7 +65,11 @@ export class RealtimeResponseController {
       if (!this.active) this.scheduleFlush(Math.max(20, delayMs));
       return false;
     }
-    return this.sendResponse(instructions);
+    const sent = this.sendResponse(instructions);
+    if (sent) {
+      this.lastSentInstructionHash = instrHash;
+    }
+    return sent;
   }
 
   markCreated(): void {
