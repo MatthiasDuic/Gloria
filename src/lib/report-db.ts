@@ -283,6 +283,29 @@ function parseLeadActivities(value: unknown): Lead["activities"] {
   return entries.length ? entries : undefined;
 }
 
+function parseLeadPipeline(value: unknown): Lead["crmPipeline"] {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const stage =
+    row.stage === "neu"
+    || row.stage === "qualifiziert"
+    || row.stage === "angebot"
+    || row.stage === "verhandlung"
+    || row.stage === "gewonnen"
+    || row.stage === "verloren"
+      ? row.stage
+      : undefined;
+  const updatedAt = typeof row.updatedAt === "string" ? row.updatedAt : "";
+  if (!stage || !updatedAt) return undefined;
+  return {
+    stage,
+    valueEUR: typeof row.valueEUR === "number" ? row.valueEUR : undefined,
+    probability: typeof row.probability === "number" ? row.probability : undefined,
+    expectedCloseAt: typeof row.expectedCloseAt === "string" ? row.expectedCloseAt : undefined,
+    updatedAt,
+  };
+}
+
 async function initializeSchema() {
   if (schemaReady || !shouldUsePostgres()) {
     return;
@@ -676,6 +699,7 @@ async function initializeSchema() {
       email_history JSONB,
       tasks JSONB,
       activities JSONB,
+      crm_pipeline JSONB,
       topic TEXT NOT NULL,
       note TEXT,
       next_call_at TIMESTAMPTZ,
@@ -713,6 +737,7 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS tasks JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS activities JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS crm_pipeline JSONB;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
@@ -1739,6 +1764,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         email_history,
         tasks,
         activities,
+        crm_pipeline,
         topic,
         note,
         next_call_at,
@@ -1770,6 +1796,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       emailHistory: parseLeadEmailHistory(row.email_history),
       tasks: parseLeadTasks(row.tasks),
       activities: parseLeadActivities(row.activities),
+      crmPipeline: parseLeadPipeline(row.crm_pipeline),
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
       nextCallAt: toIso(row.next_call_at),
@@ -1834,6 +1861,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             email_history,
             tasks,
             activities,
+            crm_pipeline,
             topic,
             note,
             next_call_at,
@@ -1841,7 +1869,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -1864,6 +1892,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             email_history = EXCLUDED.email_history,
             tasks = EXCLUDED.tasks,
             activities = EXCLUDED.activities,
+            crm_pipeline = EXCLUDED.crm_pipeline,
             topic = EXCLUDED.topic,
             note = EXCLUDED.note,
             next_call_at = EXCLUDED.next_call_at,
@@ -1892,6 +1921,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             JSON.stringify(lead.emailHistory || []),
             JSON.stringify(lead.tasks || []),
             JSON.stringify(lead.activities || []),
+            JSON.stringify(lead.crmPipeline || null),
             lead.topic,
             lead.note || null,
             lead.nextCallAt || null,

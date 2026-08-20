@@ -935,6 +935,16 @@ export default function HomePage() {
     rejections: number;
   };
 
+  type CrmSavedView = {
+    id: string;
+    name: string;
+    search: string;
+    owner: "" | "BarmeniaGothaer" | "Agentur-Duic";
+    customerKind: "" | "privat" | "firma";
+    productFilter: string;
+    createdAt: string;
+  };
+
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -1014,10 +1024,13 @@ export default function HomePage() {
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
-  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
+  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
   const [leadTaskDraft, setLeadTaskDraft] = useState({ title: "", dueAt: "" });
   const [outlookMailDraft, setOutlookMailDraft] = useState({ subject: "", body: "", to: "", sentAt: "" });
   const [selectedListForEvaluation, setSelectedListForEvaluation] = useState<CampaignListSummary | null>(null);
+  const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
+  const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
+  const [crmSelectedViewId, setCrmSelectedViewId] = useState("");
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1070,6 +1083,27 @@ export default function HomePage() {
     }
   }, [data.leads, selectedLeadForHistory]);
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("gloria.crm.savedViews");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CrmSavedView[];
+      if (Array.isArray(parsed)) {
+        setCrmSavedViews(parsed.slice(0, 20));
+      }
+    } catch {
+      // ignore local storage parse errors
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gloria.crm.savedViews", JSON.stringify(crmSavedViews.slice(0, 20)));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [crmSavedViews]);
+
+  useEffect(() => {
     if (!selectedLeadForHistory) {
       setDetailDraft(null);
       setCrmDetailTab("stammdaten");
@@ -1092,6 +1126,7 @@ export default function HomePage() {
       addressCity: selectedLeadForHistory.addressCity,
       addressCountry: selectedLeadForHistory.addressCountry,
       products: selectedLeadForHistory.products,
+      crmPipeline: selectedLeadForHistory.crmPipeline,
       topic: selectedLeadForHistory.topic,
       note: selectedLeadForHistory.note,
     });
@@ -2178,6 +2213,57 @@ export default function HomePage() {
       .filter(Boolean);
   }
 
+  function getLeadPipelineStage(lead: DashboardData["leads"][number]) {
+    if (lead.crmPipeline?.stage) return lead.crmPipeline.stage;
+    if (lead.status === "termin") return "gewonnen" as const;
+    if (lead.status === "absage") return "verloren" as const;
+    if (lead.status === "angerufen") return "qualifiziert" as const;
+    if (lead.status === "wiedervorlage") return "verhandlung" as const;
+    return "neu" as const;
+  }
+
+  function saveCurrentCrmView() {
+    const name = crmViewNameDraft.trim();
+    if (!name) {
+      setNotice("Bitte einen Namen für die CRM-Ansicht angeben.");
+      return;
+    }
+    const entry: CrmSavedView = {
+      id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      search: crmSearch,
+      owner: crmTypeFilter,
+      customerKind: crmCustomerKindFilter,
+      productFilter: crmProductFilter,
+      createdAt: new Date().toISOString(),
+    };
+    setCrmSavedViews((current) => [entry, ...current.filter((v) => v.name !== name)].slice(0, 20));
+    setCrmSelectedViewId(entry.id);
+    setNotice(`Ansicht "${name}" gespeichert.`);
+  }
+
+  function applyCrmSavedView(viewId: string) {
+    setCrmSelectedViewId(viewId);
+    const view = crmSavedViews.find((entry) => entry.id === viewId);
+    if (!view) return;
+    setCrmSearch(view.search);
+    setCrmTypeFilter(view.owner);
+    setCrmCustomerKindFilter(view.customerKind);
+    setCrmProductFilter(view.productFilter);
+    setNotice(`Ansicht "${view.name}" geladen.`);
+  }
+
+  function deleteCrmSavedView(viewId: string) {
+    const view = crmSavedViews.find((entry) => entry.id === viewId);
+    setCrmSavedViews((current) => current.filter((entry) => entry.id !== viewId));
+    if (crmSelectedViewId === viewId) {
+      setCrmSelectedViewId("");
+    }
+    if (view) {
+      setNotice(`Ansicht "${view.name}" gelöscht.`);
+    }
+  }
+
   function getListTrafficLight(params: { pending: number; active: boolean; currentlyDialing?: boolean; runningList: boolean }) {
     if (params.currentlyDialing || params.active || params.runningList) {
       return { color: "blue", label: "Blau", text: "Gloria telefoniert gerade in dieser Liste." };
@@ -2315,6 +2401,7 @@ export default function HomePage() {
         addressCity: detailDraft.addressCity,
         addressCountry: detailDraft.addressCountry,
         products: detailDraft.products,
+        crmPipeline: detailDraft.crmPipeline,
         topic: detailDraft.topic,
         note: leadNoteEdit,
       };
@@ -3029,11 +3116,12 @@ export default function HomePage() {
 
       {activeView === "crm" ? (() => {
         const stages: Array<{ key: string; label: string; color: string }> = [
-          { key: "neu", label: "Neu / Offen", color: "#6b7280" },
-          { key: "angerufen", label: "Angerufen", color: "#2563eb" },
-          { key: "wiedervorlage", label: "Wiedervorlage", color: "#d97706" },
-          { key: "termin", label: "Termin", color: "#059669" },
-          { key: "absage", label: "Absage", color: "#dc2626" },
+          { key: "neu", label: "Neu", color: "#6b7280" },
+          { key: "qualifiziert", label: "Qualifiziert", color: "#2563eb" },
+          { key: "angebot", label: "Angebot", color: "#0ea5e9" },
+          { key: "verhandlung", label: "Verhandlung", color: "#d97706" },
+          { key: "gewonnen", label: "Gewonnen", color: "#059669" },
+          { key: "verloren", label: "Verloren", color: "#dc2626" },
         ];
         const todayCallbacks = data.reports.filter((r) => {
           if (r.outcome !== "Wiedervorlage" || !r.nextCallAt) return false;
@@ -3117,6 +3205,21 @@ export default function HomePage() {
                       onChange={e => setCrmProductFilter(e.target.value)}
                       style={{ minWidth: 150 }}
                     />
+                    <select value={crmSelectedViewId} onChange={(e) => applyCrmSavedView(e.target.value)} style={{ minWidth: 190 }}>
+                      <option value="">Gespeicherte Ansicht laden</option>
+                      {crmSavedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Ansicht speichern als..."
+                      value={crmViewNameDraft}
+                      onChange={(e) => setCrmViewNameDraft(e.target.value)}
+                      style={{ minWidth: 180 }}
+                    />
+                    <button className="btn ghost" onClick={saveCurrentCrmView}>Ansicht speichern</button>
+                    {crmSelectedViewId ? (
+                      <button className="btn ghost" onClick={() => deleteCrmSavedView(crmSelectedViewId)}>Ansicht löschen</button>
+                    ) : null}
                   </div>
                   <div className="row" style={{ gap: 8 }}>
                     <button className="btn ghost" onClick={() => setShowCrmImport(v => !v)}>📥 Importieren</button>
@@ -3230,13 +3333,14 @@ export default function HomePage() {
                         <th>Stadt</th>
                         <th>Land</th>
                         <th>Produkte</th>
+                        <th>Pipeline</th>
                         <th>Liste</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredCrmLeads.length === 0 && (
-                        <tr><td colSpan={14} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
+                        <tr><td colSpan={15} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
                       )}
                       {filteredCrmLeads.map((lead) => {
                         const custType = getCrmCustomerType(lead);
@@ -3274,6 +3378,7 @@ export default function HomePage() {
                             <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
                             <td style={{ fontSize: "0.85rem", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{(lead.products || []).join(", ") || "-"}</td>
+                            <td style={{ fontSize: "0.85rem", whiteSpace: "nowrap" }}>{getLeadPipelineStage(lead)}</td>
                             <td style={{ fontSize: "0.8rem", color: "#6b7280" }}>{lead.listName || "-"}</td>
                             <td>
                               <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
@@ -3301,10 +3406,10 @@ export default function HomePage() {
 
             {/* === SALES PIPELINE === */}
             {crmTab === "pipeline" && (
-              <CollapsiblePanel title="Sales Pipeline" defaultOpen>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, overflowX: "auto", minWidth: 0 }}>
+              <CollapsiblePanel title="CRM-Pipeline" defaultOpen>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(180px, 1fr))", gap: 12, overflowX: "auto", minWidth: 0 }}>
                   {stages.map((stage) => {
-                    const leadsInStage = data.leads.filter((l) => (l.status || "neu") === stage.key);
+                    const leadsInStage = data.leads.filter((l) => getLeadPipelineStage(l) === stage.key);
                     return (
                       <div key={stage.key} style={{ background: "#f8fafc", borderRadius: 8, padding: 12, borderTop: `3px solid ${stage.color}` }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
@@ -4847,6 +4952,7 @@ export default function HomePage() {
         const hasCallback = selectedLeadReports.some((report) => report.outcome === "Wiedervorlage");
         const callbackCount = selectedLeadReports.filter((report) => report.outcome === "Wiedervorlage").length;
         const callCount = selectedLeadReports.length;
+        const canEditSensitiveCrmFields = currentUser?.role === "master";
         const openTasks = (selectedLeadForHistory.tasks || []).filter((task) => task.status === "open");
         const doneTasks = (selectedLeadForHistory.tasks || []).filter((task) => task.status === "done");
         const recentActivities = (selectedLeadForHistory.activities || [])
@@ -4881,6 +4987,7 @@ export default function HomePage() {
               <div className="row top-gap" style={{ gap: 6, flexWrap: "wrap" }}>
                 {([
                   { key: "stammdaten", label: "Stammdaten" },
+                  { key: "pipeline", label: "Pipeline" },
                   { key: "historie", label: "Historie" },
                   { key: "kommunikation", label: "Kommunikation" },
                   { key: "termine", label: "Termine" },
@@ -4940,6 +5047,7 @@ export default function HomePage() {
                   <label>Zuordnung</label>
                   <select
                     value={detailDraft?.customerOwner || ""}
+                    disabled={!canEditSensitiveCrmFields}
                     onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), customerOwner: (e.target.value || undefined) as "BarmeniaGothaer" | "Agentur-Duic" | undefined }))}
                   >
                     <option value="">Nicht gesetzt</option>
@@ -5004,6 +5112,96 @@ export default function HomePage() {
                   />
                   <button className="btn" style={{ marginTop: 8 }} disabled={busy} onClick={() => void saveLeadDetailsFromModal()}>
                     Kundendaten speichern
+                  </button>
+                </div>
+              </div> : null}
+
+              {crmDetailTab === "pipeline" ? <div className="report-detail-grid top-gap">
+                {!canEditSensitiveCrmFields ? <p className="subtle">Pipeline-Felder koennen nur von Master-Usern bearbeitet werden.</p> : null}
+                <div className="report-detail-field">
+                  <label>Pipeline-Phase</label>
+                  <select
+                    value={detailDraft?.crmPipeline?.stage || getLeadPipelineStage(selectedLeadForHistory)}
+                    disabled={!canEditSensitiveCrmFields}
+                    onChange={(e) => setDetailDraft((draft) => ({
+                      ...(draft || {}),
+                      crmPipeline: {
+                        stage: e.target.value as NonNullable<DashboardData["leads"][number]["crmPipeline"]>["stage"],
+                        valueEUR: draft?.crmPipeline?.valueEUR,
+                        probability: draft?.crmPipeline?.probability,
+                        expectedCloseAt: draft?.crmPipeline?.expectedCloseAt,
+                        updatedAt: new Date().toISOString(),
+                      },
+                    }))}
+                  >
+                    <option value="neu">Neu</option>
+                    <option value="qualifiziert">Qualifiziert</option>
+                    <option value="angebot">Angebot</option>
+                    <option value="verhandlung">Verhandlung</option>
+                    <option value="gewonnen">Gewonnen</option>
+                    <option value="verloren">Verloren</option>
+                  </select>
+                </div>
+                <div className="report-detail-field">
+                  <label>Potentialwert (EUR)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={!canEditSensitiveCrmFields}
+                    value={detailDraft?.crmPipeline?.valueEUR ?? ""}
+                    onChange={(e) => setDetailDraft((draft) => ({
+                      ...(draft || {}),
+                      crmPipeline: {
+                        stage: draft?.crmPipeline?.stage || getLeadPipelineStage(selectedLeadForHistory),
+                        valueEUR: e.target.value ? Number(e.target.value) : undefined,
+                        probability: draft?.crmPipeline?.probability,
+                        expectedCloseAt: draft?.crmPipeline?.expectedCloseAt,
+                        updatedAt: new Date().toISOString(),
+                      },
+                    }))}
+                  />
+                </div>
+                <div className="report-detail-field">
+                  <label>Abschlusswahrscheinlichkeit (%)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    disabled={!canEditSensitiveCrmFields}
+                    value={detailDraft?.crmPipeline?.probability ?? ""}
+                    onChange={(e) => setDetailDraft((draft) => ({
+                      ...(draft || {}),
+                      crmPipeline: {
+                        stage: draft?.crmPipeline?.stage || getLeadPipelineStage(selectedLeadForHistory),
+                        valueEUR: draft?.crmPipeline?.valueEUR,
+                        probability: e.target.value ? Number(e.target.value) : undefined,
+                        expectedCloseAt: draft?.crmPipeline?.expectedCloseAt,
+                        updatedAt: new Date().toISOString(),
+                      },
+                    }))}
+                  />
+                </div>
+                <div className="report-detail-field">
+                  <label>Voraussichtlicher Abschluss</label>
+                  <input
+                    type="datetime-local"
+                    disabled={!canEditSensitiveCrmFields}
+                    value={detailDraft?.crmPipeline?.expectedCloseAt ? new Date(detailDraft.crmPipeline.expectedCloseAt).toISOString().slice(0, 16) : ""}
+                    onChange={(e) => setDetailDraft((draft) => ({
+                      ...(draft || {}),
+                      crmPipeline: {
+                        stage: draft?.crmPipeline?.stage || getLeadPipelineStage(selectedLeadForHistory),
+                        valueEUR: draft?.crmPipeline?.valueEUR,
+                        probability: draft?.crmPipeline?.probability,
+                        expectedCloseAt: e.target.value ? new Date(e.target.value).toISOString() : undefined,
+                        updatedAt: new Date().toISOString(),
+                      },
+                    }))}
+                  />
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <button className="btn" style={{ marginTop: 8 }} disabled={busy || !canEditSensitiveCrmFields} onClick={() => void saveLeadDetailsFromModal()}>
+                    Pipeline speichern
                   </button>
                 </div>
               </div> : null}

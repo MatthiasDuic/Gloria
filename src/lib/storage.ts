@@ -672,6 +672,21 @@ function normalizeLeadActivities(activities: Lead["activities"]): Lead["activiti
   return next.length ? next : undefined;
 }
 
+function normalizeLeadPipeline(pipeline: Lead["crmPipeline"]): Lead["crmPipeline"] {
+  if (!pipeline) return undefined;
+  const stage = pipeline.stage;
+  if (!stage) return undefined;
+  return {
+    stage,
+    valueEUR: typeof pipeline.valueEUR === "number" && Number.isFinite(pipeline.valueEUR) ? pipeline.valueEUR : undefined,
+    probability: typeof pipeline.probability === "number"
+      ? Math.max(0, Math.min(100, Math.round(pipeline.probability)))
+      : undefined,
+    expectedCloseAt: pipeline.expectedCloseAt || undefined,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function normalizeEmailHistory(history: Lead["emailHistory"]): Lead["emailHistory"] {
   if (!history?.length) return undefined;
   const next = history
@@ -714,23 +729,9 @@ export async function updateLeadDetails(
       emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
       tasks: normalizeLeadTasks(updates.tasks ?? lead.tasks),
       activities: normalizeLeadActivities(updates.activities ?? lead.activities),
+      crmPipeline: normalizeLeadPipeline(updates.crmPipeline ?? lead.crmPipeline),
     };
-    const changed = JSON.stringify({
-      customerKind: nextLead.customerKind,
-      customerOwner: nextLead.customerOwner,
-      contactName: nextLead.contactName,
-      phone: nextLead.phone,
-      directDial: nextLead.directDial,
-      email: nextLead.email,
-      location: nextLead.location,
-      addressStreet: nextLead.addressStreet,
-      addressPostalCode: nextLead.addressPostalCode,
-      addressCity: nextLead.addressCity,
-      addressCountry: nextLead.addressCountry,
-      products: nextLead.products,
-      topic: nextLead.topic,
-      note: nextLead.note,
-    }) !== JSON.stringify({
+    const before = {
       customerKind: lead.customerKind,
       customerOwner: lead.customerOwner,
       contactName: lead.contactName,
@@ -745,15 +746,43 @@ export async function updateLeadDetails(
       products: lead.products,
       topic: lead.topic,
       note: lead.note,
+      crmPipeline: lead.crmPipeline,
+    };
+    const after = {
+      customerKind: nextLead.customerKind,
+      customerOwner: nextLead.customerOwner,
+      contactName: nextLead.contactName,
+      phone: nextLead.phone,
+      directDial: nextLead.directDial,
+      email: nextLead.email,
+      location: nextLead.location,
+      addressStreet: nextLead.addressStreet,
+      addressPostalCode: nextLead.addressPostalCode,
+      addressCity: nextLead.addressCity,
+      addressCountry: nextLead.addressCountry,
+      products: nextLead.products,
+      topic: nextLead.topic,
+      note: nextLead.note,
+      crmPipeline: nextLead.crmPipeline,
+    };
+    const changed = JSON.stringify(after) !== JSON.stringify(before);
+    if (!changed) {
+      updatedLead = nextLead;
+      return updatedLead;
+    }
+    const changedFields = Object.keys(after).filter((key) => {
+      const k = key as keyof typeof after;
+      return JSON.stringify(after[k]) !== JSON.stringify(before[k]);
     });
-    updatedLead = changed
-      ? appendLeadActivity(nextLead, {
-        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        type: updates.note !== undefined ? "note_updated" : "details_updated",
-        message: updates.note !== undefined ? "Notiz aktualisiert." : "Kundendaten aktualisiert.",
-        createdAt: new Date().toISOString(),
-      })
-      : nextLead;
+    const message = changedFields.length
+      ? `Kundendaten aktualisiert: ${changedFields.join(", ")}`
+      : "Kundendaten aktualisiert.";
+    updatedLead = appendLeadActivity(nextLead, {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: updates.note !== undefined && changedFields.length === 1 && changedFields[0] === "note" ? "note_updated" : "details_updated",
+      message,
+      createdAt: new Date().toISOString(),
+    });
     return updatedLead;
   });
   if (!updatedLead) return undefined;

@@ -13,7 +13,7 @@ import {
 } from "@/lib/storage";
 import type { Lead } from "@/lib/types";
 import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
-import { getSessionUserFromRequest } from "@/lib/request-auth";
+import { forbiddenResponse, getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, bindCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 
@@ -87,7 +87,12 @@ export async function POST(request: Request) {
       if (!leadId) {
         return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
       }
-      const updates = payload.updates || {};
+      const updates = { ...(payload.updates || {}) };
+      if (sessionUser.role !== "master") {
+        // Normal users cannot change owner assignment or core pipeline metrics.
+        delete updates.customerOwner;
+        delete updates.crmPipeline;
+      }
       const updatedLead = await updateLeadDetails(leadId, updates, sessionUser.id);
       if (!updatedLead) {
         return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
@@ -174,6 +179,9 @@ export async function POST(request: Request) {
     }
 
     if (action === "delete") {
+      if (sessionUser.role !== "master") {
+        return forbiddenResponse("Nur Master-User duerfen Listen loeschen.");
+      }
       const result = await deleteCampaignList(listId, sessionUser.id);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({ ok: true, action, listId, removedLeads: result.removedLeads, lists });

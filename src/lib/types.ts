@@ -47,6 +47,16 @@ export interface LeadActivity {
   createdAt: string;
 }
 
+export type LeadPipelineStage = "neu" | "qualifiziert" | "angebot" | "verhandlung" | "gewonnen" | "verloren";
+
+export interface LeadPipeline {
+  stage: LeadPipelineStage;
+  valueEUR?: number;
+  probability?: number;
+  expectedCloseAt?: string;
+  updatedAt: string;
+}
+
 export interface Lead {
   id: string;
   userId?: string;
@@ -68,6 +78,7 @@ export interface Lead {
   emailHistory?: LeadEmailActivity[];
   tasks?: LeadTask[];
   activities?: LeadActivity[];
+  crmPipeline?: LeadPipeline;
   topic: Topic;
   note?: string;
   nextCallAt?: string;
