@@ -1026,6 +1026,7 @@ export default function HomePage() {
   const crmPrefsLastSavedKeyRef = useRef("");
   const crmPrefsRequestRef = useRef<AbortController | null>(null);
   const requestGuardsRef = useRef<Record<string, { inFlight: boolean; failures: number; nextAllowedAt: number }>>({});
+  const networkPauseUntilRef = useRef(0);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1145,6 +1146,10 @@ export default function HomePage() {
     const guard = getRequestGuard(key);
     const now = Date.now();
 
+    if (networkPauseUntilRef.current > now) {
+      return { response: null, skipped: true, reason: "cooldown" };
+    }
+
     if (guard.inFlight) {
       return { response: null, skipped: true, reason: "in-flight" };
     }
@@ -1178,7 +1183,10 @@ export default function HomePage() {
       const isNetworkError = error instanceof TypeError;
       if (isAbort || isNetworkError) {
         guard.failures += 1;
-        guard.nextAllowedAt = Date.now() + computeBackoffMs(guard.failures);
+        const nextRetryMs = computeBackoffMs(guard.failures);
+        guard.nextAllowedAt = Date.now() + nextRetryMs;
+        // Pause all guarded reads briefly after connection churn to prevent burst retries.
+        networkPauseUntilRef.current = Date.now() + Math.max(5_000, nextRetryMs);
         return {
           response: null,
           skipped: true,
@@ -1485,8 +1493,8 @@ export default function HomePage() {
   async function loadDashboard(): Promise<DashboardData | null> {
     try {
       const [dashboardRequest, learningRequest] = await Promise.all([
-        guardedFetch("reports-read", "/api/reports", { cache: "no-store", allowWhenHidden: true }),
-        guardedFetch("learning-read", "/api/learning", { cache: "no-store", allowWhenHidden: true }),
+        guardedFetch("reports-read", "/api/reports", { cache: "no-store" }),
+        guardedFetch("learning-read", "/api/learning", { cache: "no-store" }),
       ]);
 
       const dashboardResponse = dashboardRequest.response;
@@ -1534,7 +1542,7 @@ export default function HomePage() {
 
   const loadCampaignLists = useCallback(async () => {
     try {
-      const request = await guardedFetch("campaign-lists-read", "/api/campaigns/lists", { cache: "no-store", allowWhenHidden: true });
+      const request = await guardedFetch("campaign-lists-read", "/api/campaigns/lists", { cache: "no-store" });
       const response = request.response;
       if (!response) {
         return;
@@ -1570,7 +1578,7 @@ export default function HomePage() {
 
   const loadSessionAndAdminData = useCallback(async () => {
     try {
-      const meRequest = await guardedFetch("auth-me-read", "/api/auth/me", { cache: "no-store", allowWhenHidden: true });
+      const meRequest = await guardedFetch("auth-me-read", "/api/auth/me", { cache: "no-store" });
       const meResponse = meRequest.response;
       if (!meResponse) {
         return;
@@ -1580,7 +1588,11 @@ export default function HomePage() {
 
       setCurrentUser(mePayload.user);
 
-      const crmViewsResponse = await fetch("/api/crm/views", { cache: "no-store" });
+      const crmViewsRequest = await guardedFetch("crm-views-read", "/api/crm/views", { cache: "no-store" });
+      const crmViewsResponse = crmViewsRequest.response;
+      if (!crmViewsResponse) {
+        return;
+      }
       const crmViewsPayload = (await crmViewsResponse.json().catch(() => ({}))) as { views?: CrmSavedView[] };
       if (crmViewsResponse.ok) {
         setCrmSavedViews(Array.isArray(crmViewsPayload.views) ? crmViewsPayload.views.slice(0, 20) : []);
@@ -1588,7 +1600,11 @@ export default function HomePage() {
         setCrmSavedViews([]);
       }
 
-      const crmPrefsResponse = await fetch("/api/crm/preferences", { cache: "no-store" });
+      const crmPrefsRequest = await guardedFetch("crm-prefs-read", "/api/crm/preferences", { cache: "no-store" });
+      const crmPrefsResponse = crmPrefsRequest.response;
+      if (!crmPrefsResponse) {
+        return;
+      }
       const crmPrefsPayload = (await crmPrefsResponse.json().catch(() => ({}))) as { preferences?: CrmUiPreferences };
       if (crmPrefsResponse.ok && crmPrefsPayload.preferences) {
         const prefs = crmPrefsPayload.preferences;
@@ -1611,29 +1627,38 @@ export default function HomePage() {
       }
       setCrmPrefsReady(true);
 
-    const voicesResponse = await fetch("/api/voices", { cache: "no-store" });
-    const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
-      voices?: Array<{ id: string; name: string }>;
-      selectedVoiceId?: string;
-    };
-    if (voicesResponse.ok) {
-      setAvailableVoices(voicesPayload.voices || []);
-      setSelectedVoiceId(voicesPayload.selectedVoiceId || "");
-    }
+      const voicesRequest = await guardedFetch("voices-read", "/api/voices", { cache: "no-store" });
+      const voicesResponse = voicesRequest.response;
+      if (voicesResponse) {
+        const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
+          voices?: Array<{ id: string; name: string }>;
+          selectedVoiceId?: string;
+        };
+        if (voicesResponse.ok) {
+          setAvailableVoices(voicesPayload.voices || []);
+          setSelectedVoiceId(voicesPayload.selectedVoiceId || "");
+        }
+      }
 
-    const phoneResponse = await fetch("/api/admin/phone-numbers", { cache: "no-store" });
-    const phonePayload = (await phoneResponse.json().catch(() => ({}))) as {
-      phoneNumbers?: ManagedPhoneNumber[];
-    };
-    if (phoneResponse.ok) {
-      setManagedPhoneNumbers(phonePayload.phoneNumbers || []);
-    }
+      const phoneRequest = await guardedFetch("admin-phone-read", "/api/admin/phone-numbers", { cache: "no-store" });
+      const phoneResponse = phoneRequest.response;
+      if (phoneResponse) {
+        const phonePayload = (await phoneResponse.json().catch(() => ({}))) as {
+          phoneNumbers?: ManagedPhoneNumber[];
+        };
+        if (phoneResponse.ok) {
+          setManagedPhoneNumbers(phonePayload.phoneNumbers || []);
+        }
+      }
 
       if (mePayload.user.role === "master") {
-        const usersResponse = await fetch("/api/admin/users", { cache: "no-store" });
-        const usersPayload = (await usersResponse.json().catch(() => ({}))) as { users?: AdminUser[] };
-        if (usersResponse.ok) {
-          setAdminUsers(usersPayload.users || []);
+        const usersRequest = await guardedFetch("admin-users-read", "/api/admin/users", { cache: "no-store" });
+        const usersResponse = usersRequest.response;
+        if (usersResponse) {
+          const usersPayload = (await usersResponse.json().catch(() => ({}))) as { users?: AdminUser[] };
+          if (usersResponse.ok) {
+            setAdminUsers(usersPayload.users || []);
+          }
         }
       }
     } catch (error) {
@@ -1734,9 +1759,11 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    void loadDashboard();
-    void loadCampaignLists();
-    void loadSessionAndAdminData();
+    void (async () => {
+      await loadDashboard();
+      await loadCampaignLists();
+      await loadSessionAndAdminData();
+    })();
   }, [loadCampaignLists, loadSessionAndAdminData]);
 
   useEffect(() => {
