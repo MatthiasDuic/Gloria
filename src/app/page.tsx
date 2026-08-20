@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import Image from "next/image";
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CrmSavedView, CrmUiPreferences, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
@@ -1023,6 +1023,8 @@ export default function HomePage() {
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
+  const crmPrefsLastSavedKeyRef = useRef("");
+  const crmPrefsRequestRef = useRef<AbortController | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1503,6 +1505,15 @@ export default function HomePage() {
         if (prefs.crmCustomerKindFilter !== undefined) setCrmCustomerKindFilter(prefs.crmCustomerKindFilter);
         if (prefs.crmPipelineFilter !== undefined) setCrmPipelineFilter(prefs.crmPipelineFilter);
         if (prefs.crmContactFilter !== undefined) setCrmContactFilter(prefs.crmContactFilter);
+        crmPrefsLastSavedKeyRef.current = JSON.stringify({
+          crmTab: prefs.crmTab || "customers",
+          crmDetailTab: prefs.crmDetailTab || "stammdaten",
+          crmSearch: prefs.crmSearch || "",
+          crmTypeFilter: prefs.crmTypeFilter || "",
+          crmCustomerKindFilter: prefs.crmCustomerKindFilter || "",
+          crmPipelineFilter: prefs.crmPipelineFilter || "",
+          crmContactFilter: prefs.crmContactFilter || "",
+        });
       }
       setCrmPrefsReady(true);
 
@@ -1549,35 +1560,65 @@ export default function HomePage() {
     return Array.isArray(payload.views) ? payload.views.slice(0, 20) : nextViews.slice(0, 20);
   }
 
-  async function persistCrmUiPreferences(nextPreferences: CrmUiPreferences) {
-    const response = await fetch("/api/crm/preferences", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preferences: nextPreferences }),
-    });
-    const payload = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      throw new Error(payload.error || "CRM-Layout konnte nicht gespeichert werden.");
+  async function persistCrmUiPreferences(nextPreferences: CrmUiPreferences, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const response = await fetch("/api/crm/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ preferences: nextPreferences }),
+        signal,
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "CRM-Layout konnte nicht gespeichert werden.");
+      }
+      return true;
+    } catch (error) {
+      if (signal?.aborted) {
+        return false;
+      }
+      if (error instanceof TypeError) {
+        return false;
+      }
+      throw error;
     }
   }
 
   useEffect(() => {
-    if (!currentUser || !crmPrefsReady) return;
+    if (!currentUser || !crmPrefsReady || activeView !== "crm") return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    const snapshot: CrmUiPreferences = {
+      crmTab,
+      crmDetailTab,
+      crmSearch,
+      crmTypeFilter,
+      crmCustomerKindFilter,
+      crmPipelineFilter,
+      crmContactFilter,
+    };
+    const nextKey = JSON.stringify(snapshot);
+    if (nextKey === crmPrefsLastSavedKeyRef.current) return;
+
     const timer = setTimeout(() => {
-      void persistCrmUiPreferences({
-        crmTab,
-        crmDetailTab,
-        crmSearch,
-        crmTypeFilter,
-        crmCustomerKindFilter,
-        crmPipelineFilter,
-        crmContactFilter,
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      crmPrefsRequestRef.current?.abort();
+      const controller = new AbortController();
+      crmPrefsRequestRef.current = controller;
+
+      void persistCrmUiPreferences(snapshot, controller.signal).then((saved) => {
+        if (saved) {
+          crmPrefsLastSavedKeyRef.current = nextKey;
+        }
       }).catch(() => {
         // Avoid interrupting UX with noisy autosave messages.
       });
-    }, 500);
+    }, 1200);
     return () => clearTimeout(timer);
   }, [
+    activeView,
     crmCustomerKindFilter,
     crmContactFilter,
     crmDetailTab,
@@ -1588,6 +1629,12 @@ export default function HomePage() {
     crmTypeFilter,
     currentUser,
   ]);
+
+  useEffect(() => {
+    return () => {
+      crmPrefsRequestRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     void loadDashboard();
