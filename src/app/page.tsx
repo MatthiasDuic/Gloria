@@ -1005,7 +1005,7 @@ export default function HomePage() {
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerFeedback, setAddCustomerFeedback] = useState<{ type: "" | "success" | "error"; message: string }>({ type: "", message: "" });
   const [addCustomerDraft, setAddCustomerDraft] = useState({
-    company: "", contactName: "", phone: "", email: "", topic: "" as Topic | "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "",
+    company: "", contactName: "", phone: "", email: "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", note: "",
   });
   const [showCampaignFromSelectionModal, setShowCampaignFromSelectionModal] = useState(false);
   const [showCrmImport, setShowCrmImport] = useState(false);
@@ -1027,6 +1027,7 @@ export default function HomePage() {
   const crmPrefsRequestRef = useRef<AbortController | null>(null);
   const requestGuardsRef = useRef<Record<string, { inFlight: boolean; failures: number; nextAllowedAt: number }>>({});
   const networkPauseUntilRef = useRef(0);
+  const selectedLeadIdRef = useRef<string | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1080,37 +1081,42 @@ export default function HomePage() {
   }, [data.leads, selectedLeadForHistory]);
   useEffect(() => {
     if (!selectedLeadForHistory) {
+      selectedLeadIdRef.current = null;
       setDetailDraft(null);
       setCrmDetailTab("stammdaten");
       setLeadTaskDraft({ title: "", dueAt: "" });
       setOutlookMailDraft({ subject: "", body: "", to: "", sentAt: "" });
       return;
     }
-    setCrmDetailTab("stammdaten");
-    setLeadTaskDraft({ title: "", dueAt: "" });
-    setDetailDraft({
-      customerKind: selectedLeadForHistory.customerKind || "firma",
-      customerOwner: selectedLeadForHistory.customerOwner,
-      contactName: selectedLeadForHistory.contactName,
-      phone: selectedLeadForHistory.phone,
-      directDial: selectedLeadForHistory.directDial,
-      email: selectedLeadForHistory.email,
-      location: selectedLeadForHistory.location,
-      addressStreet: selectedLeadForHistory.addressStreet,
-      addressPostalCode: selectedLeadForHistory.addressPostalCode,
-      addressCity: selectedLeadForHistory.addressCity,
-      addressCountry: selectedLeadForHistory.addressCountry,
-      products: selectedLeadForHistory.products,
-      crmPipeline: selectedLeadForHistory.crmPipeline,
-      topic: selectedLeadForHistory.topic,
-      note: selectedLeadForHistory.note,
-    });
-    setOutlookMailDraft({
-      subject: "",
-      body: "",
-      to: selectedLeadForHistory.email || "",
-      sentAt: "",
-    });
+    const isLeadChange = selectedLeadIdRef.current !== selectedLeadForHistory.id;
+    if (isLeadChange) {
+      selectedLeadIdRef.current = selectedLeadForHistory.id;
+      setCrmDetailTab("stammdaten");
+      setLeadTaskDraft({ title: "", dueAt: "" });
+      setDetailDraft({
+        customerKind: selectedLeadForHistory.customerKind || "firma",
+        customerOwner: selectedLeadForHistory.customerOwner,
+        contactName: selectedLeadForHistory.contactName,
+        phone: selectedLeadForHistory.phone,
+        directDial: selectedLeadForHistory.directDial,
+        email: selectedLeadForHistory.email,
+        location: selectedLeadForHistory.location,
+        addressStreet: selectedLeadForHistory.addressStreet,
+        addressPostalCode: selectedLeadForHistory.addressPostalCode,
+        addressCity: selectedLeadForHistory.addressCity,
+        addressCountry: selectedLeadForHistory.addressCountry,
+        products: selectedLeadForHistory.products,
+        crmPipeline: selectedLeadForHistory.crmPipeline,
+        topic: selectedLeadForHistory.topic,
+        note: selectedLeadForHistory.note,
+      });
+      setOutlookMailDraft({
+        subject: "",
+        body: "",
+        to: selectedLeadForHistory.email || "",
+        sentAt: "",
+      });
+    }
   }, [selectedLeadForHistory]);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
@@ -2541,7 +2547,7 @@ export default function HomePage() {
     setBusy(true);
     setAddCustomerFeedback({ type: "", message: "" });
     try {
-      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${d.productsInput.replace(/"/g, '""')}","${d.topic}","${d.note.replace(/"/g, '""')}"`;
+      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","","","${d.note.replace(/"/g, '""')}"`;
       const listName = `${d.customerType} | Manuell hinzugefügt`;
       const res = await fetch("/api/campaigns/import", {
         method: "POST",
@@ -2558,7 +2564,7 @@ export default function HomePage() {
       await new Promise((resolve) => setTimeout(resolve, 320));
       setNotice(`Kunde "${company}" angelegt.`);
       setShowAddCustomerModal(false);
-      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
+      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", note: "" });
       setAddCustomerFeedback({ type: "", message: "" });
       setCrmSearch("");
       setCrmTypeFilter("");
@@ -3932,17 +3938,6 @@ export default function HomePage() {
                       <input value={addCustomerDraft.addressCountry} onChange={e => setAddCustomerDraft(d => ({ ...d, addressCountry: e.target.value }))} placeholder="Deutschland" />
                     </div>
                     <div className="report-detail-field">
-                      <label>Produkte</label>
-                      <input value={addCustomerDraft.productsInput} onChange={e => setAddCustomerDraft(d => ({ ...d, productsInput: e.target.value }))} placeholder="PKV; Zahn; Pflege" />
-                    </div>
-                    <div className="report-detail-field">
-                      <label>Thema / Anlass (optional)</label>
-                      <select value={addCustomerDraft.topic} onChange={e => setAddCustomerDraft(d => ({ ...d, topic: e.target.value as Topic | "" }))}>
-                        <option value="">Kein Thema vorgeben</option>
-                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </div>
-                    <div className="report-detail-field report-detail-full">
                       <label>Notiz / Kontext</label>
                       <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={3} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
                     </div>
