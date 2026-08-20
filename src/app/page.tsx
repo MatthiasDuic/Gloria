@@ -3939,7 +3939,7 @@ export default function HomePage() {
                     </div>
                     <div className="report-detail-field report-detail-full">
                       <label>Notiz / Kontext</label>
-                      <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={3} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
+                      <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={6} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
                     </div>
                   </div>
                   <div className="row top-gap" style={{ gap: 8 }}>
