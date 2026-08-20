@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { CallReport, ConversationEvent, CrmSavedView, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
 import type { LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
@@ -40,6 +40,7 @@ export interface AppUser {
   gesellschaft: string;
   selectedVoiceId: string;
   allowedPlaybookTopics: string[];
+  crmSavedViews: CrmSavedView[];
   passwordHash: string;
   role: UserRole;
   createdAt: string;
@@ -205,6 +206,28 @@ function parseJsonTextArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function parseCrmSavedViews(value: unknown): CrmSavedView[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      const name = typeof row.name === "string" ? row.name.trim() : "";
+      const search = typeof row.search === "string" ? row.search : "";
+      const owner = row.owner === "BarmeniaGothaer" || row.owner === "Agentur-Duic" ? row.owner : "";
+      const customerKind = row.customerKind === "privat" || row.customerKind === "firma" ? row.customerKind : "";
+      const productFilter = typeof row.productFilter === "string" ? row.productFilter : "";
+      const createdAt = typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString();
+      if (!id || !name) return null;
+      return { id, name, search, owner, customerKind, productFilter, createdAt } as CrmSavedView;
+    })
+    .filter((entry): entry is CrmSavedView => Boolean(entry))
+    .slice(0, 20);
+}
+
 function parseLeadEmailHistory(value: unknown): Lead["emailHistory"] {
   if (!Array.isArray(value)) return undefined;
   const entries: LeadEmailActivity[] = value
@@ -341,6 +364,7 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gesellschaft TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_voice_id TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_playbook_topics JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_saved_views JSONB NOT NULL DEFAULT '[]'::jsonb;`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS phone_numbers (
@@ -827,7 +851,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
     FROM users
     WHERE LOWER(username) = LOWER($1)
     LIMIT 1
@@ -851,6 +875,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
     gesellschaft: String(row.gesellschaft || ""),
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
+    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -866,7 +891,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
     FROM users
     WHERE id = $1
     LIMIT 1
@@ -890,6 +915,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
     gesellschaft: String(row.gesellschaft || ""),
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
+    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -909,7 +935,7 @@ export async function listUsers(): Promise<AppUser[]> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
     FROM users
     ORDER BY created_at DESC
     `,
@@ -926,6 +952,7 @@ export async function listUsers(): Promise<AppUser[]> {
     gesellschaft: String(row.gesellschaft || ""),
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
+    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -996,6 +1023,7 @@ export async function updateUser(
     gesellschaft?: string;
     selectedVoiceId?: string;
     allowedPlaybookTopics?: string[];
+    crmSavedViews?: CrmSavedView[];
     password?: string;
     role?: UserRole;
   },
@@ -1033,12 +1061,27 @@ export async function updateUser(
       JSON.stringify(input.allowedPlaybookTopics.map((t) => t.trim()).filter(Boolean)),
     ]);
   }
+  if (input.crmSavedViews !== undefined) {
+    await db.query(`UPDATE users SET crm_saved_views = $2::jsonb WHERE id = $1`, [
+      userId,
+      JSON.stringify(input.crmSavedViews.slice(0, 20)),
+    ]);
+  }
   if (input.password) {
     await db.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, hashPassword(input.password)]);
   }
   if (input.role) {
     await db.query(`UPDATE users SET role = $2 WHERE id = $1`, [userId, input.role]);
   }
+}
+
+export async function updateUserCrmSavedViews(userId: string, views: CrmSavedView[]): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(
+    `UPDATE users SET crm_saved_views = $2::jsonb WHERE id = $1`,
+    [userId, JSON.stringify(views.slice(0, 20))],
+  );
 }
 
 export async function deleteUser(userId: string): Promise<void> {

@@ -57,6 +57,16 @@ export interface LeadPipeline {
   updatedAt: string;
 }
 
+export interface CrmSavedView {
+  id: string;
+  name: string;
+  search: string;
+  owner: "" | "BarmeniaGothaer" | "Agentur-Duic";
+  customerKind: "" | "privat" | "firma";
+  productFilter: string;
+  createdAt: string;
+}
+
 export interface Lead {
   id: string;
   userId?: string;

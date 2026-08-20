@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
+import type { CrmSavedView, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
@@ -935,16 +935,6 @@ export default function HomePage() {
     rejections: number;
   };
 
-  type CrmSavedView = {
-    id: string;
-    name: string;
-    search: string;
-    owner: "" | "BarmeniaGothaer" | "Agentur-Duic";
-    customerKind: "" | "privat" | "firma";
-    productFilter: string;
-    createdAt: string;
-  };
-
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -1074,7 +1064,6 @@ export default function HomePage() {
   void settingsOpen; void setSettingsOpen;
   const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "crm" | "settings" | "compliance">("overview");
   const [leadNoteEdit, setLeadNoteEdit] = useState<string>("");
-  const crmSavedViewsStorageKey = currentUser ? `gloria.crm.savedViews.${currentUser.id}` : "";
   useEffect(() => { setLeadNoteEdit(selectedLeadForHistory?.note || ""); }, [selectedLeadForHistory]);
   useEffect(() => {
     if (!selectedLeadForHistory) return;
@@ -1083,35 +1072,6 @@ export default function HomePage() {
       setSelectedLeadForHistory(latestLead);
     }
   }, [data.leads, selectedLeadForHistory]);
-  useEffect(() => {
-    if (!crmSavedViewsStorageKey) {
-      setCrmSavedViews([]);
-      setCrmSelectedViewId("");
-      return;
-    }
-    try {
-      const raw = window.localStorage.getItem(crmSavedViewsStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as CrmSavedView[];
-      if (Array.isArray(parsed)) {
-        setCrmSavedViews(parsed.slice(0, 20));
-      }
-    } catch {
-      // ignore local storage parse errors
-    }
-  }, [crmSavedViewsStorageKey]);
-
-  useEffect(() => {
-    if (!crmSavedViewsStorageKey) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(crmSavedViewsStorageKey, JSON.stringify(crmSavedViews.slice(0, 20)));
-    } catch {
-      // ignore storage quota errors
-    }
-  }, [crmSavedViews, crmSavedViewsStorageKey]);
-
   useEffect(() => {
     if (!selectedLeadForHistory) {
       setDetailDraft(null);
@@ -1520,6 +1480,15 @@ export default function HomePage() {
 
       setCurrentUser(mePayload.user);
 
+      const crmViewsResponse = await fetch("/api/crm/views", { cache: "no-store" });
+      const crmViewsPayload = (await crmViewsResponse.json().catch(() => ({}))) as { views?: CrmSavedView[] };
+      if (crmViewsResponse.ok) {
+        setCrmSavedViews(Array.isArray(crmViewsPayload.views) ? crmViewsPayload.views.slice(0, 20) : []);
+      } else {
+        setCrmSavedViews([]);
+      }
+      setCrmSelectedViewId("");
+
     const voicesResponse = await fetch("/api/voices", { cache: "no-store" });
     const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
       voices?: Array<{ id: string; name: string }>;
@@ -1549,6 +1518,19 @@ export default function HomePage() {
       setNotice(error instanceof Error ? error.message : "Kontodaten konnten nicht geladen werden.");
     }
   }, []);
+
+  async function persistCrmSavedViews(nextViews: CrmSavedView[]) {
+    const response = await fetch("/api/crm/views", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ views: nextViews.slice(0, 20) }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; views?: CrmSavedView[] };
+    if (!response.ok) {
+      throw new Error(payload.error || "CRM-Ansichten konnten nicht gespeichert werden.");
+    }
+    return Array.isArray(payload.views) ? payload.views.slice(0, 20) : nextViews.slice(0, 20);
+  }
 
   useEffect(() => {
     void loadDashboard();
@@ -2231,7 +2213,7 @@ export default function HomePage() {
     return "neu" as const;
   }
 
-  function saveCurrentCrmView() {
+  async function saveCurrentCrmView() {
     const name = crmViewNameDraft.trim();
     if (!name) {
       setNotice("Bitte einen Namen für die CRM-Ansicht angeben.");
@@ -2246,9 +2228,15 @@ export default function HomePage() {
       productFilter: crmProductFilter,
       createdAt: new Date().toISOString(),
     };
-    setCrmSavedViews((current) => [entry, ...current.filter((v) => v.name !== name)].slice(0, 20));
-    setCrmSelectedViewId(entry.id);
-    setNotice(`Ansicht "${name}" gespeichert.`);
+    const nextViews = [entry, ...crmSavedViews.filter((view) => view.name !== name)].slice(0, 20);
+    try {
+      const persisted = await persistCrmSavedViews(nextViews);
+      setCrmSavedViews(persisted);
+      setCrmSelectedViewId(entry.id);
+      setNotice(`Ansicht "${name}" gespeichert.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "CRM-Ansicht konnte nicht gespeichert werden.");
+    }
   }
 
   function applyCrmSavedView(viewId: string) {
@@ -2262,14 +2250,20 @@ export default function HomePage() {
     setNotice(`Ansicht "${view.name}" geladen.`);
   }
 
-  function deleteCrmSavedView(viewId: string) {
+  async function deleteCrmSavedView(viewId: string) {
     const view = crmSavedViews.find((entry) => entry.id === viewId);
-    setCrmSavedViews((current) => current.filter((entry) => entry.id !== viewId));
-    if (crmSelectedViewId === viewId) {
-      setCrmSelectedViewId("");
-    }
-    if (view) {
-      setNotice(`Ansicht "${view.name}" gelöscht.`);
+    const nextViews = crmSavedViews.filter((entry) => entry.id !== viewId);
+    try {
+      const persisted = await persistCrmSavedViews(nextViews);
+      setCrmSavedViews(persisted);
+      if (crmSelectedViewId === viewId) {
+        setCrmSelectedViewId("");
+      }
+      if (view) {
+        setNotice(`Ansicht "${view.name}" gelöscht.`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "CRM-Ansicht konnte nicht gelöscht werden.");
     }
   }
 
@@ -3225,9 +3219,9 @@ export default function HomePage() {
                       onChange={(e) => setCrmViewNameDraft(e.target.value)}
                       style={{ minWidth: 180 }}
                     />
-                    <button className="btn ghost" onClick={saveCurrentCrmView}>Ansicht speichern</button>
+                    <button className="btn ghost" onClick={() => void saveCurrentCrmView()}>Ansicht speichern</button>
                     {crmSelectedViewId ? (
-                      <button className="btn ghost" onClick={() => deleteCrmSavedView(crmSelectedViewId)}>Ansicht löschen</button>
+                      <button className="btn ghost" onClick={() => void deleteCrmSavedView(crmSelectedViewId)}>Ansicht löschen</button>
                     ) : null}
                   </div>
                   <div className="row" style={{ gap: 8 }}>
