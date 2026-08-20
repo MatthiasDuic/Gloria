@@ -1406,7 +1406,7 @@ export default function HomePage() {
     return Array.from(byNumber.values());
   }, [managedPhoneNumbers, anrufEinzelfirmaFromOptions, blockedOutboundNumbers]);
 
-  async function loadDashboard() {
+  async function loadDashboard(): Promise<DashboardData | null> {
     try {
       const [dashboardResponse, learningResponse] = await Promise.all([
         fetch("/api/reports", { cache: "no-store" }),
@@ -1436,8 +1436,10 @@ export default function HomePage() {
       setNotice(
         `Aktueller Stand: ${payload.metrics.appointments} Termin(e), ${payload.metrics.callbacksOpen} offene Wiedervorlage(n).`,
       );
+      return payload;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Dashboard konnte nicht geladen werden.");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -2325,13 +2327,15 @@ export default function HomePage() {
 
   async function addCustomerManually() {
     const d = addCustomerDraft;
-    if (!d.company.trim() || !d.phone.trim()) {
+    const company = d.company.trim();
+    const phone = d.phone.trim();
+    if (!company || !phone) {
       setNotice("Firma und Telefonnummer sind Pflichtfelder.");
       return;
     }
     setBusy(true);
     try {
-      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${d.company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${d.phone}","${d.email}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${d.productsInput.replace(/"/g, '""')}","${d.topic}","${d.note.replace(/"/g, '""')}"`;
+      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${d.productsInput.replace(/"/g, '""')}","${d.topic}","${d.note.replace(/"/g, '""')}"`;
       const listName = `${d.customerType} | Manuell hinzugefügt`;
       const res = await fetch("/api/campaigns/import", {
         method: "POST",
@@ -2340,15 +2344,30 @@ export default function HomePage() {
       });
       const payload = (await res.json()) as { imported?: number; error?: string };
       if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
-      setNotice(`Kunde "${d.company}" angelegt.`);
+      setNotice(`Kunde "${company}" angelegt.`);
       setShowAddCustomerModal(false);
       setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
+      setCrmSelectedViewId("");
       setCrmSearch("");
       setCrmTypeFilter("");
       setCrmCustomerKindFilter("");
       setCrmTab("customers");
-      await loadDashboard();
+      const refreshed = await loadDashboard();
       await loadCampaignLists();
+
+      if (refreshed) {
+        const normalizedPhone = phone.replace(/\s+/g, "");
+        const createdLead = refreshed.leads.find((lead) => {
+          const byCompany = lead.company.trim().toLowerCase() === company.toLowerCase();
+          const candidatePhone = (lead.phone || lead.directDial || "").replace(/\s+/g, "");
+          return byCompany && candidatePhone === normalizedPhone;
+        }) || refreshed.leads.find((lead) => lead.company.trim().toLowerCase() === company.toLowerCase());
+
+        if (createdLead) {
+          setCrmSearch(createdLead.company);
+          setSelectedLeadForHistory(createdLead);
+        }
+      }
     } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
     finally { setBusy(false); }
   }
