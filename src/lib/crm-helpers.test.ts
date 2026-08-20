@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildEffectiveLeadCompanyName,
+  getLeadCustomerKindFormConfig,
   normalizeLeadAffiliationRole,
   normalizeLeadBirthDate,
   resolveLeadCompanyValue,
@@ -21,4 +22,20 @@ test("affiliation roles fall back to a valid default when empty", () => {
 test("german birth dates are normalized to ISO strings", () => {
   assert.equal(normalizeLeadBirthDate("25.08.1990"), "1990-08-25");
   assert.equal(normalizeLeadBirthDate("2024-04-03"), "2024-04-03");
+});
+
+test("customer kind form config switches the required fields between private persons and companies", () => {
+  assert.deepEqual(getLeadCustomerKindFormConfig("privat"), {
+    companyLabel: "Privatperson / Firma (optional)",
+    companyPlaceholder: "optional – wird aus Name abgeleitet",
+    requireCompany: false,
+    showBirthDate: true,
+  });
+
+  assert.deepEqual(getLeadCustomerKindFormConfig("firma"), {
+    companyLabel: "Firma",
+    companyPlaceholder: "Musterbau GmbH",
+    requireCompany: true,
+    showBirthDate: false,
+  });
 });

@@ -76,3 +76,21 @@ export function normalizeLeadBirthDate(rawValue?: string): string | undefined {
 
   return value;
 }
+
+export function getLeadCustomerKindFormConfig(customerKind: "privat" | "firma") {
+  if (customerKind === "privat") {
+    return {
+      companyLabel: "Privatperson / Firma (optional)",
+      companyPlaceholder: "optional – wird aus Name abgeleitet",
+      requireCompany: false,
+      showBirthDate: true,
+    };
+  }
+
+  return {
+    companyLabel: "Firma",
+    companyPlaceholder: "Musterbau GmbH",
+    requireCompany: true,
+    showBirthDate: false,
+  };
+}

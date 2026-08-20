@@ -6,6 +6,7 @@ import type { CrmSavedView, CrmUiPreferences, DashboardData, LearningResponse, T
 import { TOPICS } from "@/lib/types";
 import {
   buildEffectiveLeadCompanyName,
+  getLeadCustomerKindFormConfig,
   normalizeLeadAffiliationRole,
   normalizeLeadBirthDate,
   resolveLeadCompanyValue,
@@ -2557,10 +2558,11 @@ export default function HomePage() {
     const phone = d.phone.trim();
     const contactName = d.contactName.trim();
     const normalizedCustomerKind = d.customerKind === "privat" || d.customerKind === "firma" ? d.customerKind : "firma";
+    const formConfig = getLeadCustomerKindFormConfig(normalizedCustomerKind);
     const effectiveCompany = normalizedCustomerKind === "privat"
       ? resolveLeadCompanyValue({ customerKind: "privat", company: d.company, contactName })
       : d.company.trim() || "Neue Firma";
-    if ((!effectiveCompany && normalizedCustomerKind !== "privat") || !phone || (normalizedCustomerKind === "privat" && !contactName)) {
+    if ((formConfig.requireCompany && !d.company.trim()) || !phone || (normalizedCustomerKind === "privat" && !contactName)) {
       const errorMessage = normalizedCustomerKind === "privat"
         ? "Name und Telefonnummer sind Pflichtfelder für Privatpersonen."
         : "Firma und Telefonnummer sind Pflichtfelder.";
@@ -3980,19 +3982,36 @@ export default function HomePage() {
                     </div>
                     <div className="report-detail-field">
                       <label>Kundenart *</label>
-                      <select value={addCustomerDraft.customerKind} onChange={e => setAddCustomerDraft(d => ({ ...d, customerKind: e.target.value as "privat" | "firma" }))}>
+                      <select
+                        value={addCustomerDraft.customerKind}
+                        onChange={e => setAddCustomerDraft(d => ({
+                          ...d,
+                          customerKind: e.target.value as "privat" | "firma",
+                          birthDate: e.target.value === "firma" ? "" : d.birthDate,
+                        }))}
+                      >
                         <option value="firma">Firmenkunde</option>
                         <option value="privat">Privatkunde</option>
                       </select>
                     </div>
                     <div className="report-detail-field">
-                      <label>Firma *</label>
-                      <input value={addCustomerDraft.company} onChange={e => setAddCustomerDraft(d => ({ ...d, company: e.target.value }))} placeholder="Musterbau GmbH" />
+                      <label>{getLeadCustomerKindFormConfig(addCustomerDraft.customerKind).companyLabel}{addCustomerDraft.customerKind === "firma" ? " *" : ""}</label>
+                      <input
+                        value={addCustomerDraft.company}
+                        onChange={e => setAddCustomerDraft(d => ({ ...d, company: e.target.value }))}
+                        placeholder={getLeadCustomerKindFormConfig(addCustomerDraft.customerKind).companyPlaceholder}
+                      />
                     </div>
                     <div className="report-detail-field">
-                      <label>Ansprechpartner</label>
-                      <input value={addCustomerDraft.contactName} onChange={e => setAddCustomerDraft(d => ({ ...d, contactName: e.target.value }))} placeholder="Herr Neumann" />
+                      <label>{addCustomerDraft.customerKind === "privat" ? "Name *" : "Ansprechpartner"}</label>
+                      <input value={addCustomerDraft.contactName} onChange={e => setAddCustomerDraft(d => ({ ...d, contactName: e.target.value }))} placeholder={addCustomerDraft.customerKind === "privat" ? "Max Mustermann" : "Herr Neumann"} />
                     </div>
+                    {addCustomerDraft.customerKind === "privat" && (
+                      <div className="report-detail-field">
+                        <label>Geburtsdatum</label>
+                        <input type="date" value={addCustomerDraft.birthDate ? normalizeLeadBirthDate(addCustomerDraft.birthDate) || "" : ""} onChange={e => setAddCustomerDraft(d => ({ ...d, birthDate: normalizeLeadBirthDate(e.target.value) || "" }))} />
+                      </div>
+                    )}
                     <div className="report-detail-field">
                       <label>Telefon *</label>
                       <input value={addCustomerDraft.phone} onChange={e => setAddCustomerDraft(d => ({ ...d, phone: e.target.value }))} placeholder="+492339123456" />
@@ -4027,7 +4046,11 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="row top-gap" style={{ gap: 8 }}>
-                    <button className="btn" onClick={() => void addCustomerManually()} disabled={busy || !addCustomerDraft.company.trim() || !addCustomerDraft.phone.trim()}>
+                    <button
+                      className="btn"
+                      onClick={() => void addCustomerManually()}
+                      disabled={busy || !addCustomerDraft.phone.trim() || (addCustomerDraft.customerKind === "firma" && !addCustomerDraft.company.trim()) || (addCustomerDraft.customerKind === "privat" && !addCustomerDraft.contactName.trim())}
+                    >
                       {busy ? "Speichert..." : "Kunde anlegen"}
                     </button>
                     <button className="btn ghost" onClick={() => setShowAddCustomerModal(false)}>Abbrechen</button>
@@ -5498,18 +5521,37 @@ export default function HomePage() {
                   <label>Kundenart</label>
                   <select
                     value={detailDraft?.customerKind || "firma"}
-                    onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), customerKind: e.target.value as "privat" | "firma" }))}
+                    onChange={(e) => {
+                      const nextKind = e.target.value as "privat" | "firma";
+                      const cfg = getLeadCustomerKindFormConfig(nextKind);
+                      setDetailDraft((draft) => ({
+                        ...(draft || {}),
+                        customerKind: nextKind,
+                        company: nextKind === "privat"
+                          ? (draft?.company || "")
+                          : ((draft?.company || "").trim() || ""),
+                        birthDate: nextKind === "privat" ? (draft?.birthDate || "") : (draft?.birthDate || ""),
+                      }));
+                      if (nextKind === "privat") {
+                        setNotice(`Privatkunde ausgewählt. Firmenname ist optional, Geburtsdatum wird angezeigt.`);
+                      } else {
+                        setNotice("Firmenkunde ausgewählt. Firmenname ist jetzt erforderlich.");
+                      }
+                      if (cfg.requireCompany && !((detailDraft?.company || "").trim())) {
+                        setDetailDraft((draft) => ({ ...(draft || {}), company: "" }));
+                      }
+                    }}
                   >
                     <option value="firma">Firmenkunde</option>
                     <option value="privat">Privatkunde</option>
                   </select>
                 </div>
                 <div className="report-detail-field">
-                  <label>{detailDraft?.customerKind === "privat" ? "Privatperson / Firma (optional)" : "Firma"}</label>
+                  <label>{getLeadCustomerKindFormConfig(detailDraft?.customerKind === "privat" ? "privat" : "firma").companyLabel}</label>
                   <input
                     value={detailDraft?.company ?? ""}
                     onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), company: e.target.value }))}
-                    placeholder={detailDraft?.customerKind === "privat" ? "optional – wird aus Name abgeleitet" : "Musterbau GmbH"}
+                    placeholder={getLeadCustomerKindFormConfig(detailDraft?.customerKind === "privat" ? "privat" : "firma").companyPlaceholder}
                   />
                 </div>
                 <div className="report-detail-field">
@@ -5540,7 +5582,7 @@ export default function HomePage() {
                   <label>E-Mail</label>
                   <input value={detailDraft?.email || ""} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), email: e.target.value }))} placeholder="kunde@email.de" />
                 </div>
-                {detailDraft?.customerKind === "privat" && (
+                {getLeadCustomerKindFormConfig(detailDraft?.customerKind === "privat" ? "privat" : "firma").showBirthDate && (
                   <div className="report-detail-field">
                     <label>Geburtsdatum</label>
                     <input
