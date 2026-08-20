@@ -2321,10 +2321,14 @@ export default function HomePage() {
       const res = await fetch("/api/campaigns/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ csvText: csvRow, listName }),
       });
       const payload = (await res.json()) as { imported?: number; error?: string };
       if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
+      if (!payload.imported || payload.imported < 1) {
+        throw new Error("Kunde konnte nicht gespeichert werden.");
+      }
       setNotice(`Kunde "${company}" angelegt.`);
       setShowAddCustomerModal(false);
       setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
