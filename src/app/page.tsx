@@ -1759,6 +1759,37 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    const applyNetworkGrace = (ms: number) => {
+      networkPauseUntilRef.current = Math.max(networkPauseUntilRef.current, Date.now() + ms);
+    };
+
+    const handleOffline = () => {
+      applyNetworkGrace(15_000);
+    };
+
+    const handleOnline = () => {
+      // Give the browser a brief recovery window before restarting reads.
+      applyNetworkGrace(6_000);
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("offline", handleOffline);
+      window.addEventListener("online", handleOnline);
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      applyNetworkGrace(15_000);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("offline", handleOffline);
+        window.removeEventListener("online", handleOnline);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       await loadDashboard();
       await loadCampaignLists();
@@ -1812,7 +1843,11 @@ export default function HomePage() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/telnyx/call-options", { cache: "no-store" });
+        const request = await guardedFetch("telnyx-call-options-read", "/api/telnyx/call-options", { cache: "no-store" });
+        const response = request.response;
+        if (!response) {
+          return;
+        }
         const payload = (await response.json()) as {
           fromOptions?: Array<{ id?: string; number: string; label: string }>;
           defaultFrom?: string;
