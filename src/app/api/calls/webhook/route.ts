@@ -304,7 +304,9 @@ export async function POST(request: Request) {
     // Recovery path for incomplete finalize payloads: if leadId/callSid is present,
     // derive missing context (company/topic/userId) from lead or existing report.
     if (payload.summary && payload.outcome && (payload.leadId || payload.callSid)) {
-      const dashboard = await getDashboardData();
+      const dashboard = payload.userId
+        ? await getDashboardData({ userId: payload.userId, role: "user" })
+        : await getDashboardData();
       const existingByCallSid = payload.callSid
         ? dashboard.reports.find((entry) => entry.callSid === payload.callSid)
         : undefined;
@@ -393,7 +395,9 @@ export async function POST(request: Request) {
     // mit callSid schon existiert. In diesem Fall das Recording per callSid
     // an den bestehenden Report anhängen.
     if (payload.callSid && payload.recordingUrl) {
-      const dashboard = await getDashboardData();
+      const dashboard = payload.userId
+        ? await getDashboardData({ userId: payload.userId, role: "user" })
+        : await getDashboardData();
       const existing = dashboard.reports.find((entry) => entry.callSid === payload.callSid);
 
       if (existing) {

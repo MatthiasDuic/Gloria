@@ -1074,6 +1074,7 @@ export default function HomePage() {
   void settingsOpen; void setSettingsOpen;
   const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "crm" | "settings" | "compliance">("overview");
   const [leadNoteEdit, setLeadNoteEdit] = useState<string>("");
+  const crmSavedViewsStorageKey = currentUser ? `gloria.crm.savedViews.${currentUser.id}` : "";
   useEffect(() => { setLeadNoteEdit(selectedLeadForHistory?.note || ""); }, [selectedLeadForHistory]);
   useEffect(() => {
     if (!selectedLeadForHistory) return;
@@ -1083,8 +1084,13 @@ export default function HomePage() {
     }
   }, [data.leads, selectedLeadForHistory]);
   useEffect(() => {
+    if (!crmSavedViewsStorageKey) {
+      setCrmSavedViews([]);
+      setCrmSelectedViewId("");
+      return;
+    }
     try {
-      const raw = window.localStorage.getItem("gloria.crm.savedViews");
+      const raw = window.localStorage.getItem(crmSavedViewsStorageKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as CrmSavedView[];
       if (Array.isArray(parsed)) {
@@ -1093,15 +1099,18 @@ export default function HomePage() {
     } catch {
       // ignore local storage parse errors
     }
-  }, []);
+  }, [crmSavedViewsStorageKey]);
 
   useEffect(() => {
+    if (!crmSavedViewsStorageKey) {
+      return;
+    }
     try {
-      window.localStorage.setItem("gloria.crm.savedViews", JSON.stringify(crmSavedViews.slice(0, 20)));
+      window.localStorage.setItem(crmSavedViewsStorageKey, JSON.stringify(crmSavedViews.slice(0, 20)));
     } catch {
       // ignore storage quota errors
     }
-  }, [crmSavedViews]);
+  }, [crmSavedViews, crmSavedViewsStorageKey]);
 
   useEffect(() => {
     if (!selectedLeadForHistory) {

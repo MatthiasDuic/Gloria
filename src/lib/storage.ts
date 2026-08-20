@@ -1651,15 +1651,14 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     rejections: number;
   }>
 > {
-  const [leads, campaignState, scopedEvents, globalEvents] = await Promise.all([
+  const [leads, campaignState, scopedEvents] = await Promise.all([
     readLeads(userId),
     readCampaignState(userId),
     getRecentConversationEvents({ userId, minutes: 20, limit: 400 }),
-    userId ? getRecentConversationEvents({ minutes: 20, limit: 400 }) : Promise.resolve([]),
   ]);
 
   const eventMap = new Map<string, ConversationEvent>();
-  for (const event of [...scopedEvents, ...globalEvents]) {
+  for (const event of scopedEvents) {
     eventMap.set(event.id, event);
   }
   const recentEvents = [...eventMap.values()];
