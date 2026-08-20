@@ -349,6 +349,34 @@ textarea {
   background: #f7faff;
 }
 
+.crm-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.crm-filter-chip {
+  border: 1px solid #d4e2f6;
+  background: #f7faff;
+  color: #375985;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.crm-filter-chip:hover {
+  background: #edf4ff;
+}
+
+.crm-filter-chip.active {
+  background: #1f4fae;
+  border-color: #1f4fae;
+  color: #ffffff;
+}
+
 @media (max-width: 980px) {
   .crm-header-card {
     grid-template-columns: 1fr;

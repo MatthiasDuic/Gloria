@@ -3200,6 +3200,10 @@ export default function HomePage() {
           return true;
         });
 
+        const hasActiveCrmFilters = Boolean(
+          crmSearch.trim() || crmTypeFilter || crmCustomerKindFilter || crmPipelineFilter || crmContactFilter,
+        );
+
         const allFilteredSelected = filteredCrmLeads.length > 0 && filteredCrmLeads.every(l => selectedCrmLeads.has(l.id));
 
         const typeColors: Record<string, { bg: string; color: string }> = {
@@ -3306,6 +3310,63 @@ export default function HomePage() {
                       </button>
                     )}
                   </div>
+                </div>
+
+                <div className="crm-quick-filters">
+                  <button
+                    className={`crm-filter-chip ${!hasActiveCrmFilters ? "active" : ""}`}
+                    onClick={() => {
+                      setCrmSearch("");
+                      setCrmTypeFilter("");
+                      setCrmCustomerKindFilter("");
+                      setCrmPipelineFilter("");
+                      setCrmContactFilter("");
+                    }}
+                  >
+                    Alle Kunden
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmPipelineFilter === "gewonnen" ? "active" : ""}`}
+                    onClick={() => setCrmPipelineFilter("gewonnen")}
+                  >
+                    Nur Gewinner
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmContactFilter === "ohneEmail" ? "active" : ""}`}
+                    onClick={() => setCrmContactFilter("ohneEmail")}
+                  >
+                    Ohne E-Mail
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmContactFilter === "mitEmail" ? "active" : ""}`}
+                    onClick={() => setCrmContactFilter("mitEmail")}
+                  >
+                    Mit E-Mail
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmCustomerKindFilter === "firma" ? "active" : ""}`}
+                    onClick={() => setCrmCustomerKindFilter("firma")}
+                  >
+                    Firmenkunden
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmCustomerKindFilter === "privat" ? "active" : ""}`}
+                    onClick={() => setCrmCustomerKindFilter("privat")}
+                  >
+                    Privatkunden
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmTypeFilter === "BarmeniaGothaer" ? "active" : ""}`}
+                    onClick={() => setCrmTypeFilter("BarmeniaGothaer")}
+                  >
+                    BarmeniaGothaer
+                  </button>
+                  <button
+                    className={`crm-filter-chip ${crmTypeFilter === "Agentur-Duic" ? "active" : ""}`}
+                    onClick={() => setCrmTypeFilter("Agentur-Duic")}
+                  >
+                    Agentur-Duic
+                  </button>
                 </div>
 
                 {/* Import Panel */}
