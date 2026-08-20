@@ -76,6 +76,15 @@ const TOPIC_CATEGORY_DEFINITIONS: TopicCategoryDefinition[] = [
 
 const PLAYBOOK_CATEGORY_ALL = "Alle Kategorien";
 
+const PRODUCT_OPTIONS = [
+  "Gewerbliche Versicherungen",
+  "betriebliche Krankenversicherung",
+  "private Krankenversicherung",
+  "betriebliche Altersvorsorge",
+  "Strom und Gas",
+  "private Versicherungen",
+] as const;
+
 function normalizeTopicKey(value: string) {
   return value.trim().toLowerCase();
 }
@@ -1027,7 +1036,7 @@ export default function HomePage() {
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
-  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "zugehoerigkeiten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
+  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "produkte" | "zugehoerigkeiten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
   const [leadTaskDraft, setLeadTaskDraft] = useState<{ title: string; topic: string; dueAt: string }>({
     title: "",
     topic: TOPICS[0],
@@ -2505,6 +2514,21 @@ export default function HomePage() {
       .split(/[;,|\n]/)
       .map((entry) => entry.trim())
       .filter(Boolean);
+  }
+
+  function toggleLeadProduct(product: string) {
+    setDetailDraft((draft) => {
+      const currentProducts = draft?.products || selectedLeadForHistory?.products || [];
+      const hasProduct = currentProducts.includes(product);
+      const nextProducts = hasProduct
+        ? currentProducts.filter((entry) => entry !== product)
+        : [...currentProducts, product];
+
+      return {
+        ...(draft || {}),
+        products: nextProducts,
+      };
+    });
   }
 
   function getLeadPipelineStage(lead: DashboardData["leads"][number]) {
@@ -4037,10 +4061,6 @@ export default function HomePage() {
                       <input value={addCustomerDraft.addressCountry} onChange={e => setAddCustomerDraft(d => ({ ...d, addressCountry: e.target.value }))} placeholder="Deutschland" />
                     </div>
                     <div className="report-detail-field report-detail-full">
-                      <label>Produkte</label>
-                      <input value={addCustomerDraft.products} onChange={e => setAddCustomerDraft(d => ({ ...d, products: e.target.value }))} placeholder="PKV; Zahn; Pflege" />
-                    </div>
-                    <div className="report-detail-field report-detail-full">
                       <label>Notiz / Kontext</label>
                       <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={6} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
                     </div>
@@ -5470,6 +5490,7 @@ export default function HomePage() {
               <div className="row top-gap" style={{ gap: 6, flexWrap: "wrap" }}>
                 {([
                   { key: "stammdaten", label: "Stammdaten" },
+                  { key: "produkte", label: "Produkte" },
                   { key: "zugehoerigkeiten", label: "Zugehörigkeiten" },
                   { key: "pipeline", label: "Pipeline" },
                   { key: "historie", label: "Historie" },
@@ -5618,14 +5639,6 @@ export default function HomePage() {
                   <label>Land</label>
                   <input value={detailDraft?.addressCountry || ""} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), addressCountry: e.target.value }))} placeholder="Deutschland" />
                 </div>
-                <div className="report-detail-field">
-                  <label>Produkte</label>
-                  <input
-                    value={(detailDraft?.products || []).join("; ")}
-                    onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), products: splitProductsInput(e.target.value) }))}
-                    placeholder="PKV; Zahn; Pflege"
-                  />
-                </div>
                 <div className="report-detail-field report-detail-full">
                   <label>Notiz</label>
                   <textarea
@@ -5638,6 +5651,36 @@ export default function HomePage() {
                   <button className="btn" style={{ marginTop: 8 }} disabled={busy} onClick={() => void saveLeadDetailsFromModal()}>
                     Kundendaten speichern
                   </button>
+                </div>
+              </div> : null}
+
+              {crmDetailTab === "produkte" ? <div className="report-detail-grid top-gap">
+                <div className="report-detail-field report-detail-full">
+                  <label>Produkte für diesen Kunden</label>
+                  <div className="row top-gap" style={{ gap: 8, flexWrap: "wrap" }}>
+                    {PRODUCT_OPTIONS.map((product) => {
+                      const selected = (detailDraft?.products || selectedLeadForHistory.products || []).includes(product);
+                      return (
+                        <button
+                          key={product}
+                          className={`btn ${selected ? "" : "ghost"}`}
+                          style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                          onClick={() => toggleLeadProduct(product)}
+                        >
+                          {selected ? "✓ " : "+ "}{product}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="top-gap" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {(detailDraft?.products || selectedLeadForHistory.products || []).length > 0 ? (
+                      (detailDraft?.products || selectedLeadForHistory.products || []).map((product) => (
+                        <span key={product} className="status-pill ok" style={{ fontSize: "0.74rem" }}>{product}</span>
+                      ))
+                    ) : (
+                      <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte zugewiesen.</p>
+                    )}
+                  </div>
                 </div>
               </div> : null}
 

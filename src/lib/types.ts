@@ -71,7 +71,7 @@ export interface CrmSavedView {
 
 export interface CrmUiPreferences {
   crmTab?: "customers" | "pipeline" | "callbacks";
-  crmDetailTab?: "stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
+  crmDetailTab?: "stammdaten" | "produkte" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
   crmSearch?: string;
   crmTypeFilter?: "" | "BarmeniaGothaer" | "Agentur-Duic";
   crmCustomerKindFilter?: "" | "privat" | "firma";
