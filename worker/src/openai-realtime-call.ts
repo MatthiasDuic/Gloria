@@ -429,6 +429,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
+  let hangupAfterAssistantResponse = false;
+  let terminationInProgress = false;
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -595,6 +597,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const processUserTranscript = (transcript: string) => {
     if (!ctx) return;
+    if (terminationInProgress) return;
     if (isSyntheticTranscriptionPrompt(transcript)) {
       log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
       return;
@@ -709,8 +712,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
       return;
     }
 
+    const previousPreparationStage = preparationState.stage;
     const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
     preparationState = transition.state;
+
+    if (previousPreparationStage === "awaiting_final_questions" && transition.state.stage === "completed") {
+      hangupAfterAssistantResponse = true;
+      requestEventResponse("Sage exakt: 'Danke Ihnen für das Gespräch, auf Wiederhören.' Stelle keine weitere Frage und füge keinen weiteren Satz hinzu.");
+      return;
+    }
+
     requestEventResponse(transition.instruction);
   };
 
@@ -765,12 +776,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (tool.name === "end_call") {
-      if (!hasClearFarewellOrRejection(ctx)) {
+      const canTerminateFromPreparation = preparationState.stage === "completed" || hangupAfterAssistantResponse;
+      if (!canTerminateFromPreparation && !hasClearFarewellOrRejection(ctx)) {
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: "unclear_hangup_request", instruction: "Frage auf Deutsch kurz nach, ob der Kunde das Gespräch beenden möchte. Hänge nicht auf." });
         requestResponse("Das habe ich nicht eindeutig verstanden. Möchten Sie das Gespräch beenden, oder sollen wir kurz weitermachen?");
         return;
       }
+      terminationInProgress = true;
+      hangupAfterAssistantResponse = false;
+      pendingUserTranscripts.splice(0);
+      responses.stop();
       sendToolResult(tool.callId, { ok: true });
       log.info("realtime.hangup", { callSid: ctx.callSid });
       await notifyCallAction(ctx, "hangup");
@@ -889,6 +905,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
+          if (terminationInProgress) return;
           if (isLikelyNoiseTranscript(transcript)) {
             log.info("realtime.unclear_transcript", { callSid: ctx.callSid, text: transcript });
           }
@@ -1025,6 +1042,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
         if (transcript) void speakWithElevenLabs(transcript);
+
+        if (transcript && hangupAfterAssistantResponse && ctx) {
+          hangupAfterAssistantResponse = false;
+          terminationInProgress = true;
+          pendingUserTranscripts.splice(0);
+          responses.stop();
+          log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
+          void notifyCallAction(ctx, "hangup");
+        }
+
         assistantContinuationRequested = false;
         for (const item of message.response?.output || []) {
           if (item.type === "function_call" && item.name && item.call_id) {
@@ -1035,11 +1062,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
             });
           }
         }
-        // Only the latest queued utterance carries the user's current intent.
-        const pending = pendingUserTranscripts.splice(0);
-        const nextUserTranscript = pending.at(-1)?.trim() ?? "";
-        if (nextUserTranscript) processUserTranscript(nextUserTranscript);
-        responses.flush();
+        if (!terminationInProgress) {
+          // Only the latest queued utterance carries the user's current intent.
+          const pending = pendingUserTranscripts.splice(0);
+          const nextUserTranscript = pending.at(-1)?.trim() ?? "";
+          if (nextUserTranscript) processUserTranscript(nextUserTranscript);
+          responses.flush();
+        } else {
+          pendingUserTranscripts.splice(0);
+        }
         responseCreatedAt = null;
         firstModelTokenAt = null;
         firstTtsChunkAt = null;

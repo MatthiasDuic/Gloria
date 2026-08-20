@@ -25,6 +25,13 @@ type ReportDocumentation = {
   followUpAt?: string;
 };
 
+type TranscriptEntry = {
+  role: "user" | "assistant";
+  text: string;
+  at?: number;
+  latencyMs?: number;
+};
+
 const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das Transkript unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit folgenden Feldern:
 {
   "outcome": "Termin" | "Absage" | "Wiedervorlage" | "Nicht erreicht / kein Kontakt" | "Gespräch abgebrochen",
@@ -217,14 +224,18 @@ export async function postReport(ctx: CallContext): Promise<void> {
 
   // Phase 2: LLM-Auswertung; updated existierenden Report per callSid.
   const extracted = await extractReport(ctx);
+  const resolvedExtraction = extracted || buildFallbackExtraction(ctx);
+
   if (!extracted) {
-    log.info("finalize.no_llm_extraction", { callSid: ctx.callSid });
-    return;
+    log.warn("finalize.no_llm_extraction_fallback", {
+      callSid: ctx.callSid,
+      fallbackOutcome: resolvedExtraction.outcome,
+    });
   }
 
-  let outcome: Outcome = extracted.outcome;
-  let appointmentAt: string | undefined = extracted.appointmentAt;
-  let summary = extracted.summary;
+  let outcome: Outcome = resolvedExtraction.outcome;
+  let appointmentAt: string | undefined = resolvedExtraction.appointmentAt;
+  let summary = resolvedExtraction.summary;
 
   if (ctx.confirmedSlotPhrase) {
     outcome = "Termin";
@@ -232,22 +243,18 @@ export async function postReport(ctx: CallContext): Promise<void> {
     if (parsed) appointmentAt = parsed;
   }
 
-  const fullDocumentation = deriveReportDocumentation(ctx, extracted);
+  const fullDocumentation = deriveReportDocumentation(ctx, resolvedExtraction);
   summary = withDocumentationHeader(summary, outcome, fullDocumentation);
-
-  // Append raw transcript to summary so it's visible even without Postgres transcript events table
-  if (ctx.transcript.length > 0) {
-    const transcriptText = ctx.transcript
-      .map((t) => `${t.role === "assistant" ? "Gloria" : "Interessent"}: ${t.text}`)
-      .join("\n");
-    summary = `${summary}\n\n--- GESPRÄCHSVERLAUF ---\n${transcriptText}`;
+  const conversationProtocol = buildConversationProtocol(ctx.transcript);
+  if (conversationProtocol) {
+    summary = `${summary}\n\n--- GESPRAECHSPROTOKOLL (inkl. Reaktionszeit pro Gloria-Antwort) ---\n${conversationProtocol}`;
   }
 
   log.info("finalize.posting_final", {
     callSid: ctx.callSid,
     outcome,
     appointmentAt,
-    email: extracted.contactEmail,
+    email: resolvedExtraction.contactEmail,
   });
 
   await postWithRetry(url, headers, {
@@ -264,8 +271,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     followUpPlanned: fullDocumentation.followUpPlanned,
     followUpAt: fullDocumentation.followUpAt,
     appointmentAt,
-    nextCallAt: extracted.nextCallAt,
-    directDial: extracted.directDial,
+    nextCallAt: resolvedExtraction.nextCallAt,
+    directDial: resolvedExtraction.directDial,
     recordingConsent,
     transcript: transcriptEntries,
   });
@@ -277,7 +284,7 @@ async function postWithRetry(
   headers: Record<string, string>,
   body: Record<string, unknown>,
 ): Promise<boolean> {
-  const maxAttempts = 3;
+  const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
@@ -286,15 +293,93 @@ async function postWithRetry(
       const retryable = res.status >= 500 || res.status === 429;
       log.error("finalize.post_failed", { status: res.status, body: text.slice(0, 400), attempt, retryable });
       if (!retryable || attempt >= maxAttempts) return false;
-      await wait(250 * attempt);
+      await wait(Math.min(4000, 400 * (2 ** (attempt - 1))));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error("finalize.post_error", { error: message, attempt });
       if (attempt >= maxAttempts) return false;
-      await wait(250 * attempt);
+      await wait(Math.min(4000, 400 * (2 ** (attempt - 1))));
     }
   }
   return false;
+}
+
+function inferContactEmailFromTranscript(transcript: TranscriptEntry[]): string | undefined {
+  const emailRegex = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+  for (let i = transcript.length - 1; i >= 0; i -= 1) {
+    const turn = transcript[i];
+    if (turn.role !== "user") continue;
+    const match = turn.text.match(emailRegex);
+    if (match?.[0]) return match[0].toLowerCase();
+  }
+  return undefined;
+}
+
+function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
+  const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
+  const hadConversation = userTurns.some((turn) => turn.text.trim().length > 1);
+  const rejected = userTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
+
+  const appointmentAt = ctx.confirmedSlotPhrase ? parseSlotPhraseToIso(ctx.confirmedSlotPhrase) : undefined;
+  const outcome: Outcome = appointmentAt
+    ? "Termin"
+    : rejected
+      ? "Absage"
+      : hadConversation
+        ? "Gespräch abgebrochen"
+        : "Nicht erreicht / kein Kontakt";
+
+  const summaryParts: string[] = [];
+  if (appointmentAt && ctx.confirmedSlotPhrase) {
+    summaryParts.push(`Ein Termin wurde verbindlich vereinbart: ${ctx.confirmedSlotPhrase}.`);
+  } else if (outcome === "Absage") {
+    summaryParts.push("Der Interessent hat das Gespräch bzw. den Termin klar abgelehnt.");
+  } else if (outcome === "Gespräch abgebrochen") {
+    summaryParts.push("Es fand ein Gespräch statt, wurde jedoch ohne abschließende Vereinbarung beendet.");
+  } else {
+    summaryParts.push("Es kam zu keinem belastbaren Gesprächsabschluss.");
+  }
+
+  const lastUserSignals = userTurns
+    .map((turn) => turn.text.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(" | ");
+  if (lastUserSignals) {
+    summaryParts.push(`Letzte relevante Kundenaussagen: ${lastUserSignals}.`);
+  }
+
+  summaryParts.push("Automatisch erzeugte Fallback-Zusammenfassung, da die LLM-Auswertung nicht rechtzeitig verfügbar war.");
+
+  return {
+    outcome,
+    appointmentAt,
+    contactEmail: inferContactEmailFromTranscript(ctx.transcript),
+    nextCallAt: undefined,
+    directDial: undefined,
+    summary: summaryParts.join(" "),
+  };
+}
+
+function buildConversationProtocol(transcript: TranscriptEntry[]): string {
+  if (!transcript.length) return "";
+  const timeFormatter = new Intl.DateTimeFormat("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Europe/Berlin",
+  });
+
+  const lines = transcript.map((turn) => {
+    const timestamp = typeof turn.at === "number" ? timeFormatter.format(new Date(turn.at)) : "--:--:--";
+    if (turn.role === "assistant") {
+      const latency = typeof turn.latencyMs === "number" ? `${turn.latencyMs} ms` : "-";
+      return `- [${timestamp}] Gloria (Reaktionszeit: ${latency}): ${turn.text}`;
+    }
+    return `- [${timestamp}] Interessent: ${turn.text}`;
+  });
+  return lines.join("\n");
 }
 
 function deriveReportDocumentation(
