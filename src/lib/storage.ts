@@ -471,16 +471,46 @@ function ensureUniqueLeadIds(leads: Lead[]): Lead[] {
 }
 
 const CSV_HEADER_ALIASES: Record<string, string[]> = {
+  customerKind: ["customerkind", "kundentyp", "kundeart", "typ"],
+  customerOwner: ["customerowner", "zuweisung", "owner", "vertriebseinheit"],
   company: ["company", "firma", "unternehmen", "firmenname"],
   contactName: ["contactname", "ansprechpartner", "kontakt", "kontaktperson", "name"],
   phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
   directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
   email: ["email", "mail", "e-mail"],
   location: ["location", "ort", "stadt"],
+  addressStreet: ["addressstreet", "strasse", "straße", "strasseundnummer", "adresse"],
+  addressPostalCode: ["addresspostalcode", "plz", "postleitzahl"],
+  addressCity: ["addresscity", "stadt", "ort"],
+  addressCountry: ["addresscountry", "land", "country"],
+  products: ["products", "produkt", "produkte", "product"],
   topic: ["topic", "thema", "bereich"],
   note: ["note", "notiz", "bemerkung", "hinweis"],
   nextCallAt: ["nextcallat", "naechsteranruf", "nachsteranruf", "naechsterrueckruf", "ruckrufzeitpunkt", "callback", "rueckruf"],
 };
+
+function normalizeCustomerKind(value: string): Lead["customerKind"] {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/privat|private|p$/.test(normalized)) return "privat";
+  if (/firma|unternehmen|business|b2b|geschaeft/.test(normalized)) return "firma";
+  return undefined;
+}
+
+function normalizeCustomerOwner(value: string): Lead["customerOwner"] {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/barmenia|gothaer/.test(normalized)) return "BarmeniaGothaer";
+  if (/agentur|duic/.test(normalized)) return "Agentur-Duic";
+  return undefined;
+}
+
+function splitProducts(value: string): string[] {
+  return value
+    .split(/[;,|\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
 
 function buildHeaderIndex(headerRow: string[]): Record<string, number> {
   const normalizedHeader = headerRow.map((value) => normalizeHeaderKey(value));
@@ -598,6 +628,92 @@ export async function getLeadById(leadId: string, userId?: string): Promise<Lead
   if (!leadId) return undefined;
   const leads = await readLeads(userId);
   return leads.find((lead) => lead.id === leadId);
+}
+
+type LeadEmailInput = {
+  source: "gloria" | "outlook";
+  subject: string;
+  body?: string;
+  to?: string;
+  sentAt?: string;
+};
+
+function normalizeEmailHistory(history: Lead["emailHistory"]): Lead["emailHistory"] {
+  if (!history?.length) return undefined;
+  const next = history
+    .map((entry) => ({
+      ...entry,
+      subject: entry.subject.trim(),
+      body: entry.body?.trim() || undefined,
+      to: entry.to?.trim() || undefined,
+    }))
+    .filter((entry) => entry.subject);
+  return next.length ? next : undefined;
+}
+
+export async function updateLeadDetails(
+  leadId: string,
+  updates: Partial<Lead>,
+  userId?: string,
+): Promise<Lead | undefined> {
+  if (!leadId) return undefined;
+  const leads = await readLeads(userId);
+  let updatedLead: Lead | undefined;
+  const nextLeads = leads.map((lead) => {
+    if (lead.id !== leadId) return lead;
+    updatedLead = {
+      ...lead,
+      customerKind: updates.customerKind ?? lead.customerKind,
+      customerOwner: updates.customerOwner ?? lead.customerOwner,
+      contactName: updates.contactName ?? lead.contactName,
+      phone: updates.phone ?? lead.phone,
+      directDial: updates.directDial ?? lead.directDial,
+      email: updates.email ?? lead.email,
+      location: updates.location ?? lead.location,
+      addressStreet: updates.addressStreet ?? lead.addressStreet,
+      addressPostalCode: updates.addressPostalCode ?? lead.addressPostalCode,
+      addressCity: updates.addressCity ?? lead.addressCity,
+      addressCountry: updates.addressCountry ?? lead.addressCountry,
+      products: updates.products ?? lead.products,
+      topic: updates.topic ?? lead.topic,
+      note: updates.note ?? lead.note,
+      emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
+    };
+    return updatedLead;
+  });
+  if (!updatedLead) return undefined;
+  await writeLeads(nextLeads, userId);
+  return updatedLead;
+}
+
+export async function appendLeadEmailHistory(
+  leadId: string,
+  emailInput: LeadEmailInput,
+  userId?: string,
+): Promise<Lead | undefined> {
+  if (!leadId || !emailInput.subject.trim()) return undefined;
+  const leads = await readLeads(userId);
+  let updatedLead: Lead | undefined;
+  const nextLeads = leads.map((lead) => {
+    if (lead.id !== leadId) return lead;
+    const nextEntry = {
+      id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      source: emailInput.source,
+      subject: emailInput.subject.trim(),
+      body: emailInput.body?.trim() || undefined,
+      to: emailInput.to?.trim() || lead.email || undefined,
+      sentAt: emailInput.sentAt || new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    const history = [...(lead.emailHistory || []), nextEntry]
+      .sort((a, b) => Date.parse(b.sentAt || b.createdAt) - Date.parse(a.sentAt || a.createdAt))
+      .slice(0, 50);
+    updatedLead = { ...lead, emailHistory: history };
+    return updatedLead;
+  });
+  if (!updatedLead) return undefined;
+  await writeLeads(nextLeads, userId);
+  return updatedLead;
 }
 
 export async function findLeadForInboundCallbackByPhone(fromNumber: string): Promise<Lead | undefined> {
@@ -891,18 +1007,29 @@ export async function importLeadsFromCsv(
     const contactName = lookup("contactName");
     const location = lookup("location");
     const topic = options?.overrideTopic || lookup("topic");
+    const ownerFromRow = normalizeCustomerOwner(lookup("customerOwner"));
+    const ownerFromList = normalizeCustomerOwner(listName);
+    const customerOwner = ownerFromRow || ownerFromList;
+    const products = splitProducts(lookup("products"));
 
     return {
       id: createLeadId(index),
       userId: options?.userId,
       listId,
       listName,
+      customerKind: normalizeCustomerKind(lookup("customerKind")),
+      customerOwner,
       company: company || `Firma ${index + 1}`,
       contactName: contactName || "Empfang",
       phone: lookup("phone") || "",
       directDial: directDial || undefined,
       email: lookup("email") || undefined,
       location: location || undefined,
+      addressStreet: lookup("addressStreet") || undefined,
+      addressPostalCode: lookup("addressPostalCode") || undefined,
+      addressCity: lookup("addressCity") || location || undefined,
+      addressCountry: lookup("addressCountry") || undefined,
+      products: products.length ? products : undefined,
       topic: normalizeTopic(topic || "Energie"),
       note: lookup("note") || undefined,
       nextCallAt: nextCallAt || undefined,
@@ -1194,9 +1321,36 @@ export async function storeCallReport(payload: {
     };
   });
 
+  const leadsWithEmailHistory: Lead[] = payload.outcome === "Termin" && payload.leadId
+    ? updatedLeads.map((lead) => {
+      if (lead.id !== payload.leadId) return lead;
+      const sentAt = new Date().toISOString();
+      const subject = payload.appointmentAt
+        ? `Terminbestaetigung versendet (${payload.appointmentAt})`
+        : "Terminbestaetigung versendet";
+      const alreadyLogged = (lead.emailHistory || []).some((entry) => entry.source === "gloria" && entry.subject === subject);
+      if (alreadyLogged) return lead;
+      return {
+        ...lead,
+        emailHistory: [
+          {
+            id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            source: "gloria" as const,
+            subject,
+            body: "Automatische Terminbestaetigung durch Gloria.",
+            to: lead.email,
+            sentAt,
+            createdAt: sentAt,
+          },
+          ...(lead.emailHistory || []),
+        ].slice(0, 50),
+      };
+    })
+    : updatedLeads;
+
   await Promise.all([
     writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
-    writeLeads(updatedLeads, resolvedUserId),
+    writeLeads(leadsWithEmailHistory, resolvedUserId),
   ]);
 
   // Live-Monitor: Terminal-Event mit dem finalen Outcome anhaengen, damit

@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import {
+  appendLeadEmailHistory,
   deleteCampaignList,
   getCampaignListsSummary,
   isCampaignListActive,
   pullNextLeadForCampaignList,
   setCampaignListActive,
   storeCallReport,
+  updateLeadDetails,
 } from "@/lib/storage";
+import type { Lead } from "@/lib/types";
 import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, bindCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
@@ -41,12 +44,74 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "stop" | "run" | "delete";
+      action?: "start" | "stop" | "run" | "delete" | "update_note" | "update_lead_details" | "add_outlook_email";
       listId?: string;
+      leadId?: string;
+      note?: string;
+      updates?: Partial<Lead>;
+      email?: {
+        subject?: string;
+        body?: string;
+        to?: string;
+        sentAt?: string;
+      };
     };
 
     const action = payload.action;
     const listId = String(payload.listId || "").trim();
+    const leadId = String(payload.leadId || "").trim();
+
+    if (action === "update_note") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const updatedLead = await updateLeadDetails(
+        leadId,
+        { note: String(payload.note || "").trim() || undefined },
+        sessionUser.id,
+      );
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
+    if (action === "update_lead_details") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const updates = payload.updates || {};
+      const updatedLead = await updateLeadDetails(leadId, updates, sessionUser.id);
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
+    if (action === "add_outlook_email") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const subject = String(payload.email?.subject || "").trim();
+      if (!subject) {
+        return NextResponse.json({ error: "Betreff ist erforderlich." }, { status: 400 });
+      }
+      const updatedLead = await appendLeadEmailHistory(
+        leadId,
+        {
+          source: "outlook",
+          subject,
+          body: String(payload.email?.body || "").trim() || undefined,
+          to: String(payload.email?.to || "").trim() || undefined,
+          sentAt: String(payload.email?.sentAt || "").trim() || undefined,
+        },
+        sessionUser.id,
+      );
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
 
     if (!action || !listId) {
       return NextResponse.json({ error: "action und listId sind erforderlich." }, { status: 400 });

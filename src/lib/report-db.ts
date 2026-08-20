@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
 import type { CallReport, ConversationEvent, Lead, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
 
@@ -202,6 +203,34 @@ function parseJsonTextArray(value: unknown): string[] {
   return value
     .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
     .filter(Boolean);
+}
+
+function parseLeadEmailHistory(value: unknown): Lead["emailHistory"] {
+  if (!Array.isArray(value)) return undefined;
+  const entries: LeadEmailActivity[] = value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const source = row.source === "gloria" || row.source === "outlook"
+        ? (row.source as LeadEmailActivity["source"])
+        : undefined;
+      const subject = typeof row.subject === "string" ? row.subject.trim() : "";
+      const sentAt = typeof row.sentAt === "string" ? row.sentAt : "";
+      const createdAt = typeof row.createdAt === "string" ? row.createdAt : sentAt;
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!source || !subject || !sentAt || !createdAt || !id) return null;
+      return {
+        id,
+        source,
+        subject,
+        body: typeof row.body === "string" ? row.body : undefined,
+        to: typeof row.to === "string" ? row.to : undefined,
+        sentAt,
+        createdAt,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  return entries.length ? entries : undefined;
 }
 
 async function initializeSchema() {
@@ -581,12 +610,20 @@ async function initializeSchema() {
       user_id TEXT,
       list_id TEXT,
       list_name TEXT,
+      customer_kind TEXT,
+      customer_owner TEXT,
       company TEXT NOT NULL,
       contact_name TEXT NOT NULL,
       phone TEXT NOT NULL,
       direct_dial TEXT,
       email TEXT,
       location TEXT,
+      address_street TEXT,
+      address_postal_code TEXT,
+      address_city TEXT,
+      address_country TEXT,
+      products JSONB,
+      email_history JSONB,
       topic TEXT NOT NULL,
       note TEXT,
       next_call_at TIMESTAMPTZ,
@@ -613,6 +650,15 @@ async function initializeSchema() {
   } catch (err) {
     console.warn("Failed to add location column to gloria_leads:", err instanceof Error ? err.message : String(err));
   }
+
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_kind TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_owner TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_street TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_postal_code TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_city TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_country TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS products JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
@@ -1623,12 +1669,20 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         user_id,
         list_id,
         list_name,
+        customer_kind,
+        customer_owner,
         company,
         contact_name,
         phone,
         direct_dial,
         email,
         location,
+        address_street,
+        address_postal_code,
+        address_city,
+        address_country,
+        products,
+        email_history,
         topic,
         note,
         next_call_at,
@@ -1644,12 +1698,20 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       userId: row.user_id ? String(row.user_id) : undefined,
       listId: row.list_id ? String(row.list_id) : undefined,
       listName: row.list_name ? String(row.list_name) : undefined,
+      customerKind: row.customer_kind === "privat" || row.customer_kind === "firma" ? row.customer_kind : undefined,
+      customerOwner: row.customer_owner === "BarmeniaGothaer" || row.customer_owner === "Agentur-Duic" ? row.customer_owner : undefined,
       company: String(row.company),
       contactName: String(row.contact_name || "Empfang"),
       phone: String(row.phone || ""),
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
       email: row.email ? String(row.email) : undefined,
       location: row.location ? String(row.location) : undefined,
+      addressStreet: row.address_street ? String(row.address_street) : undefined,
+      addressPostalCode: row.address_postal_code ? String(row.address_postal_code) : undefined,
+      addressCity: row.address_city ? String(row.address_city) : undefined,
+      addressCountry: row.address_country ? String(row.address_country) : undefined,
+      products: parseJsonTextArray(row.products),
+      emailHistory: parseLeadEmailHistory(row.email_history),
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
       nextCallAt: toIso(row.next_call_at),
@@ -1698,12 +1760,20 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             user_id,
             list_id,
             list_name,
+            customer_kind,
+            customer_owner,
             company,
             contact_name,
             phone,
             direct_dial,
             email,
             location,
+            address_street,
+            address_postal_code,
+            address_city,
+            address_country,
+            products,
+            email_history,
             topic,
             note,
             next_call_at,
@@ -1711,19 +1781,27 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
             user_id = EXCLUDED.user_id,
             list_id = EXCLUDED.list_id,
             list_name = EXCLUDED.list_name,
+            customer_kind = EXCLUDED.customer_kind,
+            customer_owner = EXCLUDED.customer_owner,
             company = EXCLUDED.company,
             contact_name = EXCLUDED.contact_name,
             phone = EXCLUDED.phone,
             direct_dial = EXCLUDED.direct_dial,
             email = EXCLUDED.email,
             location = EXCLUDED.location,
+            address_street = EXCLUDED.address_street,
+            address_postal_code = EXCLUDED.address_postal_code,
+            address_city = EXCLUDED.address_city,
+            address_country = EXCLUDED.address_country,
+            products = EXCLUDED.products,
+            email_history = EXCLUDED.email_history,
             topic = EXCLUDED.topic,
             note = EXCLUDED.note,
             next_call_at = EXCLUDED.next_call_at,
@@ -1736,12 +1814,20 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.userId || userId || null,
             lead.listId || null,
             lead.listName || null,
+            lead.customerKind || null,
+            lead.customerOwner || null,
             lead.company,
             lead.contactName,
             lead.phone,
             lead.directDial || null,
             lead.email || null,
             lead.location || null,
+            lead.addressStreet || null,
+            lead.addressPostalCode || null,
+            lead.addressCity || null,
+            lead.addressCountry || null,
+            JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
+            JSON.stringify(lead.emailHistory || []),
             lead.topic,
             lead.note || null,
             lead.nextCallAt || null,

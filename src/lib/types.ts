@@ -12,6 +12,8 @@ export const TOPICS = [
 // Dynamische Themen sind erlaubt: TOPICS sind nur die Standard-Vorgaben.
 export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
+export type LeadCustomerKind = "privat" | "firma";
+export type LeadCustomerOwner = "BarmeniaGothaer" | "Agentur-Duic";
 export type ReportOutcome =
   | "Termin"
   | "Absage"
@@ -19,17 +21,35 @@ export type ReportOutcome =
   | "Nicht erreicht / kein Kontakt"
   | "Gespräch abgebrochen";
 
+export interface LeadEmailActivity {
+  id: string;
+  source: "gloria" | "outlook";
+  subject: string;
+  body?: string;
+  to?: string;
+  sentAt: string;
+  createdAt: string;
+}
+
 export interface Lead {
   id: string;
   userId?: string;
   listId?: string;
   listName?: string;
+  customerKind?: LeadCustomerKind;
+  customerOwner?: LeadCustomerOwner;
   company: string;
   contactName: string;
   phone: string;
   directDial?: string;
   email?: string;
   location?: string;
+  addressStreet?: string;
+  addressPostalCode?: string;
+  addressCity?: string;
+  addressCountry?: string;
+  products?: string[];
+  emailHistory?: LeadEmailActivity[];
   topic: Topic;
   note?: string;
   nextCallAt?: string;
