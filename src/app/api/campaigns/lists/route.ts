@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import {
+  addLeadTask,
   appendLeadEmailHistory,
+  completeLeadTask,
   deleteCampaignList,
   getCampaignListsSummary,
   isCampaignListActive,
@@ -44,10 +46,15 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "stop" | "run" | "delete" | "update_note" | "update_lead_details" | "add_outlook_email";
+      action?: "start" | "stop" | "run" | "delete" | "update_note" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
       leadId?: string;
       note?: string;
+      taskId?: string;
+      task?: {
+        title?: string;
+        dueAt?: string;
+      };
       updates?: Partial<Lead>;
       email?: {
         subject?: string;
@@ -107,6 +114,43 @@ export async function POST(request: Request) {
         },
         sessionUser.id,
       );
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
+    if (action === "add_lead_task") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const title = String(payload.task?.title || "").trim();
+      if (!title) {
+        return NextResponse.json({ error: "Aufgabentitel ist erforderlich." }, { status: 400 });
+      }
+      const updatedLead = await addLeadTask(
+        leadId,
+        {
+          title,
+          dueAt: String(payload.task?.dueAt || "").trim() || undefined,
+        },
+        sessionUser.id,
+      );
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
+    if (action === "complete_lead_task") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const taskId = String(payload.taskId || "").trim();
+      if (!taskId) {
+        return NextResponse.json({ error: "taskId ist erforderlich." }, { status: 400 });
+      }
+      const updatedLead = await completeLeadTask(leadId, taskId, sessionUser.id);
       if (!updatedLead) {
         return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
       }

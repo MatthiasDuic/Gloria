@@ -31,6 +31,22 @@ export interface LeadEmailActivity {
   createdAt: string;
 }
 
+export interface LeadTask {
+  id: string;
+  title: string;
+  dueAt?: string;
+  status: "open" | "done";
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface LeadActivity {
+  id: string;
+  type: "details_updated" | "note_updated" | "email_logged" | "task_created" | "task_completed";
+  message: string;
+  createdAt: string;
+}
+
 export interface Lead {
   id: string;
   userId?: string;
@@ -50,6 +66,8 @@ export interface Lead {
   addressCountry?: string;
   products?: string[];
   emailHistory?: LeadEmailActivity[];
+  tasks?: LeadTask[];
+  activities?: LeadActivity[];
   topic: Topic;
   note?: string;
   nextCallAt?: string;

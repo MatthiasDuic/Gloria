@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, Lead, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { CallReport, ConversationEvent, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
 import type { LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
@@ -228,6 +228,56 @@ function parseLeadEmailHistory(value: unknown): Lead["emailHistory"] {
         sentAt,
         createdAt,
       };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  return entries.length ? entries : undefined;
+}
+
+function parseLeadTasks(value: unknown): Lead["tasks"] {
+  if (!Array.isArray(value)) return undefined;
+  const entries: LeadTask[] = value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const status = row.status === "open" || row.status === "done"
+        ? (row.status as LeadTask["status"])
+        : undefined;
+      const title = typeof row.title === "string" ? row.title.trim() : "";
+      const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!status || !title || !createdAt || !id) return null;
+      return {
+        id,
+        title,
+        dueAt: typeof row.dueAt === "string" ? row.dueAt : undefined,
+        status,
+        createdAt,
+        completedAt: typeof row.completedAt === "string" ? row.completedAt : undefined,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  return entries.length ? entries : undefined;
+}
+
+function parseLeadActivities(value: unknown): Lead["activities"] {
+  if (!Array.isArray(value)) return undefined;
+  const entries: LeadActivity[] = value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const type =
+        row.type === "details_updated"
+        || row.type === "note_updated"
+        || row.type === "email_logged"
+        || row.type === "task_created"
+        || row.type === "task_completed"
+          ? (row.type as LeadActivity["type"])
+          : undefined;
+      const message = typeof row.message === "string" ? row.message.trim() : "";
+      const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!type || !message || !createdAt || !id) return null;
+      return { id, type, message, createdAt };
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   return entries.length ? entries : undefined;
@@ -624,6 +674,8 @@ async function initializeSchema() {
       address_country TEXT,
       products JSONB,
       email_history JSONB,
+      tasks JSONB,
+      activities JSONB,
       topic TEXT NOT NULL,
       note TEXT,
       next_call_at TIMESTAMPTZ,
@@ -659,6 +711,8 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_country TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS products JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS tasks JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS activities JSONB;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
@@ -1683,6 +1737,8 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         address_country,
         products,
         email_history,
+        tasks,
+        activities,
         topic,
         note,
         next_call_at,
@@ -1712,6 +1768,8 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       addressCountry: row.address_country ? String(row.address_country) : undefined,
       products: parseJsonTextArray(row.products),
       emailHistory: parseLeadEmailHistory(row.email_history),
+      tasks: parseLeadTasks(row.tasks),
+      activities: parseLeadActivities(row.activities),
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
       nextCallAt: toIso(row.next_call_at),
@@ -1774,6 +1832,8 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             address_country,
             products,
             email_history,
+            tasks,
+            activities,
             topic,
             note,
             next_call_at,
@@ -1781,7 +1841,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -1802,6 +1862,8 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             address_country = EXCLUDED.address_country,
             products = EXCLUDED.products,
             email_history = EXCLUDED.email_history,
+            tasks = EXCLUDED.tasks,
+            activities = EXCLUDED.activities,
             topic = EXCLUDED.topic,
             note = EXCLUDED.note,
             next_call_at = EXCLUDED.next_call_at,
@@ -1828,6 +1890,8 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.addressCountry || null,
             JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
             JSON.stringify(lead.emailHistory || []),
+            JSON.stringify(lead.tasks || []),
+            JSON.stringify(lead.activities || []),
             lead.topic,
             lead.note || null,
             lead.nextCallAt || null,

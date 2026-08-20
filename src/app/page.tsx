@@ -1000,11 +1000,10 @@ export default function HomePage() {
   const [crmTypeFilter, setCrmTypeFilter] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
   const [crmCustomerKindFilter, setCrmCustomerKindFilter] = useState<"" | "privat" | "firma">("");
   const [crmProductFilter, setCrmProductFilter] = useState("");
-  const [crmStatusFilter, setCrmStatusFilter] = useState("");
   const [selectedCrmLeads, setSelectedCrmLeads] = useState<Set<string>>(new Set());
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState({
-    company: "", contactName: "", phone: "", email: "", topic: TOPICS[0] as Topic, customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "",
+    company: "", contactName: "", phone: "", email: "", topic: "" as Topic | "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "",
   });
   const [showCampaignFromSelectionModal, setShowCampaignFromSelectionModal] = useState(false);
   const [showCrmImport, setShowCrmImport] = useState(false);
@@ -1015,6 +1014,8 @@ export default function HomePage() {
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
+  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
+  const [leadTaskDraft, setLeadTaskDraft] = useState({ title: "", dueAt: "" });
   const [outlookMailDraft, setOutlookMailDraft] = useState({ subject: "", body: "", to: "", sentAt: "" });
   const [selectedListForEvaluation, setSelectedListForEvaluation] = useState<CampaignListSummary | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
@@ -1071,9 +1072,13 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedLeadForHistory) {
       setDetailDraft(null);
+      setCrmDetailTab("stammdaten");
+      setLeadTaskDraft({ title: "", dueAt: "" });
       setOutlookMailDraft({ subject: "", body: "", to: "", sentAt: "" });
       return;
     }
+    setCrmDetailTab("stammdaten");
+    setLeadTaskDraft({ title: "", dueAt: "" });
     setDetailDraft({
       customerKind: selectedLeadForHistory.customerKind || "firma",
       customerOwner: selectedLeadForHistory.customerOwner,
@@ -2202,7 +2207,12 @@ export default function HomePage() {
       if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
       setNotice(`Kunde "${d.company}" angelegt.`);
       setShowAddCustomerModal(false);
-      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: TOPICS[0] as Topic, customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
+      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
+      setCrmSearch("");
+      setCrmTypeFilter("");
+      setCrmCustomerKindFilter("");
+      setCrmProductFilter("");
+      setCrmTab("customers");
       await loadDashboard();
       await loadCampaignLists();
     } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
@@ -2358,6 +2368,64 @@ export default function HomePage() {
       await loadCampaignLists();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Outlook-Mail konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addLeadTaskFromModal() {
+    if (!selectedLeadForHistory) return;
+    if (!leadTaskDraft.title.trim()) {
+      setNotice("Bitte einen Aufgabentitel eingeben.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_lead_task",
+          leadId: selectedLeadForHistory.id,
+          task: {
+            title: leadTaskDraft.title,
+            dueAt: leadTaskDraft.dueAt ? new Date(leadTaskDraft.dueAt).toISOString() : undefined,
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error || "Aufgabe konnte nicht erstellt werden.");
+      setLeadTaskDraft({ title: "", dueAt: "" });
+      setNotice("Aufgabe gespeichert.");
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Aufgabe konnte nicht erstellt werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeLeadTaskFromModal(taskId: string) {
+    if (!selectedLeadForHistory) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "complete_lead_task",
+          leadId: selectedLeadForHistory.id,
+          taskId,
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error || "Aufgabe konnte nicht abgeschlossen werden.");
+      setNotice("Aufgabe abgeschlossen.");
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Aufgabe konnte nicht abgeschlossen werden.");
     } finally {
       setBusy(false);
     }
@@ -2733,7 +2801,7 @@ export default function HomePage() {
             onClick={() => setActiveView("crm")}
           >
             <span className="nav-icon" aria-hidden>◈</span>
-            <span>CRM Pipeline</span>
+            <span>CRM</span>
           </button>
         </nav>
         <div className="sidebar-footer">
@@ -2767,7 +2835,7 @@ export default function HomePage() {
               {activeView === "calls" ? "Anrufe" : null}
               {activeView === "leads" ? "Aufträge" : null}
               {activeView === "calendar" ? "Kalender" : null}
-              {activeView === "crm" ? "CRM Pipeline" : null}
+              {activeView === "crm" ? "CRM" : null}
               {activeView === "settings" ? "Einstellungen" : null}
               {activeView === "compliance" ? "Compliance & Ablauf" : null}
             </h1>
@@ -2976,7 +3044,6 @@ export default function HomePage() {
         const filteredCrmLeads = data.leads.filter((lead) => {
           if (crmTypeFilter && getCrmCustomerType(lead) !== crmTypeFilter) return false;
           if (crmCustomerKindFilter && (lead.customerKind || "firma") !== crmCustomerKindFilter) return false;
-          if (crmStatusFilter && lead.status !== crmStatusFilter) return false;
           if (crmProductFilter) {
             const haystack = (lead.products || []).join(" ").toLowerCase();
             if (!haystack.includes(crmProductFilter.toLowerCase())) return false;
@@ -3042,14 +3109,6 @@ export default function HomePage() {
                       <option value="">Privat + Firma</option>
                       <option value="privat">Privatkunde</option>
                       <option value="firma">Firmenkunde</option>
-                    </select>
-                    <select value={crmStatusFilter} onChange={e => setCrmStatusFilter(e.target.value)} style={{ minWidth: 140 }}>
-                      <option value="">Alle Status</option>
-                      <option value="neu">Neu</option>
-                      <option value="angerufen">Angerufen</option>
-                      <option value="wiedervorlage">Wiedervorlage</option>
-                      <option value="termin">Termin</option>
-                      <option value="absage">Absage</option>
                     </select>
                     <input
                       type="text"
@@ -3161,19 +3220,23 @@ export default function HomePage() {
                           />
                         </th>
                         <th>Kundentyp</th>
+                        <th>Kundenart</th>
                         <th>Firma</th>
                         <th>Ansprechpartner</th>
                         <th>Telefon</th>
                         <th>Email</th>
-                        <th>Thema</th>
-                        <th>Status</th>
+                        <th>Strasse</th>
+                        <th>PLZ</th>
+                        <th>Stadt</th>
+                        <th>Land</th>
+                        <th>Produkte</th>
                         <th>Liste</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredCrmLeads.length === 0 && (
-                        <tr><td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
+                        <tr><td colSpan={14} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
                       )}
                       {filteredCrmLeads.map((lead) => {
                         const custType = getCrmCustomerType(lead);
@@ -3197,6 +3260,7 @@ export default function HomePage() {
                                 {custType === "BarmeniaGothaer" ? "🏢" : custType === "Agentur-Duic" ? "🏬" : "❓"} {custType}
                               </span>
                             </td>
+                            <td>{lead.customerKind === "privat" ? "Privat" : "Firma"}</td>
                             <td>
                               <button className="link-button" onClick={() => setSelectedLeadForHistory(lead)}>
                                 <strong>{lead.company}</strong>
@@ -3205,12 +3269,11 @@ export default function HomePage() {
                             <td>{lead.contactName || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
                             <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.email || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.topic}</td>
-                            <td>
-                              <span className={`auftrag-ampel ${leadAmpelById[lead.id]?.tone || "info"}`} title={leadAmpelById[lead.id]?.text || ""}>
-                                {lead.status}
-                              </span>
-                            </td>
+                            <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.addressStreet || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.addressPostalCode || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
+                            <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
+                            <td style={{ fontSize: "0.85rem", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{(lead.products || []).join(", ") || "-"}</td>
                             <td style={{ fontSize: "0.8rem", color: "#6b7280" }}>{lead.listName || "-"}</td>
                             <td>
                               <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
@@ -3387,8 +3450,9 @@ export default function HomePage() {
                       <input value={addCustomerDraft.productsInput} onChange={e => setAddCustomerDraft(d => ({ ...d, productsInput: e.target.value }))} placeholder="PKV; Zahn; Pflege" />
                     </div>
                     <div className="report-detail-field">
-                      <label>Thema / Anlass</label>
-                      <select value={addCustomerDraft.topic} onChange={e => setAddCustomerDraft(d => ({ ...d, topic: e.target.value as Topic }))}>
+                      <label>Thema / Anlass (optional)</label>
+                      <select value={addCustomerDraft.topic} onChange={e => setAddCustomerDraft(d => ({ ...d, topic: e.target.value as Topic | "" }))}>
+                        <option value="">Kein Thema vorgeben</option>
                         {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
@@ -3578,7 +3642,7 @@ export default function HomePage() {
           </div>
         </CollapsiblePanel>
 
-        <CollapsiblePanel title="Offene Auftraege" defaultOpen>
+        <CollapsiblePanel title="Auftraege" defaultOpen>
           {campaignLists.length > 0 && (
             <div className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               <input
@@ -4783,6 +4847,11 @@ export default function HomePage() {
         const hasCallback = selectedLeadReports.some((report) => report.outcome === "Wiedervorlage");
         const callbackCount = selectedLeadReports.filter((report) => report.outcome === "Wiedervorlage").length;
         const callCount = selectedLeadReports.length;
+        const openTasks = (selectedLeadForHistory.tasks || []).filter((task) => task.status === "open");
+        const doneTasks = (selectedLeadForHistory.tasks || []).filter((task) => task.status === "done");
+        const recentActivities = (selectedLeadForHistory.activities || [])
+          .slice()
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
         const upcomingDate = selectedLeadForHistory.nextCallAt || latestReport?.nextCallAt;
         const statusHeadline = hasAppointment
           ? "Termin vereinbart"
@@ -4809,7 +4878,26 @@ export default function HomePage() {
                 Ansprechpartner: {selectedLeadForHistory.contactName || "-"} · Thema: {selectedLeadForHistory.topic}
               </p>
 
-              <div className="lead-status-grid top-gap">
+              <div className="row top-gap" style={{ gap: 6, flexWrap: "wrap" }}>
+                {([
+                  { key: "stammdaten", label: "Stammdaten" },
+                  { key: "historie", label: "Historie" },
+                  { key: "kommunikation", label: "Kommunikation" },
+                  { key: "termine", label: "Termine" },
+                  { key: "aufgaben", label: "Aufgaben" },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`btn ${crmDetailTab === tab.key ? "" : "ghost"}`}
+                    style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+                    onClick={() => setCrmDetailTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {crmDetailTab === "stammdaten" ? <div className="lead-status-grid top-gap">
                 <div className="mini-panel">
                   <label className="lead-kicker">Aktueller Stand</label>
                   <h3 style={{ marginTop: 4 }}>{statusHeadline}</h3>
@@ -4831,9 +4919,9 @@ export default function HomePage() {
                     <span className={`status-pill ${hasCallback ? "warn" : ""}`}>Wiedervorlage offen: {hasCallback ? "Ja" : "Nein"}</span>
                   </div>
                 </div>
-              </div>
+              </div> : null}
 
-              <div className="report-detail-grid top-gap">
+              {crmDetailTab === "stammdaten" ? <div className="report-detail-grid top-gap">
                 <div className="report-detail-field">
                   <label>Lead-Status</label>
                   <p>{selectedLeadForHistory.status}</p>
@@ -4918,9 +5006,9 @@ export default function HomePage() {
                     Kundendaten speichern
                   </button>
                 </div>
-              </div>
+              </div> : null}
 
-              <div className="report-detail-field report-detail-full top-gap">
+              {crmDetailTab === "historie" ? <div className="report-detail-field report-detail-full top-gap">
                 <label>Anrufhistorie</label>
                 {selectedLeadReports.length > 0 ? (
                   <div className="lead-history-list">
@@ -4950,9 +5038,25 @@ export default function HomePage() {
                     Für diese Firma liegen noch keine Gesprächsreports vor. Der Auftrag ist aktuell im Lead-Status sichtbar und wird bei neuen Anrufen hier automatisch ergänzt.
                   </p>
                 )}
-              </div>
+              </div> : null}
 
-              <div className="report-detail-field report-detail-full top-gap">
+              {crmDetailTab === "historie" ? <div className="report-detail-field report-detail-full top-gap">
+                <label>Aktivitäts-Timeline</label>
+                {recentActivities.length === 0 ? (
+                  <p className="subtle" style={{ marginTop: 8 }}>Noch keine CRM-Aktivitäten protokolliert.</p>
+                ) : (
+                  <div className="lead-history-list" style={{ marginTop: 8 }}>
+                    {recentActivities.map((activity) => (
+                      <div key={activity.id} className="lead-history-item">
+                        <strong>{activity.message}</strong>
+                        <p className="subtle" style={{ marginTop: 4 }}>{formatDate(activity.createdAt)} · Typ: {activity.type}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div> : null}
+
+              {crmDetailTab === "termine" ? <div className="report-detail-field report-detail-full top-gap">
                 <label>Termine mit diesem Kunden</label>
                 {selectedLeadReports.filter((report) => report.outcome === "Termin").length === 0 ? (
                   <p className="subtle" style={{ marginTop: 8 }}>Noch keine Termine protokolliert.</p>
@@ -4970,9 +5074,9 @@ export default function HomePage() {
                     </tbody>
                   </table>
                 )}
-              </div>
+              </div> : null}
 
-              <div className="report-detail-field report-detail-full top-gap">
+              {crmDetailTab === "kommunikation" ? <div className="report-detail-field report-detail-full top-gap">
                 <label>E-Mail-Verlauf (Gloria + Outlook)</label>
                 {(selectedLeadForHistory.emailHistory || []).length === 0 ? (
                   <p className="subtle" style={{ marginTop: 8 }}>Bisher keine E-Mails dokumentiert.</p>
@@ -4993,9 +5097,9 @@ export default function HomePage() {
                     ))}
                   </div>
                 )}
-              </div>
+              </div> : null}
 
-              <div className="report-detail-field report-detail-full top-gap">
+              {crmDetailTab === "kommunikation" ? <div className="report-detail-field report-detail-full top-gap">
                 <label>Outlook-Mail hinzufügen</label>
                 <div className="report-detail-grid">
                   <div className="report-detail-field report-detail-full">
@@ -5018,7 +5122,61 @@ export default function HomePage() {
                 <button className="btn" style={{ marginTop: 8 }} disabled={busy || !outlookMailDraft.subject.trim()} onClick={() => void addOutlookMailToLead()}>
                   Outlook-Mail speichern
                 </button>
-              </div>
+              </div> : null}
+
+              {crmDetailTab === "aufgaben" ? <div className="report-detail-field report-detail-full top-gap">
+                <label>Aufgaben</label>
+                <div className="report-detail-grid" style={{ marginTop: 8 }}>
+                  <div className="report-detail-field report-detail-full">
+                    <label>Neue Aufgabe *</label>
+                    <input value={leadTaskDraft.title} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, title: e.target.value }))} placeholder="z. B. Unterlagen nachfassen" />
+                  </div>
+                  <div className="report-detail-field">
+                    <label>Fällig am (optional)</label>
+                    <input type="datetime-local" value={leadTaskDraft.dueAt} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, dueAt: e.target.value }))} />
+                  </div>
+                </div>
+                <button className="btn" style={{ marginTop: 8 }} disabled={busy || !leadTaskDraft.title.trim()} onClick={() => void addLeadTaskFromModal()}>
+                  Aufgabe anlegen
+                </button>
+
+                <div className="top-gap">
+                  <strong>Offene Aufgaben ({openTasks.length})</strong>
+                  {openTasks.length === 0 ? (
+                    <p className="subtle" style={{ marginTop: 8 }}>Keine offenen Aufgaben.</p>
+                  ) : (
+                    <div className="lead-history-list" style={{ marginTop: 8 }}>
+                      {openTasks.map((task) => (
+                        <div key={task.id} className="lead-history-item">
+                          <div className="row spread" style={{ gap: 10, alignItems: "center" }}>
+                            <div>
+                              <strong>{task.title}</strong>
+                              <p className="subtle" style={{ marginTop: 4 }}>Erstellt: {formatDate(task.createdAt)}{task.dueAt ? ` · Fällig: ${formatDate(task.dueAt)}` : ""}</p>
+                            </div>
+                            <button className="btn ghost" onClick={() => void completeLeadTaskFromModal(task.id)} disabled={busy}>Als erledigt markieren</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="top-gap">
+                  <strong>Erledigte Aufgaben ({doneTasks.length})</strong>
+                  {doneTasks.length === 0 ? (
+                    <p className="subtle" style={{ marginTop: 8 }}>Noch keine erledigten Aufgaben.</p>
+                  ) : (
+                    <div className="lead-history-list" style={{ marginTop: 8 }}>
+                      {doneTasks.map((task) => (
+                        <div key={task.id} className="lead-history-item">
+                          <strong>{task.title}</strong>
+                          <p className="subtle" style={{ marginTop: 4 }}>Erledigt: {formatDate(task.completedAt || task.createdAt)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div> : null}
             </div>
           </div>
         );

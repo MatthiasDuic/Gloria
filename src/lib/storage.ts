@@ -32,6 +32,7 @@ import type {
   CallReport,
   ConversationEvent,
   DashboardData,
+  LeadActivity,
   Lead,
   MetricSummary,
   ReportOutcome,
@@ -638,6 +639,39 @@ type LeadEmailInput = {
   sentAt?: string;
 };
 
+type LeadTaskInput = {
+  title: string;
+  dueAt?: string;
+};
+
+function appendLeadActivity(lead: Lead, activity: LeadActivity): Lead {
+  const next = [activity, ...(lead.activities || [])]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, 200);
+  return { ...lead, activities: next };
+}
+
+function normalizeLeadTasks(tasks: Lead["tasks"]): Lead["tasks"] {
+  if (!tasks?.length) return undefined;
+  const next = tasks
+    .map((task) => ({
+      ...task,
+      title: task.title.trim(),
+    }))
+    .filter((task) => task.title)
+    .slice(0, 100);
+  return next.length ? next : undefined;
+}
+
+function normalizeLeadActivities(activities: Lead["activities"]): Lead["activities"] {
+  if (!activities?.length) return undefined;
+  const next = activities
+    .map((entry) => ({ ...entry, message: entry.message.trim() }))
+    .filter((entry) => entry.message)
+    .slice(0, 200);
+  return next.length ? next : undefined;
+}
+
 function normalizeEmailHistory(history: Lead["emailHistory"]): Lead["emailHistory"] {
   if (!history?.length) return undefined;
   const next = history
@@ -661,7 +695,7 @@ export async function updateLeadDetails(
   let updatedLead: Lead | undefined;
   const nextLeads = leads.map((lead) => {
     if (lead.id !== leadId) return lead;
-    updatedLead = {
+    const nextLead: Lead = {
       ...lead,
       customerKind: updates.customerKind ?? lead.customerKind,
       customerOwner: updates.customerOwner ?? lead.customerOwner,
@@ -678,7 +712,48 @@ export async function updateLeadDetails(
       topic: updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
       emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
+      tasks: normalizeLeadTasks(updates.tasks ?? lead.tasks),
+      activities: normalizeLeadActivities(updates.activities ?? lead.activities),
     };
+    const changed = JSON.stringify({
+      customerKind: nextLead.customerKind,
+      customerOwner: nextLead.customerOwner,
+      contactName: nextLead.contactName,
+      phone: nextLead.phone,
+      directDial: nextLead.directDial,
+      email: nextLead.email,
+      location: nextLead.location,
+      addressStreet: nextLead.addressStreet,
+      addressPostalCode: nextLead.addressPostalCode,
+      addressCity: nextLead.addressCity,
+      addressCountry: nextLead.addressCountry,
+      products: nextLead.products,
+      topic: nextLead.topic,
+      note: nextLead.note,
+    }) !== JSON.stringify({
+      customerKind: lead.customerKind,
+      customerOwner: lead.customerOwner,
+      contactName: lead.contactName,
+      phone: lead.phone,
+      directDial: lead.directDial,
+      email: lead.email,
+      location: lead.location,
+      addressStreet: lead.addressStreet,
+      addressPostalCode: lead.addressPostalCode,
+      addressCity: lead.addressCity,
+      addressCountry: lead.addressCountry,
+      products: lead.products,
+      topic: lead.topic,
+      note: lead.note,
+    });
+    updatedLead = changed
+      ? appendLeadActivity(nextLead, {
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: updates.note !== undefined ? "note_updated" : "details_updated",
+        message: updates.note !== undefined ? "Notiz aktualisiert." : "Kundendaten aktualisiert.",
+        createdAt: new Date().toISOString(),
+      })
+      : nextLead;
     return updatedLead;
   });
   if (!updatedLead) return undefined;
@@ -708,7 +783,80 @@ export async function appendLeadEmailHistory(
     const history = [...(lead.emailHistory || []), nextEntry]
       .sort((a, b) => Date.parse(b.sentAt || b.createdAt) - Date.parse(a.sentAt || a.createdAt))
       .slice(0, 50);
-    updatedLead = { ...lead, emailHistory: history };
+    updatedLead = appendLeadActivity({ ...lead, emailHistory: history }, {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: "email_logged",
+      message: `${emailInput.source === "outlook" ? "Outlook" : "Gloria"}-E-Mail protokolliert: ${nextEntry.subject}`,
+      createdAt: new Date().toISOString(),
+    });
+    return updatedLead;
+  });
+  if (!updatedLead) return undefined;
+  await writeLeads(nextLeads, userId);
+  return updatedLead;
+}
+
+export async function addLeadTask(
+  leadId: string,
+  taskInput: LeadTaskInput,
+  userId?: string,
+): Promise<Lead | undefined> {
+  if (!leadId || !taskInput.title.trim()) return undefined;
+  const leads = await readLeads(userId);
+  let updatedLead: Lead | undefined;
+  const nextLeads = leads.map((lead) => {
+    if (lead.id !== leadId) return lead;
+    const now = new Date().toISOString();
+    const task = {
+      id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: taskInput.title.trim(),
+      dueAt: taskInput.dueAt || undefined,
+      status: "open" as const,
+      createdAt: now,
+    };
+    const nextLead = {
+      ...lead,
+      tasks: [task, ...(lead.tasks || [])].slice(0, 100),
+    };
+    updatedLead = appendLeadActivity(nextLead, {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: "task_created",
+      message: `Aufgabe erstellt: ${task.title}`,
+      createdAt: now,
+    });
+    return updatedLead;
+  });
+  if (!updatedLead) return undefined;
+  await writeLeads(nextLeads, userId);
+  return updatedLead;
+}
+
+export async function completeLeadTask(
+  leadId: string,
+  taskId: string,
+  userId?: string,
+): Promise<Lead | undefined> {
+  if (!leadId || !taskId) return undefined;
+  const leads = await readLeads(userId);
+  let updatedLead: Lead | undefined;
+  const nextLeads = leads.map((lead) => {
+    if (lead.id !== leadId) return lead;
+    const now = new Date().toISOString();
+    let completedTitle = "";
+    const tasks = (lead.tasks || []).map((task) => {
+      if (task.id !== taskId) return task;
+      completedTitle = task.title;
+      return { ...task, status: "done" as const, completedAt: now };
+    });
+    const nextLead = { ...lead, tasks };
+    updatedLead = completedTitle
+      ? appendLeadActivity(nextLead, {
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: "task_completed",
+        message: `Aufgabe abgeschlossen: ${completedTitle}`,
+        createdAt: now,
+      })
+      : nextLead;
     return updatedLead;
   });
   if (!updatedLead) return undefined;
