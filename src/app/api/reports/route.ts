@@ -4,14 +4,35 @@ import { TOPICS, type Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 export async function GET(request: NextRequest) {
-  const sessionUser = getSessionUserFromRequest(request);
+  try {
+    const sessionUser = getSessionUserFromRequest(request);
 
-  if (!sessionUser) {
-    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+    }
+
+    const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("/api/reports GET failed:", error);
+    return NextResponse.json({
+      leads: [],
+      reports: [],
+      topicPolicies: [],
+      metrics: {
+        dialAttempts: 0,
+        conversations: 0,
+        appointments: 0,
+        rejections: 0,
+        callbacksOpen: 0,
+        gatekeeperLoops: 0,
+        transferSuccessRate: 0,
+      },
+      reportStorageMode: "file",
+      topicPoliciesStorageMode: "file",
+      degraded: true,
+    });
   }
-
-  const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
-  return NextResponse.json(data);
 }
 
 export async function POST(request: NextRequest) {

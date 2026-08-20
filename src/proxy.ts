@@ -32,7 +32,12 @@ export async function proxy(request: NextRequest) {
   }
 
   const token = request.cookies.get("gloria_session")?.value;
-  const sessionUser = await verifySessionTokenEdge(token);
+  let sessionUser = null;
+  try {
+    sessionUser = await verifySessionTokenEdge(token);
+  } catch (error) {
+    console.error("proxy session verification failed:", error);
+  }
 
   if (sessionUser) {
     return NextResponse.next();
