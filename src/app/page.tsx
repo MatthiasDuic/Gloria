@@ -1003,6 +1003,7 @@ export default function HomePage() {
   const [crmContactFilter, setCrmContactFilter] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
   const [selectedCrmLeads, setSelectedCrmLeads] = useState<Set<string>>(new Set());
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [addCustomerFeedback, setAddCustomerFeedback] = useState<{ type: "" | "success" | "error"; message: string }>({ type: "", message: "" });
   const [addCustomerDraft, setAddCustomerDraft] = useState({
     company: "", contactName: "", phone: "", email: "", topic: "" as Topic | "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "",
   });
@@ -2311,10 +2312,12 @@ export default function HomePage() {
     const company = d.company.trim();
     const phone = d.phone.trim();
     if (!company || !phone) {
+      setAddCustomerFeedback({ type: "error", message: "Firma und Telefonnummer sind Pflichtfelder." });
       setNotice("Firma und Telefonnummer sind Pflichtfelder.");
       return;
     }
     setBusy(true);
+    setAddCustomerFeedback({ type: "", message: "" });
     try {
       const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${d.productsInput.replace(/"/g, '""')}","${d.topic}","${d.note.replace(/"/g, '""')}"`;
       const listName = `${d.customerType} | Manuell hinzugefügt`;
@@ -2329,9 +2332,12 @@ export default function HomePage() {
       if (!payload.imported || payload.imported < 1) {
         throw new Error("Kunde konnte nicht gespeichert werden.");
       }
+      setAddCustomerFeedback({ type: "success", message: `Kunde "${company}" erfolgreich gespeichert.` });
+      await new Promise((resolve) => setTimeout(resolve, 320));
       setNotice(`Kunde "${company}" angelegt.`);
       setShowAddCustomerModal(false);
       setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
+      setAddCustomerFeedback({ type: "", message: "" });
       setCrmSearch("");
       setCrmTypeFilter("");
       setCrmCustomerKindFilter("");
@@ -2354,7 +2360,11 @@ export default function HomePage() {
           setSelectedLeadForHistory(createdLead);
         }
       }
-    } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Fehler";
+      setAddCustomerFeedback({ type: "error", message });
+      setNotice(message);
+    }
     finally { setBusy(false); }
   }
 
@@ -3625,10 +3635,33 @@ export default function HomePage() {
 
             {/* === MODAL: Kunde anlegen === */}
             {showAddCustomerModal && (
-              <div className="modal-overlay" onClick={() => setShowAddCustomerModal(false)}>
+              <div className="modal-overlay" onClick={() => {
+                setShowAddCustomerModal(false);
+                setAddCustomerFeedback({ type: "", message: "" });
+              }}>
                 <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
-                  <button className="modal-close" onClick={() => setShowAddCustomerModal(false)}>✕</button>
+                  <button className="modal-close" onClick={() => {
+                    setShowAddCustomerModal(false);
+                    setAddCustomerFeedback({ type: "", message: "" });
+                  }}>✕</button>
                   <h2>Kunde anlegen</h2>
+                  {addCustomerFeedback.message ? (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        marginBottom: 6,
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        fontSize: "0.85rem",
+                        fontWeight: 600,
+                        color: addCustomerFeedback.type === "success" ? "#065f46" : "#991b1b",
+                        background: addCustomerFeedback.type === "success" ? "#ecfdf5" : "#fef2f2",
+                        border: `1px solid ${addCustomerFeedback.type === "success" ? "#a7f3d0" : "#fecaca"}`,
+                      }}
+                    >
+                      {addCustomerFeedback.message}
+                    </div>
+                  ) : null}
                   <div className="report-detail-grid top-gap">
                     <div className="report-detail-field">
                       <label>Kundentyp *</label>
