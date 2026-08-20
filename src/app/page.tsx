@@ -1041,6 +1041,7 @@ export default function HomePage() {
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
   const [productEditorDraft, setProductEditorDraft] = useState<Partial<LeadProductDetail> | null>(null);
   const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "produkte" | "zugehoerigkeiten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [leadTaskDraft, setLeadTaskDraft] = useState<{ title: string; topic: string; dueAt: string }>({
     title: "",
     topic: TOPICS[0],
@@ -2558,43 +2559,69 @@ export default function HomePage() {
     setProductEditorDraft(draft);
   }
 
-  function saveLeadProductEditor() {
-    if (!productEditorDraft) return;
+  async function saveLeadProductEditor() {
+    if (!productEditorDraft || !selectedLeadForHistory) return;
     const normalized = buildLeadProductRecord({
       ...productEditorDraft,
       category: String(productEditorDraft.category || productEditorDraft.label || "Sonstige").trim() || "Sonstige",
       label: String(productEditorDraft.label || productEditorDraft.category || "Sonstige").trim() || String(productEditorDraft.category || "Sonstige").trim() || "Sonstige",
       paymentMethod: String(productEditorDraft.paymentMethod || "monatlich").trim() || "monatlich",
     });
-
-    setDetailDraft((draft) => {
-      const currentProducts = getLeadProductDetailsForDraft(draft);
-      const nextProducts = currentProducts.some((entry) => entry.id === normalized.id)
-        ? currentProducts.map((entry) => (entry.id === normalized.id ? normalized : entry))
-        : [...currentProducts, normalized];
-
-      return {
-        ...(draft || {}),
-        productDetails: nextProducts,
-        products: nextProducts.map((entry) => entry.category || entry.label),
-      };
-    });
-
+    const currentProducts = getLeadProductDetailsForDraft(detailDraft);
+    const nextProducts = currentProducts.some((e) => e.id === normalized.id)
+      ? currentProducts.map((e) => (e.id === normalized.id ? normalized : e))
+      : [...currentProducts, normalized];
+    setDetailDraft((draft) => ({
+      ...(draft || {}),
+      productDetails: nextProducts,
+      products: nextProducts.map((e) => e.category || e.label),
+    }));
     setProductEditorDraft(null);
+    setExpandedProductId(normalized.id);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_lead_details", leadId: selectedLeadForHistory.id, updates: { productDetails: nextProducts, products: nextProducts.map((e) => e.category || e.label) } }),
+      });
+      if (!res.ok) throw new Error("Speichern fehlgeschlagen.");
+      setNotice("Produkt gespeichert.");
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Produkt konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function deleteLeadProduct(productId: string) {
-    setDetailDraft((draft) => {
-      const currentProducts = getLeadProductDetailsForDraft(draft);
-      const nextProducts = currentProducts.filter((entry) => entry.id !== productId);
-      return {
-        ...(draft || {}),
-        productDetails: nextProducts,
-        products: nextProducts.map((entry) => entry.category || entry.label),
-      };
-    });
-    if (productEditorDraft?.id === productId) {
-      setProductEditorDraft(null);
+  async function deleteLeadProduct(productId: string) {
+    if (!selectedLeadForHistory) return;
+    const currentProducts = getLeadProductDetailsForDraft(detailDraft);
+    const nextProducts = currentProducts.filter((e) => e.id !== productId);
+    setDetailDraft((draft) => ({
+      ...(draft || {}),
+      productDetails: nextProducts,
+      products: nextProducts.map((e) => e.category || e.label),
+    }));
+    if (productEditorDraft?.id === productId) setProductEditorDraft(null);
+    if (expandedProductId === productId) setExpandedProductId(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_lead_details", leadId: selectedLeadForHistory.id, updates: { productDetails: nextProducts, products: nextProducts.map((e) => e.category || e.label) } }),
+      });
+      if (!res.ok) throw new Error("Löschen fehlgeschlagen.");
+      setNotice("Produkt gelöscht.");
+      await loadDashboard();
+      await loadCampaignLists();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Produkt konnte nicht gelöscht werden.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -5744,20 +5771,10 @@ export default function HomePage() {
               </div> : null}
 
               {crmDetailTab === "produkte" ? <div className="report-detail-grid top-gap">
-                <div className="report-detail-field report-detail-full">
-                  <label>Produkte für Kunden hinzufügen</label>
-                  <div className="row top-gap" style={{ gap: 8, flexWrap: "wrap" }}>
-                    {PRODUCT_OPTIONS.map((product) => (
-                      <button
-                        key={product}
-                        className="btn ghost"
-                        style={{ padding: "6px 10px", fontSize: "0.78rem" }}
-                        onClick={() => startLeadProductEditor(product)}
-                      >
-                        + {product}
-                      </button>
-                    ))}
-                  </div>
+                <div className="report-detail-field report-detail-full" style={{ display: "flex", justifyContent: "flex-end" }}>
+                  {!productEditorDraft && (
+                    <button className="btn" onClick={() => startLeadProductEditor()}>+ Produkt hinzufügen</button>
+                  )}
                 </div>
 
                 {productEditorDraft ? (
@@ -5853,50 +5870,62 @@ export default function HomePage() {
                         </div>
                       </div>
                       <div className="row top-gap" style={{ gap: 8 }}>
-                        <button className="btn" onClick={saveLeadProductEditor}>Produkt speichern</button>
-                        {productEditorDraft.id ? <button className="btn danger ghost" onClick={() => deleteLeadProduct(productEditorDraft.id!)}>Löschen</button> : null}
+                        <button className="btn" disabled={busy} onClick={() => void saveLeadProductEditor()}>Produkt speichern</button>
+                        {productEditorDraft.id ? <button className="btn danger ghost" disabled={busy} onClick={() => void deleteLeadProduct(productEditorDraft.id!)}>Löschen</button> : null}
                       </div>
                     </div>
                   </div>
                 ) : null}
 
                 <div className="report-detail-field report-detail-full">
-                  <label>Gespeicherte Produkte</label>
-                  <div className="top-gap" style={{ display: "grid", gap: 10 }}>
-                    {getLeadProductDetailsForDraft(detailDraft).length > 0 ? (
-                      getLeadProductDetailsForDraft(detailDraft).map((product) => (
-                        <div key={product.id} className="panel static-panel" style={{ padding: 12 }}>
-                          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                            <strong>{product.label || product.category}</strong>
-                            <div className="row" style={{ gap: 8 }}>
-                              <button className="btn ghost" onClick={() => startLeadProductEditor(product.category, product)}>Bearbeiten</button>
-                              <button className="btn danger ghost" onClick={() => deleteLeadProduct(product.id)}>Löschen</button>
+                  {getLeadProductDetailsForDraft(detailDraft).length === 0 && !productEditorDraft ? (
+                    <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte vorhanden. Klicke auf "+ Produkt hinzufügen".</p>
+                  ) : null}
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {getLeadProductDetailsForDraft(detailDraft).map((product) => {
+                      const isExpanded = expandedProductId === product.id;
+                      return (
+                        <div key={product.id} className="panel static-panel" style={{ padding: 0, overflow: "hidden" }}>
+                          <button
+                            className="link-button"
+                            style={{ width: "100%", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, background: isExpanded ? "#f0f9ff" : "white", borderBottom: isExpanded ? "1px solid #e5e7eb" : "none" }}
+                            onClick={() => setExpandedProductId(isExpanded ? null : product.id)}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                              <strong>{product.label || product.category}</strong>
+                              <span className="subtle" style={{ fontSize: "0.8rem" }}>{product.category}{product.insurer ? ` · ${product.insurer}` : ""}{product.premium ? ` · ${product.premium}` : ""}</span>
                             </div>
-                          </div>
-                          <div className="subtle top-gap" style={{ display: "grid", gap: 2 }}>
-                            {product.insurer ? <span>Anbieter: {product.insurer}</span> : null}
-                            {product.contractNumber ? <span>Vertragsnummer: {product.contractNumber}</span> : null}
-                            {product.premium ? <span>Beitrag: {product.premium}</span> : null}
-                            {product.paymentMethod ? <span>Zahlweise: {product.paymentMethod}</span> : null}
-                            {product.startDate ? <span>Beginn: {product.startDate}</span> : null}
-                            {product.endDate ? <span>Ablauf: {product.endDate}</span> : null}
-                          </div>
+                            <span style={{ fontSize: "0.85rem", color: "#6b7280" }}>{isExpanded ? "▲" : "▼"}</span>
+                          </button>
+                          {isExpanded ? (
+                            <div style={{ padding: "12px 14px", display: "grid", gap: 6 }}>
+                              <div className="subtle" style={{ display: "grid", gap: 4, fontSize: "0.87rem" }}>
+                                {product.insurer ? <span><strong>Gesellschaft:</strong> {product.insurer}</span> : null}
+                                {product.contractNumber ? <span><strong>Vertragsnummer:</strong> {product.contractNumber}</span> : null}
+                                {product.premium ? <span><strong>Beitrag:</strong> {product.premium} ({product.paymentMethod || "monatlich"})</span> : null}
+                                {product.productType ? <span><strong>Produkttyp:</strong> {product.productType}</span> : null}
+                                {product.energyType ? <span><strong>Energieart:</strong> {product.energyType}</span> : null}
+                                {product.startDate ? <span><strong>Beginn:</strong> {product.startDate}</span> : null}
+                                {product.endDate ? <span><strong>Ablauf:</strong> {product.endDate}</span> : null}
+                                {product.notes ? <span><strong>Details:</strong> {product.notes}</span> : null}
+                                {product.documentName ? (
+                                  <span><strong>Police:</strong>{" "}
+                                    {product.documentUrl ? (
+                                      <a href={product.documentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "underline" }}>{product.documentName}</a>
+                                    ) : product.documentName}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                                <button className="btn ghost" style={{ fontSize: "0.82rem" }} disabled={busy} onClick={() => { startLeadProductEditor(product.category, product); setExpandedProductId(null); }}>Bearbeiten</button>
+                                <button className="btn danger ghost" style={{ fontSize: "0.82rem" }} disabled={busy} onClick={() => void deleteLeadProduct(product.id)}>Löschen</button>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                      ))
-                    ) : (
-                      <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte hinzugefügt.</p>
-                    )}
+                      );
+                    })}
                   </div>
-                </div>
-                <div className="report-detail-field report-detail-full">
-                  <button
-                    className="btn"
-                    style={{ marginTop: 8 }}
-                    disabled={busy}
-                    onClick={() => void saveLeadDetailsFromModal()}
-                  >
-                    Produkte speichern
-                  </button>
                 </div>
               </div> : null}
 
