@@ -999,6 +999,8 @@ export default function HomePage() {
   const [crmSearch, setCrmSearch] = useState("");
   const [crmTypeFilter, setCrmTypeFilter] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
   const [crmCustomerKindFilter, setCrmCustomerKindFilter] = useState<"" | "privat" | "firma">("");
+  const [crmPipelineFilter, setCrmPipelineFilter] = useState<"" | "neu" | "qualifiziert" | "angebot" | "verhandlung" | "gewonnen" | "verloren">("");
+  const [crmContactFilter, setCrmContactFilter] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
   const [selectedCrmLeads, setSelectedCrmLeads] = useState<Set<string>>(new Set());
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState({
@@ -1019,7 +1021,6 @@ export default function HomePage() {
   const [selectedListForEvaluation, setSelectedListForEvaluation] = useState<CampaignListSummary | null>(null);
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
-  const [crmSelectedViewId, setCrmSelectedViewId] = useState("");
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
@@ -1489,7 +1490,6 @@ export default function HomePage() {
       } else {
         setCrmSavedViews([]);
       }
-      setCrmSelectedViewId("");
 
       const crmPrefsResponse = await fetch("/api/crm/preferences", { cache: "no-store" });
       const crmPrefsPayload = (await crmPrefsResponse.json().catch(() => ({}))) as { preferences?: CrmUiPreferences };
@@ -1500,6 +1500,8 @@ export default function HomePage() {
         if (typeof prefs.crmSearch === "string") setCrmSearch(prefs.crmSearch);
         if (prefs.crmTypeFilter !== undefined) setCrmTypeFilter(prefs.crmTypeFilter);
         if (prefs.crmCustomerKindFilter !== undefined) setCrmCustomerKindFilter(prefs.crmCustomerKindFilter);
+        if (prefs.crmPipelineFilter !== undefined) setCrmPipelineFilter(prefs.crmPipelineFilter);
+        if (prefs.crmContactFilter !== undefined) setCrmContactFilter(prefs.crmContactFilter);
       }
       setCrmPrefsReady(true);
 
@@ -1567,6 +1569,8 @@ export default function HomePage() {
         crmSearch,
         crmTypeFilter,
         crmCustomerKindFilter,
+        crmPipelineFilter,
+        crmContactFilter,
       }).catch(() => {
         // Avoid interrupting UX with noisy autosave messages.
       });
@@ -1574,7 +1578,9 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, [
     crmCustomerKindFilter,
+    crmContactFilter,
     crmDetailTab,
+    crmPipelineFilter,
     crmPrefsReady,
     crmSearch,
     crmTab,
@@ -2263,10 +2269,10 @@ export default function HomePage() {
     return "neu" as const;
   }
 
-  async function saveCurrentCrmView() {
-    const name = crmViewNameDraft.trim();
+  async function saveCurrentCrmSearch() {
+    const name = crmViewNameDraft.trim() || `Suche ${new Date().toLocaleDateString("de-DE")}`;
     if (!name) {
-      setNotice("Bitte einen Namen für die CRM-Ansicht angeben.");
+      setNotice("Bitte einen Namen für die Suche angeben.");
       return;
     }
     const entry: CrmSavedView = {
@@ -2275,43 +2281,18 @@ export default function HomePage() {
       search: crmSearch,
       owner: crmTypeFilter,
       customerKind: crmCustomerKindFilter,
+      pipelineStage: crmPipelineFilter,
+      contactFilter: crmContactFilter,
       createdAt: new Date().toISOString(),
     };
     const nextViews = [entry, ...crmSavedViews.filter((view) => view.name !== name)].slice(0, 20);
     try {
       const persisted = await persistCrmSavedViews(nextViews);
       setCrmSavedViews(persisted);
-      setCrmSelectedViewId(entry.id);
-      setNotice(`Ansicht "${name}" gespeichert.`);
+      setCrmViewNameDraft("");
+      setNotice(`Suche "${name}" gespeichert.`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "CRM-Ansicht konnte nicht gespeichert werden.");
-    }
-  }
-
-  function applyCrmSavedView(viewId: string) {
-    setCrmSelectedViewId(viewId);
-    const view = crmSavedViews.find((entry) => entry.id === viewId);
-    if (!view) return;
-    setCrmSearch(view.search);
-    setCrmTypeFilter(view.owner);
-    setCrmCustomerKindFilter(view.customerKind);
-    setNotice(`Ansicht "${view.name}" geladen.`);
-  }
-
-  async function deleteCrmSavedView(viewId: string) {
-    const view = crmSavedViews.find((entry) => entry.id === viewId);
-    const nextViews = crmSavedViews.filter((entry) => entry.id !== viewId);
-    try {
-      const persisted = await persistCrmSavedViews(nextViews);
-      setCrmSavedViews(persisted);
-      if (crmSelectedViewId === viewId) {
-        setCrmSelectedViewId("");
-      }
-      if (view) {
-        setNotice(`Ansicht "${view.name}" gelöscht.`);
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "CRM-Ansicht konnte nicht gelöscht werden.");
+      setNotice(error instanceof Error ? error.message : "Suche konnte nicht gespeichert werden.");
     }
   }
 
@@ -2347,10 +2328,11 @@ export default function HomePage() {
       setNotice(`Kunde "${company}" angelegt.`);
       setShowAddCustomerModal(false);
       setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", topic: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", productsInput: "", note: "" });
-      setCrmSelectedViewId("");
       setCrmSearch("");
       setCrmTypeFilter("");
       setCrmCustomerKindFilter("");
+      setCrmPipelineFilter("");
+      setCrmContactFilter("");
       setCrmTab("customers");
       const refreshed = await loadDashboard();
       await loadCampaignLists();
@@ -3199,6 +3181,10 @@ export default function HomePage() {
         const filteredCrmLeads = data.leads.filter((lead) => {
           if (crmTypeFilter && getCrmCustomerType(lead) !== crmTypeFilter) return false;
           if (crmCustomerKindFilter && (lead.customerKind || "firma") !== crmCustomerKindFilter) return false;
+          if (crmPipelineFilter && getLeadPipelineStage(lead) !== crmPipelineFilter) return false;
+          if (crmContactFilter === "mitEmail" && !lead.email) return false;
+          if (crmContactFilter === "ohneEmail" && lead.email) return false;
+          if (crmContactFilter === "mitTelefon" && !(lead.phone || lead.directDial)) return false;
           if (crmSearch) {
             const q = crmSearch.toLowerCase();
             return (
@@ -3275,21 +3261,32 @@ export default function HomePage() {
                       <option value="privat">Privatkunde</option>
                       <option value="firma">Firmenkunde</option>
                     </select>
-                    <select value={crmSelectedViewId} onChange={(e) => applyCrmSavedView(e.target.value)} style={{ minWidth: 190 }}>
-                      <option value="">Gespeicherte Ansicht laden</option>
-                      {crmSavedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
+                    <select value={crmPipelineFilter} onChange={e => setCrmPipelineFilter(e.target.value as typeof crmPipelineFilter)} style={{ minWidth: 160 }}>
+                      <option value="">Alle Pipeline-Stufen</option>
+                      <option value="neu">Neu</option>
+                      <option value="qualifiziert">Qualifiziert</option>
+                      <option value="angebot">Angebot</option>
+                      <option value="verhandlung">Verhandlung</option>
+                      <option value="gewonnen">Gewonnen</option>
+                      <option value="verloren">Verloren</option>
+                    </select>
+                    <select value={crmContactFilter} onChange={e => setCrmContactFilter(e.target.value as typeof crmContactFilter)} style={{ minWidth: 150 }}>
+                      <option value="">Alle Kontakte</option>
+                      <option value="mitEmail">Mit E-Mail</option>
+                      <option value="ohneEmail">Ohne E-Mail</option>
+                      <option value="mitTelefon">Mit Telefonnummer</option>
                     </select>
                     <input
                       type="text"
-                      placeholder="Ansicht speichern als..."
+                      placeholder="Suche speichern als..."
                       value={crmViewNameDraft}
                       onChange={(e) => setCrmViewNameDraft(e.target.value)}
                       style={{ minWidth: 180 }}
                     />
-                    <button className="btn ghost" onClick={() => void saveCurrentCrmView()}>Ansicht speichern</button>
-                    {crmSelectedViewId ? (
-                      <button className="btn ghost" onClick={() => void deleteCrmSavedView(crmSelectedViewId)}>Ansicht löschen</button>
-                    ) : null}
+                    <button className="btn ghost" onClick={() => void saveCurrentCrmSearch()}>Suche speichern</button>
+                    <span className="subtle" style={{ fontSize: "0.8rem" }}>
+                      {crmSavedViews.length} gespeicherte Suche(n)
+                    </span>
                   </div>
                   <div className="row" style={{ gap: 8 }}>
                     <button className="btn ghost" onClick={() => setShowCrmImport(v => !v)}>📥 Importieren</button>

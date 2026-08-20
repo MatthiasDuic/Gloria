@@ -63,6 +63,8 @@ export interface CrmSavedView {
   search: string;
   owner: "" | "BarmeniaGothaer" | "Agentur-Duic";
   customerKind: "" | "privat" | "firma";
+  pipelineStage: "" | LeadPipelineStage;
+  contactFilter: "" | "mitEmail" | "ohneEmail" | "mitTelefon";
   createdAt: string;
 }
 
@@ -72,6 +74,8 @@ export interface CrmUiPreferences {
   crmSearch?: string;
   crmTypeFilter?: "" | "BarmeniaGothaer" | "Agentur-Duic";
   crmCustomerKindFilter?: "" | "privat" | "firma";
+  crmPipelineFilter?: "" | LeadPipelineStage;
+  crmContactFilter?: "" | "mitEmail" | "ohneEmail" | "mitTelefon";
 }
 
 export interface Lead {

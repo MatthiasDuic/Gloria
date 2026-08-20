@@ -220,9 +220,19 @@ function parseCrmSavedViews(value: unknown): CrmSavedView[] {
       const search = typeof row.search === "string" ? row.search : "";
       const owner = row.owner === "BarmeniaGothaer" || row.owner === "Agentur-Duic" ? row.owner : "";
       const customerKind = row.customerKind === "privat" || row.customerKind === "firma" ? row.customerKind : "";
+      const pipelineStage =
+        row.pipelineStage === "neu"
+        || row.pipelineStage === "qualifiziert"
+        || row.pipelineStage === "angebot"
+        || row.pipelineStage === "verhandlung"
+        || row.pipelineStage === "gewonnen"
+        || row.pipelineStage === "verloren"
+          ? row.pipelineStage
+          : "";
+      const contactFilter = row.contactFilter === "mitEmail" || row.contactFilter === "ohneEmail" || row.contactFilter === "mitTelefon" ? row.contactFilter : "";
       const createdAt = typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString();
       if (!id || !name) return null;
-      return { id, name, search, owner, customerKind, createdAt } as CrmSavedView;
+      return { id, name, search, owner, customerKind, pipelineStage, contactFilter, createdAt } as CrmSavedView;
     })
     .filter((entry): entry is CrmSavedView => Boolean(entry))
     .slice(0, 20);
@@ -247,6 +257,23 @@ function parseCrmUiPreferences(value: unknown): CrmUiPreferences {
     crmSearch: typeof row.crmSearch === "string" ? row.crmSearch : undefined,
     crmTypeFilter: row.crmTypeFilter === "BarmeniaGothaer" || row.crmTypeFilter === "Agentur-Duic" || row.crmTypeFilter === "" ? row.crmTypeFilter : undefined,
     crmCustomerKindFilter: row.crmCustomerKindFilter === "privat" || row.crmCustomerKindFilter === "firma" || row.crmCustomerKindFilter === "" ? row.crmCustomerKindFilter : undefined,
+    crmPipelineFilter:
+      row.crmPipelineFilter === "neu"
+      || row.crmPipelineFilter === "qualifiziert"
+      || row.crmPipelineFilter === "angebot"
+      || row.crmPipelineFilter === "verhandlung"
+      || row.crmPipelineFilter === "gewonnen"
+      || row.crmPipelineFilter === "verloren"
+      || row.crmPipelineFilter === ""
+        ? row.crmPipelineFilter
+        : undefined,
+    crmContactFilter:
+      row.crmContactFilter === "mitEmail"
+      || row.crmContactFilter === "ohneEmail"
+      || row.crmContactFilter === "mitTelefon"
+      || row.crmContactFilter === ""
+        ? row.crmContactFilter
+        : undefined,
   };
 }
 

@@ -19,6 +19,16 @@ function sanitizeSavedViews(input: unknown): CrmSavedView[] {
       const search = typeof row.search === "string" ? row.search : "";
       const owner = row.owner === "BarmeniaGothaer" || row.owner === "Agentur-Duic" ? row.owner : "";
       const customerKind = row.customerKind === "privat" || row.customerKind === "firma" ? row.customerKind : "";
+      const pipelineStage =
+        row.pipelineStage === "neu"
+        || row.pipelineStage === "qualifiziert"
+        || row.pipelineStage === "angebot"
+        || row.pipelineStage === "verhandlung"
+        || row.pipelineStage === "gewonnen"
+        || row.pipelineStage === "verloren"
+          ? row.pipelineStage
+          : "";
+      const contactFilter = row.contactFilter === "mitEmail" || row.contactFilter === "ohneEmail" || row.contactFilter === "mitTelefon" ? row.contactFilter : "";
       const createdAt = typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString();
 
       if (!id || !name) return null;
@@ -29,6 +39,8 @@ function sanitizeSavedViews(input: unknown): CrmSavedView[] {
         search,
         owner,
         customerKind,
+        pipelineStage,
+        contactFilter,
         createdAt,
       } as CrmSavedView;
     })

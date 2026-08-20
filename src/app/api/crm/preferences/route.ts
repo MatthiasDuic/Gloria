@@ -25,6 +25,23 @@ function sanitizePreferences(input: unknown): CrmUiPreferences {
     crmSearch: typeof row.crmSearch === "string" ? row.crmSearch : undefined,
     crmTypeFilter: row.crmTypeFilter === "BarmeniaGothaer" || row.crmTypeFilter === "Agentur-Duic" || row.crmTypeFilter === "" ? row.crmTypeFilter : undefined,
     crmCustomerKindFilter: row.crmCustomerKindFilter === "privat" || row.crmCustomerKindFilter === "firma" || row.crmCustomerKindFilter === "" ? row.crmCustomerKindFilter : undefined,
+    crmPipelineFilter:
+      row.crmPipelineFilter === "neu"
+      || row.crmPipelineFilter === "qualifiziert"
+      || row.crmPipelineFilter === "angebot"
+      || row.crmPipelineFilter === "verhandlung"
+      || row.crmPipelineFilter === "gewonnen"
+      || row.crmPipelineFilter === "verloren"
+      || row.crmPipelineFilter === ""
+        ? row.crmPipelineFilter
+        : undefined,
+    crmContactFilter:
+      row.crmContactFilter === "mitEmail"
+      || row.crmContactFilter === "ohneEmail"
+      || row.crmContactFilter === "mitTelefon"
+      || row.crmContactFilter === ""
+        ? row.crmContactFilter
+        : undefined,
   };
 }
 
