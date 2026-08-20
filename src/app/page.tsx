@@ -3937,7 +3937,7 @@ export default function HomePage() {
                       <label>Land</label>
                       <input value={addCustomerDraft.addressCountry} onChange={e => setAddCustomerDraft(d => ({ ...d, addressCountry: e.target.value }))} placeholder="Deutschland" />
                     </div>
-                    <div className="report-detail-field">
+                    <div className="report-detail-field report-detail-full">
                       <label>Notiz / Kontext</label>
                       <textarea value={addCustomerDraft.note} onChange={e => setAddCustomerDraft(d => ({ ...d, note: e.target.value }))} rows={3} placeholder="Bisherige Informationen, Besonderheiten..." style={{ width: "100%", resize: "vertical" }} />
                     </div>
