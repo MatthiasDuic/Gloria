@@ -641,6 +641,7 @@ type LeadEmailInput = {
 
 type LeadTaskInput = {
   title: string;
+  topic?: string;
   dueAt?: string;
 };
 
@@ -687,6 +688,20 @@ function normalizeLeadPipeline(pipeline: Lead["crmPipeline"]): Lead["crmPipeline
   };
 }
 
+function normalizeLeadAffiliations(affiliations: Lead["affiliations"]): Lead["affiliations"] {
+  if (!affiliations?.length) return undefined;
+  const next = affiliations
+    .map((entry) => ({
+      id: entry.id || `aff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      companyId: entry.companyId || undefined,
+      companyName: String(entry.companyName || "").trim(),
+      role: String(entry.role || "Mitarbeiter").trim() || "Mitarbeiter",
+      createdAt: entry.createdAt || new Date().toISOString(),
+    }))
+    .filter((entry) => entry.companyName);
+  return next.length ? next : undefined;
+}
+
 function normalizeEmailHistory(history: Lead["emailHistory"]): Lead["emailHistory"] {
   if (!history?.length) return undefined;
   const next = history
@@ -718,12 +733,14 @@ export async function updateLeadDetails(
       phone: updates.phone ?? lead.phone,
       directDial: updates.directDial ?? lead.directDial,
       email: updates.email ?? lead.email,
+      birthDate: updates.birthDate ?? lead.birthDate,
       location: updates.location ?? lead.location,
       addressStreet: updates.addressStreet ?? lead.addressStreet,
       addressPostalCode: updates.addressPostalCode ?? lead.addressPostalCode,
       addressCity: updates.addressCity ?? lead.addressCity,
       addressCountry: updates.addressCountry ?? lead.addressCountry,
       products: updates.products ?? lead.products,
+      affiliations: normalizeLeadAffiliations(updates.affiliations ?? lead.affiliations),
       topic: updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
       emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
@@ -738,12 +755,14 @@ export async function updateLeadDetails(
       phone: lead.phone,
       directDial: lead.directDial,
       email: lead.email,
+      birthDate: lead.birthDate,
       location: lead.location,
       addressStreet: lead.addressStreet,
       addressPostalCode: lead.addressPostalCode,
       addressCity: lead.addressCity,
       addressCountry: lead.addressCountry,
       products: lead.products,
+      affiliations: lead.affiliations,
       topic: lead.topic,
       note: lead.note,
       crmPipeline: lead.crmPipeline,
@@ -755,12 +774,14 @@ export async function updateLeadDetails(
       phone: nextLead.phone,
       directDial: nextLead.directDial,
       email: nextLead.email,
+      birthDate: nextLead.birthDate,
       location: nextLead.location,
       addressStreet: nextLead.addressStreet,
       addressPostalCode: nextLead.addressPostalCode,
       addressCity: nextLead.addressCity,
       addressCountry: nextLead.addressCountry,
       products: nextLead.products,
+      affiliations: nextLead.affiliations,
       topic: nextLead.topic,
       note: nextLead.note,
       crmPipeline: nextLead.crmPipeline,
@@ -830,15 +851,23 @@ export async function addLeadTask(
   taskInput: LeadTaskInput,
   userId?: string,
 ): Promise<Lead | undefined> {
-  if (!leadId || !taskInput.title.trim()) return undefined;
+  if (!leadId) return undefined;
+  const rawTitle = taskInput.title.trim();
+  const rawTopic = String(taskInput.topic || "").trim();
+  if (!rawTitle || !rawTopic) return undefined;
+
   const leads = await readLeads(userId);
   let updatedLead: Lead | undefined;
   const nextLeads = leads.map((lead) => {
     if (lead.id !== leadId) return lead;
     const now = new Date().toISOString();
+    const title = rawTitle.toLowerCase().includes(rawTopic.toLowerCase())
+      ? rawTitle
+      : `Gloria anrufen – Thema: ${rawTopic} – ${rawTitle}`;
     const task = {
       id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: taskInput.title.trim(),
+      title,
+      topic: rawTopic,
       dueAt: taskInput.dueAt || undefined,
       status: "open" as const,
       createdAt: now,

@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       taskId?: string;
       task?: {
         title?: string;
+        topic?: string;
         dueAt?: string;
       };
       updates?: Partial<Lead>;
@@ -130,13 +131,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
       }
       const title = String(payload.task?.title || "").trim();
+      const topic = String(payload.task?.topic || "").trim();
       if (!title) {
         return NextResponse.json({ error: "Aufgabentitel ist erforderlich." }, { status: 400 });
+      }
+      if (!topic) {
+        return NextResponse.json({ error: "Thema für Gloria ist erforderlich." }, { status: 400 });
       }
       const updatedLead = await addLeadTask(
         leadId,
         {
           title,
+          topic,
           dueAt: String(payload.task?.dueAt || "").trim() || undefined,
         },
         sessionUser.id,

@@ -4,6 +4,12 @@ import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CrmSavedView, CrmUiPreferences, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
+import {
+  buildEffectiveLeadCompanyName,
+  normalizeLeadAffiliationRole,
+  normalizeLeadBirthDate,
+  resolveLeadCompanyValue,
+} from "@/lib/crm-helpers";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -996,6 +1002,8 @@ export default function HomePage() {
   const [leadSearch, setLeadSearch] = useState("");
   const [leadStatusFilter, setLeadStatusFilter] = useState("");
   const [crmTab, setCrmTab] = useState<"customers" | "pipeline" | "callbacks">("customers");
+  const [crmSelectionOpen, setCrmSelectionOpen] = useState(true);
+  const [crmListOpen, setCrmListOpen] = useState(true);
   const [crmSearch, setCrmSearch] = useState("");
   const [crmTypeFilter, setCrmTypeFilter] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
   const [crmCustomerKindFilter, setCrmCustomerKindFilter] = useState<"" | "privat" | "firma">("");
@@ -1005,8 +1013,10 @@ export default function HomePage() {
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerFeedback, setAddCustomerFeedback] = useState<{ type: "" | "success" | "error"; message: string }>({ type: "", message: "" });
   const [addCustomerDraft, setAddCustomerDraft] = useState({
-    company: "", contactName: "", phone: "", email: "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", note: "",
+    company: "", contactName: "", phone: "", email: "", birthDate: "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "",
   });
+  const [affiliationSearch, setAffiliationSearch] = useState("");
+  const [affiliationRoleDraft, setAffiliationRoleDraft] = useState("Mitarbeiter");
   const [showCampaignFromSelectionModal, setShowCampaignFromSelectionModal] = useState(false);
   const [showCrmImport, setShowCrmImport] = useState(false);
   const [crmImportFile, setCrmImportFile] = useState<File | null>(null);
@@ -1016,8 +1026,12 @@ export default function HomePage() {
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
-  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
-  const [leadTaskDraft, setLeadTaskDraft] = useState({ title: "", dueAt: "" });
+  const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "zugehoerigkeiten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
+  const [leadTaskDraft, setLeadTaskDraft] = useState<{ title: string; topic: string; dueAt: string }>({
+    title: "",
+    topic: TOPICS[0],
+    dueAt: "",
+  });
   const [outlookMailDraft, setOutlookMailDraft] = useState({ subject: "", body: "", to: "", sentAt: "" });
   const [selectedListForEvaluation, setSelectedListForEvaluation] = useState<CampaignListSummary | null>(null);
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
@@ -1084,7 +1098,7 @@ export default function HomePage() {
       selectedLeadIdRef.current = null;
       setDetailDraft(null);
       setCrmDetailTab("stammdaten");
-      setLeadTaskDraft({ title: "", dueAt: "" });
+      setLeadTaskDraft({ title: "", topic: TOPICS[0], dueAt: "" });
       setOutlookMailDraft({ subject: "", body: "", to: "", sentAt: "" });
       return;
     }
@@ -1092,20 +1106,23 @@ export default function HomePage() {
     if (isLeadChange) {
       selectedLeadIdRef.current = selectedLeadForHistory.id;
       setCrmDetailTab("stammdaten");
-      setLeadTaskDraft({ title: "", dueAt: "" });
+      setLeadTaskDraft({ title: "", topic: selectedLeadForHistory.topic || TOPICS[0], dueAt: "" });
       setDetailDraft({
+        company: selectedLeadForHistory.company || "",
         customerKind: selectedLeadForHistory.customerKind || "firma",
         customerOwner: selectedLeadForHistory.customerOwner,
         contactName: selectedLeadForHistory.contactName,
         phone: selectedLeadForHistory.phone,
         directDial: selectedLeadForHistory.directDial,
         email: selectedLeadForHistory.email,
+        birthDate: selectedLeadForHistory.birthDate,
         location: selectedLeadForHistory.location,
         addressStreet: selectedLeadForHistory.addressStreet,
         addressPostalCode: selectedLeadForHistory.addressPostalCode,
         addressCity: selectedLeadForHistory.addressCity,
         addressCountry: selectedLeadForHistory.addressCountry,
         products: selectedLeadForHistory.products,
+        affiliations: selectedLeadForHistory.affiliations,
         crmPipeline: selectedLeadForHistory.crmPipeline,
         topic: selectedLeadForHistory.topic,
         note: selectedLeadForHistory.note,
@@ -2537,17 +2554,26 @@ export default function HomePage() {
 
   async function addCustomerManually() {
     const d = addCustomerDraft;
-    const company = d.company.trim();
     const phone = d.phone.trim();
-    if (!company || !phone) {
-      setAddCustomerFeedback({ type: "error", message: "Firma und Telefonnummer sind Pflichtfelder." });
-      setNotice("Firma und Telefonnummer sind Pflichtfelder.");
+    const contactName = d.contactName.trim();
+    const normalizedCustomerKind = d.customerKind === "privat" || d.customerKind === "firma" ? d.customerKind : "firma";
+    const effectiveCompany = normalizedCustomerKind === "privat"
+      ? resolveLeadCompanyValue({ customerKind: "privat", company: d.company, contactName })
+      : d.company.trim() || "Neue Firma";
+    if ((!effectiveCompany && normalizedCustomerKind !== "privat") || !phone || (normalizedCustomerKind === "privat" && !contactName)) {
+      const errorMessage = normalizedCustomerKind === "privat"
+        ? "Name und Telefonnummer sind Pflichtfelder für Privatpersonen."
+        : "Firma und Telefonnummer sind Pflichtfelder.";
+      setAddCustomerFeedback({ type: "error", message: errorMessage });
+      setNotice(errorMessage);
       return;
     }
     setBusy(true);
     setAddCustomerFeedback({ type: "", message: "" });
     try {
-      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${d.customerKind}","${company.replace(/"/g, '""')}","${d.contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","","","${d.note.replace(/"/g, '""')}"`;
+      const productsCell = splitProductsInput(d.products).join("; ");
+      const normalizedBirthDate = normalizeLeadBirthDate(d.birthDate) || "";
+      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,birthDate,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${normalizedCustomerKind}","${effectiveCompany.replace(/"/g, '""')}","${contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${normalizedBirthDate.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${productsCell.replace(/"/g, '""')}","","${d.note.replace(/"/g, '""')}"`;
       const listName = `${d.customerType} | Manuell hinzugefügt`;
       const res = await fetch("/api/campaigns/import", {
         method: "POST",
@@ -2560,11 +2586,11 @@ export default function HomePage() {
       if (!payload.imported || payload.imported < 1) {
         throw new Error("Kunde konnte nicht gespeichert werden.");
       }
-      setAddCustomerFeedback({ type: "success", message: `Kunde "${company}" erfolgreich gespeichert.` });
+      setAddCustomerFeedback({ type: "success", message: `Kunde "${effectiveCompany}" erfolgreich gespeichert.` });
       await new Promise((resolve) => setTimeout(resolve, 320));
-      setNotice(`Kunde "${company}" angelegt.`);
+      setNotice(`Kunde "${effectiveCompany}" angelegt.`);
       setShowAddCustomerModal(false);
-      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", note: "" });
+      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", birthDate: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "" });
       setAddCustomerFeedback({ type: "", message: "" });
       setCrmSearch("");
       setCrmTypeFilter("");
@@ -2578,10 +2604,10 @@ export default function HomePage() {
       if (refreshed) {
         const normalizedPhone = phone.replace(/\s+/g, "");
         const createdLead = refreshed.leads.find((lead) => {
-          const byCompany = lead.company.trim().toLowerCase() === company.toLowerCase();
+          const byCompany = (lead.company || buildEffectiveLeadCompanyName({ customerKind: lead.customerKind || "firma", company: lead.company, contactName: lead.contactName })).trim().toLowerCase() === effectiveCompany.toLowerCase();
           const candidatePhone = (lead.phone || lead.directDial || "").replace(/\s+/g, "");
           return byCompany && candidatePhone === normalizedPhone;
-        }) || refreshed.leads.find((lead) => lead.company.trim().toLowerCase() === company.toLowerCase());
+        }) || refreshed.leads.find((lead) => (lead.company || buildEffectiveLeadCompanyName({ customerKind: lead.customerKind || "firma", company: lead.company, contactName: lead.contactName })).trim().toLowerCase() === effectiveCompany.toLowerCase());
 
         if (createdLead) {
           setCrmSearch(createdLead.company);
@@ -2679,19 +2705,29 @@ export default function HomePage() {
     if (!selectedLeadForHistory || !detailDraft) return;
     setBusy(true);
     try {
+      const nextCompanyValue = detailDraft.customerKind === "privat"
+        ? resolveLeadCompanyValue({
+            customerKind: "privat",
+            company: detailDraft.company || selectedLeadForHistory.company || "",
+            contactName: detailDraft.contactName || selectedLeadForHistory.contactName || "",
+          })
+        : (detailDraft.company || selectedLeadForHistory.company || "").trim() || "Neue Firma";
       const updates: Partial<DashboardData["leads"][number]> = {
+        company: nextCompanyValue,
         customerKind: detailDraft.customerKind === "privat" || detailDraft.customerKind === "firma" ? detailDraft.customerKind : undefined,
         customerOwner: detailDraft.customerOwner === "BarmeniaGothaer" || detailDraft.customerOwner === "Agentur-Duic" ? detailDraft.customerOwner : undefined,
         contactName: detailDraft.contactName,
         phone: detailDraft.phone,
         directDial: detailDraft.directDial,
         email: detailDraft.email,
+        birthDate: normalizeLeadBirthDate(detailDraft.birthDate || selectedLeadForHistory.birthDate),
         location: detailDraft.location,
         addressStreet: detailDraft.addressStreet,
         addressPostalCode: detailDraft.addressPostalCode,
         addressCity: detailDraft.addressCity,
         addressCountry: detailDraft.addressCountry,
         products: detailDraft.products,
+        affiliations: detailDraft.affiliations,
         crmPipeline: detailDraft.crmPipeline,
         topic: detailDraft.topic,
         note: leadNoteEdit,
@@ -2753,10 +2789,22 @@ export default function HomePage() {
 
   async function addLeadTaskFromModal() {
     if (!selectedLeadForHistory) return;
-    if (!leadTaskDraft.title.trim()) {
+    const taskTitle = leadTaskDraft.title.trim();
+    const selectedTopic = (leadTaskDraft.topic || selectedLeadForHistory.topic || "").trim();
+
+    if (!taskTitle) {
       setNotice("Bitte einen Aufgabentitel eingeben.");
       return;
     }
+    if (!selectedTopic) {
+      setNotice("Bitte ein Thema für Gloria angeben.");
+      return;
+    }
+
+    const normalizedTitle = taskTitle.toLowerCase().includes(selectedTopic.toLowerCase())
+      ? taskTitle
+      : `Gloria anrufen – Thema: ${selectedTopic} – ${taskTitle}`;
+
     setBusy(true);
     try {
       const res = await fetch("/api/campaigns/lists", {
@@ -2766,14 +2814,15 @@ export default function HomePage() {
           action: "add_lead_task",
           leadId: selectedLeadForHistory.id,
           task: {
-            title: leadTaskDraft.title,
+            title: normalizedTitle,
+            topic: selectedTopic,
             dueAt: leadTaskDraft.dueAt ? new Date(leadTaskDraft.dueAt).toISOString() : undefined,
           },
         }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error || "Aufgabe konnte nicht erstellt werden.");
-      setLeadTaskDraft({ title: "", dueAt: "" });
+      setLeadTaskDraft({ title: "", topic: selectedLeadForHistory.topic || TOPICS[0], dueAt: "" });
       setNotice("Aufgabe gespeichert.");
       await loadDashboard();
       await loadCampaignLists();
@@ -3411,7 +3460,7 @@ export default function HomePage() {
           { key: "qualifiziert", label: "Qualifiziert", color: "#2563eb" },
           { key: "angebot", label: "Angebot", color: "#0ea5e9" },
           { key: "verhandlung", label: "Verhandlung", color: "#d97706" },
-          { key: "gewonnen", label: "Gewonnen", color: "#059669" },
+          { key: "gewonnen", label: "Abschlüsse / Erfolg", color: "#059669" },
           { key: "verloren", label: "Verloren", color: "#dc2626" },
         ];
         const todayCallbacks = data.reports.filter((r) => {
@@ -3467,7 +3516,7 @@ export default function HomePage() {
               <div className="crm-header-stats">
                 <div className="crm-stat-chip"><strong>{data.leads.length}</strong><span>Kunden</span></div>
                 <div className="crm-stat-chip"><strong>{data.leads.filter((lead) => lead.status === "wiedervorlage").length}</strong><span>Wiedervorlagen</span></div>
-                <div className="crm-stat-chip"><strong>{data.leads.filter((lead) => getLeadPipelineStage(lead) === "gewonnen").length}</strong><span>Gewonnen</span></div>
+                <div className="crm-stat-chip"><strong>{data.leads.filter((lead) => getLeadPipelineStage(lead) === "gewonnen").length}</strong><span>Abschlüsse / Erfolg</span></div>
               </div>
             </div>
 
@@ -3487,283 +3536,314 @@ export default function HomePage() {
             {/* === KUNDENVERWALTUNG === */}
             {crmTab === "customers" && (
               <div className="mini-panel crm-table-panel">
-                {/* Toolbar */}
-                <div className="row spread" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                  <div className="row" style={{ gap: 8, flexWrap: "wrap", flex: 1 }}>
-                    <input
-                      type="text"
-                      placeholder="Suche: Firma, Kontakt, Tel, Email, Thema..."
-                      value={crmSearch}
-                      onChange={e => setCrmSearch(e.target.value)}
-                      style={{ flex: 1, minWidth: 200 }}
-                    />
-                    <select value={crmTypeFilter} onChange={e => setCrmTypeFilter(e.target.value as typeof crmTypeFilter)} style={{ minWidth: 170 }}>
-                      <option value="">Alle Kundentypen</option>
-                      <option value="BarmeniaGothaer">🏢 BarmeniaGothaer</option>
-                      <option value="Agentur-Duic">🏬 Agentur-Duic</option>
-                    </select>
-                    <select value={crmCustomerKindFilter} onChange={e => setCrmCustomerKindFilter(e.target.value as typeof crmCustomerKindFilter)} style={{ minWidth: 150 }}>
-                      <option value="">Privat + Firma</option>
-                      <option value="privat">Privatkunde</option>
-                      <option value="firma">Firmenkunde</option>
-                    </select>
-                    <select value={crmPipelineFilter} onChange={e => setCrmPipelineFilter(e.target.value as typeof crmPipelineFilter)} style={{ minWidth: 160 }}>
-                      <option value="">Alle Pipeline-Stufen</option>
-                      <option value="neu">Neu</option>
-                      <option value="qualifiziert">Qualifiziert</option>
-                      <option value="angebot">Angebot</option>
-                      <option value="verhandlung">Verhandlung</option>
-                      <option value="gewonnen">Gewonnen</option>
-                      <option value="verloren">Verloren</option>
-                    </select>
-                    <select value={crmContactFilter} onChange={e => setCrmContactFilter(e.target.value as typeof crmContactFilter)} style={{ minWidth: 150 }}>
-                      <option value="">Alle Kontakte</option>
-                      <option value="mitEmail">Mit E-Mail</option>
-                      <option value="ohneEmail">Ohne E-Mail</option>
-                      <option value="mitTelefon">Mit Telefonnummer</option>
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="Suche speichern als..."
-                      value={crmViewNameDraft}
-                      onChange={(e) => setCrmViewNameDraft(e.target.value)}
-                      style={{ minWidth: 180 }}
-                    />
-                    <button className="btn ghost" onClick={() => void saveCurrentCrmSearch()}>Suche speichern</button>
-                    <span className="subtle" style={{ fontSize: "0.8rem" }}>
-                      {crmSavedViews.length} gespeicherte Suche(n)
-                    </span>
-                  </div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <button className="btn ghost" onClick={() => setShowCrmImport(v => !v)}>📥 Importieren</button>
-                    <button className="btn" onClick={() => setShowAddCustomerModal(true)}>+ Kunde anlegen</button>
-                    {selectedCrmLeads.size > 0 && (
-                      <button
-                        className="btn"
-                        style={{ background: "#059669" }}
-                        onClick={() => setShowCampaignFromSelectionModal(true)}
-                      >
-                        📞 Kampagne aus Auswahl ({selectedCrmLeads.size})
-                      </button>
-                    )}
-                    {selectedCrmLeads.size > 0 && (
-                      <button className="btn ghost" onClick={() => void exportSelectedCustomers()}>
-                        ⤓ Export ({selectedCrmLeads.size})
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="crm-quick-filters">
+                <div className="crm-panel-header-row">
+                  <strong>Filter</strong>
                   <button
-                    className={`crm-filter-chip ${!hasActiveCrmFilters ? "active" : ""}`}
-                    onClick={() => {
-                      setCrmSearch("");
-                      setCrmTypeFilter("");
-                      setCrmCustomerKindFilter("");
-                      setCrmPipelineFilter("");
-                      setCrmContactFilter("");
-                    }}
+                    className="crm-panel-toggle"
+                    aria-label={crmSelectionOpen ? "Filter ausblenden" : "Filter einblenden"}
+                    onClick={() => setCrmSelectionOpen((open) => !open)}
+                    title={crmSelectionOpen ? "Ausblenden" : "Einblenden"}
                   >
-                    Alle Kunden
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmPipelineFilter === "gewonnen" ? "active" : ""}`}
-                    onClick={() => setCrmPipelineFilter("gewonnen")}
-                  >
-                    Nur Gewinner
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmContactFilter === "ohneEmail" ? "active" : ""}`}
-                    onClick={() => setCrmContactFilter("ohneEmail")}
-                  >
-                    Ohne E-Mail
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmContactFilter === "mitEmail" ? "active" : ""}`}
-                    onClick={() => setCrmContactFilter("mitEmail")}
-                  >
-                    Mit E-Mail
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmCustomerKindFilter === "firma" ? "active" : ""}`}
-                    onClick={() => setCrmCustomerKindFilter("firma")}
-                  >
-                    Firmenkunden
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmCustomerKindFilter === "privat" ? "active" : ""}`}
-                    onClick={() => setCrmCustomerKindFilter("privat")}
-                  >
-                    Privatkunden
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmTypeFilter === "BarmeniaGothaer" ? "active" : ""}`}
-                    onClick={() => setCrmTypeFilter("BarmeniaGothaer")}
-                  >
-                    BarmeniaGothaer
-                  </button>
-                  <button
-                    className={`crm-filter-chip ${crmTypeFilter === "Agentur-Duic" ? "active" : ""}`}
-                    onClick={() => setCrmTypeFilter("Agentur-Duic")}
-                  >
-                    Agentur-Duic
+                    {crmSelectionOpen ? "−" : "+"}
                   </button>
                 </div>
 
-                {/* Import Panel */}
-                {showCrmImport && (
-                  <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 8, padding: "16px", marginBottom: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                      <strong>CSV / Excel importieren</strong>
-                      <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setShowCrmImport(false)}>✕</button>
-                    </div>
-                    <div className="field-grid">
-                      <div>
-                        <label>Kundentyp</label>
-                        <select value={crmImportCustomerType} onChange={e => setCrmImportCustomerType(e.target.value as typeof crmImportCustomerType)}>
-                          <option value="Agentur-Duic">🏬 Agentur-Duic Kunden</option>
-                          <option value="BarmeniaGothaer">🏢 BarmeniaGothaer Kunden</option>
+                {crmSelectionOpen && (
+                  <>
+                    <div className="row spread" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: "wrap", flex: 1 }}>
+                        <input
+                          type="text"
+                          placeholder="Suche: Firma, Kontakt, Tel, Email, Thema..."
+                          value={crmSearch}
+                          onChange={e => setCrmSearch(e.target.value)}
+                          style={{ flex: 1, minWidth: 200 }}
+                        />
+                        <select value={crmTypeFilter} onChange={e => setCrmTypeFilter(e.target.value as typeof crmTypeFilter)} style={{ minWidth: 170 }}>
+                          <option value="">Alle Kundentypen</option>
+                          <option value="BarmeniaGothaer">🏢 BarmeniaGothaer</option>
+                          <option value="Agentur-Duic">🏬 Agentur-Duic</option>
                         </select>
-                      </div>
-                      <div>
-                        <label>Listenname</label>
-                        <input value={crmImportListName} onChange={e => setCrmImportListName(e.target.value)} placeholder="z. B. Jahresgespräche August" />
-                      </div>
-                      <div>
-                        <label>Thema (optional, überschreibt Datei)</label>
-                        <select value={crmImportTopic} onChange={e => setCrmImportTopic(e.target.value as Topic | "")}>
-                          <option value="">-- Thema aus Datei --</option>
-                          {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                        <select value={crmCustomerKindFilter} onChange={e => setCrmCustomerKindFilter(e.target.value as typeof crmCustomerKindFilter)} style={{ minWidth: 150 }}>
+                          <option value="">Privat + Firma</option>
+                          <option value="privat">Privatkunde</option>
+                          <option value="firma">Firmenkunde</option>
                         </select>
+                        <select value={crmPipelineFilter} onChange={e => setCrmPipelineFilter(e.target.value as typeof crmPipelineFilter)} style={{ minWidth: 160 }}>
+                          <option value="">Alle Pipeline-Stufen</option>
+                          <option value="neu">Neu</option>
+                          <option value="qualifiziert">Qualifiziert</option>
+                          <option value="angebot">Angebot</option>
+                          <option value="verhandlung">Verhandlung</option>
+                          <option value="gewonnen">Abschlüsse / Erfolg</option>
+                          <option value="verloren">Verloren</option>
+                        </select>
+                        <select value={crmContactFilter} onChange={e => setCrmContactFilter(e.target.value as typeof crmContactFilter)} style={{ minWidth: 150 }}>
+                          <option value="">Alle Kontakte</option>
+                          <option value="mitEmail">Mit E-Mail</option>
+                          <option value="ohneEmail">Ohne E-Mail</option>
+                          <option value="mitTelefon">Mit Telefonnummer</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Suche speichern als..."
+                          value={crmViewNameDraft}
+                          onChange={(e) => setCrmViewNameDraft(e.target.value)}
+                          style={{ minWidth: 180 }}
+                        />
+                        <button className="btn ghost" onClick={() => void saveCurrentCrmSearch()}>Suche speichern</button>
+                        <span className="subtle" style={{ fontSize: "0.8rem" }}>
+                          {crmSavedViews.length} gespeicherte Suche(n)
+                        </span>
                       </div>
-                      <div>
-                        <label>Datei (CSV / XLSX / XLS)</label>
-                        <input type="file" accept=".csv,.xlsx,.xls" onChange={e => setCrmImportFile(e.target.files?.[0] || null)} />
+                      <div className="row" style={{ gap: 8 }}>
+                        <button className="btn ghost" onClick={() => setShowCrmImport(v => !v)}>📥 Importieren</button>
+                        <button className="btn" onClick={() => setShowAddCustomerModal(true)}>+ Kunde anlegen</button>
+                        {selectedCrmLeads.size > 0 && (
+                          <button
+                            className="btn"
+                            style={{ background: "#059669" }}
+                            onClick={() => setShowCampaignFromSelectionModal(true)}
+                          >
+                            📞 Kampagne aus Auswahl ({selectedCrmLeads.size})
+                          </button>
+                        )}
+                        {selectedCrmLeads.size > 0 && (
+                          <button className="btn ghost" onClick={() => void exportSelectedCustomers()}>
+                            ⤓ Export ({selectedCrmLeads.size})
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <p className="subtle" style={{ fontSize: "0.82rem", margin: "8px 0" }}>Format: customerOwner, customerKind, company, contactName, phone, email, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt</p>
-                    <div className="row top-gap" style={{ gap: 8 }}>
+
+                    <div className="crm-quick-filters">
                       <button
-                        className="btn"
-                        disabled={busy || !crmImportFile}
-                        onClick={async () => {
-                          if (!crmImportFile) return;
-                          setBusy(true);
-                          try {
-                            const form = new FormData();
-                            form.set("file", crmImportFile);
-                            const resolvedListName = crmImportListName.trim() || crmImportFile.name.replace(/\.[^.]+$/, "");
-                            form.set("listName", `${crmImportCustomerType} | ${resolvedListName}`);
-                            if (crmImportTopic) form.set("topic", crmImportTopic);
-                            const res = await fetch("/api/campaigns/import", { method: "POST", body: form, credentials: "same-origin" });
-                            const payload = (await res.json()) as { imported?: number; error?: string; listName?: string };
-                            if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
-                            setNotice(`${payload.imported ?? 0} Kunden importiert in "${payload.listName || resolvedListName}"`);
-                            setCrmImportFile(null);
-                            setCrmImportListName("");
-                            setShowCrmImport(false);
-                            await loadDashboard();
-                            await loadCampaignLists();
-                          } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
-                          finally { setBusy(false); }
+                        className={`crm-filter-chip ${!hasActiveCrmFilters ? "active" : ""}`}
+                        onClick={() => {
+                          setCrmSearch("");
+                          setCrmTypeFilter("");
+                          setCrmCustomerKindFilter("");
+                          setCrmPipelineFilter("");
+                          setCrmContactFilter("");
                         }}
                       >
-                        {busy ? "Importiert..." : "Importieren"}
+                        Alle Kunden
                       </button>
-                      {crmImportFile && <span className="subtle">{crmImportFile.name}</span>}
+                      <button
+                        className={`crm-filter-chip ${crmPipelineFilter === "gewonnen" ? "active" : ""}`}
+                        onClick={() => setCrmPipelineFilter("gewonnen")}
+                      >
+                        Nur Abschlüsse / Erfolg
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmContactFilter === "ohneEmail" ? "active" : ""}`}
+                        onClick={() => setCrmContactFilter("ohneEmail")}
+                      >
+                        Ohne E-Mail
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmContactFilter === "mitEmail" ? "active" : ""}`}
+                        onClick={() => setCrmContactFilter("mitEmail")}
+                      >
+                        Mit E-Mail
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmCustomerKindFilter === "firma" ? "active" : ""}`}
+                        onClick={() => setCrmCustomerKindFilter("firma")}
+                      >
+                        Firmenkunden
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmCustomerKindFilter === "privat" ? "active" : ""}`}
+                        onClick={() => setCrmCustomerKindFilter("privat")}
+                      >
+                        Privatkunden
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmTypeFilter === "BarmeniaGothaer" ? "active" : ""}`}
+                        onClick={() => setCrmTypeFilter("BarmeniaGothaer")}
+                      >
+                        BarmeniaGothaer
+                      </button>
+                      <button
+                        className={`crm-filter-chip ${crmTypeFilter === "Agentur-Duic" ? "active" : ""}`}
+                        onClick={() => setCrmTypeFilter("Agentur-Duic")}
+                      >
+                        Agentur-Duic
+                      </button>
                     </div>
-                  </div>
+
+                    {showCrmImport && (
+                      <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 8, padding: "16px", marginBottom: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                          <strong>CSV / Excel importieren</strong>
+                          <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setShowCrmImport(false)}>✕</button>
+                        </div>
+                        <div className="field-grid">
+                          <div>
+                            <label>Kundentyp</label>
+                            <select value={crmImportCustomerType} onChange={e => setCrmImportCustomerType(e.target.value as typeof crmImportCustomerType)}>
+                              <option value="Agentur-Duic">🏬 Agentur-Duic Kunden</option>
+                              <option value="BarmeniaGothaer">🏢 BarmeniaGothaer Kunden</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label>Listenname</label>
+                            <input value={crmImportListName} onChange={e => setCrmImportListName(e.target.value)} placeholder="z. B. Jahresgespräche August" />
+                          </div>
+                          <div>
+                            <label>Thema (optional, überschreibt Datei)</label>
+                            <select value={crmImportTopic} onChange={e => setCrmImportTopic(e.target.value as Topic | "")}>
+                              <option value="">-- Thema aus Datei --</option>
+                              {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Datei (CSV / XLSX / XLS)</label>
+                            <input type="file" accept=".csv,.xlsx,.xls" onChange={e => setCrmImportFile(e.target.files?.[0] || null)} />
+                          </div>
+                        </div>
+                        <p className="subtle" style={{ fontSize: "0.82rem", margin: "8px 0" }}>Format: customerOwner, customerKind, company, contactName, phone, email, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt</p>
+                        <div className="row top-gap" style={{ gap: 8 }}>
+                          <button
+                            className="btn"
+                            disabled={busy || !crmImportFile}
+                            onClick={async () => {
+                              if (!crmImportFile) return;
+                              setBusy(true);
+                              try {
+                                const form = new FormData();
+                                form.set("file", crmImportFile);
+                                const resolvedListName = crmImportListName.trim() || crmImportFile.name.replace(/\.[^.]+$/, "");
+                                form.set("listName", `${crmImportCustomerType} | ${resolvedListName}`);
+                                if (crmImportTopic) form.set("topic", crmImportTopic);
+                                const res = await fetch("/api/campaigns/import", { method: "POST", body: form, credentials: "same-origin" });
+                                const payload = (await res.json()) as { imported?: number; error?: string; listName?: string };
+                                if (!res.ok) throw new Error(payload.error || "Import fehlgeschlagen");
+                                setNotice(`${payload.imported ?? 0} Kunden importiert in "${payload.listName || resolvedListName}"`);
+                                setCrmImportFile(null);
+                                setCrmImportListName("");
+                                setShowCrmImport(false);
+                                await loadDashboard();
+                                await loadCampaignLists();
+                              } catch (e) { setNotice(e instanceof Error ? e.message : "Fehler"); }
+                              finally { setBusy(false); }
+                            }}
+                          >
+                            {busy ? "Importiert..." : "Importieren"}
+                          </button>
+                          {crmImportFile && <span className="subtle">{crmImportFile.name}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {/* Customer Table */}
-                <div style={{ overflowX: "auto" }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ width: 32 }}>
-                          <input
-                            type="checkbox"
-                            checked={allFilteredSelected}
-                            onChange={e => {
-                              const next = new Set(selectedCrmLeads);
-                              filteredCrmLeads.forEach(l => e.target.checked ? next.add(l.id) : next.delete(l.id));
-                              setSelectedCrmLeads(next);
-                            }}
-                          />
-                        </th>
-                        <th>Kundentyp</th>
-                        <th>Kundenart</th>
-                        <th>Firma</th>
-                        <th>Ansprechpartner</th>
-                        <th>Telefon</th>
-                        <th>Email</th>
-                        <th>Strasse</th>
-                        <th>PLZ</th>
-                        <th>Stadt</th>
-                        <th>Land</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredCrmLeads.length === 0 && (
-                        <tr><td colSpan={12} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
-                      )}
-                      {filteredCrmLeads.map((lead) => {
-                        const custType = getCrmCustomerType(lead);
-                        const typeStyle = typeColors[custType] || typeColors["Unbekannt"];
-                        const isSelected = selectedCrmLeads.has(lead.id);
-                        return (
-                          <tr key={lead.id} style={{ background: isSelected ? "#eff6ff" : undefined }}>
-                            <td>
+                <div style={{ marginTop: 12, marginBottom: 12 }}>
+                  <div className="crm-panel-header-row">
+                    <strong>Kundenliste</strong>
+                    <button
+                      className="crm-panel-toggle"
+                      aria-label={crmListOpen ? "Kundenliste ausblenden" : "Kundenliste einblenden"}
+                      onClick={() => setCrmListOpen((open) => !open)}
+                      title={crmListOpen ? "Ausblenden" : "Einblenden"}
+                    >
+                      {crmListOpen ? "−" : "+"}
+                    </button>
+                  </div>
+                </div>
+
+                {crmListOpen && (
+                  <>
+                    <div style={{ overflowX: "auto" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{ width: 32 }}>
                               <input
                                 type="checkbox"
-                                checked={isSelected}
+                                checked={allFilteredSelected}
                                 onChange={e => {
                                   const next = new Set(selectedCrmLeads);
-                                  e.target.checked ? next.add(lead.id) : next.delete(lead.id);
+                                  filteredCrmLeads.forEach(l => e.target.checked ? next.add(l.id) : next.delete(l.id));
                                   setSelectedCrmLeads(next);
                                 }}
                               />
-                            </td>
-                            <td>
-                              <span style={{ ...typeStyle, borderRadius: 999, padding: "2px 8px", fontSize: "0.78rem", fontWeight: 600, whiteSpace: "nowrap" }}>
-                                {custType === "BarmeniaGothaer" ? "🏢" : custType === "Agentur-Duic" ? "🏬" : "❓"} {custType}
-                              </span>
-                            </td>
-                            <td>{lead.customerKind === "privat" ? "Privat" : "Firma"}</td>
-                            <td>
-                              <button className="link-button" onClick={() => setSelectedLeadForHistory(lead)}>
-                                <strong>{lead.company}</strong>
-                              </button>
-                            </td>
-                            <td>{lead.contactName || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
-                            <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.email || "-"}</td>
-                            <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.addressStreet || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.addressPostalCode || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
-                            <td>
-                              <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
-                                Historie
-                              </button>
-                            </td>
+                            </th>
+                            <th>Kundentyp</th>
+                            <th>Kundenart</th>
+                            <th>Firma</th>
+                            <th>Ansprechpartner</th>
+                            <th>Telefon</th>
+                            <th>Email</th>
+                            <th>Strasse</th>
+                            <th>PLZ</th>
+                            <th>Stadt</th>
+                            <th>Land</th>
+                            <th></th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody>
+                          {filteredCrmLeads.length === 0 && (
+                            <tr><td colSpan={12} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
+                          )}
+                          {filteredCrmLeads.map((lead) => {
+                            const custType = getCrmCustomerType(lead);
+                            const typeStyle = typeColors[custType] || typeColors["Unbekannt"];
+                            const isSelected = selectedCrmLeads.has(lead.id);
+                            return (
+                              <tr key={lead.id} style={{ background: isSelected ? "#eff6ff" : undefined }}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={e => {
+                                      const next = new Set(selectedCrmLeads);
+                                      e.target.checked ? next.add(lead.id) : next.delete(lead.id);
+                                      setSelectedCrmLeads(next);
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <span style={{ ...typeStyle, borderRadius: 999, padding: "2px 8px", fontSize: "0.78rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+                                    {custType === "BarmeniaGothaer" ? "🏢" : custType === "Agentur-Duic" ? "🏬" : "❓"} {custType}
+                                  </span>
+                                </td>
+                                <td>{lead.customerKind === "privat" ? "Privat" : "Firma"}</td>
+                                <td>
+                                  <button className="link-button" onClick={() => setSelectedLeadForHistory(lead)}>
+                                    <strong>{lead.company}</strong>
+                                  </button>
+                                </td>
+                                <td>{lead.contactName || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
+                                <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.email || "-"}</td>
+                                <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.addressStreet || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>{lead.addressPostalCode || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
+                                <td>
+                                  <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
+                                    Historie
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
 
-                {selectedCrmLeads.size > 0 && (
-                  <div style={{ marginTop: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ color: "#1e40af", fontWeight: 600 }}>{selectedCrmLeads.size} Kunden ausgewählt</span>
-                    <button className="btn" style={{ background: "#059669", padding: "6px 14px", fontSize: "0.85rem" }} onClick={() => setShowCampaignFromSelectionModal(true)}>
-                      📞 Kampagne für Gloria erstellen
-                    </button>
-                    <button className="btn ghost" style={{ fontSize: "0.85rem" }} onClick={() => setSelectedCrmLeads(new Set())}>Auswahl aufheben</button>
-                  </div>
+                    {selectedCrmLeads.size > 0 && (
+                      <div style={{ marginTop: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ color: "#1e40af", fontWeight: 600 }}>{selectedCrmLeads.size} Kunden ausgewählt</span>
+                        <button className="btn" style={{ background: "#059669", padding: "6px 14px", fontSize: "0.85rem" }} onClick={() => setShowCampaignFromSelectionModal(true)}>
+                          📞 Kampagne für Gloria erstellen
+                        </button>
+                        <button className="btn ghost" style={{ fontSize: "0.85rem" }} onClick={() => setSelectedCrmLeads(new Set())}>Auswahl aufheben</button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -3936,6 +4016,10 @@ export default function HomePage() {
                     <div className="report-detail-field">
                       <label>Land</label>
                       <input value={addCustomerDraft.addressCountry} onChange={e => setAddCustomerDraft(d => ({ ...d, addressCountry: e.target.value }))} placeholder="Deutschland" />
+                    </div>
+                    <div className="report-detail-field report-detail-full">
+                      <label>Produkte</label>
+                      <input value={addCustomerDraft.products} onChange={e => setAddCustomerDraft(d => ({ ...d, products: e.target.value }))} placeholder="PKV; Zahn; Pflege" />
                     </div>
                     <div className="report-detail-field report-detail-full">
                       <label>Notiz / Kontext</label>
@@ -5355,7 +5439,7 @@ export default function HomePage() {
           <div className="modal-overlay" onClick={() => setSelectedLeadForHistory(null)}>
             <div className="modal lead-history-modal" onClick={(event) => event.stopPropagation()}>
               <button className="modal-close" onClick={() => setSelectedLeadForHistory(null)}>✕</button>
-              <h2>Auftragshistorie: {selectedLeadForHistory.company}</h2>
+              <h2>Auftragshistorie: {buildEffectiveLeadCompanyName({ customerKind: selectedLeadForHistory.customerKind || "firma", company: selectedLeadForHistory.company, contactName: selectedLeadForHistory.contactName })}</h2>
               <p className="subtle" style={{ marginTop: 6 }}>
                 Ansprechpartner: {selectedLeadForHistory.contactName || "-"} · Thema: {selectedLeadForHistory.topic}
               </p>
@@ -5363,6 +5447,7 @@ export default function HomePage() {
               <div className="row top-gap" style={{ gap: 6, flexWrap: "wrap" }}>
                 {([
                   { key: "stammdaten", label: "Stammdaten" },
+                  { key: "zugehoerigkeiten", label: "Zugehörigkeiten" },
                   { key: "pipeline", label: "Pipeline" },
                   { key: "historie", label: "Historie" },
                   { key: "kommunikation", label: "Kommunikation" },
@@ -5420,6 +5505,14 @@ export default function HomePage() {
                   </select>
                 </div>
                 <div className="report-detail-field">
+                  <label>{detailDraft?.customerKind === "privat" ? "Privatperson / Firma (optional)" : "Firma"}</label>
+                  <input
+                    value={detailDraft?.company ?? ""}
+                    onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), company: e.target.value }))}
+                    placeholder={detailDraft?.customerKind === "privat" ? "optional – wird aus Name abgeleitet" : "Musterbau GmbH"}
+                  />
+                </div>
+                <div className="report-detail-field">
                   <label>Zuordnung</label>
                   <select
                     value={detailDraft?.customerOwner || ""}
@@ -5447,6 +5540,16 @@ export default function HomePage() {
                   <label>E-Mail</label>
                   <input value={detailDraft?.email || ""} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), email: e.target.value }))} placeholder="kunde@email.de" />
                 </div>
+                {detailDraft?.customerKind === "privat" && (
+                  <div className="report-detail-field">
+                    <label>Geburtsdatum</label>
+                    <input
+                      type="date"
+                      value={detailDraft?.birthDate ? normalizeLeadBirthDate(detailDraft.birthDate) || "" : ""}
+                      onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), birthDate: normalizeLeadBirthDate(e.target.value) || undefined }))}
+                    />
+                  </div>
+                )}
                 <div className="report-detail-field">
                   <label>Thema</label>
                   <select value={detailDraft?.topic || selectedLeadForHistory.topic} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), topic: e.target.value as Topic }))}>
@@ -5496,6 +5599,112 @@ export default function HomePage() {
                 </div>
               </div> : null}
 
+              {crmDetailTab === "zugehoerigkeiten" ? <div className="report-detail-grid top-gap">
+                <div className="report-detail-field report-detail-full">
+                  <label>Private Personen aus dem Bestand suchen</label>
+                  <input
+                    value={affiliationSearch}
+                    onChange={(e) => setAffiliationSearch(e.target.value)}
+                    placeholder="Name, Firma, E-Mail oder Telefon..."
+                  />
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <label>Vorschläge</label>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {(() => {
+                      const privateLeads = data.leads.filter((lead) => lead.customerKind === "privat" && lead.id !== selectedLeadForHistory.id);
+                      const matches = privateLeads.filter((lead) => {
+                        const haystack = `${lead.contactName || ""} ${lead.company || ""} ${lead.email || ""} ${lead.phone || ""}`.toLowerCase();
+                        return !affiliationSearch || haystack.includes(affiliationSearch.toLowerCase());
+                      });
+
+                      if (matches.length === 0) {
+                        return <p className="subtle" style={{ margin: 0 }}>Keine passenden Privatpersonen gefunden.</p>;
+                      }
+
+                      return matches.slice(0, 8).map((lead) => (
+                        <div key={lead.id} className="affiliation-card">
+                          <div className="affiliation-card-main">
+                            <strong>{lead.contactName || buildEffectiveLeadCompanyName({ customerKind: lead.customerKind || "privat", company: lead.company, contactName: lead.contactName })}</strong>
+                            <div className="subtle" style={{ fontSize: "0.8rem" }}>{lead.email || lead.phone || "Keine Kontaktdaten"}</div>
+                          </div>
+                          <div className="affiliation-card-actions">
+                            <span className="affiliation-role-badge">{normalizeLeadAffiliationRole(affiliationRoleDraft)}</span>
+                            <button
+                              className="btn ghost"
+                              style={{ fontSize: "0.8rem", padding: "5px 10px" }}
+                              onClick={() => {
+                                const nextItem = {
+                                  id: `aff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                  companyId: lead.id,
+                                  companyName: buildEffectiveLeadCompanyName({ customerKind: lead.customerKind || "privat", company: lead.company, contactName: lead.contactName }),
+                                  role: normalizeLeadAffiliationRole(affiliationRoleDraft),
+                                  createdAt: new Date().toISOString(),
+                                };
+                                setDetailDraft((draft) => ({
+                                  ...(draft || {}),
+                                  affiliations: [...((draft?.affiliations || selectedLeadForHistory.affiliations || []).filter((entry) => entry.companyId !== lead.id)), nextItem],
+                                }));
+                                setAffiliationSearch("");
+                              }}
+                            >
+                              Hinzufügen
+                            </button>
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+                <div className="report-detail-field">
+                  <label>Standardrolle</label>
+                  <select value={affiliationRoleDraft} onChange={(e) => setAffiliationRoleDraft(e.target.value)}>
+                    <option value="Mitarbeiter">Mitarbeiter</option>
+                    <option value="Geschäftsführer">Geschäftsführer</option>
+                    <option value="Inhaber">Inhaber</option>
+                    <option value="Vorstand">Vorstand</option>
+                    <option value="Beirat">Beirat</option>
+                    <option value="Kontakt">Kontakt</option>
+                    <option value="Sonstige">Sonstige</option>
+                  </select>
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <label>Aktuelle Zugehörigkeiten</label>
+                  {(detailDraft?.affiliations || selectedLeadForHistory.affiliations || []).length === 0 ? (
+                    <p className="subtle" style={{ margin: 0 }}>Noch keine Zugehörigkeiten hinterlegt.</p>
+                  ) : (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {(detailDraft?.affiliations || selectedLeadForHistory.affiliations || []).map((affiliation) => (
+                        <div key={affiliation.id} className="affiliation-card">
+                          <div className="affiliation-card-main">
+                            <div className="affiliation-name-row">
+                              <strong>{affiliation.companyName}</strong>
+                              <span className="affiliation-role-badge">{affiliation.role}</span>
+                            </div>
+                            <div className="subtle" style={{ fontSize: "0.75rem" }}>Zuordnung</div>
+                          </div>
+                          <button
+                            className="btn ghost"
+                            style={{ fontSize: "0.8rem", padding: "5px 10px" }}
+                            onClick={() => setDetailDraft((draft) => ({
+                              ...(draft || {}),
+                              affiliations: (draft?.affiliations || selectedLeadForHistory.affiliations || []).filter((entry) => entry.id !== affiliation.id),
+                            }))}
+                          >
+                            Entfernen
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <button className="btn" style={{ marginTop: 8 }} disabled={busy} onClick={() => void saveLeadDetailsFromModal()}>
+                    Zugehörigkeiten speichern
+                  </button>
+                </div>
+              </div> : null}
+
               {crmDetailTab === "pipeline" ? <div className="report-detail-grid top-gap">
                 {!canEditSensitiveCrmFields ? <p className="subtle">Pipeline-Felder koennen nur von Master-Usern bearbeitet werden.</p> : null}
                 <div className="report-detail-field">
@@ -5518,7 +5727,7 @@ export default function HomePage() {
                     <option value="qualifiziert">Qualifiziert</option>
                     <option value="angebot">Angebot</option>
                     <option value="verhandlung">Verhandlung</option>
-                    <option value="gewonnen">Gewonnen</option>
+                    <option value="gewonnen">Abschlüsse / Erfolg</option>
                     <option value="verloren">Verloren</option>
                   </select>
                 </div>
@@ -5705,16 +5914,22 @@ export default function HomePage() {
               {crmDetailTab === "aufgaben" ? <div className="report-detail-field report-detail-full top-gap">
                 <label>Aufgaben</label>
                 <div className="report-detail-grid" style={{ marginTop: 8 }}>
-                  <div className="report-detail-field report-detail-full">
-                    <label>Neue Aufgabe *</label>
-                    <input value={leadTaskDraft.title} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, title: e.target.value }))} placeholder="z. B. Unterlagen nachfassen" />
+                  <div className="report-detail-field">
+                    <label>Gloria-Thema *</label>
+                    <select value={leadTaskDraft.topic || selectedLeadForHistory.topic} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, topic: e.target.value }))}>
+                      {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                    </select>
                   </div>
                   <div className="report-detail-field">
                     <label>Fällig am (optional)</label>
                     <input type="datetime-local" value={leadTaskDraft.dueAt} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, dueAt: e.target.value }))} />
                   </div>
+                  <div className="report-detail-field report-detail-full">
+                    <label>Neue Aufgabe *</label>
+                    <input value={leadTaskDraft.title} onChange={(e) => setLeadTaskDraft((draft) => ({ ...draft, title: e.target.value }))} placeholder="z. B. Rückruf wegen Angebot" />
+                  </div>
                 </div>
-                <button className="btn" style={{ marginTop: 8 }} disabled={busy || !leadTaskDraft.title.trim()} onClick={() => void addLeadTaskFromModal()}>
+                <button className="btn" style={{ marginTop: 8 }} disabled={busy || !leadTaskDraft.title.trim() || !(leadTaskDraft.topic || selectedLeadForHistory.topic)} onClick={() => void addLeadTaskFromModal()}>
                   Aufgabe anlegen
                 </button>
 
@@ -5729,7 +5944,9 @@ export default function HomePage() {
                           <div className="row spread" style={{ gap: 10, alignItems: "center" }}>
                             <div>
                               <strong>{task.title}</strong>
-                              <p className="subtle" style={{ marginTop: 4 }}>Erstellt: {formatDate(task.createdAt)}{task.dueAt ? ` · Fällig: ${formatDate(task.dueAt)}` : ""}</p>
+                              <p className="subtle" style={{ marginTop: 4 }}>
+                                {task.topic ? `Thema: ${task.topic} · ` : ""}Erstellt: {formatDate(task.createdAt)}{task.dueAt ? ` · Fällig: ${formatDate(task.dueAt)}` : ""}
+                              </p>
                             </div>
                             <button className="btn ghost" onClick={() => void completeLeadTaskFromModal(task.id)} disabled={busy}>Als erledigt markieren</button>
                           </div>
@@ -5748,7 +5965,9 @@ export default function HomePage() {
                       {doneTasks.map((task) => (
                         <div key={task.id} className="lead-history-item">
                           <strong>{task.title}</strong>
-                          <p className="subtle" style={{ marginTop: 4 }}>Erledigt: {formatDate(task.completedAt || task.createdAt)}</p>
+                          <p className="subtle" style={{ marginTop: 4 }}>
+                            {task.topic ? `Thema: ${task.topic} · ` : ""}Erledigt: {formatDate(task.completedAt || task.createdAt)}
+                          </p>
                         </div>
                       ))}
                     </div>

@@ -764,12 +764,14 @@ async function initializeSchema() {
       phone TEXT NOT NULL,
       direct_dial TEXT,
       email TEXT,
+      birth_date TEXT,
       location TEXT,
       address_street TEXT,
       address_postal_code TEXT,
       address_city TEXT,
       address_country TEXT,
       products JSONB,
+      affiliations JSONB,
       email_history JSONB,
       tasks JSONB,
       activities JSONB,
@@ -803,11 +805,13 @@ async function initializeSchema() {
 
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_kind TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_owner TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS birth_date TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_street TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_postal_code TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_city TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_country TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS products JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS affiliations JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS tasks JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS activities JSONB;`);
@@ -1858,12 +1862,14 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         phone,
         direct_dial,
         email,
+        birth_date,
         location,
         address_street,
         address_postal_code,
         address_city,
         address_country,
         products,
+        affiliations,
         email_history,
         tasks,
         activities,
@@ -1890,12 +1896,14 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       phone: String(row.phone || ""),
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
       email: row.email ? String(row.email) : undefined,
+      birthDate: row.birth_date ? String(row.birth_date) : undefined,
       location: row.location ? String(row.location) : undefined,
       addressStreet: row.address_street ? String(row.address_street) : undefined,
       addressPostalCode: row.address_postal_code ? String(row.address_postal_code) : undefined,
       addressCity: row.address_city ? String(row.address_city) : undefined,
       addressCountry: row.address_country ? String(row.address_country) : undefined,
       products: parseJsonTextArray(row.products),
+      affiliations: row.affiliations ? (Array.isArray(row.affiliations) ? row.affiliations : JSON.parse(String(row.affiliations || "[]"))) : undefined,
       emailHistory: parseLeadEmailHistory(row.email_history),
       tasks: parseLeadTasks(row.tasks),
       activities: parseLeadActivities(row.activities),
@@ -1955,12 +1963,14 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             phone,
             direct_dial,
             email,
+            birth_date,
             location,
             address_street,
             address_postal_code,
             address_city,
             address_country,
             products,
+            affiliations,
             email_history,
             tasks,
             activities,
@@ -1972,7 +1982,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -1986,12 +1996,14 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             phone = EXCLUDED.phone,
             direct_dial = EXCLUDED.direct_dial,
             email = EXCLUDED.email,
+            birth_date = EXCLUDED.birth_date,
             location = EXCLUDED.location,
             address_street = EXCLUDED.address_street,
             address_postal_code = EXCLUDED.address_postal_code,
             address_city = EXCLUDED.address_city,
             address_country = EXCLUDED.address_country,
             products = EXCLUDED.products,
+            affiliations = EXCLUDED.affiliations,
             email_history = EXCLUDED.email_history,
             tasks = EXCLUDED.tasks,
             activities = EXCLUDED.activities,
@@ -2015,12 +2027,14 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.phone,
             lead.directDial || null,
             lead.email || null,
+            lead.birthDate || null,
             lead.location || null,
             lead.addressStreet || null,
             lead.addressPostalCode || null,
             lead.addressCity || null,
             lead.addressCountry || null,
             JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
+            JSON.stringify(lead.affiliations || null),
             JSON.stringify(lead.emailHistory || []),
             JSON.stringify(lead.tasks || []),
             JSON.stringify(lead.activities || []),

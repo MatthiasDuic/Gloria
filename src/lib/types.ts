@@ -34,6 +34,7 @@ export interface LeadEmailActivity {
 export interface LeadTask {
   id: string;
   title: string;
+  topic?: string;
   dueAt?: string;
   status: "open" | "done";
   createdAt: string;
@@ -70,12 +71,20 @@ export interface CrmSavedView {
 
 export interface CrmUiPreferences {
   crmTab?: "customers" | "pipeline" | "callbacks";
-  crmDetailTab?: "stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben";
+  crmDetailTab?: "stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
   crmSearch?: string;
   crmTypeFilter?: "" | "BarmeniaGothaer" | "Agentur-Duic";
   crmCustomerKindFilter?: "" | "privat" | "firma";
   crmPipelineFilter?: "" | LeadPipelineStage;
   crmContactFilter?: "" | "mitEmail" | "ohneEmail" | "mitTelefon";
+}
+
+export interface LeadAffiliation {
+  id: string;
+  companyId?: string;
+  companyName: string;
+  role: string;
+  createdAt: string;
 }
 
 export interface Lead {
@@ -90,12 +99,14 @@ export interface Lead {
   phone: string;
   directDial?: string;
   email?: string;
+  birthDate?: string;
   location?: string;
   addressStreet?: string;
   addressPostalCode?: string;
   addressCity?: string;
   addressCountry?: string;
   products?: string[];
+  affiliations?: LeadAffiliation[];
   emailHistory?: LeadEmailActivity[];
   tasks?: LeadTask[];
   activities?: LeadActivity[];
