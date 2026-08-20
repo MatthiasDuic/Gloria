@@ -5879,41 +5879,49 @@ export default function HomePage() {
                   {getLeadProductDetailsForDraft(detailDraft).length === 0 && !productEditorDraft ? (
                     <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte vorhanden. Klicke auf "+ Produkt hinzufügen".</p>
                   ) : null}
-                  <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "grid", gap: 6 }}>
                     {getLeadProductDetailsForDraft(detailDraft).map((product) => {
                       const isExpanded = expandedProductId === product.id;
+                      // append EUR only if not already present in the premium string
+                      const premiumDisplay = product.premium
+                        ? (/eur|€/i.test(product.premium) ? product.premium : `${product.premium} EUR`)
+                        : null;
                       return (
-                        <div key={product.id} className="panel static-panel" style={{ padding: 0, overflow: "hidden" }}>
+                        <div key={product.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "white" }}>
+                          {/* summary row – always visible */}
                           <button
                             className="link-button"
-                            style={{ width: "100%", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, background: isExpanded ? "#f0f9ff" : "white", borderBottom: isExpanded ? "1px solid #e5e7eb" : "none" }}
+                            style={{ width: "100%", padding: "10px 14px", display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 12, background: isExpanded ? "#f0f9ff" : "white" }}
                             onClick={() => setExpandedProductId(isExpanded ? null : product.id)}
                           >
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-                              <strong>{product.label || product.category}</strong>
-                              <span className="subtle" style={{ fontSize: "0.8rem" }}>{product.category}{product.insurer ? ` · ${product.insurer}` : ""}{product.premium ? ` · ${product.premium}` : ""}</span>
+                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", textAlign: "left" }}>
+                              <strong style={{ fontSize: "0.92rem" }}>{product.label || product.category}</strong>
+                              {product.insurer ? <span className="subtle" style={{ fontSize: "0.82rem" }}>{product.insurer}</span> : null}
+                              {premiumDisplay ? <span className="subtle" style={{ fontSize: "0.82rem" }}>{premiumDisplay}{product.paymentMethod ? ` / ${product.paymentMethod}` : ""}</span> : null}
+                              {product.startDate ? <span className="subtle" style={{ fontSize: "0.82rem" }}>ab {product.startDate}</span> : null}
                             </div>
-                            <span style={{ fontSize: "0.85rem", color: "#6b7280" }}>{isExpanded ? "▲" : "▼"}</span>
+                            <span style={{ fontSize: "0.8rem", color: "#9ca3af", flexShrink: 0 }}>{isExpanded ? "▲" : "▼"}</span>
                           </button>
+                          {/* details – visible on expand */}
                           {isExpanded ? (
-                            <div style={{ padding: "12px 14px", display: "grid", gap: 6 }}>
-                              <div className="subtle" style={{ display: "grid", gap: 4, fontSize: "0.87rem" }}>
-                                {product.insurer ? <span><strong>Gesellschaft:</strong> {product.insurer}</span> : null}
-                                {product.contractNumber ? <span><strong>Vertragsnummer:</strong> {product.contractNumber}</span> : null}
-                                {product.premium ? <span><strong>Beitrag:</strong> {product.premium} ({product.paymentMethod || "monatlich"})</span> : null}
-                                {product.productType ? <span><strong>Produkttyp:</strong> {product.productType}</span> : null}
-                                {product.energyType ? <span><strong>Energieart:</strong> {product.energyType}</span> : null}
-                                {product.startDate ? <span><strong>Beginn:</strong> {product.startDate}</span> : null}
-                                {product.endDate ? <span><strong>Ablauf:</strong> {product.endDate}</span> : null}
-                                {product.notes ? <span><strong>Details:</strong> {product.notes}</span> : null}
-                                {product.documentName ? (
-                                  <span><strong>Police:</strong>{" "}
-                                    {product.documentUrl ? (
-                                      <a href={product.documentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "underline" }}>{product.documentName}</a>
-                                    ) : product.documentName}
-                                  </span>
-                                ) : null}
+                            <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb", display: "grid", gap: 4 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "4px 16px", fontSize: "0.86rem", color: "#374151" }}>
+                                {product.insurer ? <span><span style={{ color: "#6b7280" }}>Gesellschaft: </span>{product.insurer}</span> : null}
+                                {product.contractNumber ? <span><span style={{ color: "#6b7280" }}>Vertragsnummer: </span>{product.contractNumber}</span> : null}
+                                {premiumDisplay ? <span><span style={{ color: "#6b7280" }}>Beitrag: </span>{premiumDisplay}</span> : null}
+                                {product.paymentMethod ? <span><span style={{ color: "#6b7280" }}>Zahlweise: </span>{product.paymentMethod}</span> : null}
+                                {product.productType ? <span><span style={{ color: "#6b7280" }}>Produkttyp: </span>{product.productType}</span> : null}
+                                {product.energyType ? <span><span style={{ color: "#6b7280" }}>Energieart: </span>{product.energyType}</span> : null}
+                                {product.startDate ? <span><span style={{ color: "#6b7280" }}>Beginn: </span>{product.startDate}</span> : null}
+                                {product.endDate ? <span><span style={{ color: "#6b7280" }}>Ablauf: </span>{product.endDate}</span> : null}
                               </div>
+                              {product.notes ? <p style={{ margin: "6px 0 0", fontSize: "0.86rem", color: "#374151" }}><span style={{ color: "#6b7280" }}>Details: </span>{product.notes}</p> : null}
+                              {product.documentName ? (
+                                <p style={{ margin: "4px 0 0", fontSize: "0.86rem" }}>
+                                  <span style={{ color: "#6b7280" }}>Police: </span>
+                                  {product.documentUrl ? <a href={product.documentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "underline" }}>{product.documentName}</a> : product.documentName}
+                                </p>
+                              ) : null}
                               <div className="row" style={{ gap: 8, marginTop: 8 }}>
                                 <button className="btn ghost" style={{ fontSize: "0.82rem" }} disabled={busy} onClick={() => { startLeadProductEditor(product.category, product); setExpandedProductId(null); }}>Bearbeiten</button>
                                 <button className="btn danger ghost" style={{ fontSize: "0.82rem" }} disabled={busy} onClick={() => void deleteLeadProduct(product.id)}>Löschen</button>
