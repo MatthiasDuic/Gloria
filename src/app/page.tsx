@@ -5772,9 +5772,7 @@ export default function HomePage() {
 
               {crmDetailTab === "produkte" ? <div className="report-detail-grid top-gap">
                 <div className="report-detail-field report-detail-full" style={{ display: "flex", justifyContent: "flex-end" }}>
-                  {!productEditorDraft && (
-                    <button className="btn" onClick={() => startLeadProductEditor()}>+ Produkt hinzufügen</button>
-                  )}
+                  <button className="btn" onClick={() => startLeadProductEditor()}>+ Produkt hinzufügen</button>
                 </div>
 
                 {productEditorDraft ? (
