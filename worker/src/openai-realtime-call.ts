@@ -11,12 +11,14 @@ import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractContributionPhrase, type PkvConversationAssessment, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractContributionPhrase } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+
+const CANONICAL_PKV_TOPIC = "Beitragsentwicklung in der Gesundheitsversorgung";
 
 type TelnyxFrame =
   | { event: "connected" }
@@ -111,7 +113,7 @@ export function isLikelyNoiseTranscript(text: string): boolean {
 }
 
 export function isSyntheticTranscriptionPrompt(text: string): boolean {
-  return /deutsches telefonat zur privaten krankenversicherung|achte besonders auf eigennamen.*euro[- ]?betr[aä]ge/i.test(text.trim());
+  return /deutsches telefonat zur (?:privaten krankenversicherung|beitragsentwicklung in der gesundheitsversorgung)|achte besonders auf eigennamen.*euro[- ]?betr[aä]ge/i.test(text.trim());
 }
 
 function hasClearFarewellOrRejection(ctx: CallContext): boolean {
@@ -122,19 +124,37 @@ function hasClearFarewellOrRejection(ctx: CallContext): boolean {
 function buildKnownConversationFacts(ctx: CallContext): string {
   const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
   const facts: string[] = [];
-  if (/\b(?:gesetzlich|gkv)\b/i.test(userText)) facts.push("Versicherungsstatus: gesetzlich versichert (bereits geklärt; nicht erneut fragen).");
-  else if (/\b(?:privat|pkv)\b/i.test(userText)) facts.push("Versicherungsstatus: privat versichert (bereits geklärt; nicht erneut fragen).");
+  if (/\b(?:gesetzlich|gkv)\b/i.test(userText)) facts.push("Status: gesetzlich versichert (bereits geklärt; nicht erneut fragen).");
+  else if (/\b(?:privat|pkv)\b/i.test(userText)) facts.push("Status: privat versichert (bereits geklärt; nicht erneut fragen).");
   const contribution = userText.match(/\b(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro\b/i)?.[0];
   if (contribution) facts.push(`Aktueller Monatsbeitrag: ${contribution} (bereits genannt; nicht erneut fragen).`);
   return facts.length ? `BEREITS GEKLÄRTE FAKTEN:\n- ${facts.join("\n- ")}\nDiese Angaben sind verbindlich und haben Vorrang vor allgemeinen Policy-Fragen.` : "";
 }
 
+function normalizePkvTerminology(text: string): string {
+  return text
+    .replace(/\bprivate\s+krankenversicherung\b/gi, "Gesundheitsversorgung")
+    .replace(/\bkrankenversicherung\b/gi, "Gesundheitsversorgung");
+}
+
 export function buildRequiredPkvSequenceInstruction(ctx: CallContext): string {
   if (ctx.topicKind !== "pkv") return "";
-  if (ctx.dialogState.pkvStep >= 6) return "";
+  const transcriptAssessment = assessPkvConversation(ctx.transcript);
+  if (transcriptAssessment.stage === "ready_to_schedule" || ctx.dialogState.pkvStep >= 6) return "";
+
+  const derivedStepByAssessment = transcriptAssessment.stage === "need_interest" || transcriptAssessment.stage === "need_concept"
+    ? 5
+    : transcriptAssessment.stage === "need_projection"
+      ? 4
+      : transcriptAssessment.stage === "need_contribution"
+        ? 3
+        : 1;
+
+  const stepFromContext = ctx.dialogState.pkvStep;
+  const step = stepFromContext > 0 ? stepFromContext : derivedStepByAssessment;
   const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
   const contributionPhrase = extractContributionPhrase(userText);
-  return `AKTUELLER GESPRÄCHSSCHRITT: ${instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase)}`;
+  return `ZWINGENDER NÄCHSTER SCHRITT: ${instructionForPkvStep(step, contributionPhrase)}`;
 }
 
 function isRelevantPkvStageAnswer(stage: string, text: string): boolean {
@@ -155,15 +175,16 @@ export function buildRealtimeResponseInstructions(
 ): string {
   const facts = buildKnownConversationFacts(ctx);
   const sequence = includeSequence ? buildRequiredPkvSequenceInstruction(ctx) : "";
-  return convertNumbersForSpeech([facts, instructions, sequence].filter(Boolean).join("\n\n"));
+  const merged = [facts, instructions, sequence].filter(Boolean).join("\n\n");
+  return convertNumbersForSpeech(normalizePkvTerminology(merged));
 }
 
 export function shouldRestoreDecisionMakerIntro(params: {
   decisionMakerIntroWasLastResponse: boolean;
   playbackPending: boolean;
 }): boolean {
-  // Re-trigger intro if it was interrupted mid-playback by a barge-in.
-  return params.decisionMakerIntroWasLastResponse && params.playbackPending;
+  // Never replay the full intro after interruptions; continue contextually instead.
+  return false;
 }
 
 function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -177,6 +198,10 @@ const DECISION_MAKER_INTRO = "Guten Tag, mein Name ist Gloria. Ich bin die digit
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
   if (ctx.dialogState.pkvStep >= 6) return { ok: true };
+  const assessment = assessPkvConversation(ctx.transcript);
+  if (assessment.stage === "ready_to_schedule") return { ok: true };
+  const stagedReason = instructionForPkvStage(assessment);
+  if (stagedReason) return { ok: false, reason: stagedReason };
   const userText = ctx.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
   const contributionPhrase = extractContributionPhrase(userText);
   return { ok: false, reason: instructionForPkvStep(ctx.dialogState.pkvStep, contributionPhrase) };
@@ -201,8 +226,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   const parts = [
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
-    "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und entscheide erst dann frei, welcher nächste Schritt sinnvoll ist.",
-    "Sprich natürlich, klar und in passenden Gesprächsabschnitten. Setze kurze natürliche Pausen mit Kommas und kurzen Sätzen, statt lange Satzketten oder Aufzählungen zu sprechen. Stelle höchstens eine Frage pro Turn. Formuliere die Frage möglichst als letzten Satz. Sobald du eine Frage gestellt hast, beendest du deinen Turn vollständig und sprichst nicht weiter, bis der Kunde geantwortet hat. Keine Absätze, keine Wiederholung derselben Rechnung.",
+    "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und führe dann direkt im aktiven Gesprächsschritt weiter.",
+    "Sprich natürlich und knapp in kurzen Sätzen. Stelle höchstens eine Frage pro Turn als letzten Satz. Sobald du die Frage gestellt hast, beendest du deinen Turn vollständig und wartest.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
@@ -233,12 +258,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch warm, professionell und empathisch durch diese Phasen:\n" +
       "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht.\n" +
       "2. RELEVANZ: Beitragsentwicklung in der Gesundheitsversorgung ansprechen, offene Frage wie der Kunde damit umgeht.\n" +
-      "3. VERTIEFUNG: Emotional auf Antwort eingehen, vertiefende Frage stellen.\n" +
+      "3. VERTIEFUNG: Kläre mit genau einer Frage, ob der Kunde bereits einen konkreten Plan zur Beitragsentwicklung und Absicherung bis zum Ruhestand hat.\n" +
       "4. BEITRAG: Hochrechnung anbieten, Monatsbeitrag erfragen.\n" +
       "5. HOCHRECHNUNG: 10-Jahres-Projektion präsentieren, fragen ob schon so betrachtet.\n" +
       "6. KONZEPT: Persönlich und emotional — Herrn Duics Ansatz als Lösung des Kundenproblems erklären.\n" +
       "7. TERMIN: Vor-Ort-Termin vereinbaren (Vor- oder Nachmittag, 2 Optionen, Kundenwunsch akzeptieren).\n" +
-      "SPRACHE: Sprich immer von 'Beitragsentwicklung in der Gesundheitsversorgung', NIEMALS von 'privater Krankenversicherung' oder 'PKV'. Frage NICHT nach gesetzlich oder privat versichert.\n" +
+      "SPRACHE: Sprich immer von 'Beitragsentwicklung in der Gesundheitsversorgung'. Frage NICHT nach gesetzlich oder privat versichert.\n" +
       "PROFESSIONALITÄT: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch, präzise, zugewandt.",
     );
   }
@@ -252,48 +277,40 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(`Bereits bestätigter Termin: ${ctx.confirmedSlotPhrase}. Diesen Termin nicht verändern.`);
   }
   
-  // Dialog state: Track which questions have been asked to prevent repetition
-  if (ctx.dialogState.askedQuestions.size > 0) {
-    const askedCount = ctx.dialogState.askedQuestions.size;
-    parts.push(
-      `BEREITS GESTELLTE FRAGEN (${askedCount}): Du hast bereits ${askedCount} Frage(n) gestellt. ` +
-      `Stelle diese Fragen nicht erneut. Wenn der Kunde die Antwort wiederholt oder zu einer anderen Frage überleitet, ` +
-      `akzeptiere das und stelle nur neue Fragen, die noch nicht geklärt sind.`,
-    );
-  }
-
   // Phase-specific instructions to keep conversation on track
-  const phase = ctx.dialogState.phase;
-  if (phase === "opener") {
-    parts.push(
-      "PHASE: ERÖFFNUNG - Du befindest dich in der Eröffnungsphase. Deine Aufgabe: " +
-      "Freundliche Begrüßung, kurze Erklärung warum du anrufst, und Zustimmung zum Gespräch bekommen. " +
-      "Stelle KEINE inhaltlichen Fragen zu Versicherung, Beiträgen oder Kundensituation.",
-    );
-  } else if (phase === "discovery") {
-    parts.push(
-      "PHASE: BEDARFSKLÄRUNG - Du befindest dich in der Discovery-Phase. Deine Aufgabe: " +
-      "Verstehe die aktuelle Situation des Kunden (Alter, Beitrag, Versicherungsstatus, Bedenken). " +
-      "Stelle gezielt Fragen die den Nutzen unserer Analyse erklären. Keine Termin-Angebote in dieser Phase.",
-    );
-  } else if (phase === "objection") {
-    parts.push(
-      "PHASE: EINWAND-HANDLING - Du befindest dich in der Objection-Handling-Phase. Deine Aufgabe: " +
-      "Der Kunde hat einen Einwand oder Bedenken. Nimm ihn ernst, verstehe die konkrete Sorge, " +
-      "und beantworte ihn sachlich mit Fokus auf den Nutzen des Termins. Nach Einwand-Handling, zurück zu Discovery.",
-    );
-  } else if (phase === "close" || phase === "done") {
-    parts.push(
-      "PHASE: TERMIN/ABSCHLUSS - Du befindest dich in der Abschlussphase. Deine Aufgabe: " +
-      "Termin anbieten und bestätigen, oder bei Ablehnung respektvoll verabschieden. " +
-      "Keine neuen Discovery-Fragen mehr.",
-    );
+  if (ctx.topicKind !== "pkv") {
+    const phase = ctx.dialogState.phase;
+    if (phase === "opener") {
+      parts.push(
+        "PHASE: ERÖFFNUNG - Du befindest dich in der Eröffnungsphase. Deine Aufgabe: " +
+        "Freundliche Begrüßung, kurze Erklärung warum du anrufst, und Zustimmung zum Gespräch bekommen. " +
+        "Stelle KEINE inhaltlichen Fragen zu Versicherung, Beiträgen oder Kundensituation.",
+      );
+    } else if (phase === "discovery") {
+      parts.push(
+        "PHASE: BEDARFSKLÄRUNG - Du befindest dich in der Discovery-Phase. Deine Aufgabe: " +
+        "Verstehe die aktuelle Situation des Kunden (Alter, Beitrag, Status, Bedenken). " +
+        "Stelle gezielt Fragen die den Nutzen unserer Analyse erklären. Keine Termin-Angebote in dieser Phase.",
+      );
+    } else if (phase === "objection") {
+      parts.push(
+        "PHASE: EINWAND-HANDLING - Du befindest dich in der Objection-Handling-Phase. Deine Aufgabe: " +
+        "Der Kunde hat einen Einwand oder Bedenken. Nimm ihn ernst, verstehe die konkrete Sorge, " +
+        "und beantworte ihn sachlich mit Fokus auf den Nutzen des Termins. Nach Einwand-Handling, zurück zu Discovery.",
+      );
+    } else if (phase === "close" || phase === "done") {
+      parts.push(
+        "PHASE: TERMIN/ABSCHLUSS - Du befindest dich in der Abschlussphase. Deine Aufgabe: " +
+        "Termin anbieten und bestätigen, oder bei Ablehnung respektvoll verabschieden. " +
+        "Keine neuen Discovery-Fragen mehr.",
+      );
+    }
   }
   
   parts.push("VERBINDLICHE ERSTKONTAKT-REGEL: Dies ist grundsätzlich eine Neukundenakquise und der erste Kontakt. Behaupte niemals, der Kunde habe eine Anfrage gestellt, Unterlagen gesendet oder um einen Rückruf geboten, außer der Rückruf ist ausdrücklich als Rückruf gekennzeichnet. Verwende am Gesprächsbeginn den vorgegebenen Erstkontakt-Wortlaut und beginne nicht mit der Versicherungsfrage.");
 
   const instructions = parts.join("\n\n");
-  return convertNumbersForSpeech(instructions);
+  return convertNumbersForSpeech(normalizePkvTerminology(instructions));
 }
 
 /**
@@ -403,14 +420,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let currentAssistantTurnIndex: number | undefined;
   let decisionMakerIntroPending = false;
   let decisionMakerIntroWasLastResponse = false;
+  let responseCreatedAt: number | null = null;
+  let firstModelTokenAt: number | null = null;
+  let firstTtsChunkAt: number | null = null;
   let preparationState: PreparationState = createPreparationState();
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
-  let lastPkvAssessment: PkvConversationAssessment | null = null;
-  let lastPkvAssessmentTranscriptLength = -1;
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -425,7 +443,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const playback = new TelnyxPlayback({
-    prebufferFrames: 3,
+    prebufferFrames: 2,
     sendFrame: (frame) => sendTelnyx({
       event: "media",
       stream_id: streamId,
@@ -447,6 +465,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         playbackPending,
       });
     },
+    cooldownMs: Number.parseInt(process.env.OPENAI_RESPONSE_COOLDOWN_MS?.trim() || "40", 10),
   });
 
   const updateSession = () => {
@@ -454,7 +473,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.75");
     const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "800", 10);
     const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "300", 10);
-    const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "520", 10);
+    const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "220", 10);
     sendOpenAi({
       type: "session.update",
       session: {
@@ -505,7 +524,21 @@ export async function handleOpenAiRealtimeTelnyxStream(
     try {
       await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
         if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
-        if (audioBytes === 0) ttsPlaybackStartedAt = Date.now(); // set on first real audio chunk
+        if (audioBytes === 0) {
+          const now = Date.now();
+          ttsPlaybackStartedAt = now; // set on first real audio chunk
+          firstTtsChunkAt = now;
+          const userFinalAt = ctx?.lastUserFinalAt;
+          if (ctx && userFinalAt) {
+            log.info("realtime.turn_latency", {
+              callSid: ctx.callSid,
+              asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - userFinalAt : undefined,
+              asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - userFinalAt : undefined,
+              asrFinalToFirstTtsChunkMs: now - userFinalAt,
+              responseCreatedToFirstTtsChunkMs: responseCreatedAt ? now - responseCreatedAt : undefined,
+            });
+          }
+        }
         audioBytes += chunk.length;
         playback.appendBase64Audio(chunk.toString("base64"));
       }, ctx?.voiceProfile);
@@ -539,19 +572,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
-  const cachedAssessPkvConversation = (transcript: ConversationTurn[]): PkvConversationAssessment => {
-    // Cache result if transcript length hasn't changed
-    if (lastPkvAssessmentTranscriptLength === transcript.length && lastPkvAssessment) {
-      return lastPkvAssessment;
-    }
-    lastPkvAssessment = assessPkvConversation(transcript);
-    lastPkvAssessmentTranscriptLength = transcript.length;
-    return lastPkvAssessment;
-  };
-
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
-    requestResponse("Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, Versicherung oder Termin.");
+    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
   };
 
   const requestInterruptedIntroContinuation = () => {
@@ -581,15 +604,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     currentContext.lastUserFinalAt = Date.now();
     currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
     rotateTranscriptIfNeeded(currentContext);
-    
-    // Track answered questions (any user response after a question is implicitly answering)
-    currentContext.dialogState.answeredQuestions.add(`turn-${currentContext.transcript.length}`);
+
     updateDialogPhase(currentContext);
     // Reset deduplication so same instruction can fire again after user speaks
     responses.clearLastHash();
-    // Invalidate PKV assessment cache to force re-evaluation with new user turn
-    lastPkvAssessmentTranscriptLength = -1;
-    
+
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
     const event = classifyConversationEvent(transcript);
@@ -639,11 +658,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
       return;
     }
 
-    if (currentContext.topicKind === "pkv") {
-      // For PKV: invalidate the assessment cache since transcript changed
-      lastPkvAssessmentTranscriptLength = -1;
-    }
-
     if (preparationState.stage === "inactive") {
       // ── PKV: step-based state machine ──────────────────────────────────────
       if (currentContext.topicKind === "pkv") {
@@ -652,7 +666,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         // Customer asks a question or raises an objection → answer then return to current step
         if (event.type === "customer_question" || event.type === "objection") {
           const userTextAll = currentContext.transcript.filter(t => t.role === "user").map(t => t.text).join(" ");
-          const returnInstruction = `Nach der Antwort kehre direkt zur aktuellen Aufgabe zurück: ${instructionForPkvStep(currentStep, extractContributionPhrase(userTextAll))}`;
+          const returnInstruction = `Antworte kurz und konkret auf den Einwand oder die Frage. Kehre dann unmittelbar zum aktuellen Gesprächsschritt zurück und stelle genau eine passende Folgefrage: ${instructionForPkvStep(currentStep, extractContributionPhrase(userTextAll))}`;
           requestEventResponse(instructionForConversationEvent(event, returnInstruction));
           return;
         }
@@ -889,6 +903,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.created") {
+        responseCreatedAt = Date.now();
+        firstModelTokenAt = null;
+        firstTtsChunkAt = null;
         responses.markCreated();
         playback.startResponse();
         // ttsPlaybackStartedAt is set on first audio chunk in speakWithElevenLabs
@@ -918,6 +935,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.output_audio_transcript.delta" || message.type === "response.audio_transcript.delta") {
         if (responseInterrupted) return;
+        if (!firstModelTokenAt) firstModelTokenAt = Date.now();
         assistantTranscript += message.delta || "";
         assistantTranscriptDeltaSeen = true;
         return;
@@ -925,6 +943,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "response.output_text.delta" || message.type === "response.text.delta") {
         if (responseInterrupted) return;
+        if (!firstModelTokenAt) firstModelTokenAt = Date.now();
         assistantTranscript += message.delta || "";
         assistantTranscriptDeltaSeen = true;
         return;
@@ -957,6 +976,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
           responses.markCancelled();
           responseInterrupted = false;
+          responseCreatedAt = null;
+          firstModelTokenAt = null;
+          firstTtsChunkAt = null;
           activeAssistantItemId = "";
           assistantAudioBytes = 0;
           assistantTranscript = "";
@@ -971,15 +993,20 @@ export async function handleOpenAiRealtimeTelnyxStream(
           : assistantTranscript.replace(/\s+/g, " ").trim();
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
+          if (ctx.lastUserFinalAt) {
+            log.info("realtime.turn_latency_completed", {
+              callSid: ctx.callSid,
+              asrFinalToResponseDoneMs: Date.now() - ctx.lastUserFinalAt,
+              asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - ctx.lastUserFinalAt : undefined,
+              asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - ctx.lastUserFinalAt : undefined,
+              asrFinalToFirstTtsChunkMs: firstTtsChunkAt ? firstTtsChunkAt - ctx.lastUserFinalAt : undefined,
+            });
+          }
           ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
           rotateTranscriptIfNeeded(ctx);
-          
-          // Track asked questions (any question-like assistant turn)
-          if (/\?/.test(transcript)) {
-            ctx.dialogState.askedQuestions.add(`turn-${ctx.transcript.length}`);
-          }
+
           updateDialogPhase(ctx);
-          
+
           currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }
@@ -1013,6 +1040,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const nextUserTranscript = pending.at(-1)?.trim() ?? "";
         if (nextUserTranscript) processUserTranscript(nextUserTranscript);
         responses.flush();
+        responseCreatedAt = null;
+        firstModelTokenAt = null;
+        firstTtsChunkAt = null;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
         return;
@@ -1021,6 +1051,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.cancelled" || message.type === "response.canceled") {
         responses.markCancelled();
         responseInterrupted = false;
+        responseCreatedAt = null;
+        firstModelTokenAt = null;
+        firstTtsChunkAt = null;
         activeAssistantItemId = "";
         assistantAudioBytes = 0;
         assistantTranscript = "";
@@ -1160,6 +1193,28 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
 
 function convertNumbersForSpeech(text: string): string {
+  const percentageToSpeech = (value: string): string => {
+    const normalized = value.replace(".", ",");
+    if (!normalized.includes(",")) return formatAmountForSpeech(normalized);
+    const [whole, decimals] = normalized.split(",");
+    const wholePart = formatAmountForSpeech(whole || "0");
+    const decimalPart = (decimals || "")
+      .split("")
+      .map((digit) => formatAmountForSpeech(digit))
+      .join(" ");
+    return `${wholePart} Komma ${decimalPart}`.trim();
+  };
+
+  const amountToSpeech = (amount: string): string => {
+    const numericAmount = amount.replace(/\./g, "").split(",")[0];
+    const compact = formatAmountForSpeech(numericAmount);
+    return compact
+      .replace(/tausend/g, "tausend ")
+      .replace(/hundert/g, "hundert ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
   // Convert times like "13:00" to "dreizehn Uhr", "15:30" to "fünfzehn Uhr dreißig"
   const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
   const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
@@ -1174,10 +1229,19 @@ function convertNumbersForSpeech(text: string): string {
     return `${hourWord} Uhr ${minuteWord}`;
   });
 
-  result = result.replace(/\b(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(Euro|EUR|€)\b/gi, (match, amount, unit) => {
-    const numericAmount = amount.replace(/\./g, "").split(",")[0];
-    return `${formatAmountForSpeech(numericAmount)} ${unit === "€" ? "Euro" : unit}`;
+  result = result.replace(/\b(\d{1,2})\s*-\s*(\d{1,2})\s*%/g, (_match, from, to) => {
+    return `${percentageToSpeech(String(from))} bis ${percentageToSpeech(String(to))} Prozent`;
   });
-  
+
+  result = result.replace(/\b(\d+(?:[.,]\d+)?)\s*%/g, (_match, value) => {
+    return `${percentageToSpeech(String(value))} Prozent`;
+  });
+
+  result = result.replace(/\b(\+?\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(Euro|EUR|€)(?:\s*\/\s*(?:Mo|Monat))?\b/gi, (_match, amount, unit) => {
+    const spokenAmount = amountToSpeech(String(amount).replace(/^\+/, ""));
+    const spokenUnit = unit === "€" ? "Euro" : unit;
+    return `${spokenAmount} ${spokenUnit}`;
+  });
+
   return result;
 }

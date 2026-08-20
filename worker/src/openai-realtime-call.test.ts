@@ -82,8 +82,20 @@ test("formats times and Euro amounts in dynamic response instructions", () => {
   const ctx = buildPkvContext();
   const response = buildRealtimeResponseInstructions(ctx, "Biete Donnerstag, 3. September um 18:00 Uhr und 1.800 Euro an.", false);
   assert.match(response, /achtzehn Uhr/);
-  assert.match(response, /eintausendachthundert Euro/);
+  assert.match(response, /eintausend achthundert Euro/);
   assert.doesNotMatch(response, /18:00|1\.800 Euro/);
+});
+
+test("formats percentages and larger amounts naturally for speech", () => {
+  const ctx = buildPkvContext();
+  const response = buildRealtimeResponseInstructions(
+    ctx,
+    "Bei 5% und 1.286 Euro sieht man die Entwicklung klarer.",
+    false,
+  );
+  assert.match(response, /fünf Prozent/);
+  assert.match(response, /eintausend zweihundert sechsundachtzig Euro/);
+  assert.doesNotMatch(response, /5%|1\.286 Euro/);
 });
 
 test("includes the required decision-maker and gatekeeper opening lines", () => {
@@ -111,14 +123,12 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Beitragsstabilität und Bezahlbarkeit im Alter/);
-  assert.match(instructions, /Bezahlbarkeit im Alter/);
-  assert.match(instructions, /Tarifoptimierung/);
-  assert.match(instructions, /Altersrückstellungen/);
-  assert.match(instructions, /Beitragsentlastungstarife/);
-  assert.match(instructions, /Steuervorteile/);
+  assert.match(instructions, /PKV-GESPRÄCHSZIEL/);
+  assert.match(instructions, /HOCHRECHNUNG: 10-Jahres-Projektion/);
+  assert.match(instructions, /KONZEPT: Persönlich und emotional/);
+  assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
-  assert.match(instructions, /nur auf konkrete Kundenfrage/i);
+  assert.match(instructions, /Eine Frage pro Turn/);
 });
 
 test("uses the standard PKV flow in a strict order: concept → insurance status and contribution", () => {
@@ -130,14 +140,21 @@ test("uses the standard PKV flow in a strict order: concept → insurance status
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const conceptIndex = instructions.search(/Ersttermin zum Kennenlernen/);
-  const projectionIndex = instructions.search(/Beitragsstabilität und Bezahlbarkeit im Alter/);
-  const contributionIndex = instructions.search(/aktuellen Beitrag/);
+  const relevanceIndex = instructions.search(/2\. RELEVANZ/);
+  const contributionIndex = instructions.search(/4\. BEITRAG/);
+  const projectionIndex = instructions.search(/5\. HOCHRECHNUNG/);
+  const conceptIndex = instructions.search(/6\. KONZEPT/);
+  const appointmentIndex = instructions.search(/7\. TERMIN/);
 
+  assert.notEqual(relevanceIndex, -1);
   assert.notEqual(conceptIndex, -1);
   assert.notEqual(projectionIndex, -1);
   assert.notEqual(contributionIndex, -1);
-  assert.ok(conceptIndex < contributionIndex);
+  assert.notEqual(appointmentIndex, -1);
+  assert.ok(relevanceIndex < contributionIndex);
+  assert.ok(contributionIndex < projectionIndex);
+  assert.ok(projectionIndex < conceptIndex);
+  assert.ok(conceptIndex < appointmentIndex);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {
@@ -150,13 +167,13 @@ test("forces the ten-year projection before scheduling after a contribution", ()
   ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
 
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /in zehn Jahren|Beitragsentwicklung/);
-  assert.match(instruction, /Keine Terminfrage/);
+  assert.match(instruction, /10 Jahre|Beitragsentwicklung/);
+  assert.match(instruction, /KEIN Ruhestand|nur 10 Jahre/);
 
   ctx.transcript.push(
     { role: "assistant", text: "Bei 1000 Euro wären es in zehn Jahren ungefähr 1480 Euro.", at: 2 },
   );
-  assert.match(buildRequiredPkvSequenceInstruction(ctx), /bis zum Ruhestand/);
+  assert.match(buildRequiredPkvSequenceInstruction(ctx), /Wäre es nicht sinnvoll|Keine Terminfrage/);
 });
 
 test("keeps customer-question responses separate from the PKV sequence", () => {
@@ -200,7 +217,7 @@ test("requires the sensibilization and relevance question after permission to ex
   );
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
   assert.match(instruction, /Beitragsentwicklung|wie nehmen Sie diese entwicklung wahr/i);
-  assert.match(instruction, /Sensibilisiere|steigen Jahr für Jahr/);
+  assert.match(instruction, /Jahr für Jahr.*steigen|3-5% jährlich/);
   assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
 });
 

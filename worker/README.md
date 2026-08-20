@@ -93,6 +93,37 @@ Audio-Realtime ist der Standard. Nur `OPENAI_AUDIO_REALTIME=false` schaltet
 ohne Codeänderung auf die bisherige ASR/Chat/ElevenLabs-Pipeline zurück.
 ElevenLabs-Secrets werden nur für diesen Rückfallpfad benötigt.
 
+## Production Checklist (Realtime)
+
+1. Kern-Env-Variablen setzen:
+      - `OPENAI_REALTIME_MODEL=gpt-realtime-2.1`
+      - `OPENAI_REALTIME_REASONING_EFFORT=low`
+      - `OPENAI_REALTIME_MAX_OUTPUT_TOKENS=220`
+      - `OPENAI_REALTIME_SILENCE_MS=650`
+      - `OPENAI_REALTIME_PREFIX_PADDING_MS=300`
+      - `OPENAI_RESPONSE_COOLDOWN_MS=40`
+      - `TELNYX_SILENCE_OPENER_MS=4500`
+      - `ELEVENLABS_MODEL=eleven_flash_v2_5`
+      - `ELEVENLABS_STREAMING_LATENCY=2`
+
+2. Terminologie verifizieren:
+      - In PKV-Calls soll konsistent `Beitragsentwicklung in der Gesundheitsversorgung` verwendet werden.
+      - Keine Mischung aus `PKV`/`Krankenversicherung` in Kundensätzen, außer wenn der Kunde selbst so spricht.
+
+3. Strukturtreue prüfen:
+      - PKV-Reihenfolge: `ERLAUBNIS -> RELEVANZ -> VERTIEFUNG -> BEITRAG -> HOCHRECHNUNG -> KONZEPT -> TERMIN`.
+      - Genau eine Frage pro Turn.
+
+4. Messbare Latenz-Ziele in Logs überwachen:
+      - `realtime.turn_latency`
+      - `realtime.turn_latency_completed`
+      - Zielwerte: `asrFinalToResponseCreatedMs < 450`, `asrFinalToFirstTtsChunkMs < 1400`, `asrFinalToResponseDoneMs < 2200`.
+
+5. Operative Regression-Checks vor Deploy:
+      - `npm run typecheck`
+      - `npm test`
+      - Mindestens ein Testanruf mit aktivem Barge-in (Unterbrechung während laufender Antwort).
+
 ### Offen (nächste Iteration)
 
 - [ ] Persistenz: am Stream-Ende Transcript & Outcome an Vercel posten

@@ -59,26 +59,26 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
     case 1:
       return (
         "Der Kunde hat zugestimmt. Erkläre in 1-2 eigenen, natürlichen Sätzen, dass die Beiträge in der " +
-        "Gesundheitsversorgung laut PKV-Verbänden jährlich im Durchschnitt 3-5% steigen — und das über die Jahre erheblich wird. " +
-        "Sprich NICHT von 'privater Krankenversicherung' oder 'PKV' — sage 'Beiträge in der Gesundheitsversorgung'. " +
+        "Gesundheitsversorgung Jahr für Jahr steigen, im Durchschnitt etwa 3-5% jährlich, und das über die Jahre erheblich wird. " +
+        "Sprich konsistent von 'Beitragsentwicklung in der Gesundheitsversorgung'. " +
         "Frage dann genau einmal wie der Kunde damit umgeht oder wie er das erlebt. Warte vollständig auf die Antwort."
       );
 
     case 2:
-      // VERTIEFUNG: emotional follow-up before asking for contribution
+      // VERTIEFUNG: clarify whether customer already has a plan for contribution trend and retirement preparedness
       return (
-        "Gehe persönlich auf die Antwort des Kunden ein. Benenne konkret was er gesagt hat und zeige echtes Verständnis " +
-        "(z.B. 'Das kenne ich — wenn man jedes Jahr mehr zahlt und das Gefühl hat darauf keinen Einfluss zu haben...'). " +
-        "Stelle dann genau eine vertiefende Frage die zur Antwort des Kunden passt, z.B.: " +
-        "'Was belastet Sie dabei mehr — die Unplanbarkeit, oder ist es der Betrag der sich aufsummiert?' " +
-        "oder 'Haben Sie das Gefühl, das einfach hinnehmen zu müssen, oder schauen Sie aktiv nach Möglichkeiten?' " +
-        "Nur diese eine Frage. Warte vollständig auf die Antwort."
+        "Gehe kurz auf die Antwort des Kunden ein und zeige Verständnis in einem Satz. " +
+        "Kläre dann gezielt, ob bereits ein konkreter Plan für die Beitragsentwicklung und die Absicherung bis zum Ruhestand besteht. " +
+        "Stelle genau eine vertiefende Frage, zum Beispiel: " +
+        "'Haben Sie dafür bereits einen klaren Plan, wie Sie mit der Beitragsentwicklung umgehen und sich bis zum Ruhestand absichern?' " +
+        "Wenn nein oder unklar: frage kurz nach, warum das bisher keine Priorität hatte. " +
+        "Nur diese eine Frage pro Turn. Warte vollständig auf die Antwort."
       );
 
     case 3:
       return (
         "Greife die Antwort des Kunden kurz auf (ein Satz). " +
-        "Leite dann über: 'Ich kann das für Sie einmal konkret hochrechnen — so sehen Sie schwarz auf weiß, was das in den nächsten Jahren bedeutet. " +
+        "Leite dann über: 'Ich kann das für Sie einmal konkret hochrechnen, damit Sie ein Gefühl dafür bekommen, wohin die Reise geht und was in den nächsten Jahren auf Sie zukommen wird, wenn die Entwicklung so weitergeht. " +
         "Wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage. Warte auf die Antwort."
       );
 
@@ -90,7 +90,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         if (amount) {
           const y10 = roundToFive(Math.round(amount * (1.04 ** 10)));
           const d10 = roundToFive(y10 - amount);
-          hint = ` RECHENWERTE (exakt so verwenden): ${amount}€ heute → ca. ${y10}€ in 10 Jahren (+${d10}€/Mo).`;
+          hint = ` RECHENWERTE (exakt so verwenden): heute ${amount} Euro, in 10 Jahren circa ${y10} Euro, das sind etwa ${d10} Euro mehr pro Monat.`;
         }
       }
       return (
@@ -110,7 +110,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         "Er schaut sich die Beitragsentwicklung gemeinsam mit dem Kunden an, rechnet den Beitrag konkret hoch " +
         "und zeigt persönlich welche Stellschrauben es gibt, um langfristig mehr Kontrolle zu haben. " +
         "Stelle dann eine offene, einladende Frage: 'Wäre es nicht sinnvoll, das einmal zusammen im Detail anzuschauen?' " +
-        "Kein Verkaufsdruck, kein Pitch. KEINE Erwähnung von Termindauer oder Anzahl Termine — nur wenn der Kunde fragt. " +
+        "Kein Verkaufsdruck, kein Pitch. KEINE Erwähnung von Termindauer oder Anzahl Termine — nur wenn der Kunde fragt. Keine Terminfrage, bevor der Kunde klar Interesse bestätigt. " +
         "Warte auf klares Ja oder Nein."
       );
 
@@ -183,18 +183,31 @@ export function advancePkvStep(
 export function assessPkvConversation(turns: ConversationTurn[]): PkvConversationAssessment {
   const userText = turns.filter(t => t.role === "user").map(t => t.text).join(" ");
   const assistantText = turns.filter(t => t.role === "assistant").map(t => t.text).join(" ");
+  if (!turns.length || !userText.trim()) {
+    return { stage: "need_relevance", contributionPhrase: undefined, projectionDelivered: false, conceptDelivered: false, interestConfirmed: false };
+  }
   const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
   const projectionDelivered = /(?:zehn\s+jahren|10\s+jahren|hochrechn|mehrbetrag)/i.test(assistantText);
-  const conceptDelivered = /(?:herr\s+duic|altersrückstell|beitragsentlastung)/i.test(assistantText);
-  const lastUserText = turns.slice().reverse().find(t => t.role === "user")?.text || "";
-  const lastAssistantText = turns.slice().reverse().find(t => t.role === "assistant")?.text || "";
-  const interestConfirmed = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut)\b/i.test(lastUserText)
-    && /(?:interessant|termin|klingt|konzept)/i.test(lastAssistantText);
+  const conceptDelivered = /(?:herr\s+duic|altersrückstell|beitragsentlastung|bis\s+zum\s+ruhestand|f[üu]r\s+ihre\s+planung|wie\s+f[üu]hlt\s+sich\s+diese\s+entwicklung)/i.test(assistantText);
+
+  let interestConfirmed = false;
+  for (let index = 1; index < turns.length; index += 1) {
+    const current = turns[index];
+    const previous = turns[index - 1];
+    if (current.role !== "user" || previous.role !== "assistant") continue;
+    const affirmative = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|hilfreich|sinnvoll|passt)\b/i.test(current.text);
+    const conceptPrompt = /(?:interessant|termin|klingt|konzept|hilfreich|klarheit|sinnvoll|zusammen\s+im\s+detail)/i.test(previous.text);
+    if (affirmative && conceptPrompt) {
+      interestConfirmed = true;
+      break;
+    }
+  }
+
   const stage: PkvConversationStage = interestConfirmed ? "ready_to_schedule"
     : conceptDelivered ? "need_interest"
     : projectionDelivered ? "need_concept"
     : contributionPhrase ? "need_projection"
-    : "need_contribution";
+    : /beitrag|entwicklung|versichert|gesundheitsversorgung/i.test(userText) ? "need_contribution" : "need_relevance";
   return { stage, contributionPhrase, projectionDelivered, conceptDelivered, interestConfirmed };
 }
 
