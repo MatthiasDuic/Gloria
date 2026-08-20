@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, CrmSavedView, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
 import type { LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
@@ -41,6 +41,7 @@ export interface AppUser {
   selectedVoiceId: string;
   allowedPlaybookTopics: string[];
   crmSavedViews: CrmSavedView[];
+  crmUiPreferences: CrmUiPreferences;
   passwordHash: string;
   role: UserRole;
   createdAt: string;
@@ -219,13 +220,34 @@ function parseCrmSavedViews(value: unknown): CrmSavedView[] {
       const search = typeof row.search === "string" ? row.search : "";
       const owner = row.owner === "BarmeniaGothaer" || row.owner === "Agentur-Duic" ? row.owner : "";
       const customerKind = row.customerKind === "privat" || row.customerKind === "firma" ? row.customerKind : "";
-      const productFilter = typeof row.productFilter === "string" ? row.productFilter : "";
       const createdAt = typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString();
       if (!id || !name) return null;
-      return { id, name, search, owner, customerKind, productFilter, createdAt } as CrmSavedView;
+      return { id, name, search, owner, customerKind, createdAt } as CrmSavedView;
     })
     .filter((entry): entry is CrmSavedView => Boolean(entry))
     .slice(0, 20);
+}
+
+function parseCrmUiPreferences(value: unknown): CrmUiPreferences {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const row = value as Record<string, unknown>;
+  return {
+    crmTab: row.crmTab === "customers" || row.crmTab === "pipeline" || row.crmTab === "callbacks" ? row.crmTab : undefined,
+    crmDetailTab:
+      row.crmDetailTab === "stammdaten"
+      || row.crmDetailTab === "pipeline"
+      || row.crmDetailTab === "historie"
+      || row.crmDetailTab === "kommunikation"
+      || row.crmDetailTab === "termine"
+      || row.crmDetailTab === "aufgaben"
+        ? row.crmDetailTab
+        : undefined,
+    crmSearch: typeof row.crmSearch === "string" ? row.crmSearch : undefined,
+    crmTypeFilter: row.crmTypeFilter === "BarmeniaGothaer" || row.crmTypeFilter === "Agentur-Duic" || row.crmTypeFilter === "" ? row.crmTypeFilter : undefined,
+    crmCustomerKindFilter: row.crmCustomerKindFilter === "privat" || row.crmCustomerKindFilter === "firma" || row.crmCustomerKindFilter === "" ? row.crmCustomerKindFilter : undefined,
+  };
 }
 
 function parseLeadEmailHistory(value: unknown): Lead["emailHistory"] {
@@ -365,6 +387,7 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_voice_id TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_playbook_topics JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_saved_views JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_ui_preferences JSONB NOT NULL DEFAULT '{}'::jsonb;`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS phone_numbers (
@@ -851,7 +874,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
     FROM users
     WHERE LOWER(username) = LOWER($1)
     LIMIT 1
@@ -876,6 +899,7 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
+    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -891,7 +915,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
     FROM users
     WHERE id = $1
     LIMIT 1
@@ -916,6 +940,7 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
+    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -935,7 +960,7 @@ export async function listUsers(): Promise<AppUser[]> {
   const db = getPool();
   const result = await db.query(
     `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, password_hash, role, created_at
+    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
     FROM users
     ORDER BY created_at DESC
     `,
@@ -953,6 +978,7 @@ export async function listUsers(): Promise<AppUser[]> {
     selectedVoiceId: String(row.selected_voice_id || ""),
     allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
     crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
+    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
     passwordHash: String(row.password_hash),
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
@@ -1024,6 +1050,7 @@ export async function updateUser(
     selectedVoiceId?: string;
     allowedPlaybookTopics?: string[];
     crmSavedViews?: CrmSavedView[];
+    crmUiPreferences?: CrmUiPreferences;
     password?: string;
     role?: UserRole;
   },
@@ -1065,6 +1092,12 @@ export async function updateUser(
     await db.query(`UPDATE users SET crm_saved_views = $2::jsonb WHERE id = $1`, [
       userId,
       JSON.stringify(input.crmSavedViews.slice(0, 20)),
+    ]);
+  }
+  if (input.crmUiPreferences !== undefined) {
+    await db.query(`UPDATE users SET crm_ui_preferences = $2::jsonb WHERE id = $1`, [
+      userId,
+      JSON.stringify(input.crmUiPreferences || {}),
     ]);
   }
   if (input.password) {
@@ -2523,4 +2556,13 @@ export async function canUserAccessTopic(userId: string, topic: string): Promise
   }
 
   return allowList.includes(topic);
+}
+
+export async function updateUserCrmUiPreferences(userId: string, prefs: CrmUiPreferences): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(
+    `UPDATE users SET crm_ui_preferences = $2::jsonb WHERE id = $1`,
+    [userId, JSON.stringify(prefs || {})],
+  );
 }

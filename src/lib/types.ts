@@ -63,8 +63,15 @@ export interface CrmSavedView {
   search: string;
   owner: "" | "BarmeniaGothaer" | "Agentur-Duic";
   customerKind: "" | "privat" | "firma";
-  productFilter: string;
   createdAt: string;
+}
+
+export interface CrmUiPreferences {
+  crmTab?: "customers" | "pipeline" | "callbacks";
+  crmDetailTab?: "stammdaten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben";
+  crmSearch?: string;
+  crmTypeFilter?: "" | "BarmeniaGothaer" | "Agentur-Duic";
+  crmCustomerKindFilter?: "" | "privat" | "firma";
 }
 
 export interface Lead {

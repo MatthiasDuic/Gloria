@@ -19,7 +19,6 @@ function sanitizeSavedViews(input: unknown): CrmSavedView[] {
       const search = typeof row.search === "string" ? row.search : "";
       const owner = row.owner === "BarmeniaGothaer" || row.owner === "Agentur-Duic" ? row.owner : "";
       const customerKind = row.customerKind === "privat" || row.customerKind === "firma" ? row.customerKind : "";
-      const productFilter = typeof row.productFilter === "string" ? row.productFilter : "";
       const createdAt = typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString();
 
       if (!id || !name) return null;
@@ -30,7 +29,6 @@ function sanitizeSavedViews(input: unknown): CrmSavedView[] {
         search,
         owner,
         customerKind,
-        productFilter,
         createdAt,
       } as CrmSavedView;
     })

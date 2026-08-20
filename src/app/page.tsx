@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { CrmSavedView, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
+import type { CrmSavedView, CrmUiPreferences, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
@@ -999,7 +999,6 @@ export default function HomePage() {
   const [crmSearch, setCrmSearch] = useState("");
   const [crmTypeFilter, setCrmTypeFilter] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
   const [crmCustomerKindFilter, setCrmCustomerKindFilter] = useState<"" | "privat" | "firma">("");
-  const [crmProductFilter, setCrmProductFilter] = useState("");
   const [selectedCrmLeads, setSelectedCrmLeads] = useState<Set<string>>(new Set());
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState({
@@ -1021,6 +1020,7 @@ export default function HomePage() {
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
   const [crmSelectedViewId, setCrmSelectedViewId] = useState("");
+  const [crmPrefsReady, setCrmPrefsReady] = useState(false);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1489,6 +1489,18 @@ export default function HomePage() {
       }
       setCrmSelectedViewId("");
 
+      const crmPrefsResponse = await fetch("/api/crm/preferences", { cache: "no-store" });
+      const crmPrefsPayload = (await crmPrefsResponse.json().catch(() => ({}))) as { preferences?: CrmUiPreferences };
+      if (crmPrefsResponse.ok && crmPrefsPayload.preferences) {
+        const prefs = crmPrefsPayload.preferences;
+        if (prefs.crmTab) setCrmTab(prefs.crmTab);
+        if (prefs.crmDetailTab) setCrmDetailTab(prefs.crmDetailTab);
+        if (typeof prefs.crmSearch === "string") setCrmSearch(prefs.crmSearch);
+        if (prefs.crmTypeFilter !== undefined) setCrmTypeFilter(prefs.crmTypeFilter);
+        if (prefs.crmCustomerKindFilter !== undefined) setCrmCustomerKindFilter(prefs.crmCustomerKindFilter);
+      }
+      setCrmPrefsReady(true);
+
     const voicesResponse = await fetch("/api/voices", { cache: "no-store" });
     const voicesPayload = (await voicesResponse.json().catch(() => ({}))) as {
       voices?: Array<{ id: string; name: string }>;
@@ -1531,6 +1543,42 @@ export default function HomePage() {
     }
     return Array.isArray(payload.views) ? payload.views.slice(0, 20) : nextViews.slice(0, 20);
   }
+
+  async function persistCrmUiPreferences(nextPreferences: CrmUiPreferences) {
+    const response = await fetch("/api/crm/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferences: nextPreferences }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "CRM-Layout konnte nicht gespeichert werden.");
+    }
+  }
+
+  useEffect(() => {
+    if (!currentUser || !crmPrefsReady) return;
+    const timer = setTimeout(() => {
+      void persistCrmUiPreferences({
+        crmTab,
+        crmDetailTab,
+        crmSearch,
+        crmTypeFilter,
+        crmCustomerKindFilter,
+      }).catch(() => {
+        // Avoid interrupting UX with noisy autosave messages.
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [
+    crmCustomerKindFilter,
+    crmDetailTab,
+    crmPrefsReady,
+    crmSearch,
+    crmTab,
+    crmTypeFilter,
+    currentUser,
+  ]);
 
   useEffect(() => {
     void loadDashboard();
@@ -2225,7 +2273,6 @@ export default function HomePage() {
       search: crmSearch,
       owner: crmTypeFilter,
       customerKind: crmCustomerKindFilter,
-      productFilter: crmProductFilter,
       createdAt: new Date().toISOString(),
     };
     const nextViews = [entry, ...crmSavedViews.filter((view) => view.name !== name)].slice(0, 20);
@@ -2246,7 +2293,6 @@ export default function HomePage() {
     setCrmSearch(view.search);
     setCrmTypeFilter(view.owner);
     setCrmCustomerKindFilter(view.customerKind);
-    setCrmProductFilter(view.productFilter);
     setNotice(`Ansicht "${view.name}" geladen.`);
   }
 
@@ -2300,7 +2346,6 @@ export default function HomePage() {
       setCrmSearch("");
       setCrmTypeFilter("");
       setCrmCustomerKindFilter("");
-      setCrmProductFilter("");
       setCrmTab("customers");
       await loadDashboard();
       await loadCampaignLists();
@@ -2891,7 +2936,7 @@ export default function HomePage() {
             onClick={() => setActiveView("crm")}
           >
             <span className="nav-icon" aria-hidden>◈</span>
-            <span>CRM</span>
+            <span>Kundenmanagement</span>
           </button>
         </nav>
         <div className="sidebar-footer">
@@ -2925,7 +2970,7 @@ export default function HomePage() {
               {activeView === "calls" ? "Anrufe" : null}
               {activeView === "leads" ? "Aufträge" : null}
               {activeView === "calendar" ? "Kalender" : null}
-              {activeView === "crm" ? "CRM" : null}
+              {activeView === "crm" ? "Kundenmanagement" : null}
               {activeView === "settings" ? "Einstellungen" : null}
               {activeView === "compliance" ? "Compliance & Ablauf" : null}
             </h1>
@@ -3135,10 +3180,6 @@ export default function HomePage() {
         const filteredCrmLeads = data.leads.filter((lead) => {
           if (crmTypeFilter && getCrmCustomerType(lead) !== crmTypeFilter) return false;
           if (crmCustomerKindFilter && (lead.customerKind || "firma") !== crmCustomerKindFilter) return false;
-          if (crmProductFilter) {
-            const haystack = (lead.products || []).join(" ").toLowerCase();
-            if (!haystack.includes(crmProductFilter.toLowerCase())) return false;
-          }
           if (crmSearch) {
             const q = crmSearch.toLowerCase();
             return (
@@ -3148,7 +3189,6 @@ export default function HomePage() {
               (lead.directDial || "").includes(q) ||
               (lead.email || "").toLowerCase().includes(q) ||
               (lead.addressCity || lead.location || "").toLowerCase().includes(q) ||
-              (lead.products || []).join(" ").toLowerCase().includes(q) ||
               lead.topic.toLowerCase().includes(q)
             );
           }
@@ -3164,23 +3204,38 @@ export default function HomePage() {
         };
 
         return (
-          <section className="stack top-section">
+          <section className="stack top-section crm-shell">
+            <div className="crm-header-card">
+              <div>
+                <p className="crm-kicker">Kundenmanagement</p>
+                <h2>Kundenmanagement</h2>
+                <p className="subtle" style={{ marginTop: 6 }}>
+                  Professionelle Kundensteuerung mit Stammdatenfokus im Dashboard und Detailakten für Pipeline, Produkte und Historie.
+                </p>
+              </div>
+              <div className="crm-header-stats">
+                <div className="crm-stat-chip"><strong>{data.leads.length}</strong><span>Kunden</span></div>
+                <div className="crm-stat-chip"><strong>{data.leads.filter((lead) => lead.status === "wiedervorlage").length}</strong><span>Wiedervorlagen</span></div>
+                <div className="crm-stat-chip"><strong>{data.leads.filter((lead) => getLeadPipelineStage(lead) === "gewonnen").length}</strong><span>Gewonnen</span></div>
+              </div>
+            </div>
+
             {/* Sub-navigation */}
-            <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e5e7eb", marginBottom: -1 }}>
+            <div className="crm-tabs-bar">
               {(["customers", "pipeline", "callbacks"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setCrmTab(tab)}
-                  style={{ padding: "8px 16px", border: "none", background: crmTab === tab ? "white" : "transparent", borderBottom: crmTab === tab ? "2px solid #2563eb" : "2px solid transparent", color: crmTab === tab ? "#2563eb" : "#6b7280", fontWeight: crmTab === tab ? 600 : 400, cursor: "pointer", fontSize: "0.9rem" }}
+                  className={`crm-tab-btn ${crmTab === tab ? "active" : ""}`}
                 >
-                  {tab === "customers" ? `Kundenverwaltung (${data.leads.length})` : tab === "pipeline" ? "Sales Pipeline" : "Wiedervorlagen"}
+                  {tab === "customers" ? `Kundenliste (${data.leads.length})` : tab === "pipeline" ? "Pipeline" : "Wiedervorlagen"}
                 </button>
               ))}
             </div>
 
             {/* === KUNDENVERWALTUNG === */}
             {crmTab === "customers" && (
-              <div className="mini-panel">
+              <div className="mini-panel crm-table-panel">
                 {/* Toolbar */}
                 <div className="row spread" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   <div className="row" style={{ gap: 8, flexWrap: "wrap", flex: 1 }}>
@@ -3201,13 +3256,6 @@ export default function HomePage() {
                       <option value="privat">Privatkunde</option>
                       <option value="firma">Firmenkunde</option>
                     </select>
-                    <input
-                      type="text"
-                      placeholder="Produkt filtern..."
-                      value={crmProductFilter}
-                      onChange={e => setCrmProductFilter(e.target.value)}
-                      style={{ minWidth: 150 }}
-                    />
                     <select value={crmSelectedViewId} onChange={(e) => applyCrmSavedView(e.target.value)} style={{ minWidth: 190 }}>
                       <option value="">Gespeicherte Ansicht laden</option>
                       {crmSavedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
@@ -3335,15 +3383,12 @@ export default function HomePage() {
                         <th>PLZ</th>
                         <th>Stadt</th>
                         <th>Land</th>
-                        <th>Produkte</th>
-                        <th>Pipeline</th>
-                        <th>Liste</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredCrmLeads.length === 0 && (
-                        <tr><td colSpan={15} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
+                        <tr><td colSpan={12} style={{ textAlign: "center", padding: "24px", color: "#9ca3af" }}>Keine Kunden gefunden</td></tr>
                       )}
                       {filteredCrmLeads.map((lead) => {
                         const custType = getCrmCustomerType(lead);
@@ -3380,9 +3425,6 @@ export default function HomePage() {
                             <td style={{ fontSize: "0.85rem" }}>{lead.addressPostalCode || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
                             <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
-                            <td style={{ fontSize: "0.85rem", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{(lead.products || []).join(", ") || "-"}</td>
-                            <td style={{ fontSize: "0.85rem", whiteSpace: "nowrap" }}>{getLeadPipelineStage(lead)}</td>
-                            <td style={{ fontSize: "0.8rem", color: "#6b7280" }}>{lead.listName || "-"}</td>
                             <td>
                               <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
                                 Historie
@@ -5079,6 +5121,10 @@ export default function HomePage() {
                   <select value={detailDraft?.topic || selectedLeadForHistory.topic} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), topic: e.target.value as Topic }))}>
                     {TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
+                </div>
+                <div className="report-detail-field">
+                  <label>Quellliste</label>
+                  <p>{selectedLeadForHistory.listName || "Standardliste"}</p>
                 </div>
                 <div className="report-detail-field report-detail-full">
                   <label>Strasse und Hausnummer</label>
