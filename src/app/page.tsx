@@ -1025,6 +1025,7 @@ export default function HomePage() {
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
   const crmPrefsLastSavedKeyRef = useRef("");
   const crmPrefsRequestRef = useRef<AbortController | null>(null);
+  const requestGuardsRef = useRef<Record<string, { inFlight: boolean; failures: number; nextAllowedAt: number }>>({});
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
     speaker: "Gloria" | "Interessent";
@@ -1117,7 +1118,78 @@ export default function HomePage() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
   const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
   const [runningListIds, setRunningListIds] = useState<string[]>([]);
+  const campaignRunTickActiveRef = useRef(false);
   const blockedOutboundNumbers = useMemo(() => new Set(["+18446290030"]), []);
+
+  function getRequestGuard(key: string) {
+    const existing = requestGuardsRef.current[key];
+    if (existing) {
+      return existing;
+    }
+    const created = { inFlight: false, failures: 0, nextAllowedAt: 0 };
+    requestGuardsRef.current[key] = created;
+    return created;
+  }
+
+  function computeBackoffMs(failures: number) {
+    const exponent = Math.min(Math.max(failures, 1), 6);
+    return Math.min(30_000, 750 * 2 ** exponent);
+  }
+
+  async function guardedFetch(
+    key: string,
+    input: RequestInfo | URL,
+    init: RequestInit & { allowWhenHidden?: boolean; allowWhenOffline?: boolean } = {},
+  ): Promise<{ response: Response | null; skipped: boolean; reason?: "in-flight" | "cooldown" | "offline" | "hidden" | "network" | "aborted" }> {
+    const { allowWhenHidden = false, allowWhenOffline = false, ...requestInit } = init;
+    const guard = getRequestGuard(key);
+    const now = Date.now();
+
+    if (guard.inFlight) {
+      return { response: null, skipped: true, reason: "in-flight" };
+    }
+
+    if (guard.nextAllowedAt > now) {
+      return { response: null, skipped: true, reason: "cooldown" };
+    }
+
+    if (!allowWhenOffline && typeof navigator !== "undefined" && !navigator.onLine) {
+      return { response: null, skipped: true, reason: "offline" };
+    }
+
+    if (!allowWhenHidden && typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return { response: null, skipped: true, reason: "hidden" };
+    }
+
+    guard.inFlight = true;
+
+    try {
+      const response = await fetch(input, requestInit);
+      if (response.ok) {
+        guard.failures = 0;
+        guard.nextAllowedAt = 0;
+      } else {
+        guard.failures += 1;
+        guard.nextAllowedAt = Date.now() + computeBackoffMs(guard.failures);
+      }
+      return { response, skipped: false };
+    } catch (error) {
+      const isAbort = error instanceof DOMException && error.name === "AbortError";
+      const isNetworkError = error instanceof TypeError;
+      if (isAbort || isNetworkError) {
+        guard.failures += 1;
+        guard.nextAllowedAt = Date.now() + computeBackoffMs(guard.failures);
+        return {
+          response: null,
+          skipped: true,
+          reason: isAbort ? "aborted" : "network",
+        };
+      }
+      throw error;
+    } finally {
+      guard.inFlight = false;
+    }
+  }
 
   function normalizePhoneNumber(value?: string) {
     return String(value || "").replace(/[\s()-]/g, "").trim();
@@ -1412,10 +1484,18 @@ export default function HomePage() {
 
   async function loadDashboard(): Promise<DashboardData | null> {
     try {
-      const [dashboardResponse, learningResponse] = await Promise.all([
-        fetch("/api/reports", { cache: "no-store" }),
-        fetch("/api/learning", { cache: "no-store" }),
+      const [dashboardRequest, learningRequest] = await Promise.all([
+        guardedFetch("reports-read", "/api/reports", { cache: "no-store", allowWhenHidden: true }),
+        guardedFetch("learning-read", "/api/learning", { cache: "no-store", allowWhenHidden: true }),
       ]);
+
+      const dashboardResponse = dashboardRequest.response;
+      const learningResponse = learningRequest.response;
+
+      if (!dashboardResponse || !learningResponse) {
+        return null;
+      }
+
       if (!dashboardResponse.ok) throw new Error(`Reports konnten nicht geladen werden (HTTP ${dashboardResponse.status}).`);
       if (!learningResponse.ok) throw new Error(`Learning konnte nicht geladen werden (HTTP ${learningResponse.status}).`);
 
@@ -1442,6 +1522,9 @@ export default function HomePage() {
       );
       return payload;
     } catch (error) {
+      if (error instanceof TypeError) {
+        return null;
+      }
       setNotice(error instanceof Error ? error.message : "Dashboard konnte nicht geladen werden.");
       return null;
     } finally {
@@ -1451,7 +1534,11 @@ export default function HomePage() {
 
   const loadCampaignLists = useCallback(async () => {
     try {
-      const response = await fetch("/api/campaigns/lists", { cache: "no-store" });
+      const request = await guardedFetch("campaign-lists-read", "/api/campaigns/lists", { cache: "no-store", allowWhenHidden: true });
+      const response = request.response;
+      if (!response) {
+        return;
+      }
       const payload = (await response.json()) as { lists?: CampaignListSummary[] };
       if (response.ok) {
         const lists = payload.lists || [];
@@ -1474,13 +1561,20 @@ export default function HomePage() {
         setNotice(`Kampagnenlisten konnten nicht geladen werden (HTTP ${response.status}).`);
       }
     } catch (error) {
+      if (error instanceof TypeError) {
+        return;
+      }
       setNotice(error instanceof Error ? error.message : "Kampagnenlisten konnten nicht geladen werden.");
     }
   }, []);
 
   const loadSessionAndAdminData = useCallback(async () => {
     try {
-      const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
+      const meRequest = await guardedFetch("auth-me-read", "/api/auth/me", { cache: "no-store", allowWhenHidden: true });
+      const meResponse = meRequest.response;
+      if (!meResponse) {
+        return;
+      }
       const mePayload = (await meResponse.json().catch(() => ({}))) as { user?: SessionUser };
       if (!meResponse.ok || !mePayload.user) return;
 
@@ -1543,6 +1637,9 @@ export default function HomePage() {
         }
       }
     } catch (error) {
+      if (error instanceof TypeError) {
+        return;
+      }
       setNotice(error instanceof Error ? error.message : "Kontodaten konnten nicht geladen werden.");
     }
   }, []);
@@ -1649,7 +1746,11 @@ export default function HomePage() {
       if (document.visibilityState !== "visible") return;
 
       try {
-        const response = await fetch("/api/reports", { cache: "no-store" });
+        const request = await guardedFetch("reports-read", "/api/reports", { cache: "no-store" });
+        const response = request.response;
+        if (!response) {
+          return;
+        }
         if (!response.ok) return;
 
         const payload = (await response.json()) as DashboardData;
@@ -1900,43 +2001,55 @@ export default function HomePage() {
     }
 
     const timer = setInterval(() => {
+      if (campaignRunTickActiveRef.current) {
+        return;
+      }
+      campaignRunTickActiveRef.current = true;
       void (async () => {
-        for (const list of activeLists) {
-          const response = await fetch("/api/campaigns/lists", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "run", listId: list.listId }),
-          }).catch(() => undefined);
+        try {
+          for (const list of activeLists) {
+            const response = await fetch("/api/campaigns/lists", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "run", listId: list.listId }),
+            }).catch(() => undefined);
 
-          if (!response) {
-            continue;
+            if (!response) {
+              continue;
+            }
+
+            const payload = (await response.json().catch(() => ({}))) as CampaignRunPayload;
+
+            if (!response.ok) {
+              setNotice(
+                payload.error
+                  ? `Anruffehler in Liste "${list.listName}": ${payload.error}`
+                  : `Anruffehler in Liste "${list.listName}".`,
+              );
+              continue;
+            }
+
+            if (payload.dialed && payload.call?.sid) {
+              setNotice(
+                `Anruf läuft: ${payload.call.company || list.listName} (${payload.call.to || "-"}) · SID ${payload.call.sid}`,
+              );
+            } else if (payload.skipped && payload.reason && payload.reason !== "list_not_active") {
+              setNotice(`Liste "${list.listName}": ${describeRunReason(payload.reason)}.`);
+            }
           }
 
-          const payload = (await response.json().catch(() => ({}))) as CampaignRunPayload;
-
-          if (!response.ok) {
-            setNotice(
-              payload.error
-                ? `Anruffehler in Liste "${list.listName}": ${payload.error}`
-                : `Anruffehler in Liste "${list.listName}".`,
-            );
-            continue;
-          }
-
-          if (payload.dialed && payload.call?.sid) {
-            setNotice(
-              `Anruf läuft: ${payload.call.company || list.listName} (${payload.call.to || "-"}) · SID ${payload.call.sid}`,
-            );
-          } else if (payload.skipped && payload.reason && payload.reason !== "list_not_active") {
-            setNotice(`Liste "${list.listName}": ${describeRunReason(payload.reason)}.`);
-          }
+          await loadCampaignLists();
+          await loadDashboard();
+        } finally {
+          campaignRunTickActiveRef.current = false;
         }
-        await loadCampaignLists();
-        await loadDashboard();
       })();
     }, 15000);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      campaignRunTickActiveRef.current = false;
+    };
   }, [campaignLists, loadCampaignLists]);
 
   async function applyLearning(topic: Topic) {
