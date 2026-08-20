@@ -59,6 +59,106 @@ test("asks the configured follow-up after yes to a hospital question", () => {
   assert.match(transition.instruction, /Grund für den stationären Aufenthalt/);
 });
 
+test("collects multiple allergies adaptively before continuing", () => {
+  const allergyPolicy = { topic: "PKV", requiredQuestions: "Bestehen bei Ihnen bekannte Allergien?\nWie hoch ist Ihr Monatsbeitrag?" };
+  let transition = beginPreparation(createPreparationState(allergyPolicy), "Freitag um 10 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welche Allergie/);
+
+  transition = advancePreparation(transition.state, "Pollenallergie", []);
+  assert.match(transition.instruction, /weitere Allergien/);
+
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welche Allergie/);
+
+  transition = advancePreparation(transition.state, "Hausstaub", []);
+  assert.match(transition.instruction, /weitere Allergien/);
+
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Monatsbeitrag/);
+});
+
+test("collects multiple medications adaptively", () => {
+  const policyWithMeds = { topic: "PKV", requiredQuestions: "Nehmen Sie regelmäßig Medikamente ein?\nWie hoch ist Ihr Monatsbeitrag?" };
+  let transition = beginPreparation(createPreparationState(policyWithMeds), "Freitag um 10 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welche Medikamente/);
+
+  transition = advancePreparation(transition.state, "L-Thyroxin", []);
+  assert.match(transition.instruction, /weitere Medikamente/);
+
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welche Medikamente/);
+
+  transition = advancePreparation(transition.state, "Metformin", []);
+  assert.match(transition.instruction, /weitere Medikamente/);
+
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Monatsbeitrag/);
+});
+
+test("collects multiple inpatient stays adaptively", () => {
+  const policyWithInpatient = { topic: "PKV", requiredQuestions: "Gab es stationäre Aufenthalte im Krankenhaus?\nWie hoch ist Ihr Monatsbeitrag?" };
+  let transition = beginPreparation(createPreparationState(policyWithInpatient), "Freitag um 10 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Grund für den stationären Aufenthalt/);
+
+  transition = advancePreparation(transition.state, "Blinddarm", []);
+  assert.match(transition.instruction, /weitere stationäre Aufenthalte/);
+
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Grund für den stationären Aufenthalt/);
+
+  transition = advancePreparation(transition.state, "Knie-OP", []);
+  assert.match(transition.instruction, /weitere stationäre Aufenthalte/);
+
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Monatsbeitrag/);
+});
+
+test("collects multiple psychological treatments adaptively", () => {
+  const policyWithPsych = { topic: "PKV", requiredQuestions: "Gab es in den letzten zehn Jahren psychische Behandlungen?\nWie hoch ist Ihr Monatsbeitrag?" };
+  let transition = beginPreparation(createPreparationState(policyWithPsych), "Freitag um 10 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /psychischen Behandlung/);
+
+  transition = advancePreparation(transition.state, "Verhaltenstherapie", []);
+  assert.match(transition.instruction, /weitere psychische Behandlungen/);
+
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /psychischen Behandlung/);
+
+  transition = advancePreparation(transition.state, "Coaching", []);
+  assert.match(transition.instruction, /weitere psychische Behandlungen/);
+
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Monatsbeitrag/);
+});
+
+test("collects multiple dental entries adaptively", () => {
+  const policyWithDental = { topic: "PKV", requiredQuestions: "Fehlen aktuell Zähne oder ist Zahnersatz geplant?\nWie hoch ist Ihr Monatsbeitrag?" };
+  let transition = beginPreparation(createPreparationState(policyWithDental), "Freitag um 10 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welcher Zahnersatz/);
+
+  transition = advancePreparation(transition.state, "Implantat im Oberkiefer", []);
+  assert.match(transition.instruction, /weiteren fehlenden oder geplanten Zahnersatz/);
+
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Welcher Zahnersatz/);
+
+  transition = advancePreparation(transition.state, "Brücke links", []);
+  assert.match(transition.instruction, /weiteren fehlenden oder geplanten Zahnersatz/);
+
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Monatsbeitrag/);
+});
+
 test("completes the list and moves to the confirmation email", () => {
   const oneQuestionPolicy = { topic: "PKV", requiredQuestions: "Wie groß sind Sie?" };
   let transition = beginPreparation(createPreparationState(oneQuestionPolicy), "Donnerstag um 15 Uhr", []);
@@ -68,9 +168,13 @@ test("completes the list and moves to the confirmation email", () => {
   assert.match(transition.instruction, /E-Mail-Adresse/);
 
   transition = advancePreparation(transition.state, "kunde@example.de", []);
+  assert.equal(transition.state.stage, "awaiting_final_questions");
+  assert.match(transition.instruction, /Haben Sie noch eine Frage/);
+
+  transition = advancePreparation(transition.state, "Nein, keine Fragen.", []);
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /verabschiede dich freundlich/);
-  assert.match(transition.instruction, /keine weitere Frage/);
+  assert.match(transition.instruction, /verabschiede dich höflich/);
+  assert.match(transition.instruction, /end_call/);
 });
 
 test("completes the full health preparation flow through farewell", () => {
@@ -112,6 +216,10 @@ test("completes the full health preparation flow through farewell", () => {
   assert.match(transition.instruction, /E-Mail-Adresse/);
 
   transition = advancePreparation(transition.state, "neumann@example.de", []);
+  assert.equal(transition.state.stage, "awaiting_final_questions");
+  assert.match(transition.instruction, /Haben Sie noch eine Frage/);
+
+  transition = advancePreparation(transition.state, "Nein, wir können das Gespräch beenden.", []);
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /verabschiede dich freundlich/);
+  assert.match(transition.instruction, /verabschiede dich höflich/);
 });

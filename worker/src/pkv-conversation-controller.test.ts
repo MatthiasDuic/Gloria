@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { advancePkvStep, assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -40,4 +40,9 @@ test("does not treat an earlier yes as scheduling consent", () => {
 
   assert.equal(assessment.stage, "need_interest");
   assert.equal(assessment.interestConfirmed, false);
+});
+
+test("does not advance from step 0 on a plain greeting", () => {
+  assert.deepEqual(advancePkvStep(0, "Guten Tag."), { nextStep: 0, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(0, "Ja, gerne."), { nextStep: 1, shouldEnd: false });
 });

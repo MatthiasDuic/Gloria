@@ -7,6 +7,7 @@ test("distinguishes a factual no from a clear conversation rejection", () => {
   assert.equal(classifyConversationEvent("Nein, ich bin gesetzlich versichert.").type, "answer");
   assert.equal(classifyConversationEvent("Ich habe kein Interesse, rufen Sie bitte nicht mehr an.").type, "clear_rejection");
   assert.equal(classifyConversationEvent("Danke, auf Wiederhören.").type, "clear_rejection");
+  assert.equal(classifyConversationEvent("Nein, wir können das Gespräch beenden.").type, "clear_rejection");
 });
 
 test("prioritizes a customer question over continuing the scripted flow", () => {

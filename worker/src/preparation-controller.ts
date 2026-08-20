@@ -58,7 +58,7 @@ export type PreparationPolicy = {
   pkvHealthQuestions?: string;
 };
 
-export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "awaiting_email" | "completed" | "declined";
+export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "awaiting_email" | "awaiting_final_questions" | "completed" | "declined";
 
 export type PreparationState = {
   stage: PreparationStage;
@@ -70,6 +70,58 @@ export type PreparationTransition = {
   state: PreparationState;
   instruction: string;
 };
+
+type AdaptiveFollowUpTopic = {
+  name: "medication" | "inpatient" | "psychological" | "dental" | "allergy";
+  baseRegex: RegExp;
+  detailQuestion: string;
+  detailRegex: RegExp;
+  moreQuestion: string;
+  moreRegex: RegExp;
+};
+
+const ADAPTIVE_FOLLOW_UP_TOPICS: AdaptiveFollowUpTopic[] = [
+  {
+    name: "medication",
+    baseRegex: /medikament/i,
+    detailQuestion: "Welche Medikamente nehmen Sie regelmäßig ein?",
+    detailRegex: /welche\s+medikamente\s+nehmen\s+sie/i,
+    moreQuestion: "Gibt es weitere Medikamente, die wir aufnehmen sollten?",
+    moreRegex: /weitere\s+medikamente/i,
+  },
+  {
+    name: "inpatient",
+    baseRegex: /station[äa]r|krankenhaus/i,
+    detailQuestion: "Was war der Grund für den stationären Aufenthalt?",
+    detailRegex: /grund\s+f[üu]r\s+den\s+station[äa]ren\s+aufenthalt/i,
+    moreQuestion: "Gab es weitere stationäre Aufenthalte?",
+    moreRegex: /weitere\s+station[äa]re\s+aufenthalte/i,
+  },
+  {
+    name: "psychological",
+    baseRegex: /psychisch/i,
+    detailQuestion: "Worum ging es bei der psychischen Behandlung?",
+    detailRegex: /worum\s+ging\s+es\s+bei\s+der\s+psychischen\s+behandlung/i,
+    moreQuestion: "Gab es weitere psychische Behandlungen?",
+    moreRegex: /weitere\s+psychische\s+behandlungen/i,
+  },
+  {
+    name: "dental",
+    baseRegex: /z[äa]hne|zahnersatz/i,
+    detailQuestion: "Welcher Zahnersatz fehlt aktuell oder ist konkret geplant?",
+    detailRegex: /welcher\s+zahnersatz\s+fehlt\s+aktuell|konkret\s+geplant/i,
+    moreQuestion: "Gibt es weiteren fehlenden oder geplanten Zahnersatz?",
+    moreRegex: /weiteren\s+fehlenden\s+oder\s+geplanten\s+zahnersatz/i,
+  },
+  {
+    name: "allergy",
+    baseRegex: /allerg/i,
+    detailQuestion: "Welche Allergie liegt bei Ihnen vor?",
+    detailRegex: /welche\s+allergie\s+liegt\s+bei\s+ihnen\s+vor/i,
+    moreQuestion: "Gibt es weitere Allergien?",
+    moreRegex: /weitere\s+allergien/i,
+  },
+];
 
 const PKV_FALLBACK_QUESTIONS = [
   "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
@@ -116,6 +168,22 @@ function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]):
   return false;
 }
 
+function adaptiveTopicForQuestion(question: string): AdaptiveFollowUpTopic | undefined {
+  return ADAPTIVE_FOLLOW_UP_TOPICS.find((topic) =>
+    topic.baseRegex.test(question) || topic.detailRegex.test(question) || topic.moreRegex.test(question),
+  );
+}
+
+function adaptiveRoleForQuestion(
+  question: string,
+  topic: AdaptiveFollowUpTopic,
+): "base" | "detail" | "more" | undefined {
+  if (topic.moreRegex.test(question)) return "more";
+  if (topic.detailRegex.test(question)) return "detail";
+  if (topic.baseRegex.test(question)) return "base";
+  return undefined;
+}
+
 function nextUnansweredQuestion(
   state: PreparationState,
   turns: ConversationTurn[],
@@ -131,6 +199,12 @@ function nextUnansweredQuestion(
 function isAnswerPlausible(question: string, text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!normalized || /^(?:hallo|okay|ok|mhm|äh+|hm+|keine ahnung)[.!?]*$/i.test(normalized)) return false;
+  const adaptiveTopic = adaptiveTopicForQuestion(question);
+  if (adaptiveTopic) {
+    const role = adaptiveRoleForQuestion(question, adaptiveTopic);
+    if (role === "base" || role === "more") return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
+    if (role === "detail") return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
+  }
   if (/geburtsdatum/i.test(question)) return /\b(?:\d{1,2}\.\s*)?(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|\d{1,2}[./-]\d{1,2})\b|\b(?:19|20)\d{2}\b/i.test(normalized);
   if (/körpergröße|groesse/i.test(question)) return /\b(?:\d[,.]?\d?\s*(?:m|meter|cm|zentimeter)|ein[e]?\s+meter)\b/i.test(normalized);
   if (/gewicht/i.test(question)) return /\b\d{2,3}\s*(?:kg|kilo|kilogramm)\b/i.test(normalized) || /\b(?:\w+\s+){0,2}(?:kilo|kilogramm)\b/i.test(normalized);
@@ -139,13 +213,17 @@ function isAnswerPlausible(question: string, text: string): boolean {
 }
 
 function followUpQuestions(question: string, answer: string): string[] {
-  if (!/^ja\b/i.test(answer.trim())) return [];
-  if (/medikament/i.test(question)) return ["Welche Medikamente nehmen Sie regelmäßig ein?"];
+  const normalizedAnswer = answer.trim().toLowerCase();
+  const topic = adaptiveTopicForQuestion(question);
+  if (topic) {
+    const role = adaptiveRoleForQuestion(question, topic);
+    if (role === "base" && /^ja\b/i.test(normalizedAnswer)) return [topic.detailQuestion, topic.moreQuestion];
+    if (role === "detail") return [];
+    if (role === "more" && /^ja\b/i.test(normalizedAnswer)) return [topic.detailQuestion, topic.moreQuestion];
+    return [];
+  }
+  if (!/^ja\b/i.test(normalizedAnswer)) return [];
   if (/laufende behandlungen|diagnos/i.test(question)) return ["Um welche Behandlung oder Diagnose geht es genau?"];
-  if (/stationär|krankenhaus/i.test(question)) return ["Was war der Grund für den stationären Aufenthalt?", "Wie lange waren Sie im Krankenhaus?", "Sind Sie deswegen heute behandlungs- und beschwerdefrei?"];
-  if (/psychisch/i.test(question)) return ["Um welche Behandlung ging es, und sind Sie heute beschwerdefrei?"];
-  if (/zähne|zahnersatz/i.test(question)) return ["Was ist aktuell geplant oder offen?"];
-  if (/allerg/i.test(question)) return ["Welche Allergie liegt bei Ihnen vor?"];
   return [];
 }
 export function beginPreparation(
@@ -205,7 +283,7 @@ export function advancePreparation(
   }
 
   if (state.stage === "asking") {
-    if (/^(?:nein|nö|lieber nicht|keine zeit|nicht jetzt|möchte ich nicht(?:s)? beantworten|das möchte ich nicht|will ich nicht)\b/i.test(userText.trim())) {
+    if (/^(?:lieber nicht|keine zeit|nicht jetzt|möchte ich nicht(?:s)? beantworten|das möchte ich nicht|will ich nicht)\b/i.test(userText.trim())) {
       const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
       if (next) {
         return {
@@ -255,10 +333,36 @@ export function advancePreparation(
       return { state, instruction: "Frage ausschließlich noch einmal nach der E-Mail-Adresse für die Terminbestätigung." };
     }
     return {
-      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: "Bedanke dich einmal kurz für die E-Mail-Adresse, verabschiede dich freundlich und rufe danach end_call auf. Stelle keine weitere Frage.",
+      state: { ...state, stage: "awaiting_final_questions", currentQuestionIndex: undefined },
+      instruction: "Bedanke dich kurz für die E-Mail-Adresse und frage dann genau einmal: 'Haben Sie noch eine Frage zum Ablauf oder zum Termin?' Stelle sonst nichts.",
     };
   }
+
+  if (state.stage === "awaiting_final_questions") {
+    const normalized = userText.trim().toLowerCase();
+    const noMoreQuestions = /\b(?:nein\b|ne\b|n[öo]\b|keine\s+frage|keine\s+fragen|nichts\s+mehr|passt\s+so|alles\s+klar|das\s+war\s+alles|wir\s+k[öo]nnen\s+das\s+gespr[äa]ch\s+beenden|gespr[äa]ch\s+beenden)\b/i.test(normalized);
+    const hasQuestion = /\?|\b(?:wer|wie|was|warum|wieso|weshalb|wann|wo|welche[rmn]?)\b/i.test(normalized);
+
+    if (noMoreQuestions) {
+      return {
+        state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+        instruction: "Bedanke dich kurz für das Gespräch, verabschiede dich höflich auf Deutsch und rufe danach end_call auf. Keine weitere Rückfrage.",
+      };
+    }
+
+    if (hasQuestion) {
+      return {
+        state,
+        instruction: "Beantworte die Frage kurz und konkret. Wenn Details besser in den Termin gehören, sage transparent, dass Herr Duic diesen Punkt in der Terminvorbereitung aufnimmt und im Termin beantwortet. Frage danach nur: 'Gibt es noch eine weitere Frage?'",
+      };
+    }
+
+    return {
+      state,
+      instruction: "Wenn unklar, frage kurz nach: 'Haben Sie noch eine Frage, oder sollen wir das Gespräch beenden?'",
+    };
+  }
+
   if (state.stage === "completed" || state.stage === "declined") {
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },

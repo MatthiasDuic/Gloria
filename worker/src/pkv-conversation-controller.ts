@@ -140,8 +140,10 @@ export function advancePkvStep(
     case 0: {
       const agreed = /\b(?:ja\b|klar\b|gerne\b|bitte\b|natürlich\b|okay\b|ok\b|sicher\b|machen\s+sie|sagen\s+sie|erzählen\s+sie)\b/i.test(text);
       const declined = /\b(?:nein\b|nicht\s+interessiert|kein\s+interesse|keine\s+zeit|rufen\s+sie\s+bitte\s+nicht)\b/i.test(text);
+      const greetingOnly = /^(?:guten\s+tag|hallo|ja\s+guten\s+tag|tag\s+auch|moin)(?:[.!?\s]*)$/i.test(text);
       if (declined) return { nextStep: 0, shouldEnd: true };
-      if (agreed || text.length > 5) return { nextStep: 1, shouldEnd: false };
+      if (greetingOnly) return { nextStep: 0, shouldEnd: false };
+      if (agreed) return { nextStep: 1, shouldEnd: false };
       return { nextStep: 0, shouldEnd: false };
     }
 
