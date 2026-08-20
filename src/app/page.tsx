@@ -2,13 +2,16 @@
 
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CrmSavedView, CrmUiPreferences, DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
+import type { CrmSavedView, CrmUiPreferences, DashboardData, LeadProductDetail, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import {
   buildEffectiveLeadCompanyName,
+  buildLeadProductRecord,
   getLeadCustomerKindFormConfig,
   normalizeLeadAffiliationRole,
   normalizeLeadBirthDate,
+  normalizeLeadProductDetails,
+  resolveExclusiveDetailModal,
   resolveLeadCompanyValue,
 } from "@/lib/crm-helpers";
 import topicPolicyDefaults from "../../data/topic-policies.json";
@@ -1036,6 +1039,7 @@ export default function HomePage() {
   const [campaignFromSelectionName, setCampaignFromSelectionName] = useState("");
   const [campaignFromSelectionTopic, setCampaignFromSelectionTopic] = useState<Topic>(TOPICS[0]);
   const [detailDraft, setDetailDraft] = useState<Partial<DashboardData["leads"][number]> | null>(null);
+  const [productEditorDraft, setProductEditorDraft] = useState<Partial<LeadProductDetail> | null>(null);
   const [crmDetailTab, setCrmDetailTab] = useState<"stammdaten" | "produkte" | "zugehoerigkeiten" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben">("stammdaten");
   const [leadTaskDraft, setLeadTaskDraft] = useState<{ title: string; topic: string; dueAt: string }>({
     title: "",
@@ -1103,6 +1107,28 @@ export default function HomePage() {
       setSelectedLeadForHistory(latestLead);
     }
   }, [data.leads, selectedLeadForHistory]);
+  const openLeadDetailModal = useCallback((lead: DashboardData["leads"][number] | null) => {
+    setSelectedReport(null);
+    setSelectedLeadForHistory(lead);
+  }, []);
+
+  const openReportDetailModal = useCallback((report: DashboardData["reports"][number] | null) => {
+    setSelectedLeadForHistory(null);
+    setSelectedReport(report);
+  }, []);
+
+  useEffect(() => {
+    if (selectedReport) {
+      setSelectedLeadForHistory(null);
+    }
+  }, [selectedReport]);
+
+  useEffect(() => {
+    if (selectedLeadForHistory) {
+      setSelectedReport(null);
+    }
+  }, [selectedLeadForHistory]);
+
   useEffect(() => {
     if (!selectedLeadForHistory) {
       selectedLeadIdRef.current = null;
@@ -1132,6 +1158,7 @@ export default function HomePage() {
         addressCity: selectedLeadForHistory.addressCity,
         addressCountry: selectedLeadForHistory.addressCountry,
         products: selectedLeadForHistory.products,
+        productDetails: normalizeLeadProductDetails(selectedLeadForHistory.productDetails ?? selectedLeadForHistory.products) || [],
         affiliations: selectedLeadForHistory.affiliations,
         crmPipeline: selectedLeadForHistory.crmPipeline,
         topic: selectedLeadForHistory.topic,
@@ -2516,18 +2543,78 @@ export default function HomePage() {
       .filter(Boolean);
   }
 
-  function toggleLeadProduct(product: string) {
+  function getLeadProductDetailsForDraft(draft: Partial<DashboardData["leads"][number]> | null | undefined): LeadProductDetail[] {
+    const source = draft?.productDetails ?? draft?.products ?? selectedLeadForHistory?.productDetails ?? selectedLeadForHistory?.products ?? [];
+    const normalized = normalizeLeadProductDetails(source);
+    return normalized || [];
+  }
+
+  function startLeadProductEditor(productCategory?: string, existingProduct?: LeadProductDetail) {
+    const draft = existingProduct ? { ...existingProduct } : buildLeadProductRecord({
+      category: productCategory || "private Krankenversicherung",
+      label: productCategory || "private Krankenversicherung",
+      paymentMethod: "monatlich",
+    });
+    setProductEditorDraft(draft);
+  }
+
+  function saveLeadProductEditor() {
+    if (!productEditorDraft) return;
+    const normalized = buildLeadProductRecord({
+      ...productEditorDraft,
+      category: String(productEditorDraft.category || productEditorDraft.label || "Sonstige").trim() || "Sonstige",
+      label: String(productEditorDraft.label || productEditorDraft.category || "Sonstige").trim() || String(productEditorDraft.category || "Sonstige").trim() || "Sonstige",
+      paymentMethod: String(productEditorDraft.paymentMethod || "monatlich").trim() || "monatlich",
+    });
+
     setDetailDraft((draft) => {
-      const currentProducts = draft?.products || selectedLeadForHistory?.products || [];
-      const hasProduct = currentProducts.includes(product);
-      const nextProducts = hasProduct
-        ? currentProducts.filter((entry) => entry !== product)
-        : [...currentProducts, product];
+      const currentProducts = getLeadProductDetailsForDraft(draft);
+      const nextProducts = currentProducts.some((entry) => entry.id === normalized.id)
+        ? currentProducts.map((entry) => (entry.id === normalized.id ? normalized : entry))
+        : [...currentProducts, normalized];
 
       return {
         ...(draft || {}),
-        products: nextProducts,
+        productDetails: nextProducts,
+        products: nextProducts.map((entry) => entry.category || entry.label),
       };
+    });
+
+    setProductEditorDraft(null);
+  }
+
+  function deleteLeadProduct(productId: string) {
+    setDetailDraft((draft) => {
+      const currentProducts = getLeadProductDetailsForDraft(draft);
+      const nextProducts = currentProducts.filter((entry) => entry.id !== productId);
+      return {
+        ...(draft || {}),
+        productDetails: nextProducts,
+        products: nextProducts.map((entry) => entry.category || entry.label),
+      };
+    });
+    if (productEditorDraft?.id === productId) {
+      setProductEditorDraft(null);
+    }
+  }
+
+  function updateProductEditorField(field: keyof LeadProductDetail, value: string) {
+    setProductEditorDraft((draft) => {
+      if (!draft) return draft;
+      const next = {
+        ...draft,
+        [field]: value,
+      } as Partial<LeadProductDetail>;
+      if (field === "category" || field === "label") {
+        const category = String(next.category || next.label || "").trim() || "Sonstige";
+        const label = String(next.label || category).trim() || category;
+        next.category = category;
+        next.label = label;
+      }
+      if (field === "insurer" || field === "contractNumber" || field === "premium" || field === "productType" || field === "energyType" || field === "startDate" || field === "endDate" || field === "notes" || field === "documentName" || field === "documentUrl") {
+        next[field] = value;
+      }
+      return next;
     });
   }
 
@@ -2738,6 +2825,7 @@ export default function HomePage() {
             contactName: detailDraft.contactName || selectedLeadForHistory.contactName || "",
           })
         : (detailDraft.company || selectedLeadForHistory.company || "").trim() || "Neue Firma";
+      const nextProductDetails = normalizeLeadProductDetails(detailDraft.productDetails ?? detailDraft.products ?? selectedLeadForHistory.productDetails ?? selectedLeadForHistory.products) || [];
       const updates: Partial<DashboardData["leads"][number]> = {
         company: nextCompanyValue,
         customerKind: detailDraft.customerKind === "privat" || detailDraft.customerKind === "firma" ? detailDraft.customerKind : undefined,
@@ -2752,7 +2840,8 @@ export default function HomePage() {
         addressPostalCode: detailDraft.addressPostalCode,
         addressCity: detailDraft.addressCity,
         addressCountry: detailDraft.addressCountry,
-        products: detailDraft.products,
+        products: nextProductDetails.map((entry) => entry.category || entry.label),
+        productDetails: nextProductDetails,
         affiliations: detailDraft.affiliations,
         crmPipeline: detailDraft.crmPipeline,
         topic: detailDraft.topic,
@@ -3536,7 +3625,7 @@ export default function HomePage() {
                 <p className="crm-kicker">Kundenmanagement</p>
                 <h2>Kundenmanagement</h2>
                 <p className="subtle" style={{ marginTop: 6 }}>
-                  Professionelle Kundensteuerung mit Stammdatenfokus im Dashboard und Detailakten für Pipeline, Produkte und Historie.
+                  Professionelle Kundensteuerung mit Stammdatenfokus im Dashboard und Detailakten für Pipeline, Produkte und Anrufhistorie.
                 </p>
               </div>
               <div className="crm-header-stats">
@@ -3837,7 +3926,7 @@ export default function HomePage() {
                                 </td>
                                 <td>{lead.customerKind === "privat" ? "Privat" : "Firma"}</td>
                                 <td>
-                                  <button className="link-button" onClick={() => setSelectedLeadForHistory(lead)}>
+                                  <button className="link-button" onClick={() => openLeadDetailModal(lead)}>
                                     <strong>{lead.company}</strong>
                                   </button>
                                 </td>
@@ -3849,8 +3938,8 @@ export default function HomePage() {
                                 <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
                                 <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
                                 <td>
-                                  <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setSelectedLeadForHistory(lead)}>
-                                    Historie
+                                  <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => openLeadDetailModal(lead)}>
+                                    Stammdaten
                                   </button>
                                 </td>
                               </tr>
@@ -3894,7 +3983,7 @@ export default function HomePage() {
                               <button
                                 key={lead.id}
                                 className="link-button"
-                                onClick={() => setSelectedLeadForHistory(lead)}
+                                onClick={() => openLeadDetailModal(lead)}
                                 style={{ textAlign: "left", background: "white", padding: "8px 10px", borderRadius: 6, border: "1px solid #e5e7eb", width: "100%" }}
                               >
                                 <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{lead.company}</div>
@@ -3931,7 +4020,7 @@ export default function HomePage() {
                             <td>{r.topic}</td>
                             <td>{formatDate(r.nextCallAt)}</td>
                             <td className="subtle" style={{ maxWidth: 200 }}>{(r.summary || "").slice(0, 80)}{(r.summary || "").length > 80 ? "..." : ""}</td>
-                            <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                            <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => openReportDetailModal(r)}>Report</button></td>
                           </tr>
                         ))}
                       </tbody>
@@ -3955,7 +4044,7 @@ export default function HomePage() {
                                 <td>{r.contactName || "-"}</td>
                                 <td>{r.topic}</td>
                                 <td className="subtle" style={{ maxWidth: 220 }}>{(r.summary || "").slice(0, 100)}{(r.summary || "").length > 100 ? "..." : ""}</td>
-                                <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => setSelectedReport(r)}>Report</button></td>
+                                <td><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px" }} onClick={() => openReportDetailModal(r)}>Report</button></td>
                               </tr>
                             );
                           })}
@@ -4199,7 +4288,7 @@ export default function HomePage() {
                       <button
                         className="btn ghost"
                         style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
-                        onClick={() => setSelectedReport(report)}
+                        onClick={() => openReportDetailModal(report)}
                       >Details</button>
                       <button
                         className="btn danger"
@@ -4367,8 +4456,8 @@ export default function HomePage() {
                                 <td>
                                   <button
                                     className="link-button"
-                                    onClick={() => setSelectedLeadForHistory(lead)}
-                                    title="Auftragshistorie anzeigen"
+                                    onClick={() => openLeadDetailModal(lead)}
+                                    title="Stammdaten anzeigen"
                                   >
                                     <strong>{lead.company}</strong>
                                   </button>
@@ -4489,7 +4578,7 @@ export default function HomePage() {
                     <button
                       key={report.id}
                       className="calendar-item"
-                      onClick={() => setSelectedReport(report)}
+                      onClick={() => openReportDetailModal(report)}
                     >
                       <strong>{formatDate(report.appointmentAt)}</strong>
                       <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
@@ -5479,10 +5568,16 @@ export default function HomePage() {
                       : "Offen";
 
         return (
-          <div className="modal-overlay" onClick={() => setSelectedLeadForHistory(null)}>
+          <div className="modal-overlay" onClick={() => {
+            setSelectedLeadForHistory(null);
+            setSelectedReport(null);
+          }}>
             <div className="modal lead-history-modal" onClick={(event) => event.stopPropagation()}>
-              <button className="modal-close" onClick={() => setSelectedLeadForHistory(null)}>✕</button>
-              <h2>Auftragshistorie: {buildEffectiveLeadCompanyName({ customerKind: selectedLeadForHistory.customerKind || "firma", company: selectedLeadForHistory.company, contactName: selectedLeadForHistory.contactName })}</h2>
+              <button className="modal-close" onClick={() => {
+                setSelectedLeadForHistory(null);
+                setSelectedReport(null);
+              }}>✕</button>
+              <h2>Stammdaten: {buildEffectiveLeadCompanyName({ customerKind: selectedLeadForHistory.customerKind || "firma", company: selectedLeadForHistory.company, contactName: selectedLeadForHistory.contactName })}</h2>
               <p className="subtle" style={{ marginTop: 6 }}>
                 Ansprechpartner: {selectedLeadForHistory.contactName || "-"} · Thema: {selectedLeadForHistory.topic}
               </p>
@@ -5493,7 +5588,7 @@ export default function HomePage() {
                   { key: "produkte", label: "Produkte" },
                   { key: "zugehoerigkeiten", label: "Zugehörigkeiten" },
                   { key: "pipeline", label: "Pipeline" },
-                  { key: "historie", label: "Historie" },
+                  { key: "historie", label: "Anrufhistorie" },
                   { key: "kommunikation", label: "Kommunikation" },
                   { key: "termine", label: "Termine" },
                   { key: "aufgaben", label: "Aufgaben" },
@@ -5614,12 +5709,6 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="report-detail-field">
-                  <label>Thema</label>
-                  <select value={detailDraft?.topic || selectedLeadForHistory.topic} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), topic: e.target.value as Topic }))}>
-                    {TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div className="report-detail-field">
                   <label>Quellliste</label>
                   <p>{selectedLeadForHistory.listName || "Standardliste"}</p>
                 </div>
@@ -5656,31 +5745,158 @@ export default function HomePage() {
 
               {crmDetailTab === "produkte" ? <div className="report-detail-grid top-gap">
                 <div className="report-detail-field report-detail-full">
-                  <label>Produkte für diesen Kunden</label>
+                  <label>Produkte für Kunden hinzufügen</label>
                   <div className="row top-gap" style={{ gap: 8, flexWrap: "wrap" }}>
-                    {PRODUCT_OPTIONS.map((product) => {
-                      const selected = (detailDraft?.products || selectedLeadForHistory.products || []).includes(product);
-                      return (
-                        <button
-                          key={product}
-                          className={`btn ${selected ? "" : "ghost"}`}
-                          style={{ padding: "6px 10px", fontSize: "0.78rem" }}
-                          onClick={() => toggleLeadProduct(product)}
-                        >
-                          {selected ? "✓ " : "+ "}{product}
-                        </button>
-                      );
-                    })}
+                    {PRODUCT_OPTIONS.map((product) => (
+                      <button
+                        key={product}
+                        className="btn ghost"
+                        style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                        onClick={() => startLeadProductEditor(product)}
+                      >
+                        + {product}
+                      </button>
+                    ))}
                   </div>
-                  <div className="top-gap" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {(detailDraft?.products || selectedLeadForHistory.products || []).length > 0 ? (
-                      (detailDraft?.products || selectedLeadForHistory.products || []).map((product) => (
-                        <span key={product} className="status-pill ok" style={{ fontSize: "0.74rem" }}>{product}</span>
+                </div>
+
+                {productEditorDraft ? (
+                  <div className="report-detail-field report-detail-full">
+                    <div className="panel static-panel" style={{ padding: 12 }}>
+                      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                        <strong>{productEditorDraft.label || productEditorDraft.category || "Neues Produkt"}</strong>
+                        <button className="btn ghost" onClick={() => setProductEditorDraft(null)}>Abbrechen</button>
+                      </div>
+                      <div className="report-detail-grid top-gap">
+                        <div className="report-detail-field">
+                          <label>Produkt</label>
+                          <select value={productEditorDraft.category || "private Krankenversicherung"} onChange={(e) => updateProductEditorField("category", e.target.value)}>
+                            {PRODUCT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Produktname / Bezeichnung</label>
+                          <input value={productEditorDraft.label || ""} onChange={(e) => updateProductEditorField("label", e.target.value)} placeholder="z. B. PKV Basis" />
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Gesellschaft / Anbieter</label>
+                          <input value={productEditorDraft.insurer || ""} onChange={(e) => updateProductEditorField("insurer", e.target.value)} placeholder="z. B. Allianz" />
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Vertragsnummer</label>
+                          <input value={productEditorDraft.contractNumber || ""} onChange={(e) => updateProductEditorField("contractNumber", e.target.value)} placeholder="VN-000123" />
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Beitrag</label>
+                          <input value={productEditorDraft.premium || ""} onChange={(e) => updateProductEditorField("premium", e.target.value)} placeholder="89,50 € / monatlich" />
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Zahlweise</label>
+                          <select value={productEditorDraft.paymentMethod || "monatlich"} onChange={(e) => updateProductEditorField("paymentMethod", e.target.value)}>
+                            <option value="monatlich">monatlich</option>
+                            <option value="vierteljährlich">vierteljährlich</option>
+                            <option value="halbjährlich">halbjährlich</option>
+                            <option value="jährlich">jährlich</option>
+                            <option value="einmalig">einmalig</option>
+                          </select>
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Produkttyp</label>
+                          <input value={productEditorDraft.productType || ""} onChange={(e) => updateProductEditorField("productType", e.target.value)} placeholder="z. B. Tarif / Leistung" />
+                        </div>
+                        {(productEditorDraft.category || "").toLowerCase().includes("strom") || (productEditorDraft.category || "").toLowerCase().includes("gas") ? (
+                          <div className="report-detail-field">
+                            <label>Energieart</label>
+                            <select value={productEditorDraft.energyType || "Strom"} onChange={(e) => updateProductEditorField("energyType", e.target.value)}>
+                              <option value="Strom">Strom</option>
+                              <option value="Gas">Gas</option>
+                              <option value="Strom und Gas">Strom und Gas</option>
+                            </select>
+                          </div>
+                        ) : null}
+                        <div className="report-detail-field">
+                          <label>Beginn</label>
+                          <input type="date" value={productEditorDraft.startDate || ""} onChange={(e) => updateProductEditorField("startDate", e.target.value)} />
+                        </div>
+                        <div className="report-detail-field">
+                          <label>Ablauf</label>
+                          <input type="date" value={productEditorDraft.endDate || ""} onChange={(e) => updateProductEditorField("endDate", e.target.value)} />
+                        </div>
+                        <div className="report-detail-field report-detail-full">
+                          <label>Details zum Produkt</label>
+                          <textarea value={productEditorDraft.notes || ""} onChange={(e) => updateProductEditorField("notes", e.target.value)} rows={3} placeholder="Versicherungsumfang, Laufzeit, besondere Konditionen..." />
+                        </div>
+                        <div className="report-detail-field report-detail-full">
+                          <label>Dokument / Police</label>
+                          <input type="file" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            const dataUrl = await new Promise<string>((resolve, reject) => {
+                              reader.onload = () => resolve(String(reader.result || ""));
+                              reader.onerror = () => reject(new Error("Datei konnte nicht gelesen werden."));
+                              reader.readAsDataURL(file);
+                            });
+                            setProductEditorDraft((draft) => ({ ...(draft || {}), documentName: file.name, documentUrl: dataUrl }));
+                            e.target.value = "";
+                          }} />
+                          {productEditorDraft.documentName ? (
+                            <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                              <span className="subtle">{productEditorDraft.documentName}</span>
+                              {productEditorDraft.documentUrl ? (
+                                <a href={productEditorDraft.documentUrl} target="_blank" rel="noreferrer" className="subtle" style={{ textDecoration: "underline" }}>
+                                  Datei öffnen
+                                </a>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="row top-gap" style={{ gap: 8 }}>
+                        <button className="btn" onClick={saveLeadProductEditor}>Produkt speichern</button>
+                        {productEditorDraft.id ? <button className="btn danger ghost" onClick={() => deleteLeadProduct(productEditorDraft.id!)}>Löschen</button> : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="report-detail-field report-detail-full">
+                  <label>Gespeicherte Produkte</label>
+                  <div className="top-gap" style={{ display: "grid", gap: 10 }}>
+                    {getLeadProductDetailsForDraft(detailDraft).length > 0 ? (
+                      getLeadProductDetailsForDraft(detailDraft).map((product) => (
+                        <div key={product.id} className="panel static-panel" style={{ padding: 12 }}>
+                          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                            <strong>{product.label || product.category}</strong>
+                            <div className="row" style={{ gap: 8 }}>
+                              <button className="btn ghost" onClick={() => startLeadProductEditor(product.category, product)}>Bearbeiten</button>
+                              <button className="btn danger ghost" onClick={() => deleteLeadProduct(product.id)}>Löschen</button>
+                            </div>
+                          </div>
+                          <div className="subtle top-gap" style={{ display: "grid", gap: 2 }}>
+                            {product.insurer ? <span>Anbieter: {product.insurer}</span> : null}
+                            {product.contractNumber ? <span>Vertragsnummer: {product.contractNumber}</span> : null}
+                            {product.premium ? <span>Beitrag: {product.premium}</span> : null}
+                            {product.paymentMethod ? <span>Zahlweise: {product.paymentMethod}</span> : null}
+                            {product.startDate ? <span>Beginn: {product.startDate}</span> : null}
+                            {product.endDate ? <span>Ablauf: {product.endDate}</span> : null}
+                          </div>
+                        </div>
                       ))
                     ) : (
-                      <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte zugewiesen.</p>
+                      <p className="subtle" style={{ margin: 0 }}>Noch keine Produkte hinzugefügt.</p>
                     )}
                   </div>
+                </div>
+                <div className="report-detail-field report-detail-full">
+                  <button
+                    className="btn"
+                    style={{ marginTop: 8 }}
+                    disabled={busy}
+                    onClick={() => void saveLeadDetailsFromModal()}
+                  >
+                    Produkte speichern
+                  </button>
                 </div>
               </div> : null}
 
@@ -5895,7 +6111,7 @@ export default function HomePage() {
                               {report.nextCallAt ? ` · Nächster Anruf: ${formatDate(report.nextCallAt)}` : ""}
                             </p>
                           </div>
-                          <button className="btn ghost" onClick={() => setSelectedReport(report)}>
+                          <button className="btn ghost" onClick={() => openReportDetailModal(report)}>
                             Vollen Report öffnen
                           </button>
                         </div>
@@ -6071,9 +6287,15 @@ export default function HomePage() {
           : null;
 
         return (
-          <div className="modal-overlay" onClick={() => setSelectedReport(null)}>
+          <div className="modal-overlay" onClick={() => {
+            setSelectedReport(null);
+            setSelectedLeadForHistory(null);
+          }}>
             <div className="modal" onClick={(event) => event.stopPropagation()}>
-              <button className="modal-close" onClick={() => setSelectedReport(null)}>✕</button>
+              <button className="modal-close" onClick={() => {
+                setSelectedReport(null);
+                setSelectedLeadForHistory(null);
+              }}>✕</button>
               <h2>{selectedReport.company}</h2>
               <div className="row" style={{ marginTop: 8 }}>
                 <span className={`status ${selectedReport.outcome === "Absage" ? "absage" : selectedReport.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
