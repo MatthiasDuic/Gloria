@@ -771,6 +771,7 @@ async function initializeSchema() {
       address_city TEXT,
       address_country TEXT,
       products JSONB,
+      product_details JSONB,
       affiliations JSONB,
       email_history JSONB,
       tasks JSONB,
@@ -811,6 +812,7 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_city TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_country TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS products JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS product_details JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS affiliations JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS tasks JSONB;`);
@@ -1869,6 +1871,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         address_city,
         address_country,
         products,
+        product_details,
         affiliations,
         email_history,
         tasks,
@@ -1903,6 +1906,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       addressCity: row.address_city ? String(row.address_city) : undefined,
       addressCountry: row.address_country ? String(row.address_country) : undefined,
       products: parseJsonTextArray(row.products),
+      productDetails: Array.isArray(row.product_details) ? row.product_details : (typeof row.product_details === "string" ? JSON.parse(row.product_details || "[]") : []),
       affiliations: row.affiliations ? (Array.isArray(row.affiliations) ? row.affiliations : JSON.parse(String(row.affiliations || "[]"))) : undefined,
       emailHistory: parseLeadEmailHistory(row.email_history),
       tasks: parseLeadTasks(row.tasks),
@@ -1970,6 +1974,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             address_city,
             address_country,
             products,
+            product_details,
             affiliations,
             email_history,
             tasks,
@@ -2003,6 +2008,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             address_city = EXCLUDED.address_city,
             address_country = EXCLUDED.address_country,
             products = EXCLUDED.products,
+            product_details = EXCLUDED.product_details,
             affiliations = EXCLUDED.affiliations,
             email_history = EXCLUDED.email_history,
             tasks = EXCLUDED.tasks,
@@ -2034,6 +2040,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.addressCity || null,
             lead.addressCountry || null,
             JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
+            JSON.stringify(lead.productDetails || null),
             JSON.stringify(lead.affiliations || null),
             JSON.stringify(lead.emailHistory || []),
             JSON.stringify(lead.tasks || []),

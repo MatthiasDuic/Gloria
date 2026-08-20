@@ -1,3 +1,5 @@
+import type { LeadProductDetail } from "./types";
+
 export type LeadAffiliationRole =
   | "Mitarbeiter"
   | "Geschäftsführer"
@@ -77,6 +79,54 @@ export function normalizeLeadBirthDate(rawValue?: string): string | undefined {
   return value;
 }
 
+export function buildLeadProductRecord(input: Partial<LeadProductDetail> & { category: string; label?: string }): LeadProductDetail {
+  const category = String(input.category || "").trim() || "Sonstige";
+  const label = String(input.label || category).trim() || category;
+  return {
+    id: input.id || `product-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    category,
+    label,
+    insurer: input.insurer?.trim() || undefined,
+    contractNumber: input.contractNumber?.trim() || undefined,
+    premium: input.premium?.trim() || undefined,
+    paymentMethod: input.paymentMethod?.trim() || "monatlich",
+    productType: input.productType?.trim() || undefined,
+    energyType: input.energyType?.trim() || undefined,
+    startDate: input.startDate?.trim() || undefined,
+    endDate: input.endDate?.trim() || undefined,
+    notes: input.notes?.trim() || undefined,
+    documentName: input.documentName?.trim() || undefined,
+    documentUrl: input.documentUrl?.trim() || undefined,
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+}
+
+export function normalizeLeadProductDetails(input: unknown): LeadProductDetail[] | undefined {
+  const source = Array.isArray(input) ? input : [];
+  const next = source
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return buildLeadProductRecord({ category: entry, label: entry });
+      }
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const product = entry as Partial<LeadProductDetail> & { category?: string; label?: string };
+      const category = String(product.category || product.label || "").trim();
+      if (!category) {
+        return null;
+      }
+      return buildLeadProductRecord({
+        ...product,
+        category,
+        label: product.label || category,
+      });
+    })
+    .filter((entry): entry is LeadProductDetail => Boolean(entry));
+
+  return next.length ? next : undefined;
+}
+
 export function getLeadCustomerKindFormConfig(customerKind: "privat" | "firma") {
   if (customerKind === "privat") {
     return {
@@ -93,4 +143,19 @@ export function getLeadCustomerKindFormConfig(customerKind: "privat" | "firma") 
     requireCompany: true,
     showBirthDate: false,
   };
+}
+
+export function resolveExclusiveDetailModal<TLead = unknown, TReport = unknown>(options: {
+  lead?: TLead | null;
+  report?: TReport | null;
+}): { lead: TLead | null; report: TReport | null } {
+  if (options.lead !== undefined) {
+    return { lead: options.lead ?? null, report: null };
+  }
+
+  if (options.report !== undefined) {
+    return { lead: null, report: options.report ?? null };
+  }
+
+  return { lead: null, report: null };
 }

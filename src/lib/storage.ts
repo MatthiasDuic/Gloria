@@ -39,6 +39,7 @@ import type {
   ScriptConfig,
   Topic,
 } from "./types";
+import { normalizeLeadProductDetails } from "./crm-helpers";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
@@ -740,6 +741,7 @@ export async function updateLeadDetails(
       addressCity: updates.addressCity ?? lead.addressCity,
       addressCountry: updates.addressCountry ?? lead.addressCountry,
       products: updates.products ?? lead.products,
+      productDetails: normalizeLeadProductDetails(updates.productDetails ?? lead.productDetails ?? lead.products),
       affiliations: normalizeLeadAffiliations(updates.affiliations ?? lead.affiliations),
       topic: updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
@@ -762,6 +764,7 @@ export async function updateLeadDetails(
       addressCity: lead.addressCity,
       addressCountry: lead.addressCountry,
       products: lead.products,
+      productDetails: lead.productDetails,
       affiliations: lead.affiliations,
       topic: lead.topic,
       note: lead.note,
@@ -781,6 +784,7 @@ export async function updateLeadDetails(
       addressCity: nextLead.addressCity,
       addressCountry: nextLead.addressCountry,
       products: nextLead.products,
+      productDetails: nextLead.productDetails,
       affiliations: nextLead.affiliations,
       topic: nextLead.topic,
       note: nextLead.note,

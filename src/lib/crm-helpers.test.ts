@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildEffectiveLeadCompanyName,
+  buildLeadProductRecord,
   getLeadCustomerKindFormConfig,
   normalizeLeadAffiliationRole,
   normalizeLeadBirthDate,
+  normalizeLeadProductDetails,
+  resolveExclusiveDetailModal,
   resolveLeadCompanyValue,
 } from "./crm-helpers.ts";
 
@@ -38,4 +41,29 @@ test("customer kind form config switches the required fields between private per
     requireCompany: true,
     showBirthDate: false,
   });
+});
+
+test("product details get normalized defaults for insurance and energy products", () => {
+  const next = normalizeLeadProductDetails([
+    { category: "private Krankenversicherung", insurer: "Allianz", premium: "89,50", paymentMethod: "monatlich" },
+    { category: "Strom und Gas", energyType: "Strom" },
+  ]);
+
+  assert.equal(next?.length, 2);
+  assert.equal(next?.[0].label, "private Krankenversicherung");
+  assert.equal(next?.[0].paymentMethod, "monatlich");
+  assert.equal(next?.[1].energyType, "Strom");
+  assert.ok(next?.[0].id.startsWith("product-"));
+
+  const record = buildLeadProductRecord({ category: "betriebliche Krankenversicherung" });
+  assert.equal(record.category, "betriebliche Krankenversicherung");
+  assert.equal(record.paymentMethod, "monatlich");
+});
+
+test("detail modals stay exclusive so a lead detail cannot overlap a report detail", () => {
+  const leadState = resolveExclusiveDetailModal({ lead: { id: "lead-1" } });
+  assert.deepEqual(leadState, { lead: { id: "lead-1" }, report: null });
+
+  const reportState = resolveExclusiveDetailModal({ report: { id: "report-1" } });
+  assert.deepEqual(reportState, { lead: null, report: { id: "report-1" } });
 });

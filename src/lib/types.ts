@@ -87,6 +87,24 @@ export interface LeadAffiliation {
   createdAt: string;
 }
 
+export interface LeadProductDetail {
+  id: string;
+  category: string;
+  label: string;
+  insurer?: string;
+  contractNumber?: string;
+  premium?: string;
+  paymentMethod?: string;
+  productType?: string;
+  energyType?: string;
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
+  documentName?: string;
+  documentUrl?: string;
+  createdAt: string;
+}
+
 export interface Lead {
   id: string;
   userId?: string;
@@ -106,6 +124,7 @@ export interface Lead {
   addressCity?: string;
   addressCountry?: string;
   products?: string[];
+  productDetails?: LeadProductDetail[];
   affiliations?: LeadAffiliation[];
   emailHistory?: LeadEmailActivity[];
   tasks?: LeadTask[];
