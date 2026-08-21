@@ -31,6 +31,17 @@ function roundToFive(n: number): number {
   return Math.round(n / 5) * 5;
 }
 
+function buildTenYearProjectionSentence(contributionPhrase?: string): string {
+  if (!contributionPhrase) return "Bei Ihrem Beitrag wären das in 10 Jahren rund 100 Euro mehr pro Monat — das ist schon eine spürbare Veränderung.";
+
+  const amount = parseGermanEuroAmount(contributionPhrase);
+  if (!amount) return "Bei Ihrem Beitrag wären das in 10 Jahren rund 100 Euro mehr pro Monat — das ist schon eine spürbare Veränderung.";
+
+  const futureAmount = roundToFive(Math.round(amount * (1.04 ** 10)));
+  const increase = roundToFive(futureAmount - amount);
+  return `Bei Ihrem Beitrag wären das in 10 Jahren rund ${increase} Euro mehr pro Monat — das ist schon eine spürbare Veränderung. Gesamt dann etwa ${futureAmount} Euro pro Monat.`;
+}
+
 export function extractContributionPhrase(userText: string): string | undefined {
   return userText.match(CONTRIBUTION_PATTERN)?.[0];
 }
@@ -95,7 +106,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
       }
       return (
         `Rechne ${phrase} mit rund 4% Steigerung pro Jahr auf 10 Jahre hoch.${hint} ` +
-        "Formuliere das kurz und menschlich: 'Bei Ihrem Beitrag wären das in 10 Jahren rund X Euro mehr — das ist schon eine spürbare Veränderung.' " +
+        `Formuliere das kurz und menschlich: '${buildTenYearProjectionSentence(contributionPhrase)}' ` +
         "Stelle danach GENAU EINE Frage: 'Haben Sie das schon einmal so durchgerechnet?' Warte vollständig auf die Antwort. " +
         "KEIN Ruhestand, KEINE 25-Jahres-Berechnung — nur 10 Jahre."
       );

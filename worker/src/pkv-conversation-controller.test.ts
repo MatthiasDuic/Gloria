@@ -52,3 +52,9 @@ test("does not advance from step 0 on a plain greeting", () => {
   assert.deepEqual(advancePkvStep(0, "Guten Tag."), { nextStep: 0, shouldEnd: false });
   assert.deepEqual(advancePkvStep(0, "Ja, gerne."), { nextStep: 1, shouldEnd: false });
 });
+
+test("uses a deterministic 10-year projection instead of inventing a wrong value", () => {
+  const instruction = instructionForPkvStep(4, "1000 Euro");
+  assert.match(instruction, /1000 Euro.*1480 Euro.*480 Euro mehr pro Monat/i);
+  assert.doesNotMatch(instruction, /25 Euro mehr|rund 25|rund X Euro/i);
+});
