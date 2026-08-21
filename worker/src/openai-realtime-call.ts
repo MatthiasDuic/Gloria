@@ -229,6 +229,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und führe dann direkt im aktiven Gesprächsschritt weiter.",
     "Sprich natürlich und knapp in kurzen Sätzen. Stelle höchstens eine Frage pro Turn als letzten Satz. Sobald du die Frage gestellt hast, beendest du deinen Turn vollständig und wartest.",
+    "Keine Kundenwiederholungen: Nutze keine zuvor gehörten Kundenwörter oder Formulierungen als alleinigen Grund für einen eigenen Satz. Antworte auf den aktuellen Inhalt statt auf wiederholte Kundenbegriffe.",
+    "Vermeide Dankesfloskeln im normalen Gespräch. Nur maximal eine kurze Verabschiedung am Schluss. Keine 'Danke'-Floskel zwischen Gesprächsschritten und keine künstlichen Dankesformeln im Lauf des Calls.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Achte besonders auf die korrekte Aussprache des Namens Duic: sprich ihn immer wie 'Duitsch' aus, nicht wie 'Du-ik' oder ähnlich. Der Nachname ist Duic = Duitsch.",
@@ -237,10 +239,11 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Die Topic Policy steuert Anlass, Kundennutzen, Einwandbehandlung und Gesprächsführung für dieses Thema. Universell verbindlich bleiben nur Transparenz, Freiwilligkeit, Datenschutz, die Terminlogik und fachliche Grenzen.",
     "Sprich menschlich, ruhig, freundlich und auf Augenhöhe. Keine Callcenter-Monologe, keine künstliche Vertrautheit, keine erfundenen Fakten, keine manipulative Dringlichkeit.",
       "Nimm die letzte Aussage des Kunden zuerst emotional und inhaltlich auf: Benenne kurz seine konkrete Perspektive oder Sorge in eigenen Worten, ohne zu dramatisieren. Gib dann genau einen nachvollziehbaren nächsten Schritt und höchstens eine Frage. Keine Standardfloskel wie 'Dann ist das sinnvoll', wenn der Kunde gerade etwas anderes gesagt hat.",
-      "Nach einer Unterbrechung setzt du nur an der offenen Stelle an. Wiederhole weder die komplette Vorstellung noch den bereits gesprochenen Satz. Wenn die Äußerung unklar war, frage kurz nach; wenn sie verständlich war, antworte direkt auf ihren Inhalt.",
+      "Nach einer Unterbrechung setzt du nur an der offenen Stelle an. Keine komplette Vorstellung, kein erneutes Nachsprechen eines bereits geäußerten Satzes. Wenn die Äußerung unklar war, frage kurz nach; wenn sie verständlich war, antworte direkt auf ihren Inhalt.",
     "Gib niemals zu, dass du etwas erfunden hast, dass deine Information ungenau ist, oder dass du dich geirrt hast. Wenn du einen Fehler bemerkst oder unsicher bist, korrigiere dich diskret und fahre mit Sicherheit fort—Beispiel: nicht 'Ich kann das nicht sauber herleiten, ohne etwas zu erfinden', sondern 'Lass mich das anders erklären' oder direkt die nächste passende Frage. Vertrauen bauen heißt: immer kompetent wirken, auch wenn du eine Aussage anpasst.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
+    "VERABSCHIEDUNG: Die letzte Aussage am Ende des Gesprächs muss exakt lauten: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Rufe danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Bei 'Der Donnerstag' oder 'der zweite Termin' frage zuerst kurz zurück: 'Meinen Sie Donnerstag, den ... um ... Uhr?' Rufe confirm_appointment erst nach einem klaren 'Ja, das passt' oder einer vollständigen eindeutigen Bestätigung auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
@@ -680,7 +683,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const advance = advancePkvStep(currentStep, transcript);
 
         if (advance.shouldEnd) {
-          requestEventResponse("Bedanke dich beim Kunden für das Gespräch, verabschiede dich freundlich und rufe dann end_call auf.");
+          requestEventResponse("Verabschiede dich freundlich und rufe dann end_call auf. Nutze dabei nur die exakte Schlussformel 'Vielen Dank für das Gespräch. Auf Wiederhören.'");
           return;
         }
 
@@ -720,7 +723,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (previousPreparationStage === "awaiting_final_questions" && transition.state.stage === "completed") {
       hangupAfterAssistantResponse = true;
-      requestEventResponse("Sage exakt: 'Danke Ihnen für das Gespräch, auf Wiederhören.' Stelle keine weitere Frage und füge keinen weiteren Satz hinzu.");
+      requestEventResponse("Sage exakt: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Stelle keine weitere Frage und füge keinen weiteren Satz hinzu.");
       return;
     }
 
@@ -801,7 +804,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
     const model = process.env.OPENAI_REALTIME_MODEL?.trim() || "gpt-realtime-2.1";
 
-    let handleRealtimeEvent = (_message: RealtimeServerEvent): void => undefined;
+    let handleRealtimeEvent = async (_message: RealtimeServerEvent): Promise<void> => undefined;
     openaiSession = new OpenAiRealtimeSession({
       apiKey,
       model,
@@ -818,7 +821,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       },
     });
 
-    handleRealtimeEvent = (message) => {
+    handleRealtimeEvent = async (message) => {
 
       if (message.type === "error") {
         const errorMessage = message.error?.message || "unknown_realtime_error";
@@ -1043,7 +1046,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
           assistantTranscriptDeltaSeen = false;
           return;
         }
-        if (transcript) void speakWithElevenLabs(transcript);
+        if (transcript) {
+          await speakWithElevenLabs(transcript);
+        }
 
         if (transcript && hangupAfterAssistantResponse && ctx) {
           hangupAfterAssistantResponse = false;
@@ -1051,7 +1056,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           pendingUserTranscripts.splice(0);
           responses.stop();
           log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
-          void notifyCallAction(ctx, "hangup");
+          await notifyCallAction(ctx, "hangup");
         }
 
         assistantContinuationRequested = false;
@@ -1253,13 +1258,14 @@ function convertNumbersForSpeech(text: string): string {
   const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
   
   // Convert time: "um 13:00" or "13:00 Uhr" → "um dreizehn Uhr"
-  let result = text.replace(/\b(\d{1,2}):(\d{2})\s*(?:Uhr)?/g, (match, hourStr, minuteStr) => {
+  let result = text.replace(/\b(um\s+)?(\d{1,2}):(\d{2})\s*(?:Uhr)?/gi, (match, prefix, hourStr, minuteStr) => {
     const hour = Number.parseInt(hourStr, 10);
     const minute = Number.parseInt(minuteStr, 10);
     const hourWord = hourWords[hour % 24] || String(hour);
-    if (minute === 0) return `${hourWord} Uhr`;
+    const spokenPrefix = /\bum\b/i.test(match) ? "um " : "";
+    if (minute === 0) return `${spokenPrefix}${hourWord} Uhr`;
     const minuteWord = minuteWords[minute] || String(minute);
-    return `${hourWord} Uhr ${minuteWord}`;
+    return `${spokenPrefix}${hourWord} Uhr ${minuteWord}`;
   });
 
   result = result.replace(/\b(\d{1,2})\s*-\s*(\d{1,2})\s*%/g, (_match, from, to) => {

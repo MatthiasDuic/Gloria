@@ -22,13 +22,28 @@ function targetNameTokens(targetName?: string): string[] {
 
 function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   const normalized = text.toLowerCase();
-  if (/\b(?:das bin ich|ich bin es|ich bin selbst|selbst am apparat|sprechen sie mit mir|ich bin zuständig)\b/i.test(normalized)) {
+  if (/\b(?:stelle\s+sie\s+zu|stellen\s+sie\s+zu|verbinde\s+sie|verbinde|durchstellen|weiterleiten|weiterleite|schalte\s+weiter|durchstellen\s+zu)\b/i.test(normalized)) {
+    return false;
+  }
+  if (/\b(?:das bin ich|ich bin es|ich bin selbst|selbst am apparat|sprechen sie mit mir|ich bin zuständig|ich bin der verantwortliche|ich bin der entscheidungsträger)\b/i.test(normalized)) {
     return true;
   }
+
   const targetTokens = targetNameTokens(targetName);
   if (targetTokens.length === 0) return false;
   const escapedName = targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
-  return new RegExp(`(?:\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|\\bhier\\s+ist\\s+${escapedName}\\b|\\b${escapedName}\\s+am\\s+apparat\\b)`, "i").test(normalized);
+  const nameRegex = new RegExp(
+    `(?:` +
+      `\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|` +
+      `\\bhier\\s+ist\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
+      `\\b(?:herr|frau)?\\s*${escapedName}\\s+am\\s+apparat\\b|` +
+      `\\b(?:ich\\s+bin\\s+)?(?:herr|frau)?\\s*${escapedName}\\b|` +
+      `\\bmit\\s+(?:herr|frau)?\\s*${escapedName}\\b` +
+      `)`,
+    "i",
+  );
+
+  return nameRegex.test(normalized);
 }
 
 export function createContactRoutingState(targetName?: string): ContactRoutingState {

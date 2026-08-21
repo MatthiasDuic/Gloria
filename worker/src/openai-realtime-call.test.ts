@@ -71,6 +71,19 @@ test("allows a PKV appointment after selecting an offered slot", () => {
   assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
 });
 
+test("accepts a direct Monday selection as a confirmed slot without asking again", () => {
+  const ctx = buildPkvContext();
+  ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Montag, 24. August um 15:30 Uhr\n- Dienstag, 25. August um 13:30 Uhr";
+  ctx.transcript.push(
+    { role: "user", text: "Ja, diese Klarheit ist für mich hilfreich.", at: 6.5 },
+    { role: "assistant", text: "Dann habe ich zwei Vorschläge: Montag, 24. August um 15:30 Uhr, oder Dienstag, 25. August um 13:30 Uhr. Welcher Termin passt Ihnen besser?", at: 7 },
+    { role: "user", text: "Montag passt gut.", at: 8 },
+  );
+
+  assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
+  assert.equal(isOfferedSlotPhrase(ctx, "Montag passt gut."), true);
+});
+
 test("rejects invented slots and accepts exact supplied slots", () => {
   const ctx = buildPkvContext();
   ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
@@ -81,9 +94,19 @@ test("rejects invented slots and accepts exact supplied slots", () => {
 test("formats times and Euro amounts in dynamic response instructions", () => {
   const ctx = buildPkvContext();
   const response = buildRealtimeResponseInstructions(ctx, "Biete Donnerstag, 3. September um 18:00 Uhr und 1.800 Euro an.", false);
-  assert.match(response, /achtzehn Uhr/);
+  assert.match(response, /um achtzehn Uhr/);
   assert.match(response, /eintausend achthundert Euro/);
   assert.doesNotMatch(response, /18:00|1\.800 Euro/);
+});
+
+test("uses natural German time wording for spoken appointment slots", () => {
+  const spoken = buildRealtimeResponseInstructions(
+    buildPkvContext(),
+    "Biete Mittwoch, 9. September um 18:00 Uhr an.",
+    false,
+  );
+  assert.match(spoken, /um achtzehn Uhr/);
+  assert.doesNotMatch(spoken, /achtzehn Uhr null|18:00 Uhr/);
 });
 
 test("formats percentages and larger amounts naturally for speech", () => {
@@ -144,6 +167,18 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Eine Frage pro Turn/);
 });
 
+test("requires the exact final goodbye phrase in the realtime instructions", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-farewell",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /Vielen Dank für das Gespräch\. Auf Wiederhören\./);
+  assert.doesNotMatch(instructions, /Danke Ihnen für das Gespräch.*auf Wiederhören/i);
+});
+
 test("uses the standard PKV flow in a strict order: relevance → appointment → preparation questions", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-flow",
@@ -173,6 +208,18 @@ test("uses the standard PKV flow in a strict order: relevance → appointment �
   assert.ok(projectionIndex < conceptIndex);
   assert.match(instructions, /vor Ort|bei Ihnen vor Ort/i);
   assert.match(instructions, /Gesundheitsfragen.*nach dem Termin|nach dem Termin.*Gesundheitsfragen|nach einem bestätigten Termin/i);
+});
+
+test("keeps the prompt concise and avoids repeating customer wording", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-prompt-style",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.doesNotMatch(instructions, /Wiederhole.*letzte Aussage|wiederhole.*letzte Aussage|Wiederhole.*Kunden|wiederhole.*Kunden/i);
+  assert.doesNotMatch(instructions, /Bedanke dich|danke dir|Danke dir/i);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {

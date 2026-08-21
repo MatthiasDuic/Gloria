@@ -173,8 +173,21 @@ test("completes the list and moves to the confirmation email", () => {
 
   transition = advancePreparation(transition.state, "Nein, keine Fragen.", []);
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /verabschiede dich höflich/);
+  assert.match(transition.instruction, /Vielen Dank für das Gespräch|Auf Wiederhören/);
   assert.match(transition.instruction, /end_call/);
+});
+
+test("ends directly when the customer says there is no time left and adds the health questions to the confirmation email", () => {
+  const oneQuestionPolicy = { topic: "PKV", requiredQuestions: "Wie groß sind Sie?" };
+  let transition = beginPreparation(createPreparationState(oneQuestionPolicy), "Donnerstag um 15 Uhr", []);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  transition = advancePreparation(transition.state, "Einen Meter achtzig.", []);
+  transition = advancePreparation(transition.state, "kunde@example.de", []);
+
+  transition = advancePreparation(transition.state, "Ich habe keine Zeit mehr.", []);
+  assert.equal(transition.state.stage, "completed");
+  assert.match(transition.instruction, /Terminbestätigung.*Mail|Mail.*Terminbestätigung|keine Zeit/i);
+  assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage/i);
 });
 
 test("completes the full health preparation flow through farewell", () => {
@@ -221,5 +234,5 @@ test("completes the full health preparation flow through farewell", () => {
 
   transition = advancePreparation(transition.state, "Nein, wir können das Gespräch beenden.", []);
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /verabschiede dich höflich/);
+  assert.match(transition.instruction, /Vielen Dank für das Gespräch|Auf Wiederhören/);
 });

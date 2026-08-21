@@ -1,20 +1,20 @@
 import { assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 export function convertSlotPhraseForSpeech(slotPhrase: string): string {
-  // Convert times: "11:00 Uhr" → "elf Uhr", "15:30 Uhr" → "fünfzehn Uhr dreißig"
   const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
   const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
-  
+
   let result = slotPhrase;
-  result = result.replace(/\b(\d{1,2}):(\d{2})\s*(?:Uhr)?/g, (match, hourStr, minuteStr) => {
+  result = result.replace(/\b(um\s+)?(\d{1,2}):(\d{2})\s*(?:Uhr)?/gi, (match, prefix, hourStr, minuteStr) => {
     const hour = Number.parseInt(hourStr, 10);
     const minute = Number.parseInt(minuteStr, 10);
     const hourWord = hourWords[hour % 24] || String(hour);
-    if (minute === 0) return `${hourWord} Uhr`;
+    const spokenPrefix = /\bum\b/i.test(match) ? "um " : "";
+    if (minute === 0) return `${spokenPrefix}${hourWord} Uhr`;
     const minuteWord = minuteWords[minute] || String(minute);
-    return `${hourWord} Uhr ${minuteWord}`;
+    return `${spokenPrefix}${hourWord} Uhr ${minuteWord}`;
   });
-  
+
   return result;
 }
 export type AppointmentPreference = "morning" | "afternoon" | "unknown";
@@ -49,15 +49,23 @@ export function findSuppliedAppointmentSlot(freeSlotsPrompt: string | undefined,
   const normalizedPhrase = normalizeSlot(phrase);
   const offeredText = normalizeSlot(freeSlotsPrompt || "");
   if (normalizedPhrase.length > 10 && offeredText.includes(normalizedPhrase)) return phrase.trim();
+
+  const weekdayMatch = normalizedPhrase.match(/\b(montag|dienstag|mittwoch|donnerstag|freitag)\b/i)?.[1];
   const time = normalizedPhrase.match(/\b(?:um\s*)?(\d{1,2})(?::|\s+uhr\s*)(\d{2})?\b/);
+
+  if (weekdayMatch && !time) {
+    const offeredLines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
+    const match = offeredLines.find((line) => normalizeSlot(line).includes(weekdayMatch.toLowerCase()));
+    if (match) return match;
+  }
+
   if (!time) return undefined;
-  const weekday = normalizedPhrase.match(/\b(montag|dienstag|mittwoch|donnerstag|freitag)\b/i)?.[1];
   const day = normalizedPhrase.match(/\b(\d{1,2})\.?\b/)?.[1];
   const offeredLines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
   return offeredLines.find((line) => {
     const normalizedLine = normalizeSlot(line);
     const lineHour = normalizedLine.match(/\b(?:um\s*)?(\d{1,2}):?(\d{2})\s*uhr\b/)?.[1];
-    return (!weekday || normalizedLine.includes(weekday.toLowerCase()))
+    return (!weekdayMatch || normalizedLine.includes(weekdayMatch.toLowerCase()))
       && (!day || new RegExp(`\\b${day}\\.?\\b`).test(normalizedLine))
       && lineHour === time[1]
       && (!time[2] || normalizedLine.includes(`:${time[2]}`));
@@ -93,7 +101,8 @@ export function decideAppointment(params: {
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
   const assistantText = params.turns.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
   const confirmationWasAsked = /(?:meinen\s+sie|passt\s+der|ist\s+das\s+so|richtig\s+verstanden)[^.?!]*(?:uhr|termin|donnerstag|freitag|montag|dienstag|mittwoch)/i.test(assistantText);
-  const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText);
+  const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText)
+    || /\b(?:montag|dienstag|mittwoch|donnerstag|freitag)\b[^.!?]{0,20}\b(?:passt|passt\s+gut|gut\s+so|stimmt|klingt\s+gut|besser)\b/i.test(latestUserText);
   if (confirmationWasAsked && !explicitConfirmation) {
     return {
       ok: false,

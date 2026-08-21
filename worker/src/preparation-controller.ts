@@ -1,6 +1,8 @@
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 
+export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
+
 export function formatTimeForSpeech(timeStr: string): string {
   // Re-export for use in other modules (delegates to formatTimeGerman)
   const [hourStr, minuteStr] = timeStr.split(":") || [];
@@ -309,19 +311,19 @@ export function advancePreparation(
       questions.splice((state.currentQuestionIndex ?? -1) + 1, 0, ...followUps);
       return {
         state: { ...state, questions, currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1 },
-        instruction: `Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${followUps[0]}"`,
+        instruction: `Stelle ausschließlich die nächste Vorbereitungsfrage: "${followUps[0]}"`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
     if (next) {
       return {
         state: { ...state, currentQuestionIndex: next.index },
-        instruction: `Bedanke dich knapp und stelle ausschließlich die nächste Vorbereitungsfrage: "${next.question}"`,
+        instruction: `Stelle ausschließlich die nächste Vorbereitungsfrage: "${next.question}"`,
       };
     }
     return {
       state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-      instruction: "Die Vorbereitungsfragen sind vollständig. Sage nur kurz: Danke, das hilft Herrn Duic bei der Vorbereitung. Frage danach ausschließlich nach der E-Mail-Adresse für die Terminbestätigung.",
+      instruction: "Die Vorbereitungsfragen sind vollständig. Frage danach ausschließlich nach der E-Mail-Adresse für die Terminbestätigung.",
     };
   }
 
@@ -334,19 +336,19 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "awaiting_final_questions", currentQuestionIndex: undefined },
-      instruction: "Bedanke dich kurz für die E-Mail-Adresse und frage dann genau einmal: 'Haben Sie noch eine Frage zum Ablauf oder zum Termin?' Stelle sonst nichts.",
+      instruction: "Nimm die E-Mail-Adresse an und frage dann genau einmal: 'Haben Sie noch eine Frage zum Ablauf oder zum Termin?' Stelle sonst nichts.",
     };
   }
 
   if (state.stage === "awaiting_final_questions") {
     const normalized = userText.trim().toLowerCase();
-    const noMoreQuestions = /\b(?:nein\b|ne\b|n[öo]\b|keine\s+frage|keine\s+fragen|nichts\s+mehr|passt\s+so|alles\s+klar|das\s+war\s+alles|wir\s+k[öo]nnen\s+das\s+gespr[äa]ch\s+beenden|gespr[äa]ch\s+beenden)\b/i.test(normalized);
+    const noMoreQuestions = /\b(?:nein\b|ne\b|n[öo]\b|keine\s+frage|keine\s+fragen|nichts\s+mehr|passt\s+so|alles\s+klar|das\s+war\s+alles|wir\s+k[öo]nnen\s+das\s+gespr[äa]ch\s+beenden|gespr[äa]ch\s+beenden|keine\s+zeit\s+mehr|ich\s+habe\s+keine\s+zeit\s+mehr)\b/i.test(normalized);
     const hasQuestion = /\?|\b(?:wer|wie|was|warum|wieso|weshalb|wann|wo|welche[rmn]?)\b/i.test(normalized);
 
     if (noMoreQuestions) {
       return {
         state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-        instruction: "Bedanke dich kurz für das Gespräch, verabschiede dich höflich auf Deutsch und rufe danach end_call auf. Keine weitere Rückfrage.",
+        instruction: `Da der Kunde keine Zeit mehr hat, nehme ich die wichtigsten Gesundheitsfragen in die Terminbestätigung per Mail auf und schließe das Gespräch ab. Sage exakt: '${FINAL_FAREWELL_TEXT}' Danach rufe end_call auf. Keine weitere Rückfrage.`,
       };
     }
 

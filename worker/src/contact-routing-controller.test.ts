@@ -31,6 +31,20 @@ test("does not treat a bare target-name mention as self-identification", () => {
   assert.equal(state.stage, "gatekeeper");
 });
 
+test("recognizes a direct name-based decision maker phrase", () => {
+  const state = advanceContactRouting(
+    createContactRoutingState("Herr Neumann"),
+    "Ja, hier ist Herr Neumann.",
+  );
+  assert.equal(state.stage, "decision_maker");
+
+  const state2 = advanceContactRouting(
+    createContactRoutingState("Frau Wagner"),
+    "Ich bin Frau Wagner.",
+  );
+  assert.equal(state2.stage, "decision_maker");
+});
+
 test("makes voicemail a terminal routing state", () => {
   let state = advanceContactRouting(
     createContactRoutingState("Herr Neumann"),
