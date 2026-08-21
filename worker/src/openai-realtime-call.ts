@@ -193,7 +193,7 @@ function isLikelyIncompleteAssistantTurn(text: string): boolean {
   return !/[.!?؟]$/.test(normalized);
 }
 
-const DECISION_MAKER_INTRO = "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?";
+const DECISION_MAKER_INTRO = "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?";
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
@@ -225,11 +225,13 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   const parts = [
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
+    `Sprich den Nachnamen Duic immer wie 'Duitsch' aus. Das ist der korrekte Namenlaut: Duic = Duitsch.`,
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte zuerst darauf und führe dann direkt im aktiven Gesprächsschritt weiter.",
     "Sprich natürlich und knapp in kurzen Sätzen. Stelle höchstens eine Frage pro Turn als letzten Satz. Sobald du die Frage gestellt hast, beendest du deinen Turn vollständig und wartest.",
     "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
+    "Achte besonders auf die korrekte Aussprache des Namens Duic: sprich ihn immer wie 'Duitsch' aus, nicht wie 'Du-ik' oder ähnlich. Der Nachname ist Duic = Duitsch.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
     "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
     "Die Topic Policy steuert Anlass, Kundennutzen, Einwandbehandlung und Gesprächsführung für dieses Thema. Universell verbindlich bleiben nur Transparenz, Freiwilligkeit, Datenschutz, die Terminlogik und fachliche Grenzen.",
@@ -248,7 +250,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   if (target) {
     parts.push(
-      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang.`,
+      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang. Achte dabei auf die korrekte Aussprache des Nachnamens: Duic = Duitsch.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
@@ -257,14 +259,14 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch warm, professionell und empathisch durch diese Phasen:\n" +
       "1. ERLAUBNIS: Frage ob du kurz sagen darfst worum es geht.\n" +
-      "2. RELEVANZ: Beitragsentwicklung in der Gesundheitsversorgung ansprechen, offene Frage wie der Kunde damit umgeht.\n" +
-      "3. VERTIEFUNG: Kläre mit genau einer Frage, ob der Kunde bereits einen konkreten Plan zur Beitragsentwicklung und Absicherung bis zum Ruhestand hat.\n" +
-      "4. BEITRAG: Hochrechnung anbieten, Monatsbeitrag erfragen.\n" +
-      "5. HOCHRECHNUNG: 10-Jahres-Projektion präsentieren, fragen ob schon so betrachtet.\n" +
-      "6. KONZEPT: Persönlich und emotional — Herrn Duics Ansatz als Lösung des Kundenproblems erklären.\n" +
-      "7. TERMIN: Vor-Ort-Termin vereinbaren (Vor- oder Nachmittag, 2 Optionen, Kundenwunsch akzeptieren).\n" +
-      "SPRACHE: Sprich immer von 'Beitragsentwicklung in der Gesundheitsversorgung'. Frage NICHT nach gesetzlich oder privat versichert.\n" +
-      "PROFESSIONALITÄT: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch, präzise, zugewandt.",
+      "2. RELEVANZ: Ein kurzer Nutzen- und Relevanzsatz zur Beitragsentwicklung in der Gesundheitsversorgung; frage nur einmal, ob das Thema für den Kunden aktuell relevant ist.\n" +
+      "3. TERMIN: Vereinbare einen kurzen Termin bei Ihnen vor Ort, zu Hause oder im Betrieb. Nutze den Nutzen: Sicht auf steigende Beiträge und die Planbarkeit bis zum Ruhestand. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an.\n" +
+      "4. VORBEREITUNG NACH DEM TERMIN: Nach der Terminbestätigung dürfen nur noch wenige PKV-Basisfragen kommen. Wenn der Kunde keine Zeit hat, nimm die wichtigsten Punkte in die Terminbestätigung per Mail auf und schließe sauber ab.\n" +
+      "5. BEITRAG: Nur nach einem bestätigten Termin, falls noch nötig, kurz die aktuelle Beitragssituation erfragen.\n" +
+      "6. HOCHRECHNUNG: 10-Jahres-Projektion kurz und verständlich einordnen, nur wenn es in den Ablauf passt.\n" +
+      "7. KONZEPT: Persönlich und emotional — Herrn Duics Ansatz als Lösung des Kundenproblems erklären.\n" +
+      "SPRACHE: Sprich immer von 'Beitragsentwicklung in der Gesundheitsversorgung'. Sprich den Nachnamen Duic immer korrekt als 'Duitsch' aus. Frage NICHT nach gesetzlich oder privat versichert, bevor ein Termin steht.\n" +
+      "PROFESSIONALITÄT: Eine Frage pro Turn. Kein Skript nachsprechen. Empathisch, präzise, zugewandt. Keine Gesundheitsfragen vor dem Termin. Bei Zeitmangel: in die Terminbestätigung per Mail übernehmen.",
     );
   }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
@@ -576,7 +578,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
-    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, mein Name ist Gloria. Ich bin die digitale Vertriebsassistentin von Herrn Duic und rufe in seinem Auftrag an. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
+    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
   };
 
   const requestInterruptedIntroContinuation = () => {

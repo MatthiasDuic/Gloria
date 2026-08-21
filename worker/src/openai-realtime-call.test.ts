@@ -107,12 +107,25 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Guten Tag, mein Name ist Gloria/);
+  assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic/);
   assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
   assert.match(instructions, /beginne nicht mit der Versicherungsfrage/);
+});
+
+test("explicitly teaches the correct Duic pronunciation as Duitsch", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-pronunciation",
+    streamSid: "test-stream",
+    contactName: "Herr Neumann",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /Duic.*Duitsch|Duitsch.*Duic/i);
+  assert.match(instructions, /Nachname.*Duic.*Duitsch/i);
 });
 
 test("requires the PKV ten-year and retirement bridge after a contribution", () => {
@@ -131,7 +144,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Eine Frage pro Turn/);
 });
 
-test("uses the standard PKV flow in a strict order: concept → insurance status and contribution", () => {
+test("uses the standard PKV flow in a strict order: relevance → appointment → preparation questions", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-flow",
     streamSid: "test-stream",
@@ -141,20 +154,25 @@ test("uses the standard PKV flow in a strict order: concept → insurance status
   const instructions = buildRealtimeInstructions(ctx);
 
   const relevanceIndex = instructions.search(/2\. RELEVANZ/);
-  const contributionIndex = instructions.search(/4\. BEITRAG/);
-  const projectionIndex = instructions.search(/5\. HOCHRECHNUNG/);
-  const conceptIndex = instructions.search(/6\. KONZEPT/);
-  const appointmentIndex = instructions.search(/7\. TERMIN/);
+  const appointmentIndex = instructions.search(/3\. TERMIN/);
+  const preparationIndex = instructions.search(/4\. VORBEREITUNG NACH DEM TERMIN/);
+  const contributionIndex = instructions.search(/5\. BEITRAG/);
+  const projectionIndex = instructions.search(/6\. HOCHRECHNUNG/);
+  const conceptIndex = instructions.search(/7\. KONZEPT/);
 
   assert.notEqual(relevanceIndex, -1);
-  assert.notEqual(conceptIndex, -1);
-  assert.notEqual(projectionIndex, -1);
-  assert.notEqual(contributionIndex, -1);
   assert.notEqual(appointmentIndex, -1);
-  assert.ok(relevanceIndex < contributionIndex);
+  assert.notEqual(preparationIndex, -1);
+  assert.notEqual(contributionIndex, -1);
+  assert.notEqual(projectionIndex, -1);
+  assert.notEqual(conceptIndex, -1);
+  assert.ok(relevanceIndex < appointmentIndex);
+  assert.ok(appointmentIndex < preparationIndex);
+  assert.ok(preparationIndex < contributionIndex);
   assert.ok(contributionIndex < projectionIndex);
   assert.ok(projectionIndex < conceptIndex);
-  assert.ok(conceptIndex < appointmentIndex);
+  assert.match(instructions, /vor Ort|bei Ihnen vor Ort/i);
+  assert.match(instructions, /Gesundheitsfragen.*nach dem Termin|nach dem Termin.*Gesundheitsfragen|nach einem bestätigten Termin/i);
 });
 
 test("forces the ten-year projection before scheduling after a contribution", () => {
