@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePkvStep, assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { advancePkvStep, assessPkvConversation, instructionForPkvStage, instructionForPkvStep, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -26,6 +26,12 @@ test("derives one deterministic next step from the PKV transcript", () => {
   turns.push({ role: "assistant", text: "Herr Duic zeigt Ihnen Ihre persönliche Entwicklung und prüfbare Optionen. Wäre diese Klarheit für Sie hilfreich?" });
   turns.push({ role: "user", text: "Ja, das wäre hilfreich." });
   assert.equal(assessPkvConversation(turns).stage, "ready_to_schedule");
+});
+
+test("uses the requested relevance wording without the older 'Wie gehen Sie damit um' phrasing", () => {
+  const instruction = instructionForPkvStep(1);
+  assert.match(instruction, /Wie erleben Sie das aktuell\?/);
+  assert.doesNotMatch(instruction, /Wie gehen Sie damit um, oder wie erleben Sie das aktuell\?/i);
 });
 
 test("does not treat an earlier yes as scheduling consent", () => {

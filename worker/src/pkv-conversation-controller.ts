@@ -61,7 +61,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         "Der Kunde hat zugestimmt. Erkläre in 1-2 eigenen, natürlichen Sätzen, dass die Beiträge in der " +
         "Gesundheitsversorgung Jahr für Jahr steigen, im Durchschnitt etwa 3-5% jährlich, und das über die Jahre erheblich wird. " +
         "Sprich konsistent von 'Beitragsentwicklung in der Gesundheitsversorgung'. " +
-        "Frage dann genau einmal wie der Kunde damit umgeht oder wie er das erlebt. Warte vollständig auf die Antwort."
+        "Frage dann genau einmal: 'Wie erleben Sie das aktuell?' Warte vollständig auf die Antwort."
       );
 
     case 2:
@@ -78,8 +78,8 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
     case 3:
       return (
         "Greife die Antwort des Kunden kurz auf (ein Satz). " +
-        "Leite dann über: 'Ich kann das für Sie einmal konkret hochrechnen, damit Sie ein Gefühl dafür bekommen, wohin die Reise geht und was in den nächsten Jahren auf Sie zukommen wird, wenn die Entwicklung so weitergeht. " +
-        "Wie hoch ist Ihr aktueller monatlicher Beitrag?' Nur diese eine Frage. Warte auf die Antwort."
+        "Leite dann über: 'Damit Sie ein Gefühl dafür bekommen, worüber wir genau reden möchten und was in den nächsten Jahren auf Sie zukommen wird, nennen Sie mir kurz Ihren aktuellen Beitrag.' " +
+        "Nur diese eine Frage. Warte auf die Antwort."
       );
 
     case 4: {
@@ -96,7 +96,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
       return (
         `Rechne ${phrase} mit rund 4% Steigerung pro Jahr auf 10 Jahre hoch.${hint} ` +
         "Formuliere das kurz und menschlich: 'Bei Ihrem Beitrag wären das in 10 Jahren rund X Euro mehr — das ist schon eine spürbare Veränderung.' " +
-        "Stelle danach GENAU EINE Frage: 'Haben Sie das schon mal so im Detail angeschaut?' Warte vollständig auf die Antwort. " +
+        "Stelle danach GENAU EINE Frage: 'Haben Sie das schon einmal so durchgerechnet?' Warte vollständig auf die Antwort. " +
         "KEIN Ruhestand, KEINE 25-Jahres-Berechnung — nur 10 Jahre."
       );
     }
@@ -108,7 +108,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         "Validiere zuerst kurz: was der Kunde beschrieben hat, ist real und berechtigt. " +
         "Erkläre dann mit echter Wärme: Genau das ist es, womit Herr Duic täglich arbeitet. " +
         "Er schaut sich die Beitragsentwicklung gemeinsam mit dem Kunden an, rechnet den Beitrag konkret hoch " +
-        "und zeigt persönlich welche Stellschrauben es gibt, um langfristig mehr Kontrolle zu haben. " +
+        "und zeigt ihm dabei mögliche Handlungsoptionen, damit er langfristig mehr Kontrolle hat. " +
         "Stelle dann eine offene, einladende Frage: 'Wäre es nicht sinnvoll, das einmal zusammen im Detail anzuschauen?' " +
         "Kein Verkaufsdruck, kein Pitch. KEINE Erwähnung von Termindauer oder Anzahl Termine — nur wenn der Kunde fragt. Keine Terminfrage, bevor der Kunde klar Interesse bestätigt. " +
         "Warte auf klares Ja oder Nein."
@@ -120,7 +120,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
         "1. Frage: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
         "2. Biete zwei passende Termine an: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
         "3. Falls keiner passt: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Wunsch.\n" +
-        "4. Nach Bestätigung: Gesundheitsfragen einzeln stellen. Bei Ablehnung am Telefon: 'Kein Problem, ich lege die Fragen in die Bestätigungsmail.'\n" +
+        "4. Nach Bestätigung: Gesundheitsfragen einzeln stellen. Bei Ablehnung am Telefon: 'Kein Problem, ich schreibe die wichtigsten Punkte in die Bestätigungsmail. Diese können Sie dann in Ruhe beantworten'\n" +
         "5. Frage ob der Kunde noch Wünsche für den Termin hat, dann professionell verabschieden.\n" +
         "NUR WENN GEFRAGT: Ersttermin ca. 20 Minuten. NUR WENN GEFRAGT: Es gibt drei Termine insgesamt."
       );
