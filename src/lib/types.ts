@@ -116,6 +116,7 @@ export interface Lead {
   contactName: string;
   phone: string;
   directDial?: string;
+  additionalPhones?: string[];
   email?: string;
   birthDate?: string;
   location?: string;

@@ -477,8 +477,10 @@ const CSV_HEADER_ALIASES: Record<string, string[]> = {
   customerOwner: ["customerowner", "zuweisung", "owner", "vertriebseinheit"],
   company: ["company", "firma", "unternehmen", "firmenname"],
   contactName: ["contactname", "ansprechpartner", "kontakt", "kontaktperson", "name"],
+  birthDate: ["birthdate", "geburtsdatum", "geburtstag"],
   phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
   directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
+  additionalPhones: ["additionalphones", "weiteretelefonnummern", "weitererufnummern", "zusatznummern", "telefon2", "telefonnummern"],
   email: ["email", "mail", "e-mail"],
   location: ["location", "ort", "stadt"],
   addressStreet: ["addressstreet", "strasse", "straße", "strasseundnummer", "adresse"],
@@ -733,6 +735,7 @@ export async function updateLeadDetails(
       contactName: updates.contactName ?? lead.contactName,
       phone: updates.phone ?? lead.phone,
       directDial: updates.directDial ?? lead.directDial,
+      additionalPhones: updates.additionalPhones ?? lead.additionalPhones,
       email: updates.email ?? lead.email,
       birthDate: updates.birthDate ?? lead.birthDate,
       location: updates.location ?? lead.location,
@@ -756,6 +759,7 @@ export async function updateLeadDetails(
       contactName: lead.contactName,
       phone: lead.phone,
       directDial: lead.directDial,
+      additionalPhones: lead.additionalPhones,
       email: lead.email,
       birthDate: lead.birthDate,
       location: lead.location,
@@ -776,6 +780,7 @@ export async function updateLeadDetails(
       contactName: nextLead.contactName,
       phone: nextLead.phone,
       directDial: nextLead.directDial,
+      additionalPhones: nextLead.additionalPhones,
       email: nextLead.email,
       birthDate: nextLead.birthDate,
       location: nextLead.location,
@@ -813,6 +818,18 @@ export async function updateLeadDetails(
   if (!updatedLead) return undefined;
   await writeLeads(nextLeads, userId);
   return updatedLead;
+}
+
+export async function deleteLeads(leadIds: string[], userId?: string): Promise<{ removed: number }> {
+  const uniqueIds = new Set(leadIds.map((id) => String(id || "").trim()).filter(Boolean));
+  if (uniqueIds.size === 0) return { removed: 0 };
+  const leads = await readLeads(userId);
+  const nextLeads = leads.filter((lead) => !uniqueIds.has(lead.id));
+  const removed = leads.length - nextLeads.length;
+  if (removed > 0) {
+    await writeLeads(nextLeads, userId);
+  }
+  return { removed };
 }
 
 export async function appendLeadEmailHistory(
@@ -1215,12 +1232,14 @@ export async function importLeadsFromCsv(
     const directDial = lookup("directDial");
     const company = lookup("company");
     const contactName = lookup("contactName");
+    const birthDate = lookup("birthDate");
     const location = lookup("location");
     const topic = options?.overrideTopic || lookup("topic");
     const ownerFromRow = normalizeCustomerOwner(lookup("customerOwner"));
     const ownerFromList = normalizeCustomerOwner(listName);
     const customerOwner = ownerFromRow || ownerFromList;
     const products = splitProducts(lookup("products"));
+    const additionalPhones = splitProducts(lookup("additionalPhones"));
 
     return {
       id: createLeadId(index),
@@ -1231,8 +1250,10 @@ export async function importLeadsFromCsv(
       customerOwner,
       company: company || `Firma ${index + 1}`,
       contactName: contactName || "Empfang",
+      birthDate: birthDate || undefined,
       phone: lookup("phone") || "",
       directDial: directDial || undefined,
+      additionalPhones: additionalPhones.length ? additionalPhones : undefined,
       email: lookup("email") || undefined,
       location: location || undefined,
       addressStreet: lookup("addressStreet") || undefined,

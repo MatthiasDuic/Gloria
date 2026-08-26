@@ -1026,7 +1026,7 @@ export default function HomePage() {
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerFeedback, setAddCustomerFeedback] = useState<{ type: "" | "success" | "error"; message: string }>({ type: "", message: "" });
   const [addCustomerDraft, setAddCustomerDraft] = useState({
-    company: "", contactName: "", phone: "", email: "", birthDate: "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "",
+    company: "", contactName: "", phone: "", additionalPhones: "", email: "", birthDate: "", customerType: "Agentur-Duic" as "BarmeniaGothaer" | "Agentur-Duic", customerKind: "firma" as "privat" | "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "",
   });
   const [affiliationSearch, setAffiliationSearch] = useState("");
   const [affiliationRoleDraft, setAffiliationRoleDraft] = useState("Mitarbeiter");
@@ -1151,6 +1151,7 @@ export default function HomePage() {
         contactName: selectedLeadForHistory.contactName,
         phone: selectedLeadForHistory.phone,
         directDial: selectedLeadForHistory.directDial,
+        additionalPhones: selectedLeadForHistory.additionalPhones,
         email: selectedLeadForHistory.email,
         birthDate: selectedLeadForHistory.birthDate,
         location: selectedLeadForHistory.location,
@@ -2712,8 +2713,9 @@ export default function HomePage() {
     setAddCustomerFeedback({ type: "", message: "" });
     try {
       const productsCell = splitProductsInput(d.products).join("; ");
+      const additionalPhonesCell = splitProductsInput(d.additionalPhones).join("; ");
       const normalizedBirthDate = normalizeLeadBirthDate(d.birthDate) || "";
-      const csvRow = `customerOwner,customerKind,company,contactName,phone,email,birthDate,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${normalizedCustomerKind}","${effectiveCompany.replace(/"/g, '""')}","${contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${normalizedBirthDate.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${productsCell.replace(/"/g, '""')}","","${d.note.replace(/"/g, '""')}"`;
+      const csvRow = `customerOwner,customerKind,company,contactName,phone,additionalPhones,email,birthDate,addressStreet,addressPostalCode,addressCity,addressCountry,products,topic,note\n"${d.customerType}","${normalizedCustomerKind}","${effectiveCompany.replace(/"/g, '""')}","${contactName.replace(/"/g, '""')}","${phone.replace(/"/g, '""')}","${additionalPhonesCell.replace(/"/g, '""')}","${d.email.replace(/"/g, '""')}","${normalizedBirthDate.replace(/"/g, '""')}","${d.addressStreet.replace(/"/g, '""')}","${d.addressPostalCode.replace(/"/g, '""')}","${d.addressCity.replace(/"/g, '""')}","${d.addressCountry.replace(/"/g, '""')}","${productsCell.replace(/"/g, '""')}","","${d.note.replace(/"/g, '""')}"`;
       const listName = `${d.customerType} | Manuell hinzugefügt`;
       const res = await fetch("/api/campaigns/import", {
         method: "POST",
@@ -2730,7 +2732,7 @@ export default function HomePage() {
       await new Promise((resolve) => setTimeout(resolve, 320));
       setNotice(`Kunde "${effectiveCompany}" angelegt.`);
       setShowAddCustomerModal(false);
-      setAddCustomerDraft({ company: "", contactName: "", phone: "", email: "", birthDate: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "" });
+      setAddCustomerDraft({ company: "", contactName: "", phone: "", additionalPhones: "", email: "", birthDate: "", customerType: "Agentur-Duic", customerKind: "firma", addressStreet: "", addressPostalCode: "", addressCity: "", addressCountry: "Deutschland", products: "", note: "" });
       setAddCustomerFeedback({ type: "", message: "" });
       setCrmSearch("");
       setCrmTypeFilter("");
@@ -2799,6 +2801,7 @@ export default function HomePage() {
       "contactName",
       "phone",
       "directDial",
+      "additionalPhones",
       "email",
       "addressStreet",
       "addressPostalCode",
@@ -2817,6 +2820,7 @@ export default function HomePage() {
       lead.contactName || "",
       lead.phone || "",
       lead.directDial || "",
+      (lead.additionalPhones || []).join("; "),
       lead.email || "",
       lead.addressStreet || "",
       lead.addressPostalCode || "",
@@ -2841,6 +2845,51 @@ export default function HomePage() {
     setNotice(`${selected.length} Kunden exportiert.`);
   }
 
+  async function deleteLeadsByIds(leadIds: string[]) {
+    if (leadIds.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(
+          leadIds.length === 1
+            ? { action: "delete_lead", leadId: leadIds[0] }
+            : { action: "delete_leads", leadIds },
+        ),
+      });
+      const payload = (await res.json()) as { removed?: number; error?: string };
+      if (!res.ok) throw new Error(payload.error || "Löschen fehlgeschlagen");
+      setNotice(`${payload.removed ?? leadIds.length} Kunde(n) gelöscht.`);
+      setSelectedCrmLeads((prev) => {
+        const next = new Set(prev);
+        leadIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (selectedLeadForHistory && leadIds.includes(selectedLeadForHistory.id)) {
+        setSelectedLeadForHistory(null);
+      }
+      await loadDashboard();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Fehler beim Löschen");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function deleteSingleCustomer(lead: DashboardData["leads"][number]) {
+    const label = buildEffectiveLeadCompanyName({ customerKind: lead.customerKind || "firma", company: lead.company, contactName: lead.contactName });
+    if (!window.confirm(`Kunde "${label}" wirklich unwiderruflich löschen?`)) return;
+    void deleteLeadsByIds([lead.id]);
+  }
+
+  function deleteSelectedCustomers() {
+    if (selectedCrmLeads.size === 0) return;
+    if (!window.confirm(`${selectedCrmLeads.size} ausgewählte Kunden wirklich unwiderruflich löschen?`)) return;
+    void deleteLeadsByIds(Array.from(selectedCrmLeads));
+  }
+
   async function saveLeadDetailsFromModal() {
     if (!selectedLeadForHistory || !detailDraft) return;
     setBusy(true);
@@ -2860,6 +2909,7 @@ export default function HomePage() {
         contactName: detailDraft.contactName,
         phone: detailDraft.phone,
         directDial: detailDraft.directDial,
+        additionalPhones: detailDraft.additionalPhones,
         email: detailDraft.email,
         birthDate: normalizeLeadBirthDate(detailDraft.birthDate || selectedLeadForHistory.birthDate),
         location: detailDraft.location,
@@ -3617,7 +3667,7 @@ export default function HomePage() {
           if (crmPipelineFilter && getLeadPipelineStage(lead) !== crmPipelineFilter) return false;
           if (crmContactFilter === "mitEmail" && !lead.email) return false;
           if (crmContactFilter === "ohneEmail" && lead.email) return false;
-          if (crmContactFilter === "mitTelefon" && !(lead.phone || lead.directDial)) return false;
+          if (crmContactFilter === "mitTelefon" && !(lead.phone || lead.directDial || (lead.additionalPhones || []).length)) return false;
           if (crmSearch) {
             const q = crmSearch.toLowerCase();
             return (
@@ -3625,6 +3675,7 @@ export default function HomePage() {
               (lead.contactName || "").toLowerCase().includes(q) ||
               (lead.phone || "").includes(q) ||
               (lead.directDial || "").includes(q) ||
+              (lead.additionalPhones || []).some((entry) => entry.includes(q)) ||
               (lead.email || "").toLowerCase().includes(q) ||
               (lead.addressCity || lead.location || "").toLowerCase().includes(q) ||
               lead.topic.toLowerCase().includes(q)
@@ -3755,6 +3806,15 @@ export default function HomePage() {
                             ⤓ Export ({selectedCrmLeads.size})
                           </button>
                         )}
+                        {selectedCrmLeads.size > 0 && (
+                          <button
+                            className="btn ghost"
+                            style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                            onClick={() => deleteSelectedCustomers()}
+                          >
+                            🗑 Löschen ({selectedCrmLeads.size})
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3821,6 +3881,9 @@ export default function HomePage() {
                           <strong>CSV / Excel importieren</strong>
                           <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => setShowCrmImport(false)}>✕</button>
                         </div>
+                        <a href="/vorlage-kundenimport.xlsx" download className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 10px", display: "inline-block", marginBottom: 8 }}>
+                          ⤓ Muster-Excel herunterladen
+                        </a>
                         <div className="field-grid">
                           <div>
                             <label>Kundentyp</label>
@@ -3845,7 +3908,11 @@ export default function HomePage() {
                             <input type="file" accept=".csv,.xlsx,.xls" onChange={e => setCrmImportFile(e.target.files?.[0] || null)} />
                           </div>
                         </div>
-                        <p className="subtle" style={{ fontSize: "0.82rem", margin: "8px 0" }}>Format: customerOwner, customerKind, company, contactName, phone, email, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt</p>
+                        <p className="subtle" style={{ fontSize: "0.82rem", margin: "8px 0" }}>
+                          Spalten (1. Zeile = Überschriften): customerOwner, customerKind, company, contactName, phone, additionalPhones, email, birthDate, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt.
+                          customerKind = &quot;firma&quot; oder &quot;privat&quot;. Bei &quot;firma&quot; ist company (Firmenname) Pflicht, bei &quot;privat&quot; ist contactName (Vor- und Nachname) Pflicht und birthDate (TT.MM.JJJJ) optional.
+                          additionalPhones = weitere Rufnummern derselben Firma/Person, getrennt mit &quot;;&quot; (z. B. Zentrale +49...; Mobil +49...).
+                        </p>
                         <div className="row top-gap" style={{ gap: 8 }}>
                           <button
                             className="btn"
@@ -3958,16 +4025,33 @@ export default function HomePage() {
                                   </button>
                                 </td>
                                 <td>{lead.contactName || "-"}</td>
-                                <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>
+                                  {lead.phone || lead.directDial || "-"}
+                                  {(lead.additionalPhones || []).length > 0 && (
+                                    <span className="subtle" title={(lead.additionalPhones || []).join(", ")} style={{ marginLeft: 4 }}>
+                                      +{(lead.additionalPhones || []).length}
+                                    </span>
+                                  )}
+                                </td>
                                 <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.email || "-"}</td>
                                 <td style={{ fontSize: "0.85rem", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{lead.addressStreet || "-"}</td>
                                 <td style={{ fontSize: "0.85rem" }}>{lead.addressPostalCode || "-"}</td>
                                 <td style={{ fontSize: "0.85rem" }}>{lead.addressCity || lead.location || "-"}</td>
                                 <td style={{ fontSize: "0.85rem" }}>{lead.addressCountry || "-"}</td>
                                 <td>
-                                  <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => openLeadDetailModal(lead)}>
-                                    Stammdaten
-                                  </button>
+                                  <div className="row" style={{ gap: 6 }}>
+                                    <button className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 8px" }} onClick={() => openLeadDetailModal(lead)}>
+                                      Stammdaten
+                                    </button>
+                                    <button
+                                      className="btn ghost"
+                                      style={{ fontSize: "0.8rem", padding: "4px 8px", color: "#dc2626" }}
+                                      title="Kunde löschen"
+                                      onClick={() => deleteSingleCustomer(lead)}
+                                    >
+                                      🗑
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -4085,7 +4169,7 @@ export default function HomePage() {
 
             {/* === MODAL: Kunde anlegen === */}
             {showAddCustomerModal && (
-              <div className="modal-overlay" onClick={() => {
+              <div className="modal-overlay crm-drawer-overlay" onClick={() => {
                 setShowAddCustomerModal(false);
                 setAddCustomerFeedback({ type: "", message: "" });
               }}>
@@ -4157,6 +4241,10 @@ export default function HomePage() {
                       <input value={addCustomerDraft.phone} onChange={e => setAddCustomerDraft(d => ({ ...d, phone: e.target.value }))} placeholder="+492339123456" />
                     </div>
                     <div className="report-detail-field">
+                      <label>Weitere Telefonnummern</label>
+                      <input value={addCustomerDraft.additionalPhones} onChange={e => setAddCustomerDraft(d => ({ ...d, additionalPhones: e.target.value }))} placeholder="z. B. Zentrale +49...; Mobil +49..." />
+                    </div>
+                    <div className="report-detail-field">
                       <label>Email</label>
                       <input value={addCustomerDraft.email} onChange={e => setAddCustomerDraft(d => ({ ...d, email: e.target.value }))} placeholder="info@firma.de" />
                     </div>
@@ -4197,7 +4285,7 @@ export default function HomePage() {
 
             {/* === MODAL: Kampagne aus Selektion === */}
             {showCampaignFromSelectionModal && (
-              <div className="modal-overlay" onClick={() => setShowCampaignFromSelectionModal(false)}>
+              <div className="modal-overlay crm-drawer-overlay" onClick={() => setShowCampaignFromSelectionModal(false)}>
                 <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
                   <button className="modal-close" onClick={() => setShowCampaignFromSelectionModal(false)}>✕</button>
                   <h2>Kampagne für Gloria erstellen</h2>
@@ -4338,7 +4426,14 @@ export default function HomePage() {
       {activeView === "leads" ? (
       <section className="stack top-section">
         <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
-          <p className="subtle">Format: customerOwner, customerKind, company, contactName, phone, email, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt</p>
+          <p className="subtle">
+            Spalten (1. Zeile = Überschriften): customerOwner, customerKind, company, contactName, phone, additionalPhones, email, birthDate, addressStreet, addressPostalCode, addressCity, addressCountry, products, topic, note, nextCallAt.
+            customerKind = &quot;firma&quot; oder &quot;privat&quot;. Bei &quot;firma&quot; ist company Pflicht, bei &quot;privat&quot; ist contactName Pflicht und birthDate optional.
+            additionalPhones = weitere Rufnummern, getrennt mit &quot;;&quot;.
+          </p>
+          <a href="/vorlage-kundenimport.xlsx" download className="btn ghost" style={{ fontSize: "0.8rem", padding: "4px 10px", display: "inline-block", marginBottom: 8 }}>
+            ⤓ Muster-Excel herunterladen
+          </a>
           <label>Listenname</label>
           <input
             value={importListName}
@@ -4491,7 +4586,14 @@ export default function HomePage() {
                                 </td>
                                 <td style={{ fontSize: "0.9rem" }}>{lead.addressCity || lead.location || "-"}</td>
                                 <td>{lead.contactName || "-"}</td>
-                                <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
+                                <td style={{ fontSize: "0.85rem" }}>
+                                  {lead.phone || lead.directDial || "-"}
+                                  {(lead.additionalPhones || []).length > 0 && (
+                                    <span className="subtle" title={(lead.additionalPhones || []).join(", ")} style={{ marginLeft: 4 }}>
+                                      +{(lead.additionalPhones || []).length}
+                                    </span>
+                                  )}
+                                </td>
                                 <td style={{ fontSize: "0.85rem", wordBreak: "break-word", maxWidth: "200px" }}>{lead.email || "-"}</td>
                                 <td>{lead.topic}</td>
                                 <td>{lead.status}</td>
@@ -5595,7 +5697,7 @@ export default function HomePage() {
                       : "Offen";
 
         return (
-          <div className="modal-overlay" onClick={() => {
+          <div className="modal-overlay crm-drawer-overlay" onClick={() => {
             setSelectedLeadForHistory(null);
             setSelectedReport(null);
           }}>
@@ -5722,6 +5824,14 @@ export default function HomePage() {
                   <input value={detailDraft?.directDial || ""} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), directDial: e.target.value }))} placeholder="optional" />
                 </div>
                 <div className="report-detail-field">
+                  <label>Weitere Telefonnummern</label>
+                  <input
+                    value={(detailDraft?.additionalPhones || []).join("; ")}
+                    onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), additionalPhones: splitProductsInput(e.target.value) }))}
+                    placeholder="z. B. Zentrale +49...; Mobil +49..."
+                  />
+                </div>
+                <div className="report-detail-field">
                   <label>E-Mail</label>
                   <input value={detailDraft?.email || ""} onChange={(e) => setDetailDraft((draft) => ({ ...(draft || {}), email: e.target.value }))} placeholder="kunde@email.de" />
                 </div>
@@ -5766,6 +5876,14 @@ export default function HomePage() {
                   />
                   <button className="btn" style={{ marginTop: 8 }} disabled={busy} onClick={() => void saveLeadDetailsFromModal()}>
                     Kundendaten speichern
+                  </button>
+                  <button
+                    className="btn ghost"
+                    style={{ marginTop: 8, marginLeft: 8, color: "#dc2626" }}
+                    disabled={busy}
+                    onClick={() => deleteSingleCustomer(selectedLeadForHistory)}
+                  >
+                    🗑 Kunde löschen
                   </button>
                 </div>
               </div> : null}

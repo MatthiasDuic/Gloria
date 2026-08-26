@@ -812,6 +812,7 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_city TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_country TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS products JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS additional_phones JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS product_details JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS affiliations JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS email_history JSONB;`);
@@ -1863,6 +1864,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         contact_name,
         phone,
         direct_dial,
+        additional_phones,
         email,
         birth_date,
         location,
@@ -1898,6 +1900,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       contactName: String(row.contact_name || "Empfang"),
       phone: String(row.phone || ""),
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+      additionalPhones: parseJsonTextArray(row.additional_phones),
       email: row.email ? String(row.email) : undefined,
       birthDate: row.birth_date ? String(row.birth_date) : undefined,
       location: row.location ? String(row.location) : undefined,
@@ -1966,6 +1969,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             contact_name,
             phone,
             direct_dial,
+            additional_phones,
             email,
             birth_date,
             location,
@@ -1987,7 +1991,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             attempts,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -2000,6 +2004,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             contact_name = EXCLUDED.contact_name,
             phone = EXCLUDED.phone,
             direct_dial = EXCLUDED.direct_dial,
+            additional_phones = EXCLUDED.additional_phones,
             email = EXCLUDED.email,
             birth_date = EXCLUDED.birth_date,
             location = EXCLUDED.location,
@@ -2032,6 +2037,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.contactName,
             lead.phone,
             lead.directDial || null,
+            JSON.stringify((lead.additionalPhones || []).map((entry) => entry.trim()).filter(Boolean)),
             lead.email || null,
             lead.birthDate || null,
             lead.location || null,

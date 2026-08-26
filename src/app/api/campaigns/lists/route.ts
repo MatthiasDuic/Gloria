@@ -4,6 +4,7 @@ import {
   appendLeadEmailHistory,
   completeLeadTask,
   deleteCampaignList,
+  deleteLeads,
   getCampaignListsSummary,
   isCampaignListActive,
   pullNextLeadForCampaignList,
@@ -46,9 +47,10 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "stop" | "run" | "delete" | "update_note" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
+      action?: "start" | "stop" | "run" | "delete" | "delete_lead" | "delete_leads" | "update_note" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
       leadId?: string;
+      leadIds?: string[];
       note?: string;
       taskId?: string;
       task?: {
@@ -68,6 +70,17 @@ export async function POST(request: Request) {
     const action = payload.action;
     const listId = String(payload.listId || "").trim();
     const leadId = String(payload.leadId || "").trim();
+
+    if (action === "delete_lead" || action === "delete_leads") {
+      const leadIds = action === "delete_leads"
+        ? (payload.leadIds || []).map((id) => String(id || "").trim()).filter(Boolean)
+        : [leadId];
+      if (leadIds.length === 0) {
+        return NextResponse.json({ error: "leadId(s) ist/sind erforderlich." }, { status: 400 });
+      }
+      const result = await deleteLeads(leadIds, sessionUser.id);
+      return NextResponse.json({ ok: true, action, removed: result.removed });
+    }
 
     if (action === "update_note") {
       if (!leadId) {
