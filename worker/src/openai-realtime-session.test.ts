@@ -70,3 +70,49 @@ test("serializes client events and closes cleanly", () => {
   session.close(1000, "done");
   assert.deepEqual(socket.closed, { code: 1000, reason: "done" });
 });
+
+test("does not reconnect after a deliberate close", () => {
+  const sockets: FakeSocket[] = [];
+  const session = new OpenAiRealtimeSession({
+    apiKey: "test-key",
+    model: "test-model",
+    onEvent: () => undefined,
+    socketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+
+  session.connect();
+  sockets[0].open();
+  sockets[0].emit("close", 1011, { toString: () => "dropped" });
+  session.close();
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      assert.equal(sockets.length, 1);
+      resolve();
+    }, 650);
+  });
+});
+
+test("returns false when the socket throws while sending", () => {
+  const socket = new FakeSocket();
+  socket.send = () => {
+    throw new Error("socket is closing");
+  };
+  const errors: Error[] = [];
+  const session = new OpenAiRealtimeSession({
+    apiKey: "test-key",
+    model: "test-model",
+    onEvent: () => undefined,
+    onError: (error) => errors.push(error),
+    socketFactory: () => socket,
+  });
+
+  session.connect();
+  socket.open();
+  assert.equal(session.send({ type: "response.cancel" }), false);
+  assert.equal(errors[0]?.message, "socket is closing");
+});

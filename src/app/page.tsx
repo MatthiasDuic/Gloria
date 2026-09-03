@@ -315,10 +315,11 @@ function buildConversationLines(summary: string) {
   return summary
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
+    .map((line) => line.match(/^(?:-\s*)?(?:\[[^\]]+\]\s*)?(Gloria|Interessent)(?:\s*\([^)]*\))?:\s*(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
     .map((l) => {
-      const isGloria = l.startsWith("Gloria:");
-      return { speaker: isGloria ? "Gloria" : "Interessent", text: l.replace(/^Gloria:|^Interessent:/, "").trim() };
+      const isGloria = l[1] === "Gloria";
+      return { speaker: isGloria ? "Gloria" : "Interessent", text: l[2].trim() };
     });
 }
 
@@ -6536,18 +6537,17 @@ export default function HomePage() {
                     <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
                   ) : transcriptEvents.length === 0 ? (
                     (() => {
-                      // Fallback: parse transcript from summary field (stored by finalize.ts)
                       const lines = (selectedReport?.summary || "").split("\n");
-                      const transcriptStart = lines.findIndex(l => l.startsWith("--- GESPRÄCHSVERLAUF ---"));
-                      const summaryLines = transcriptStart >= 0
-                        ? lines.slice(transcriptStart + 1).filter(l => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
-                        : lines.filter(l => l.startsWith("Gloria:") || l.startsWith("Interessent:"));
-                      if (summaryLines.length > 0) {
+                      const transcriptStart = lines.findIndex((line) => line.startsWith("--- GESPRAECHSPROTOKOLL") || line.startsWith("--- GESPRÄCHSVERLAUF ---"));
+                      const transcriptLines = transcriptStart >= 0 ? lines.slice(transcriptStart + 1) : lines;
+                      const parsedLines = transcriptLines
+                        .map((line) => line.trim().match(/^(?:-\s*)?(?:\[([^\]]+)\]\s*)?(Gloria|Interessent)(?:\s*\(([^)]*)\))?:\s*(.+)$/))
+                        .filter((match): match is RegExpMatchArray => Boolean(match));
+                      if (parsedLines.length > 0) {
                         return (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                            {summaryLines.map((line, i) => {
-                              const isGloria = line.startsWith("Gloria:");
-                              const text = line.replace(/^(Gloria|Interessent):\s*/, "");
+                            {parsedLines.map((line, i) => {
+                              const isGloria = line[2] === "Gloria";
                               return (
                                 <div
                                   key={i}
@@ -6558,10 +6558,12 @@ export default function HomePage() {
                                     borderLeft: `3px solid ${isGloria ? "var(--blue-600, #2563eb)" : "var(--gold-600, #b45309)"}`,
                                   }}
                                 >
-                                  <div style={{ fontWeight: 700, fontSize: "0.78rem", color: isGloria ? "#2563eb" : "#b45309", marginBottom: 4 }}>
-                                    {isGloria ? "Gloria" : "Interessent"}
+                                  <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", fontWeight: 700, fontSize: "0.78rem", color: isGloria ? "#2563eb" : "#b45309", marginBottom: 4 }}>
+                                    <span>{isGloria ? "Gloria" : "Interessent"}</span>
+                                    {line[1] && <span className="subtle" style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>{line[1]}</span>}
+                                    {isGloria && line[3] && <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>{line[3]}</span>}
                                   </div>
-                                  <div style={{ fontSize: "0.92rem" }}>{text}</div>
+                                  <div style={{ fontSize: "0.92rem" }}>{line[4]}</div>
                                 </div>
                               );
                             })}

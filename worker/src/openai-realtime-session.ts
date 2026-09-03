@@ -87,7 +87,9 @@ export class OpenAiRealtimeSession {
         this.options.onError?.(
           new Error(`openai_ws_dropped code=${code}; reconnect ${this.reconnectAttempts}/${OpenAiRealtimeSession.MAX_RECONNECT_ATTEMPTS} in ${delay}ms`),
         );
-        setTimeout(() => this.connect(), delay);
+        setTimeout(() => {
+          if (!this.deliberatelyClosed) this.connect();
+        }, delay);
       } else {
         this.options.onClose?.(code, reason.toString());
       }
@@ -101,8 +103,13 @@ export class OpenAiRealtimeSession {
 
   send(event: Record<string, unknown>): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify(event));
-    return true;
+    try {
+      this.socket.send(JSON.stringify(event));
+      return true;
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      return false;
+    }
   }
 
   appendInputAudio(audio: string): void {
