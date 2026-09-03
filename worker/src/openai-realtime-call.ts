@@ -193,7 +193,13 @@ function isLikelyIncompleteAssistantTurn(text: string): boolean {
   return !/[.!?؟]$/.test(normalized);
 }
 
-const DECISION_MAKER_INTRO = "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?";
+function getSocietyName(ctx: Pick<CallContext, "ownerGesellschaft">): string {
+  return ctx.ownerGesellschaft?.trim() || "Agentur Duic Sprockhövel";
+}
+
+function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerGesellschaft">): string {
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic aus dem Hause ${getSocietyName(ctx)}. Darf ich Ihnen kurz sagen, worum es geht?`;
+}
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
@@ -214,6 +220,7 @@ export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
 export function buildRealtimeInstructions(ctx: CallContext): string {
   const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
+  const society = getSocietyName(ctx);
   const target = ctx.contactName?.trim();
   const today = new Date().toLocaleDateString("de-DE", {
     weekday: "long",
@@ -253,7 +260,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   if (target) {
     parts.push(
-      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang. Achte dabei auf die korrekte Aussprache des Nachnamens: Duic = Duitsch.`,
+      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage exakt: "${buildDecisionMakerIntro(ctx)}". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic aus dem Hause ${society}. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang. Achte dabei auf die korrekte Aussprache des Nachnamens: Duic = Duitsch.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
@@ -581,7 +588,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
-    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic. Darf ich Ihnen kurz sagen, worum es geht?\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
+    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"${buildDecisionMakerIntro(ctx!)}\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
   };
 
   const requestInterruptedIntroContinuation = () => {
@@ -1011,7 +1018,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (decisionMakerIntroPending) decisionMakerIntroPending = false;
         decisionMakerIntroWasLastResponse = wasDecisionMakerIntroPending;
         const transcript = wasDecisionMakerIntroPending
-          ? DECISION_MAKER_INTRO
+          ? buildDecisionMakerIntro(ctx!)
           : assistantTranscript.replace(/\s+/g, " ").trim();
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;

@@ -138,6 +138,28 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   assert.match(instructions, /beginne nicht mit der Versicherungsfrage/);
 });
 
+test("uses the user society in the opening and falls back when it is missing", () => {
+  const allianzContext = newContext({
+    callSid: "test-realtime-society-allianz",
+    streamSid: "test-stream",
+    contactName: "Herr Neumann",
+    topic: "private Krankenversicherung",
+    ownerGesellschaft: "Allianz",
+  });
+  const allianzInstructions = buildRealtimeInstructions(allianzContext);
+  assert.match(allianzInstructions, /aus dem Hause Allianz/);
+  assert.doesNotMatch(allianzInstructions, /aus dem Hause BarmeniaGothaer/);
+
+  const fallbackContext = newContext({
+    callSid: "test-realtime-society-fallback",
+    streamSid: "test-stream",
+    contactName: "Herr Neumann",
+    topic: "private Krankenversicherung",
+    ownerGesellschaft: "   ",
+  });
+  assert.match(buildRealtimeInstructions(fallbackContext), /aus dem Hause Agentur Duic Sprockhövel/);
+});
+
 test("explicitly teaches the correct Duic pronunciation as Duitsch", () => {
   const ctx = newContext({
     callSid: "test-realtime-pronunciation",
