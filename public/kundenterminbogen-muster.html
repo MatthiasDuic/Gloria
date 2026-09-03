@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kundenterminbogen - Muster</title>
+    <style>
+      :root {
+        --ink: #172338;
+        --muted: #5d6d7f;
+        --line: #cfd8e3;
+        --blue: #1d4f91;
+        --blue-soft: #eaf2fb;
+        --gold: #bd8a25;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #e7edf4;
+        color: var(--ink);
+        font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      }
+      .sheet {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 20px auto;
+        padding: 16mm 17mm;
+        background: #fff;
+      }
+      .masthead {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 3px solid var(--blue);
+        padding-bottom: 7mm;
+      }
+      .brand { color: var(--blue); font-size: 13px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; }
+      h1 { margin: 5px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 29px; font-weight: 400; }
+      .document-note { color: var(--muted); font-size: 11px; line-height: 1.45; text-align: right; }
+      .appointment-banner {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1px;
+        margin: 8mm 0;
+        border: 1px solid var(--line);
+        background: var(--line);
+      }
+      .appointment-banner > div { background: var(--blue-soft); padding: 10px 12px; }
+      .appointment-banner span, .field span { display: block; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+      .appointment-banner strong { display: block; margin-top: 3px; font-size: 15px; }
+      section { margin-top: 7mm; }
+      h2 { margin: 0 0 3mm; padding-bottom: 2mm; border-bottom: 1px solid var(--line); color: var(--blue); font-size: 12px; letter-spacing: .8px; text-transform: uppercase; }
+      .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 7mm; }
+      .field { min-height: 15mm; padding: 3mm 0 2mm; border-bottom: 1px solid var(--line); }
+      .field strong { display: block; margin-top: 4px; font-size: 14px; font-weight: 600; }
+      .field.wide { grid-column: 1 / -1; }
+      .visit-type { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+      .choice { border: 1px solid var(--line); padding: 5px 8px; font-size: 12px; }
+      .choice.selected { border-color: var(--blue); background: var(--blue-soft); color: var(--blue); font-weight: 700; }
+      .notes { min-height: 26mm; padding: 3mm 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+      .footer { margin-top: 12mm; padding-top: 3mm; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+      .sample-badge { color: var(--gold); font-weight: 700; }
+      @media print {
+        body { background: #fff; }
+        .sheet { width: auto; min-height: auto; margin: 0; padding: 0; }
+      }
+      @media (max-width: 760px) {
+        .sheet { width: 100%; min-height: 0; margin: 0; padding: 24px 18px; }
+        .masthead, .grid, .appointment-banner { grid-template-columns: 1fr; display: grid; }
+        .document-note { text-align: left; margin-top: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <header class="masthead">
+        <div>
+          <div class="brand">Agentur Duic</div>
+          <h1>Kundenterminbogen</h1>
+        </div>
+        <div class="document-note"><span class="sample-badge">MUSTER</span><br />Erstellt durch Gloria<br />03.09.2026, 10:42 Uhr</div>
+      </header>
+
+      <div class="appointment-banner">
+        <div><span>Termin</span><strong>Donnerstag, 10.09.2026, 15:30 Uhr</strong></div>
+        <div><span>Durchführung</span><strong>Beim Kunden vor Ort</strong></div>
+      </div>
+
+      <section>
+        <h2>Termindetails</h2>
+        <div class="grid">
+          <div class="field"><span>Ort des Termins</span><strong>Musterstraße 12, 45525 Musterstadt</strong></div>
+          <div class="field"><span>Berater</span><strong>Herr Matthias Duic</strong></div>
+          <div class="field wide"><span>Terminart</span><div class="visit-type"><div class="choice selected">Beim Kunden vor Ort</div><div class="choice">In unserem Büro</div><div class="choice">Microsoft Teams</div></div></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Ansprechpartner</h2>
+        <div class="grid">
+          <div class="field"><span>Name</span><strong>Max Mustermann</strong></div>
+          <div class="field"><span>Geburtsdatum</span><strong>15.05.1982</strong></div>
+          <div class="field"><span>Telefonnummer</span><strong>+49 170 1234567</strong></div>
+          <div class="field"><span>E-Mail-Adresse</span><strong>max.mustermann@beispiel.de</strong></div>
+          <div class="field wide"><span>Firma / Unternehmen</span><strong>Muster GmbH</strong></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Versicherungsstatus</h2>
+        <div class="grid">
+          <div class="field"><span>Aktueller Versicherungsstatus</span><strong>Privat versichert</strong></div>
+          <div class="field"><span>Derzeitiger Krankenversicherer</span><strong>Beispiel Versicherung</strong></div>
+          <div class="field"><span>Aktueller Beitrag</span><strong>980 EUR monatlich</strong></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Gesundheitsangaben</h2>
+        <div class="grid">
+          <div class="field"><span>Körpergröße / Gewicht</span><strong>182 cm / 84 kg</strong></div>
+          <div class="field"><span>Regelmäßige Medikamente</span><strong>Keine Angaben</strong></div>
+          <div class="field"><span>Bestehende Erkrankungen</span><strong>Keine Angaben</strong></div>
+          <div class="field"><span>Psychische Behandlungen, letzte 10 Jahre</span><strong>Keine Angaben</strong></div>
+          <div class="field"><span>KH-Aufenthalte, letzte 10 Jahre</span><strong>Keine Angaben</strong></div>
+          <div class="field"><span>Fehlende Zähne / Allergien</span><strong>Keine Angaben</strong></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Notizen für den Termin</h2>
+        <div class="notes">Der Kunde möchte insbesondere die langfristige Entwicklung seines aktuellen Beitrags nachvollziehen. Gesundheitsangaben werden beim Termin bei Bedarf ergänzt.</div>
+      </section>
+
+      <footer class="footer">Kundenterminbogen | Agentur Duic | Interne Arbeitsunterlage</footer>
+    </main>
+  </body>
+</html>
