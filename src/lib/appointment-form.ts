@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 
 export interface AppointmentFormInput {
   title?: string;
+  topic?: string;
   createdAt?: string;
   appointmentDate?: string;
   appointmentMode?: string;
@@ -22,6 +23,15 @@ export interface AppointmentFormInput {
   hospitalizations?: string;
   dentalAllergies?: string;
   notes?: string;
+}
+
+function normalizeTopic(value?: string) {
+  return (value || "").trim().toLowerCase();
+}
+
+export function shouldIncludeHealthSection(topic?: string) {
+  const normalized = normalizeTopic(topic);
+  return normalized.includes("private krankenversicherung") || (normalized.includes("privat") && normalized.includes("krankenversicherung"));
 }
 
 function formatGermanDate(value?: string) {
@@ -112,20 +122,22 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
       doc.fillColor("#172338").fontSize(11).text(`: ${String(value)}`);
     });
 
-    doc.moveDown(1);
-    doc.fillColor("#172338").fontSize(12).text("Gesundheitsangaben", { underline: true });
-    doc.moveDown(0.3);
-    [
-      ["Körpergröße / Gewicht", input.heightWeight || "-"],
-      ["Regelmäßige Medikamente", input.medication || "-"],
-      ["Bestehende Erkrankungen", input.diagnoses || "-"],
-      ["Psychische Behandlungen, letzte 10 Jahre", input.therapy || "-"],
-      ["KH-Aufenthalte, letzte 10 Jahre", input.hospitalizations || "-"],
-      ["Fehlende Zähne / Allergien", input.dentalAllergies || "-"],
-    ].forEach(([label, value]) => {
-      doc.fillColor("#6b7280").fontSize(9).text(String(label), { continued: true });
-      doc.fillColor("#172338").fontSize(11).text(`: ${String(value)}`);
-    });
+    if (shouldIncludeHealthSection(input.topic)) {
+      doc.moveDown(1);
+      doc.fillColor("#172338").fontSize(12).text("Gesundheitsangaben", { underline: true });
+      doc.moveDown(0.3);
+      [
+        ["Körpergröße / Gewicht", input.heightWeight || "-"],
+        ["Regelmäßige Medikamente", input.medication || "-"],
+        ["Bestehende Erkrankungen", input.diagnoses || "-"],
+        ["Psychische Behandlungen, letzte 10 Jahre", input.therapy || "-"],
+        ["KH-Aufenthalte, letzte 10 Jahre", input.hospitalizations || "-"],
+        ["Fehlende Zähne / Allergien", input.dentalAllergies || "-"],
+      ].forEach(([label, value]) => {
+        doc.fillColor("#6b7280").fontSize(9).text(String(label), { continued: true });
+        doc.fillColor("#172338").fontSize(11).text(`: ${String(value)}`);
+      });
+    }
 
     doc.moveDown(1);
     doc.fillColor("#172338").fontSize(12).text("Notizen für den Termin", { underline: true });

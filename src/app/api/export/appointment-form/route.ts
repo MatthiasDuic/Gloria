@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const pdf = await buildAppointmentFormPdf({
       title: typeof payload.title === "string" ? payload.title : "Kundenterminbogen",
+      topic: typeof payload.topic === "string" ? payload.topic : undefined,
       createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
       appointmentDate: typeof payload.appointmentDate === "string" ? payload.appointmentDate : undefined,
       appointmentMode: typeof payload.appointmentMode === "string" ? payload.appointmentMode : undefined,

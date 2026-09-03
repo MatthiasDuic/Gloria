@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAppointmentFormPdf } from "./appointment-form";
+import { buildAppointmentFormPdf, shouldIncludeHealthSection } from "./appointment-form";
 
 test("buildAppointmentFormPdf creates a valid PDF document", async () => {
   const pdf = await buildAppointmentFormPdf({
     title: "Kundenterminbogen",
+    topic: "private Krankenversicherung",
     createdAt: "2026-09-03T10:42:00.000Z",
     appointmentDate: "2026-09-10T15:30:00.000Z",
     appointmentMode: "Beim Kunden vor Ort",
@@ -30,4 +31,24 @@ test("buildAppointmentFormPdf creates a valid PDF document", async () => {
   assert.ok(Buffer.isBuffer(pdf));
   assert.ok(pdf.length > 1000);
   assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
+  assert.equal(shouldIncludeHealthSection("private Krankenversicherung"), true);
+});
+
+test("buildAppointmentFormPdf hides health questions for commercial and retirement topics", async () => {
+  const pdf = await buildAppointmentFormPdf({
+    title: "Kundenterminbogen",
+    topic: "betriebliche Altersvorsorge",
+    createdAt: "2026-09-03T10:42:00.000Z",
+    appointmentDate: "2026-09-10T15:30:00.000Z",
+    appointmentMode: "Beim Kunden vor Ort",
+    location: "Musterstraße 12, 45525 Musterstadt",
+    advisor: "Herr Matthias Duic",
+    contactName: "Max Mustermann",
+    company: "Muster GmbH",
+    notes: "Thema erfordert keine Gesundheitsdaten.",
+  });
+
+  assert.ok(Buffer.isBuffer(pdf));
+  assert.equal(shouldIncludeHealthSection("betriebliche Altersvorsorge"), false);
+  assert.equal(shouldIncludeHealthSection("gewerbliche Versicherungen"), false);
 });
