@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, shouldIncludeHealthSection } from "./appointment-form";
+import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
+
+test("getAppointmentFormFilename uses the KTB contact naming convention", () => {
+  assert.equal(getAppointmentFormFilename({ contactName: "Herr Neumann" }), "KTB_Herr_Neumann.pdf");
+  assert.equal(getAppointmentFormFilename({ contactName: "Jörg Müller" }), "KTB_Jorg_Muller.pdf");
+  assert.equal(getAppointmentFormFilename({}), "KTB_ANSPRECHPARTNER.pdf");
+});
 
 test("buildAppointmentFormInputFromReport extracts appointment preparation data", () => {
   const input = buildAppointmentFormInputFromReport({

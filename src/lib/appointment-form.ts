@@ -100,12 +100,14 @@ export function shouldIncludeHealthSection(topic?: string) {
 }
 
 export function getAppointmentFormFilename(input: AppointmentFormInput) {
-  const label = normalizeTopic(input.topic || "kundenterminbogen")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
+  const contactName = (input.contactName || "ANSPRECHPARTNER")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
 
-  return label ? `kundenterminbogen-${label}.pdf` : "kundenterminbogen.pdf";
+  return `KTB_${contactName || "ANSPRECHPARTNER"}.pdf`;
 }
 
 function formatValue(value?: string) {
