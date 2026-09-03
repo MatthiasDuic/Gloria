@@ -76,6 +76,8 @@ export type CallContext = {
     at: number;
     /** Reaktionszeit in ms: nur bei assistant-Einträgen befüllt. */
     latencyMs?: number;
+    /** Aktueller Gesprächsschritt für die spätere Qualitätsauswertung. */
+    phase?: string;
   }>;
   /** Wall-clock ms des letzten user-Final – wird zur Latenz-Berechnung genutzt. */
   lastUserFinalAt?: number;

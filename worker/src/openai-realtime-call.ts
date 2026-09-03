@@ -617,7 +617,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const currentContext = ctx;
     assistantContinuationRequested = false;
     currentContext.lastUserFinalAt = Date.now();
-    currentContext.transcript.push({ role: "user", text: transcript, at: Date.now() });
+    currentContext.transcript.push({ role: "user", text: transcript, at: Date.now(), phase: currentContext.dialogState.phase });
     rotateTranscriptIfNeeded(currentContext);
 
     updateDialogPhase(currentContext);
@@ -1031,7 +1031,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
               asrFinalToFirstTtsChunkMs: firstTtsChunkAt ? firstTtsChunkAt - ctx.lastUserFinalAt : undefined,
             });
           }
-          ctx.transcript.push({ role: "assistant", text: transcript, at: Date.now(), latencyMs });
+          ctx.transcript.push({
+            role: "assistant",
+            text: transcript,
+            at: Date.now(),
+            latencyMs,
+            phase: ctx.dialogState.phase,
+          });
           rotateTranscriptIfNeeded(ctx);
 
           updateDialogPhase(ctx);

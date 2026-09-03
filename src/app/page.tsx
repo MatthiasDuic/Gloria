@@ -181,8 +181,17 @@ function formatOutcomeLabel(value?: string): string {
   return normalized;
 }
 
+function effectiveReportOutcome(report: DashboardData["reports"][number]): string {
+  const summaryOutcome = readDocumentationField(report.summary || "", "Ergebnis");
+  if (summaryOutcome && !/^Nicht erreicht(?:\s*\/\s*kein Kontakt)?$/i.test(summaryOutcome)) {
+    return summaryOutcome;
+  }
+  if (report.appointmentAt) return "Termin";
+  return report.outcome || "";
+}
+
 function reportOutcomeBucket(report: DashboardData["reports"][number]): "no_contact" | "aborted" | "callback" | "appointment" | "rejection" {
-  const outcome = (report.outcome || "").trim();
+  const outcome = effectiveReportOutcome(report).trim();
   if (/termin/i.test(outcome)) return "appointment";
   if (/wiedervorlage/i.test(outcome)) return "callback";
   if (/absage/i.test(outcome)) return "rejection";
@@ -360,6 +369,17 @@ function reportHasRealConversation(report: DashboardData["reports"][number]): bo
 }
 
 function detectLostStage(summary: string): string {
+  const documentedPhase = readDocumentationField(summary, "Verlorene Gespraechsphase");
+  if (documentedPhase && documentedPhase !== "-") {
+    const labels: Record<string, string> = {
+      opener: "Gesprächseinstieg",
+      discovery: "Bedarfsklärung",
+      objection: "Einwandbehandlung",
+      close: "Terminierung",
+      done: "Abschluss",
+    };
+    return labels[documentedPhase] || documentedPhase;
+  }
   const t = summary.toLowerCase();
   if (t.includes("appt_slot_iso") || t.includes("appt_slot_label")) {
     return "Terminbestätigung – Interessent hat nach Terminvorschlag abgesagt";
@@ -1399,7 +1419,7 @@ export default function HomePage() {
       if (r.outcome === "Termin") entry.termin++;
       else if (r.outcome === "Absage") entry.absage++;
       else if (r.outcome === "Wiedervorlage") entry.wiedervorlage++;
-      else if (r.outcome === "Nicht erreicht / kein Kontakt") entry.keinKontakt++;
+      else if (effectiveReportOutcome(r) === "Nicht erreicht / kein Kontakt") entry.keinKontakt++;
       byTopic.set(r.topic, entry);
     }
     const topicStats = Array.from(byTopic.entries())
@@ -1422,6 +1442,13 @@ export default function HomePage() {
     const reasonCounts = reasonBuckets.map((b) => ({ label: b.label, count: 0 }));
     let reasonOther = 0;
     for (const r of reports.filter((x) => x.outcome === "Absage")) {
+      const documentedReason = readDocumentationField(r.summary || "", "Ablehnungsgrund");
+      if (documentedReason && documentedReason !== "-") {
+        const bucket = reasonCounts.find((entry) => entry.label === documentedReason);
+        if (bucket) bucket.count++;
+        else reasonOther++;
+        continue;
+      }
       const s = r.summary || "";
       let matched = false;
       reasonBuckets.forEach((b, i) => {
@@ -4395,7 +4422,7 @@ export default function HomePage() {
                   <td>{report.topic}</td>
                   <td>
                     <span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
-                      {formatOutcomeLabel(report.outcome)}
+                      {formatOutcomeLabel(effectiveReportOutcome(report))}
                     </span>
                   </td>
                   <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
@@ -6502,7 +6529,7 @@ export default function HomePage() {
                 </div>
 
                 {/* Conversation flow */}
-                {conversationLines.length > 0 && (
+                {!transcriptLoading && transcriptEvents.length === 0 && conversationLines.length > 0 && (
                   <div className="report-detail-field report-detail-full">
                     <label>Gesprächsverlauf</label>
                     <div style={{ display: "grid", gap: 6, marginTop: 4 }}>

@@ -233,6 +233,7 @@ type IncomingTranscriptEntry = {
   text?: string;
   at?: number;
   latencyMs?: number;
+  phase?: string;
 };
 
 async function persistTranscriptArray(
@@ -251,6 +252,7 @@ async function persistTranscriptArray(
       userId,
       speaker,
       text,
+      phase: entry.phase,
       latencyMs:
         speaker === "Gloria" && typeof entry.latencyMs === "number"
           ? entry.latencyMs

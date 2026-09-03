@@ -23,6 +23,8 @@ type ReportDocumentation = {
   callDisposition: "Gespraech" | "Anrufbeantworter" | "Warteschleife ohne Gespraech" | "Kein Gespraech";
   followUpPlanned: boolean;
   followUpAt?: string;
+  rejectionReason?: string;
+  lostPhase?: string;
 };
 
 type TranscriptEntry = {
@@ -30,6 +32,7 @@ type TranscriptEntry = {
   text: string;
   at?: number;
   latencyMs?: number;
+  phase?: string;
 };
 
 const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das Transkript unten und gib AUSSCHLIESSLICH ein JSON-Objekt zurück mit folgenden Feldern:
@@ -190,6 +193,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     text: entry.text,
     at: entry.at,
     latencyMs: entry.latencyMs,
+    phase: entry.phase,
   }));
 
   // Phase 1: Sofort-Post sichert Transkript und Basisdaten — kein E-Mail-Versand.
@@ -245,10 +249,6 @@ export async function postReport(ctx: CallContext): Promise<void> {
 
   const fullDocumentation = deriveReportDocumentation(ctx, resolvedExtraction);
   summary = withDocumentationHeader(summary, outcome, fullDocumentation);
-  const conversationProtocol = buildConversationProtocol(ctx.transcript);
-  if (conversationProtocol) {
-    summary = `${summary}\n\n--- GESPRAECHSPROTOKOLL (inkl. Reaktionszeit pro Gloria-Antwort) ---\n${conversationProtocol}`;
-  }
 
   log.info("finalize.posting_final", {
     callSid: ctx.callSid,
@@ -361,27 +361,6 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
   };
 }
 
-function buildConversationProtocol(transcript: TranscriptEntry[]): string {
-  if (!transcript.length) return "";
-  const timeFormatter = new Intl.DateTimeFormat("de-DE", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: "Europe/Berlin",
-  });
-
-  const lines = transcript.map((turn) => {
-    const timestamp = typeof turn.at === "number" ? timeFormatter.format(new Date(turn.at)) : "--:--:--";
-    if (turn.role === "assistant") {
-      const latency = typeof turn.latencyMs === "number" ? `${turn.latencyMs} ms` : "-";
-      return `- [${timestamp}] Gloria (Reaktionszeit: ${latency}): ${turn.text}`;
-    }
-    return `- [${timestamp}] Interessent: ${turn.text}`;
-  });
-  return lines.join("\n");
-}
-
 function deriveReportDocumentation(
   ctx: CallContext,
   extracted: ExtractedReport | null,
@@ -406,13 +385,30 @@ function deriveReportDocumentation(
   const conversationOccurred = hasMeaningfulHumanTurn && !hasVoicemailCue;
   const followUpAt = extracted?.nextCallAt;
   const followUpPlanned = extracted?.outcome === "Wiedervorlage" || Boolean(followUpAt);
+  const lastUserText = userTurns.at(-1) || "";
+  const rejectionReason = extractRejectionReason(lastUserText);
+  const lostPhase = ctx.confirmedSlotPhrase
+    ? undefined
+    : ctx.dialogState.phase;
 
   return {
     conversationOccurred,
     callDisposition,
     followUpPlanned,
     followUpAt,
+    rejectionReason,
+    lostPhase,
   };
+}
+
+function extractRejectionReason(text: string): string | undefined {
+  if (/nicht\s+(?:mehr\s+)?anrufen|keine\s+(?:werbe)?anrufe|streichen\s+mich/i.test(text)) return "Keine Werbeanrufe";
+  if (/keine?\s+zeit|gerade\s+schlecht|unpassend|muss\s+gleich\s+weg/i.test(text)) return "Keine Zeit";
+  if (/berater|makler|bereits\s+(?:versorgt|beraten)/i.test(text)) return "Bereits versorgt";
+  if (/zu\s+teuer|kein\s+budget|kosten/i.test(text)) return "Budget / Kosten";
+  if (/falsch|nicht\s+zuständig|nicht\s+der\s+richtige/i.test(text)) return "Falscher Ansprechpartner";
+  if (/kein\s+interesse|nicht\s+interessiert|kommt\s+nicht\s+infrage/i.test(text)) return "Kein Interesse";
+  return undefined;
 }
 
 function withDocumentationHeader(summary: string, outcome: Outcome, documentation: ReportDocumentation): string {
@@ -423,6 +419,8 @@ function withDocumentationHeader(summary: string, outcome: Outcome, documentatio
     `- Ergebnis: ${outcome}`,
     `- Weiterer Anruf geplant: ${documentation.followUpPlanned ? "Ja" : "Nein"}`,
     `- Rueckrufzeitpunkt: ${documentation.followUpAt || "-"}`,
+    `- Ablehnungsgrund: ${documentation.rejectionReason || "-"}`,
+    `- Verlorene Gespraechsphase: ${documentation.lostPhase || "-"}`,
   ].join("\n");
 
   const trimmed = summary.trim();

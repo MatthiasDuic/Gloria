@@ -28,6 +28,18 @@ test("classifies common objections by intent", () => {
   assert.equal(classifyConversationEvent("Mein Makler kümmert sich bereits darum.").type, "objection");
 });
 
+test("provides a short, concrete reply guide for every objection type", () => {
+  const noTime = instructionForConversationEvent(classifyConversationEvent("Ich habe gerade keine Zeit."));
+  const advisor = instructionForConversationEvent(classifyConversationEvent("Mein Makler kümmert sich darum."));
+  const email = instructionForConversationEvent(classifyConversationEvent("Schicken Sie mir etwas per Mail."));
+  const skepticism = instructionForConversationEvent(classifyConversationEvent("Das klingt unrealistisch."));
+
+  assert.match(noTime, /Rückrufzeitpunkt/);
+  assert.match(advisor, /Zweitblick/);
+  assert.match(email, /E-Mail-Adresse/);
+  assert.match(skepticism, /nachvollziehbaren Annahmen/);
+});
+
 test("keeps unclear fragments from changing the flow", () => {
   const event = classifyConversationEvent("Mhm.");
   assert.equal(event.type, "unclear");

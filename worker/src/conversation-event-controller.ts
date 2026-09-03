@@ -61,12 +61,27 @@ export function instructionForConversationEvent(
     case "objection":
       return [
         `Reagiere zuerst auf den Einwand "${event.text}". Bestätige die Perspektive knapp, antworte konkret und übe keinen Druck aus.`,
-        event.kind === "no_time" ? "Biete keinen langen Pitch an; frage höchstens nach einem passenderen Zeitpunkt." : "Widerlege den Kunden nicht pauschal.",
+        objectionReplyGuide(event.kind),
         resume ? `Wenn der Kunde offen bleibt, beachte anschließend als nächsten fachlichen Schritt: ${resume}` : "Stelle danach höchstens eine passende kurze Frage.",
       ].join(" ");
     case "unclear":
       return "Die letzte Äußerung war akustisch oder inhaltlich unklar. Leite daraus keine Zustimmung, Ablehnung, Terminwahl oder neue Tatsache ab. Frage genau einmal kurz auf Deutsch nach, wie der Kunde es gemeint hat.";
     case "answer":
       return resume || "Antworte direkt und situativ auf die letzte Kundenaussage. Stelle höchstens eine passende kurze Frage.";
+  }
+}
+
+function objectionReplyGuide(kind: Extract<ConversationEvent, { type: "objection" }>["kind"]): string {
+  switch (kind) {
+    case "no_time":
+      return "Biete keinen Pitch an. Sage in einem Satz, dass es nur um eine kurze Einordnung geht, und frage höchstens nach einem passenden Rückrufzeitpunkt.";
+    case "existing_advisor":
+      return "Würdige die bestehende Beratung. Stelle den Termin nur als unverbindlichen Zweitblick auf die konkrete Beitragsentwicklung dar, ohne den Berater abzuwerten.";
+    case "send_information":
+      return "Kläre in einem Satz, welche konkrete Frage die Information beantworten soll. Biete keinen Unterlagenversand ohne bestätigte E-Mail-Adresse an und frage höchstens nach einem kurzen Termin zur Einordnung.";
+    case "skepticism":
+      return "Nimm den Zweifel ernst. Erkläre knapp, dass im Termin die eigene Ausgangslage mit nachvollziehbaren Annahmen geprüft wird, nicht mit Versprechen.";
+    default:
+      return "Widerlege den Kunden nicht pauschal. Bleibe bei einer kurzen, konkreten Antwort und höchstens einer passenden Frage.";
   }
 }
