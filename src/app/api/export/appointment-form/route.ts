@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { buildAppointmentFormPdf } from "@/lib/appointment-form";
+import { buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
 
 export async function POST(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);
@@ -36,10 +36,15 @@ export async function POST(request: Request) {
       notes: typeof payload.notes === "string" ? payload.notes : undefined,
     });
 
+    const filename = getAppointmentFormFilename({
+      topic: typeof payload.topic === "string" ? payload.topic : undefined,
+      title: typeof payload.title === "string" ? payload.title : "Kundenterminbogen",
+    });
+
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": 'attachment; filename="kundenterminbogen.pdf"',
+        "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });
   } catch (error) {

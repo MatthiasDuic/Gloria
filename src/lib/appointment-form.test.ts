@@ -52,3 +52,10 @@ test("buildAppointmentFormPdf hides health questions for commercial and retireme
   assert.equal(shouldIncludeHealthSection("betriebliche Altersvorsorge"), false);
   assert.equal(shouldIncludeHealthSection("gewerbliche Versicherungen"), false);
 });
+
+test("shouldIncludeHealthSection recognizes common PKV topic variants", () => {
+  assert.equal(shouldIncludeHealthSection("PKV"), true);
+  assert.equal(shouldIncludeHealthSection("Privatversicherung"), true);
+  assert.equal(shouldIncludeHealthSection("private Krankenversicherung / Zusatzversicherung"), true);
+  assert.equal(shouldIncludeHealthSection("gesetzliche Krankenversicherung"), false);
+});
