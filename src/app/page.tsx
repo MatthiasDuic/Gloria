@@ -332,6 +332,11 @@ function buildConversationLines(summary: string) {
     });
 }
 
+function getSummaryWithoutTranscript(summary: string) {
+  const transcriptMarker = /\n---\s*(?:GESPRAECHSPROTOKOLL|GESPRÄCHSPROTOKOLL|GESPRÄCHSVERLAUF)[^\n]*---/i;
+  return summary.split(transcriptMarker, 1)[0].trim();
+}
+
 function readDocumentationField(summary: string, field: string): string | undefined {
   if (!summary) {
     return undefined;
@@ -6462,7 +6467,7 @@ export default function HomePage() {
       })()}
 
       {selectedReport && (() => {
-        const conversationLines = buildConversationLines(selectedReport.summary || "");
+        const summaryWithoutTranscript = getSummaryWithoutTranscript(selectedReport.summary || "");
         const lostStage = selectedReport.outcome !== "Termin" && selectedReport.outcome !== "Wiedervorlage"
           ? detectLostStage(selectedReport.summary || "")
           : null;
@@ -6526,34 +6531,23 @@ export default function HomePage() {
                       – Nicht erreicht / kein Kontakt — verloren bei: <strong>{lostStage}</strong>
                     </p>
                   )}
+                  {selectedReport.outcome === "Termin" && selectedReport.callSid && (
+                    <a
+                      className="btn"
+                      href={`/api/export/appointment-form?callSid=${encodeURIComponent(selectedReport.callSid)}`}
+                      style={{ display: "inline-flex", marginTop: 8 }}
+                    >
+                      Kundenterminbogen als PDF herunterladen
+                    </a>
+                  )}
                 </div>
 
-                {/* Conversation flow */}
-                {!transcriptLoading && transcriptEvents.length === 0 && conversationLines.length > 0 && (
-                  <div className="report-detail-field report-detail-full">
-                    <label>Gesprächsverlauf</label>
-                    <div style={{ display: "grid", gap: 6, marginTop: 4 }}>
-                      {conversationLines.map((line, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            fontSize: "0.88rem",
-                            background: line.speaker === "Gloria" ? "rgba(43,101,217,0.07)" : "rgba(32,57,93,0.05)",
-                            borderLeft: `3px solid ${line.speaker === "Gloria" ? "var(--blue-500)" : "var(--gold-500)"}`,
-                          }}
-                        >
-                          <span style={{ fontWeight: 700, fontSize: "0.78rem", color: line.speaker === "Gloria" ? "var(--blue-600)" : "var(--gold-600)" }}>
-                            {line.speaker}
-                          </span>
-                          <br />
-                          {line.text}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="report-detail-field report-detail-full">
+                  <label>Zusammenfassung (Rohdaten)</label>
+                  <pre className="code-box" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
+                    {summaryWithoutTranscript || "Keine Zusammenfassung vorhanden."}
+                  </pre>
+                </div>
 
                 <div className="report-detail-field report-detail-full">
                   <label>Gesprächsprotokoll (Reaktionszeit pro Gloria-Antwort)</label>
@@ -6661,13 +6655,6 @@ export default function HomePage() {
                       })}
                     </div>
                   )}
-                </div>
-
-                <div className="report-detail-field report-detail-full">
-                  <label>Zusammenfassung (Rohdaten)</label>
-                  <pre className="code-box" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-                    {selectedReport.summary || "Kein Protokoll vorhanden."}
-                  </pre>
                 </div>
 
                 {selectedReport.callSid && (

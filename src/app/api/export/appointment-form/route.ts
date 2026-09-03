@@ -1,6 +1,39 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { getDashboardData } from "@/lib/storage";
+
+export async function GET(request: Request) {
+  const sessionUser = getSessionUserFromRequest(request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const callSid = new URL(request.url).searchParams.get("callSid")?.trim();
+  if (!callSid) {
+    return NextResponse.json({ error: "Call-SID fehlt." }, { status: 400 });
+  }
+
+  const data = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
+  const report = data.reports.find((entry) => entry.callSid === callSid);
+  if (!report) {
+    return NextResponse.json({ error: "Report nicht gefunden." }, { status: 404 });
+  }
+
+  try {
+    const input = buildAppointmentFormInputFromReport(report);
+    const pdf = await buildAppointmentFormPdf(input);
+    return new NextResponse(new Uint8Array(pdf), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${getAppointmentFormFilename(input)}"`,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "PDF-Erstellung fehlgeschlagen.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function POST(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);

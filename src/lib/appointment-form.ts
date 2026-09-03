@@ -25,6 +25,65 @@ export interface AppointmentFormInput {
   notes?: string;
 }
 
+export interface AppointmentReportSource {
+  company: string;
+  contactName?: string;
+  topic: string;
+  summary: string;
+  conversationDate: string;
+  appointmentAt?: string;
+}
+
+function getReportSummary(summary: string) {
+  const withoutTranscript = summary.split(/\n---\s*(?:GESPRAECHSPROTOKOLL|GESPRÄCHSPROTOKOLL|GESPRÄCHSVERLAUF)[^\n]*---/i, 1)[0].trim();
+  return withoutTranscript.match(/(?:^|\n)Zusammenfassung:\s*\n([\s\S]*)$/i)?.[1]?.trim() || withoutTranscript;
+}
+
+function getConversationTurns(summary: string) {
+  return summary
+    .split("\n")
+    .map((line) => line.trim().match(/^(?:-\s*)?(?:\[[^\]]+\]\s*)?(Gloria|Interessent)(?:\s*\([^)]*\))?:\s*(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => ({ speaker: match[1], text: match[2].trim() }));
+}
+
+export function buildAppointmentFormInputFromReport(report: AppointmentReportSource): AppointmentFormInput {
+  const turns = getConversationTurns(report.summary);
+  const answerAfter = (question: RegExp) => {
+    const questionIndex = turns.findIndex((turn) => turn.speaker === "Gloria" && question.test(turn.text));
+    if (questionIndex < 0) return undefined;
+
+    return turns
+      .slice(questionIndex + 1)
+      .find((turn) => turn.speaker === "Interessent" && !/^\.*$/.test(turn.text))
+      ?.text;
+  };
+  const height = answerAfter(/körpergröße|koerpergroesse/i);
+  const weight = answerAfter(/(?:aktuelles\s+)?gewicht/i);
+  const email = report.summary.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
+
+  return {
+    title: "Kundenterminbogen",
+    topic: report.topic,
+    createdAt: report.conversationDate,
+    appointmentDate: report.appointmentAt,
+    contactName: report.contactName,
+    email,
+    company: report.company,
+    birthDate: answerAfter(/geburtsdatum/i),
+    insuranceStatus: normalizeTopic(report.topic).includes("private krankenversicherung") ? "Privat versichert" : undefined,
+    healthInsurance: answerAfter(/krankenversicherer|krankenkasse/i),
+    monthlyContribution: answerAfter(/aktuellen beitrag/i),
+    heightWeight: [height, weight].filter(Boolean).join(" / ") || undefined,
+    medication: answerAfter(/medikamente/i),
+    diagnoses: answerAfter(/diagnosen/i),
+    therapy: answerAfter(/psychische behandlungen/i),
+    hospitalizations: answerAfter(/krankenhausaufenthalte/i),
+    dentalAllergies: answerAfter(/allergien|fehlende zähne/i),
+    notes: getReportSummary(report.summary),
+  };
+}
+
 function normalizeTopic(value?: string) {
   return (value || "").trim().toLowerCase();
 }
