@@ -129,7 +129,7 @@ const ENERGIE_KNOWLEDGE = [
   "VERBOTEN: Konkrete Cent-Versprechen ohne Zählerdaten.",
 ].join("\n");
 
-export const defaultScripts: ScriptConfig[] = [
+const allDefaultScripts: ScriptConfig[] = [
   {
     id: "skript-bkv",
     topic: "betriebliche Krankenversicherung",
@@ -223,6 +223,11 @@ export const defaultScripts: ScriptConfig[] = [
     proofPoints: ENERGIE_PROOF,
   },
 ];
+
+export const defaultScripts = allDefaultScripts.filter((script) =>
+  script.topic === "betriebliche Krankenversicherung"
+  || script.topic === "private Krankenversicherung"
+);
 
 export const defaultLeads: Lead[] = [];
 

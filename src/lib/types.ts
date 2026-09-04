@@ -1,15 +1,9 @@
 export const TOPICS = [
   "betriebliche Krankenversicherung",
-  "betriebliche Altersvorsorge",
-  "gewerbliche Versicherungen",
   "private Krankenversicherung",
-  "Energie",
-  "Outbound Service (Kundenzufriedenheit)",
-  "Outbound Bestandskunden (Jahresgespraech)",
-  "Inbound Service (Anliegen und Tasks)",
 ] as const;
 
-// Dynamische Themen sind erlaubt: TOPICS sind nur die Standard-Vorgaben.
+// Topic Policies sind bewusst auf die beiden aktiven Vertriebsthemen begrenzt.
 export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
 export type LeadCustomerKind = "privat" | "firma";

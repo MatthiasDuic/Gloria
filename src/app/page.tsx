@@ -57,23 +57,8 @@ const TOPIC_CATEGORY_DEFINITIONS: TopicCategoryDefinition[] = [
     label: "Outbound Telefonie - Neukundenakquise",
     topics: [
       "betriebliche Krankenversicherung",
-      "betriebliche Altersvorsorge",
       "private Krankenversicherung",
-      "gewerbliche Versicherungen",
-      "Energie",
     ],
-  },
-  {
-    label: "Outbound Telefonie - Service",
-    topics: ["Outbound Service (Kundenzufriedenheit)"],
-  },
-  {
-    label: "Outbound Telefonie - Bestandskunden",
-    topics: ["Outbound Bestandskunden (Jahresgespraech)"],
-  },
-  {
-    label: "Inbound Telefonie",
-    topics: ["Inbound Service (Anliegen und Tasks)"],
   },
 ];
 
@@ -1078,8 +1063,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [draftScripts, setDraftScripts] = useState<Record<string, TopicPolicyConfig>>({});
-  const [newTopicInput, setNewTopicInput] = useState("");
-  const [showNewTopicForm, setShowNewTopicForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<DashboardData["leads"][number] | null>(null);
   const [leadSearch, setLeadSearch] = useState("");
@@ -1342,8 +1325,8 @@ export default function HomePage() {
 
   const activeDraft = draftScripts[detailTopic];
   const playbookTopicOptions = useMemo(
-    () => Array.from(new Set([...TOPICS, ...Object.keys(draftScripts)])),
-    [draftScripts],
+    () => [...TOPICS],
+    [],
   );
   const playbookTopicGroups = useMemo(
     () => buildTopicGroups(playbookTopicOptions),
@@ -1387,7 +1370,7 @@ export default function HomePage() {
           ? currentUserAllowedTopics
           : [...TOPICS])
           .map((topic) => String(topic).trim())
-          .filter(Boolean),
+          .filter((topic) => (TOPICS as readonly string[]).includes(topic)),
       ),
     ),
     [currentUserAllowedTopics],
@@ -2456,18 +2439,6 @@ export default function HomePage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function handleAddNewTopic() {
-    const topic = newTopicInput.trim();
-    if (!topic) return;
-    setDraftScripts((c) => ({
-      ...c,
-      [topic]: buildDraftFromPreset(topic),
-    }));
-    setDetailTopic(topic);
-    setNewTopicInput("");
-    setShowNewTopicForm(false);
   }
 
   async function testVoice() {
@@ -4982,7 +4953,6 @@ export default function HomePage() {
                         </optgroup>
                       ))}
                     </select>
-                    <button className="btn ghost" onClick={() => setShowNewTopicForm((v) => !v)} style={{ marginLeft: 8 }}>+ Neues Thema</button>
                   </div>
                 </div>
                 <div className="playbook-category-tabs top-gap">
@@ -5023,21 +4993,6 @@ export default function HomePage() {
                 <p className="subtle top-gap">
                   Kategorie-Filter aktiv: <strong>{playbookCategoryFilter}</strong>
                 </p>
-                {showNewTopicForm ? (
-                  <div className="row top-gap">
-                    <input
-                      type="text"
-                      placeholder="Thema eingeben, z. B. Immobilienfinanzierung"
-                      value={newTopicInput}
-                      onChange={(e) => setNewTopicInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAddNewTopic(); }}
-                      style={{ flex: 1 }}
-                    />
-                    <button className="btn" onClick={handleAddNewTopic} disabled={!newTopicInput.trim()} style={{ marginLeft: 8 }}>Anlegen</button>
-                    <button className="btn ghost" onClick={() => { setShowNewTopicForm(false); setNewTopicInput(""); }} style={{ marginLeft: 4 }}>Abbrechen</button>
-                  </div>
-                ) : null}
-
                 {activeDraft ? (
                   <>
                     <div className="playbook-overview top-gap">

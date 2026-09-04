@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TOPICS } from "@/lib/types";
 
-const TopicSchema = z.string().trim().min(2);
+const TopicSchema = z.enum(TOPICS);
 
 export const TopicPolicyPayloadSchema = z
   .object({

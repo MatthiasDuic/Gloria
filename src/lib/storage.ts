@@ -39,6 +39,7 @@ import type {
   ScriptConfig,
   Topic,
 } from "./types";
+import { TOPICS } from "./types";
 import { normalizeLeadProductDetails } from "./crm-helpers";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -291,8 +292,10 @@ async function filterScriptsByUserAccess(
   scripts: ScriptConfig[],
   userId?: string,
 ): Promise<ScriptConfig[]> {
+  const supportedTopics = new Set<string>(TOPICS);
+  const supportedScripts = scripts.filter((script) => supportedTopics.has(script.topic));
   if (!userId) {
-    return scripts;
+    return supportedScripts;
   }
 
   const user = await findUserById(userId);
@@ -301,11 +304,11 @@ async function filterScriptsByUserAccess(
   }
 
   if (!user.allowedPlaybookTopics || user.allowedPlaybookTopics.length === 0) {
-    return scripts;
+    return supportedScripts;
   }
 
   const allowed = new Set(user.allowedPlaybookTopics);
-  return scripts.filter((script) => allowed.has(script.topic));
+  return supportedScripts.filter((script) => allowed.has(script.topic));
 }
 
 async function persistTranscriptChunkEvent(payload: {

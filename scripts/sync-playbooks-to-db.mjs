@@ -14,6 +14,11 @@ import path from "node:path";
 import process from "node:process";
 import pg from "pg";
 
+const SUPPORTED_TOPICS = [
+  "betriebliche Krankenversicherung",
+  "private Krankenversicherung",
+];
+
 function loadEnvLocal() {
   const envPath = path.resolve(process.cwd(), ".env.local");
   if (!fs.existsSync(envPath)) return;
@@ -88,7 +93,9 @@ async function main() {
     console.error(`${playbooksPath} enthaelt keine Playbooks.`);
     process.exit(1);
   }
-  const playbooks = rawPlaybooks.map(normalizeTopicPolicy);
+  const playbooks = rawPlaybooks
+    .filter((playbook) => SUPPORTED_TOPICS.includes(String(playbook.topic || "")))
+    .map(normalizeTopicPolicy);
 
   const includeUsers = process.argv.includes("--include-users");
   const targetUserId = getTargetUserId(process.argv);
@@ -149,7 +156,11 @@ async function main() {
 
     await client.query(
       `DELETE FROM gloria_playbooks WHERE topic <> ALL($1::text[])`,
-      [playbooks.map((playbook) => playbook.topic)],
+      [SUPPORTED_TOPICS],
+    );
+    await client.query(
+      `DELETE FROM user_playbooks WHERE topic <> ALL($1::text[])`,
+      [SUPPORTED_TOPICS],
     );
 
     if (includeUsers || targetUserId) {
