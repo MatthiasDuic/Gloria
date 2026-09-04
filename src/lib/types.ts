@@ -182,11 +182,11 @@ export interface TopicPolicyConfig {
   objectionResponses?: string;
   proofPoints?: string;
   transferHandling?: string;
-  // --- Legacy-Felder (werden nicht mehr im UI editiert) ----------------
-  opener: string;
-  discovery: string;
-  objectionHandling: string;
-  close: string;
+  // --- Legacy-Felder (nur fuer alte Vorschaupfade) ----------------------
+  opener?: string;
+  discovery?: string;
+  objectionHandling?: string;
+  close?: string;
   aiKeyInfo?: string;
   consentPrompt?: string;
   pkvHealthIntro?: string;

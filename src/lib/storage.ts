@@ -1307,18 +1307,37 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
 
   const scripts = await readScripts(options?.userId);
   const existing = scripts.find((script) => script.topic === topic);
+  const combined = { ...existing, ...payload };
+  const {
+    requiredData: _requiredData,
+    opener: _opener,
+    discovery: _discovery,
+    objectionHandling: _objectionHandling,
+    close: _close,
+    aiKeyInfo: _aiKeyInfo,
+    consentPrompt: _consentPrompt,
+    pkvHealthIntro: _pkvHealthIntro,
+    pkvHealthQuestions: _pkvHealthQuestions,
+    decisionMakerTask: _decisionMakerTask,
+    decisionMakerBehavior: _decisionMakerBehavior,
+    appointmentGoal: _appointmentGoal,
+    greetingDecisionMaker: _greetingDecisionMaker,
+    greetingGatekeeper: _greetingGatekeeper,
+    reasonForCall: _reasonForCall,
+    relevanceQuestion: _relevanceQuestion,
+    contributionQuestion: _contributionQuestion,
+    projectionText: _projectionText,
+    availableAppointmentSlots: _availableAppointmentSlots,
+    ...activePolicy
+  } = combined;
   const updatedScript: ScriptConfig = {
     id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
     topic,
-    topicSummary: existing?.topicSummary || "",
-    behavior: existing?.behavior || "",
-    conversationGuardrails: existing?.conversationGuardrails || "",
-    requiredQuestions: existing?.requiredQuestions || "",
-    opener: existing?.opener || "",
-    discovery: existing?.discovery || "",
-    objectionHandling: existing?.objectionHandling || "",
-    close: existing?.close || "",
-    ...payload,
+    topicSummary: "",
+    behavior: "",
+    conversationGuardrails: "",
+    requiredQuestions: "",
+    ...activePolicy,
   };
 
   const updated = existing

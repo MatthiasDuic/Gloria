@@ -16,7 +16,7 @@ test("loads a policy through an injected non-blocking loader", async () => {
 });
 
 test("keeps topic context changes explicit and actions interruptible", () => {
-  const context = withTopicPolicy(createTopicContext("Energie"), { topic: "Energie", callObjective: "Termin", opener: "open", discovery: "discover", objectionHandling: "handle", close: "close" });
+  const context = withTopicPolicy(createTopicContext("Energie"), { topic: "Energie", callObjective: "Termin", topicSummary: "Einordnung", objectionResponses: "Einwände kurz beantworten." });
   assert.equal(context.version, 1);
   assert.equal(detectTopicAction("Bitte verbinden Sie mich mit einem Mitarbeiter").type, "handover");
 });

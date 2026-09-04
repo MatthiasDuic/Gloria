@@ -8,27 +8,13 @@ export type TopicPolicyFields = {
   behavior?: string;
   conversationGuardrails?: string;
   requiredQuestions?: string;
-  requiredData?: string;
-  pkvHealthQuestions?: string;
   exampleSentences?: string;
-  greetingDecisionMaker?: string;
-  greetingGatekeeper?: string;
-  reasonForCall?: string;
-  relevanceQuestion?: string;
-  contributionQuestion?: string;
-  projectionText?: string;
-  opener?: string;
-  discovery?: string;
-  objectionHandling?: string;
   close?: string;
   knowledge?: string;
   proofPoints?: string;
   objectionResponses?: string;
   transferHandling?: string;
-  decisionMakerTask?: string;
-  decisionMakerBehavior?: string;
   decisionMakerContext?: string;
-  appointmentGoal?: string;
   receptionTopicReason?: string;
   problemBuildup?: string;
   conceptTransition?: string;
@@ -98,28 +84,17 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topicSummary = (policy.topicSummary || "").trim();
   const behavior = (policy.behavior || "").trim();
   const conversationGuardrails = (policy.conversationGuardrails || "").trim();
-  const requiredQuestions = (policy.requiredQuestions || policy.requiredData || "").trim();
+  const requiredQuestions = (policy.requiredQuestions || "").trim();
   const exampleSentences = (policy.exampleSentences || "").trim();
-  const opening = (policy.greetingDecisionMaker || policy.opener || "").trim();
-  const gatekeeperOpening = (policy.greetingGatekeeper || "").trim();
-  const reasonForCall = (policy.reasonForCall || policy.receptionTopicReason || "").trim();
-  const relevanceQuestion = (policy.relevanceQuestion || policy.discovery || "").trim();
-  const objectionResponses = (policy.objectionResponses || policy.objectionHandling || "").trim();
+  const objectionResponses = (policy.objectionResponses || "").trim();
   const decisionMakerContext = (policy.decisionMakerContext || "").trim();
-  const decisionMakerTask = (policy.decisionMakerTask || "").trim();
-  const decisionMakerBehavior = (policy.decisionMakerBehavior || "").trim();
   const problemBuildup = (policy.problemBuildup || "").trim();
   const conceptTransition = (policy.conceptTransition || "").trim();
-  const appointmentGoal = (policy.appointmentGoal || "").trim();
   const knowledge = (policy.knowledge || "").trim();
   const proofPoints = (policy.proofPoints || "").trim();
   const transferHandling = (policy.transferHandling || "").trim();
   const gatekeeperTask = (policy.gatekeeperTask || "").trim();
   const gatekeeperBehavior = (policy.gatekeeperBehavior || "").trim();
-  const contributionQuestion = (policy.contributionQuestion || "").trim();
-  const projectionText = (policy.projectionText || "").trim();
-  const close = (policy.close || "").trim();
-  const aiKeyInfo = (policy.aiKeyInfo || "").trim();
   const appointmentConfirmation = (policy.appointmentConfirmation || "").trim();
 
   if (
@@ -150,29 +125,17 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   if (conversationGuardrails) {
     parts.push("", "THEMENSPEZIFISCHE GRENZEN & HINWEISE (nicht als Skript vorlesen):", conversationGuardrails);
   }
-  if (opening || gatekeeperOpening || reasonForCall || relevanceQuestion) {
-    parts.push("", "ERÖFFNUNG UND ERSTE RELEVANZ (sinngemäß, kurz und erst nach bestätigtem Entscheider):");
-    if (opening) parts.push(`Mögliche Begrüßung: ${opening}`);
-    if (gatekeeperOpening) parts.push(`Mögliche Begrüßung am Empfang: ${gatekeeperOpening}`);
-    if (reasonForCall) parts.push(`Kurzer Anlass am Empfang oder auf Nachfrage: ${reasonForCall}`);
-    if (relevanceQuestion) parts.push(`Mögliche erste Relevanzfrage: ${relevanceQuestion}`);
-  }
   if (gatekeeperTask || gatekeeperBehavior) {
     parts.push("", "GATEKEEPER-FÜHRUNG (nur bis die Zielperson bestätigt ist):");
     if (gatekeeperTask) parts.push(gatekeeperTask);
     if (gatekeeperBehavior) parts.push(gatekeeperBehavior);
+    if (policy.receptionTopicReason?.trim()) parts.push(`Kurzer Anlass auf Rückfrage: ${policy.receptionTopicReason.trim()}`);
   }
-  if (decisionMakerContext || decisionMakerTask || decisionMakerBehavior || problemBuildup || conceptTransition || appointmentGoal) {
+  if (decisionMakerContext || problemBuildup || conceptTransition) {
     parts.push("", "FÜHRUNG NACH BESTÄTIGTEM ENTSCHEIDER (situativ, niemals als Monolog):");
     if (decisionMakerContext) parts.push(`Kontext: ${decisionMakerContext}`);
-    if (decisionMakerTask) parts.push(`Zielablauf: ${decisionMakerTask}`);
-    if (decisionMakerBehavior) parts.push(`Haltung: ${decisionMakerBehavior}`);
     if (problemBuildup) parts.push(`Relevanzargument: ${problemBuildup}`);
     if (conceptTransition) parts.push(`Nutzen- und Terminbrücke: ${conceptTransition}`);
-    if (appointmentGoal) parts.push(`Ziel des Termins: ${appointmentGoal}`);
-    if (contributionQuestion) parts.push(`Mögliche Beitragsfrage: ${contributionQuestion}`);
-    if (projectionText) parts.push(`Mögliche Einordnung nach einer Beitragsangabe: ${projectionText}`);
-    if (close) parts.push(`Mögliche Terminbrücke: ${close}`);
   }
   if (objectionResponses) {
     parts.push("", "EINWÄNDE:", "Nutze die passende Antwort nur als inhaltliche Orientierung. Beantworte den Einwand zuerst, ohne ihn zu widerlegen oder dieselbe Frage zu wiederholen:", objectionResponses);
@@ -184,9 +147,6 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   }
   if (transferHandling) {
     parts.push("", "MENSCHLICHE ÜBERGABE:", transferHandling);
-  }
-  if (aiKeyInfo) {
-    parts.push("", "HINTERGRUND FÜR DIE EINORDNUNG (nicht vorlesen):", aiKeyInfo);
   }
   if (requiredQuestions) {
     parts.push(

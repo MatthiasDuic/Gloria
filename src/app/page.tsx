@@ -290,10 +290,6 @@ function describeRunReason(reason?: string) {
 }
 
 function toDateKey(value: Date) {
-  // Lokales Datum (nicht UTC), damit Kalenderzellen und Termine auf demselben
-  // Tag landen. toISOString() würde 2026-05-13T22:00:00 lokal als 2026-05-13
-  // (UTC) speichern, aber die Kalenderzelle für den 14.05 lokal hat als Key
-  // den UTC-13.05 -> Termin würde einen Tag zu spät erscheinen.
   const y = value.getFullYear();
   const m = String(value.getMonth() + 1).padStart(2, "0");
   const d = String(value.getDate()).padStart(2, "0");
@@ -307,15 +303,10 @@ function speakText(text: string) {
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "de-DE";
-
   const germanVoice = window.speechSynthesis
     .getVoices()
     .find((voice) => voice.lang.toLowerCase().startsWith("de"));
-
-  if (germanVoice) {
-    utterance.voice = germanVoice;
-  }
-
+  if (germanVoice) utterance.voice = germanVoice;
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
 }
@@ -323,13 +314,10 @@ function speakText(text: string) {
 function buildConversationLines(summary: string) {
   return summary
     .split("\n")
-    .map((l) => l.trim())
+    .map((line) => line.trim())
     .map((line) => line.match(/^(?:-\s*)?(?:\[[^\]]+\]\s*)?(Gloria|Interessent)(?:\s*\([^)]*\))?:\s*(.+)$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((l) => {
-      const isGloria = l[1] === "Gloria";
-      return { speaker: isGloria ? "Gloria" : "Interessent", text: l[2].trim() };
-    });
+    .map((line) => ({ speaker: line[1] === "Gloria" ? "Gloria" : "Interessent", text: line[2].trim() }));
 }
 
 function getSummaryWithoutTranscript(summary: string) {
@@ -338,10 +326,7 @@ function getSummaryWithoutTranscript(summary: string) {
 }
 
 function readDocumentationField(summary: string, field: string): string | undefined {
-  if (!summary) {
-    return undefined;
-  }
-
+  if (!summary) return undefined;
   const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = summary.match(new RegExp(`^-\\s*${escaped}:\\s*(.+)$`, "mi"));
   return match?.[1]?.trim();
@@ -419,32 +404,14 @@ const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
   "gatekeeperTask",
   "gatekeeperBehavior",
   "receptionTopicReason",
-  "decisionMakerTask",
-  "decisionMakerBehavior",
   "decisionMakerContext",
-  "appointmentGoal",
-  "greetingGatekeeper",
-  "greetingDecisionMaker",
-  "reasonForCall",
-  "relevanceQuestion",
-  "contributionQuestion",
-  "projectionText",
+  "problemBuildup",
+  "conceptTransition",
   "knowledge",
   "proofPoints",
   "objectionResponses",
   "transferHandling",
-  "opener",
-  "discovery",
-  "objectionHandling",
-  "close",
-  "aiKeyInfo",
-  "consentPrompt",
-  "pkvHealthIntro",
-  "pkvHealthQuestions",
-  "problemBuildup",
-  "conceptTransition",
   "appointmentConfirmation",
-  "availableAppointmentSlots",
 ];
 
 function countFilledTopicPolicyFields(config?: TopicPolicyConfig) {
@@ -724,42 +691,17 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
     conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
     requiredQuestions: pickText(existing?.requiredQuestions || existing?.requiredData, preset.requiredQuestions),
     exampleSentences: pickText(existing?.exampleSentences, ""),
-    requiredData: pickText(existing?.requiredData, ""),
     knowledge: pickText(existing?.knowledge, ""),
     objectionResponses: pickText(existing?.objectionResponses, ""),
     proofPoints: pickText(existing?.proofPoints, ""),
     transferHandling: pickText(existing?.transferHandling, ""),
-    greetingDecisionMaker: pickText(existing?.greetingDecisionMaker, ""),
-    greetingGatekeeper: pickText(existing?.greetingGatekeeper, ""),
-    reasonForCall: pickText(existing?.reasonForCall, ""),
-    relevanceQuestion: pickText(existing?.relevanceQuestion, ""),
-    contributionQuestion: pickText(existing?.contributionQuestion, ""),
-    projectionText: pickText(existing?.projectionText, ""),
-    opener: pickText(existing?.opener, ""),
-    discovery: pickText(existing?.discovery, ""),
-    objectionHandling: pickText(existing?.objectionHandling, ""),
-    close: pickText(existing?.close, ""),
-    aiKeyInfo: pickText(existing?.aiKeyInfo, ""),
-    consentPrompt: pickText(
-      existing?.consentPrompt,
-      'Bevor wir starten: Darf ich das Gespräch zu Schulungs- und Qualitätszwecken aufzeichnen? Bitte antworten Sie mit einem klaren "JA" oder "NEIN".',
-    ),
-    pkvHealthIntro: pickText(
-      existing?.pkvHealthIntro,
-      "Damit wir den Termin optimal vorbereiten koennen, muessen wir kurz ein paar Basisinformationen abklaeren.",
-    ),
-    pkvHealthQuestions: pickText(existing?.pkvHealthQuestions, ""),
     gatekeeperTask: pickText(existing?.gatekeeperTask, ""),
     gatekeeperBehavior: pickText(existing?.gatekeeperBehavior, ""),
-    decisionMakerTask: pickText(existing?.decisionMakerTask, ""),
-    decisionMakerBehavior: pickText(existing?.decisionMakerBehavior, ""),
     decisionMakerContext: pickText(existing?.decisionMakerContext, ""),
-    appointmentGoal: pickText(existing?.appointmentGoal, ""),
     receptionTopicReason: pickText(existing?.receptionTopicReason, ""),
     problemBuildup: pickText(existing?.problemBuildup, ""),
     conceptTransition: pickText(existing?.conceptTransition, ""),
     appointmentConfirmation: pickText(existing?.appointmentConfirmation, ""),
-    availableAppointmentSlots: pickText(existing?.availableAppointmentSlots, ""),
   };
 }
 
@@ -2310,33 +2252,14 @@ export default function HomePage() {
       gatekeeperTask: draft.gatekeeperTask || "",
       gatekeeperBehavior: draft.gatekeeperBehavior || "",
       receptionTopicReason: draft.receptionTopicReason || "",
-      decisionMakerTask: draft.decisionMakerTask || "",
-      decisionMakerBehavior: draft.decisionMakerBehavior || "",
       decisionMakerContext: draft.decisionMakerContext || "",
-      appointmentGoal: draft.appointmentGoal || "",
-      greetingGatekeeper: draft.greetingGatekeeper || "",
-      greetingDecisionMaker: draft.greetingDecisionMaker || "",
-      reasonForCall: draft.reasonForCall || "",
-      relevanceQuestion: draft.relevanceQuestion || "",
-      contributionQuestion: draft.contributionQuestion || "",
-      projectionText: draft.projectionText || "",
-      requiredData: draft.requiredData || "",
       knowledge: draft.knowledge || "",
       proofPoints: draft.proofPoints || "",
       objectionResponses: draft.objectionResponses || "",
       transferHandling: draft.transferHandling || "",
-      opener: draft.opener || "",
-      discovery: draft.discovery || "",
-      objectionHandling: draft.objectionHandling || "",
-      close: draft.close || "",
-      aiKeyInfo: draft.aiKeyInfo || "",
-      consentPrompt: draft.consentPrompt || "",
-      pkvHealthIntro: draft.pkvHealthIntro || "",
-      pkvHealthQuestions: draft.pkvHealthQuestions || "",
       problemBuildup: draft.problemBuildup || "",
       conceptTransition: draft.conceptTransition || "",
       appointmentConfirmation: draft.appointmentConfirmation || "",
-      availableAppointmentSlots: draft.availableAppointmentSlots || "",
     };
 
     const response = await fetch("/api/topic-policies", {
@@ -5169,24 +5092,6 @@ export default function HomePage() {
 
                       <div className="playbook-grid">
                         <div>
-                          <h4 className="sub-heading">Aufgabe beim Entscheider</h4>
-                          <textarea
-                            value={activeDraft.decisionMakerTask ?? ""}
-                            rows={7}
-                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerTask: event.target.value } }))}
-                          />
-                        </div>
-
-                        <div>
-                          <h4 className="sub-heading">Verhalten beim Entscheider</h4>
-                          <textarea
-                            value={activeDraft.decisionMakerBehavior ?? ""}
-                            rows={7}
-                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerBehavior: event.target.value } }))}
-                          />
-                        </div>
-
-                        <div>
                           <h4 className="sub-heading">Fachlicher Kontext & Kundennutzen</h4>
                           <textarea
                             value={activeDraft.decisionMakerContext ?? ""}
@@ -5194,48 +5099,13 @@ export default function HomePage() {
                             onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))}
                           />
                         </div>
-
-                        <div>
-                          <h4 className="sub-heading">Erfolgskriterium / nächster Schritt</h4>
-                          <textarea
-                            value={activeDraft.appointmentGoal ?? ""}
-                            rows={7}
-                            onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentGoal: event.target.value } }))}
-                          />
-                        </div>
                       </div>
                     </div>
 
                     <details className="mini-panel playbook-card playbook-details top-gap" open>
                       <summary><strong>9. Gesprächseinstieg & Dialoganker</strong></summary>
-                      <p className="subtle">
-                        Konkrete Formulierungsanker für Einstieg, Anlass, Bedarf und Nutzen. Gloria nutzt sie sinngemäß und nicht als starres Skript.
-                      </p>
+                      <p className="subtle">Konkrete Anker für Relevanz und die natürliche Überleitung zum nächsten Schritt.</p>
                       <div className="playbook-grid">
-                        <div>
-                          <h4 className="sub-heading">Begrüßung am Empfang</h4>
-                          <textarea value={activeDraft.greetingGatekeeper ?? ""} rows={5} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], greetingGatekeeper: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Begrüßung beim Entscheider</h4>
-                          <textarea value={activeDraft.greetingDecisionMaker ?? ""} rows={5} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], greetingDecisionMaker: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Grund des Anrufs</h4>
-                          <textarea value={activeDraft.reasonForCall ?? ""} rows={5} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], reasonForCall: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Relevanzfrage</h4>
-                          <textarea value={activeDraft.relevanceQuestion ?? ""} rows={5} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], relevanceQuestion: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Beitrags- oder Situationsfrage</h4>
-                          <textarea value={activeDraft.contributionQuestion ?? ""} rows={5} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], contributionQuestion: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Hochrechnung / Nutzenbrücke</h4>
-                          <textarea value={activeDraft.projectionText ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], projectionText: event.target.value } }))} />
-                        </div>
                         <div>
                           <h4 className="sub-heading">Problemaufbau</h4>
                           <textarea value={activeDraft.problemBuildup ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
@@ -5252,10 +5122,6 @@ export default function HomePage() {
                       <p className="subtle">Themenspezifischer Wissensrahmen und erlaubte Reaktionslinien für Rückfragen und Einwände.</p>
                       <div className="playbook-grid">
                         <div>
-                          <h4 className="sub-heading">Kernwissen für die KI</h4>
-                          <textarea value={activeDraft.aiKeyInfo ?? ""} rows={9} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], aiKeyInfo: event.target.value } }))} />
-                        </div>
-                        <div>
                           <h4 className="sub-heading">Erlaubtes Wissen & Grenzen</h4>
                           <textarea value={activeDraft.knowledge ?? ""} rows={9} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))} />
                         </div>
@@ -5268,10 +5134,6 @@ export default function HomePage() {
                           <textarea value={activeDraft.objectionResponses ?? ""} rows={8} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))} />
                         </div>
                         <div>
-                          <h4 className="sub-heading">Aktiver Einwandleitfaden</h4>
-                          <textarea value={activeDraft.objectionHandling ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionHandling: event.target.value } }))} />
-                        </div>
-                        <div>
                           <h4 className="sub-heading">Menschliche Übergabe</h4>
                           <textarea value={activeDraft.transferHandling ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], transferHandling: event.target.value } }))} />
                         </div>
@@ -5279,52 +5141,15 @@ export default function HomePage() {
                     </details>
 
                     <details className="mini-panel playbook-card playbook-details top-gap">
-                      <summary><strong>11. Terminierung & vorhandene Bausteine</strong></summary>
-                      <p className="subtle">Abschluss, Bestätigung und bestehende Fallback-Texte des gewählten Themas.</p>
+                      <summary><strong>11. Terminbestätigung</strong></summary>
+                      <p className="subtle">Formulierung, nachdem ein Termin erfolgreich bestätigt wurde.</p>
                       <div className="playbook-grid">
-                        <div>
-                          <h4 className="sub-heading">Terminübergang / Abschluss</h4>
-                          <textarea value={activeDraft.close ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], close: event.target.value } }))} />
-                        </div>
                         <div>
                           <h4 className="sub-heading">Terminbestätigung</h4>
                           <textarea value={activeDraft.appointmentConfirmation ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
                         </div>
-                        <div>
-                          <h4 className="sub-heading">Freigegebene Terminslots</h4>
-                          <textarea value={activeDraft.availableAppointmentSlots ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], availableAppointmentSlots: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Einwilligungsfrage</h4>
-                          <textarea value={activeDraft.consentPrompt ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], consentPrompt: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Bestehender Einstieg (Fallback)</h4>
-                          <textarea value={activeDraft.opener ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], opener: event.target.value } }))} />
-                        </div>
-                        <div>
-                          <h4 className="sub-heading">Bestehende Bedarfsfrage (Fallback)</h4>
-                          <textarea value={activeDraft.discovery ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], discovery: event.target.value } }))} />
-                        </div>
                       </div>
                     </details>
-
-                    {normalizeTopicKey(detailTopic).includes("private krankenversicherung") ? (
-                      <details className="mini-panel playbook-card playbook-details top-gap">
-                        <summary><strong>12. PKV-Terminvorbereitung</strong></summary>
-                        <p className="subtle">Optionale Vorbereitung nach bestätigtem Termin; vorhandene Werte werden unverändert angezeigt.</p>
-                        <div className="playbook-grid">
-                          <div>
-                            <h4 className="sub-heading">Einleitung der Basisfragen</h4>
-                            <textarea value={activeDraft.pkvHealthIntro ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
-                          </div>
-                          <div>
-                            <h4 className="sub-heading">Basis- und Gesundheitsfragen</h4>
-                            <textarea value={activeDraft.pkvHealthQuestions ?? ""} rows={12} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
-                          </div>
-                        </div>
-                      </details>
-                    ) : null}
 
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Topic Policy speichern</button>
