@@ -1101,22 +1101,27 @@ export default function HomePage() {
     }
     let cancelled = false;
     setTranscriptLoading(true);
-    fetch(`/api/reports/transcript?callSid=${encodeURIComponent(callSid)}`, { credentials: "include" })
-      .then(async (res) => {
+    const loadTranscript = async (attempt = 0): Promise<void> => {
+      try {
+        const res = await fetch(`/api/reports/transcript?callSid=${encodeURIComponent(callSid)}`, { credentials: "include" });
         if (!res.ok) throw new Error(`http ${res.status}`);
-        return res.json();
-      })
-      .then((data: { events?: typeof transcriptEvents }) => {
+        const data = await res.json() as { events?: typeof transcriptEvents };
         if (cancelled) return;
-        setTranscriptEvents(Array.isArray(data.events) ? data.events : []);
-      })
-      .catch(() => {
+        const events = Array.isArray(data.events) ? data.events : [];
+        if (events.length === 0 && attempt < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          if (!cancelled) await loadTranscript(attempt + 1);
+          return;
+        }
+        setTranscriptEvents(events);
+      } catch {
         if (cancelled) return;
         setTranscriptEvents([]);
-      })
-      .finally(() => {
-        if (!cancelled) setTranscriptLoading(false);
-      });
+      } finally {
+        if (!cancelled && attempt === 0) setTranscriptLoading(false);
+      }
+    };
+    void loadTranscript();
     return () => {
       cancelled = true;
     };

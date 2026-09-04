@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
-import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { formatAmountForSpeech } from "./preparation-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
@@ -63,7 +63,7 @@ const REALTIME_TOOLS = [
   {
     type: "function",
     name: "confirm_appointment",
-    description: "Speichert einen vom Kunden eindeutig bestätigten Termin. Erst aufrufen, nachdem der Kunde einen angebotenen Wochentag oder Slot klar ausgewählt und eine Rückbestätigung wie 'ja, das passt' gegeben hat. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
+    description: "Speichert einen vom Kunden eindeutig ausgewählten Termin. Eine eindeutige Auswahl wie 'der Montag' genügt ohne zweite Ja-Bestätigung. Erst aufrufen, nachdem der Kunde zusätzlich gewählt hat, ob der Termin bei ihm vor Ort, in der Agentur oder per Microsoft Teams stattfindet. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
     parameters: {
       type: "object",
       properties: {
@@ -187,10 +187,10 @@ export function shouldRestoreDecisionMakerIntro(params: {
   return false;
 }
 
-function isLikelyIncompleteAssistantTurn(text: string): boolean {
+export function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/["“”'»«]+$/g, "").replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
-  return !/[.!?؟]$/.test(normalized);
+  return !/[.!?؟:]$/.test(normalized);
 }
 
 function getSocietyName(ctx: Pick<CallContext, "ownerGesellschaft">): string {
@@ -252,7 +252,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "VERABSCHIEDUNG: Die letzte Aussage am Ende des Gesprächs muss exakt lauten: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Rufe danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Bei 'Der Donnerstag' oder 'der zweite Termin' frage zuerst kurz zurück: 'Meinen Sie Donnerstag, den ... um ... Uhr?' Rufe confirm_appointment erst nach einem klaren 'Ja, das passt' oder einer vollständigen eindeutigen Bestätigung auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits die verbindliche Terminwahl; verlange kein zusätzliches 'Ja, das passt'. Frage danach exakt: 'Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?' Erst nach dieser Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Frage nur zurück, wenn Termin oder Durchführungsart nicht eindeutig sind. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -485,7 +485,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const updateSession = () => {
     if (!ctx || !openaiSession?.isReady()) return;
     const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.75");
-    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "800", 10);
+    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "400", 10);
     const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "300", 10);
     const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "220", 10);
     sendOpenAi({
@@ -752,6 +752,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (tool.name === "confirm_appointment") {
       const phrase = typeof args.slot_phrase === "string" ? args.slot_phrase.trim() : "";
+      const appointmentMode = detectAppointmentMode(ctx.transcript);
+      if (!appointmentMode) {
+        handledToolCalls.delete(tool.callId);
+        const instruction = "Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?' Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";
+        sendToolResult(tool.callId, { ok: false, error: "missing_appointment_mode", instruction });
+        requestResponse(instruction);
+        return;
+      }
       const decision = decideAppointment({
         turns: ctx.transcript,
         topicKind: ctx.topicKind === "pkv" ? "pkv" : "other",
@@ -768,8 +776,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       } else {
         const speechSlotPhrase = convertSlotPhraseForSpeech(decision.slotPhrase);
         ctx.confirmedSlotPhrase = speechSlotPhrase;
-        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, speechSlot: speechSlotPhrase, preference: decision.preference });
-        sendToolResult(tool.callId, { ok: true, confirmed_slot: speechSlotPhrase });
+        ctx.appointmentMode = appointmentMode;
+        log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, speechSlot: speechSlotPhrase, preference: decision.preference, appointmentMode });
+        sendToolResult(tool.callId, { ok: true, confirmed_slot: speechSlotPhrase, appointment_mode: appointmentMode });
         updateSession();
         const transition = beginPreparation(preparationState, speechSlotPhrase, ctx.transcript);
         preparationState = transition.state;

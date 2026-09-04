@@ -126,6 +126,7 @@ const ADAPTIVE_FOLLOW_UP_TOPICS: AdaptiveFollowUpTopic[] = [
 ];
 
 const PKV_FALLBACK_QUESTIONS = [
+  "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
   "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
   "Könnten Sie mir Ihre Körpergröße nennen?",
   "Wie ist Ihr aktuelles Gewicht?",
@@ -144,10 +145,14 @@ export function buildPreparationQuestions(policy: PreparationPolicy | null): str
   const source = isPkv
     ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData || PKV_FALLBACK_QUESTIONS
     : policy?.requiredQuestions || policy?.requiredData || "";
-  return source
+  const questions = source
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
     .filter((line) => line.length > 3);
+  if (isPkv && !questions.some((question) => /privat\s+oder\s+gesetzlich|versicherungsstatus/i.test(question))) {
+    questions.unshift("Sind Sie aktuell privat oder gesetzlich krankenversichert?");
+  }
+  return questions;
 }
 
 export function createPreparationState(policy: PreparationPolicy | null = null): PreparationState {
@@ -163,7 +168,7 @@ function preparationConsent(text: string): "granted" | "declined" | "unknown" {
 
 function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]): boolean {
   const userText = turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
-  if (/versicher|privat|gesetzlich|pkv|gkv/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
+  if (/privat\s+oder\s+gesetzlich|versicherungsstatus/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
   if (/monatsbeitrag|beitrag.*krankenversicherung/i.test(question)) {
     return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -44,6 +44,11 @@ test("ignores the configured ASR prompt when it leaks into a transcript", () => 
   assert.equal(isSyntheticTranscriptionPrompt("Ich zahle tausend Euro."), false);
 });
 
+test("does not recover a complete preparation introduction ending with a colon", () => {
+  assert.equal(isLikelyIncompleteAssistantTurn("Bitte beantworten Sie zur Vorbereitung folgende Fragen:"), false);
+  assert.equal(isLikelyIncompleteAssistantTurn("Damit Sie ein Gefühl dafür bekommen, worüber wir genau sprechen"), true);
+});
+
 test("does not use an earlier acknowledgement as PKV appointment consent", () => {
   const ctx = buildPkvContext();
   ctx.transcript.push({ role: "user", text: "Vormittags wäre besser.", at: 7 });
@@ -82,6 +87,13 @@ test("accepts a direct Monday selection as a confirmed slot without asking again
 
   assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
   assert.equal(isOfferedSlotPhrase(ctx, "Montag passt gut."), true);
+});
+
+test("instructs the model to confirm an unambiguous offered weekday immediately", () => {
+  const instructions = buildRealtimeInstructions(buildPkvContext());
+  assert.match(instructions, /Eine eindeutige Auswahl[^.]+ist bereits die verbindliche Terminwahl/);
+  assert.match(instructions, /verlange kein zusätzliches 'Ja, das passt'/);
+  assert.doesNotMatch(instructions, /Bei 'Der Donnerstag'.+frage zuerst kurz zurück/);
 });
 
 test("rejects invented slots and accepts exact supplied slots", () => {

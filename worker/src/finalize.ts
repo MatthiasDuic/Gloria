@@ -184,7 +184,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
 
   // Preliminary summary text used as summaryChunk in Phase 1 (transcript-only post).
   const prelimSummaryText = ctx.confirmedSlotPhrase
-    ? `Termin vereinbart: ${ctx.confirmedSlotPhrase}. Vollständige Auswertung folgt.`
+    ? `Termin vereinbart: ${ctx.confirmedSlotPhrase}.${ctx.appointmentMode ? ` Durchführung: ${ctx.appointmentMode}.` : ""} Vollständige Auswertung folgt.`
     : `Anruf bei ${ctx.company || "?"} zum Thema ${ctx.topic || "?"}. Auswertung folgt.`;
 
   const transcriptEntries = ctx.transcript.map((entry) => ({
@@ -248,6 +248,9 @@ export async function postReport(ctx: CallContext): Promise<void> {
   }
 
   const fullDocumentation = deriveReportDocumentation(ctx, resolvedExtraction);
+  if (ctx.appointmentMode && !summary.includes(ctx.appointmentMode)) {
+    summary = `Durchführung: ${ctx.appointmentMode}.\n\n${summary}`;
+  }
   summary = withDocumentationHeader(summary, outcome, fullDocumentation);
 
   log.info("finalize.posting_final", {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decideAppointment, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { decideAppointment, detectAppointmentMode, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
@@ -78,4 +78,15 @@ test("requires explicit confirmation after a slot clarification question", () =>
     slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",
   });
   assert.equal(decision.ok, true);
+});
+
+test("detects the selected appointment mode from the customer answer", () => {
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Am liebsten bei mir vor Ort." }]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Ich komme zu Ihnen in die Agentur." }]), "In der Agentur");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Machen wir das per Teams." }]), "Microsoft Teams");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Der Montag passt besser." }]), undefined);
+  assert.equal(detectAppointmentMode([
+    { role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." },
+    { role: "user", text: "Der Montag passt besser." },
+  ]), undefined);
 });

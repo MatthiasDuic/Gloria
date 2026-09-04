@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
 import { getDashboardData } from "@/lib/storage";
+import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
 
 export async function GET(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);
@@ -21,7 +22,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const input = buildAppointmentFormInputFromReport(report);
+    const transcriptEvents = await listCallTranscriptEventsFromPostgres(callSid);
+    const input = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
     const pdf = await buildAppointmentFormPdf(input);
     return new NextResponse(new Uint8Array(pdf), {
       headers: {

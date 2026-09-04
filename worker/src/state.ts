@@ -53,6 +53,7 @@ export type CallContext = {
   // Vom Anrufenden bestätigte Termin-Phrase (z. B. "Donnerstag, den siebten Mai um vierzehn Uhr dreißig").
   // Sobald gesetzt, MUSS Phase 10 diese Phrase wortwörtlich übernehmen.
   confirmedSlotPhrase?: string;
+  appointmentMode?: "Beim Kunden vor Ort" | "In der Agentur" | "Microsoft Teams";
   // Bereits belegte Termin-Slots (für diesen User). In Berlin-Zeit-Strings,
   // werden in den System-Prompt injiziert, damit Gloria keine Doppelbelegung vorschlägt.
   busySlotsPrompt?: string;
