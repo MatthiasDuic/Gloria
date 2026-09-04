@@ -9,7 +9,6 @@ export type TopicPolicyFields = {
   conversationGuardrails?: string;
   requiredQuestions?: string;
   exampleSentences?: string;
-  close?: string;
   knowledge?: string;
   proofPoints?: string;
   objectionResponses?: string;
@@ -20,9 +19,18 @@ export type TopicPolicyFields = {
   conceptTransition?: string;
   gatekeeperTask?: string;
   gatekeeperBehavior?: string;
-  aiKeyInfo?: string;
   appointmentConfirmation?: string;
 };
+
+function compactPolicyText(value: string, maxLines = 5, maxLength = 700): string {
+  const lines = value
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, maxLines);
+  const compact = lines.join("\n");
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 3).trimEnd()}...` : compact;
+}
 
 export async function loadTopicPolicy(opts: {
   userId?: string;
@@ -80,22 +88,22 @@ export async function loadTopicPolicy(opts: {
 
 export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topic = (policy.topic || "").trim();
-  const callObjective = (policy.callObjective || "").trim();
-  const topicSummary = (policy.topicSummary || "").trim();
-  const behavior = (policy.behavior || "").trim();
-  const conversationGuardrails = (policy.conversationGuardrails || "").trim();
-  const requiredQuestions = (policy.requiredQuestions || "").trim();
-  const exampleSentences = (policy.exampleSentences || "").trim();
-  const objectionResponses = (policy.objectionResponses || "").trim();
-  const decisionMakerContext = (policy.decisionMakerContext || "").trim();
-  const problemBuildup = (policy.problemBuildup || "").trim();
-  const conceptTransition = (policy.conceptTransition || "").trim();
-  const knowledge = (policy.knowledge || "").trim();
-  const proofPoints = (policy.proofPoints || "").trim();
-  const transferHandling = (policy.transferHandling || "").trim();
-  const gatekeeperTask = (policy.gatekeeperTask || "").trim();
-  const gatekeeperBehavior = (policy.gatekeeperBehavior || "").trim();
-  const appointmentConfirmation = (policy.appointmentConfirmation || "").trim();
+  const callObjective = compactPolicyText(policy.callObjective || "", 2, 260);
+  const topicSummary = compactPolicyText(policy.topicSummary || "", 3, 460);
+  const behavior = compactPolicyText(policy.behavior || "", 4, 420);
+  const conversationGuardrails = compactPolicyText(policy.conversationGuardrails || "", 5, 520);
+  const requiredQuestions = compactPolicyText(policy.requiredQuestions || "", 8, 700);
+  const exampleSentences = compactPolicyText(policy.exampleSentences || "", 4, 420);
+  const objectionResponses = compactPolicyText(policy.objectionResponses || "", 5, 600);
+  const decisionMakerContext = compactPolicyText(policy.decisionMakerContext || "", 2, 300);
+  const problemBuildup = compactPolicyText(policy.problemBuildup || "", 3, 420);
+  const conceptTransition = compactPolicyText(policy.conceptTransition || "", 3, 420);
+  const knowledge = compactPolicyText(policy.knowledge || "", 5, 600);
+  const proofPoints = compactPolicyText(policy.proofPoints || "", 4, 520);
+  const transferHandling = compactPolicyText(policy.transferHandling || "", 3, 360);
+  const gatekeeperTask = compactPolicyText(policy.gatekeeperTask || "", 2, 260);
+  const gatekeeperBehavior = compactPolicyText(policy.gatekeeperBehavior || "", 3, 320);
+  const appointmentConfirmation = compactPolicyText(policy.appointmentConfirmation || "", 2, 260);
 
   if (
     !topicSummary &&
@@ -129,7 +137,8 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     parts.push("", "GATEKEEPER-FÜHRUNG (nur bis die Zielperson bestätigt ist):");
     if (gatekeeperTask) parts.push(gatekeeperTask);
     if (gatekeeperBehavior) parts.push(gatekeeperBehavior);
-    if (policy.receptionTopicReason?.trim()) parts.push(`Kurzer Anlass auf Rückfrage: ${policy.receptionTopicReason.trim()}`);
+    const receptionTopicReason = compactPolicyText(policy.receptionTopicReason || "", 2, 220);
+    if (receptionTopicReason) parts.push(`Kurzer Anlass auf Rückfrage: ${receptionTopicReason}`);
   }
   if (decisionMakerContext || problemBuildup || conceptTransition) {
     parts.push("", "FÜHRUNG NACH BESTÄTIGTEM ENTSCHEIDER (situativ, niemals als Monolog):");

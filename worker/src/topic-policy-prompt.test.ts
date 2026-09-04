@@ -22,3 +22,14 @@ test("includes complete topic guidance for a natural, objection-aware dialog", (
   assert.match(prompt, /MENSCHLICHE ÜBERGABE/);
   assert.match(prompt, /steuert jedoch fachlichen Anlass, Nutzen, Einwände und Gesprächsführung/);
 });
+
+test("keeps long Topic Policy entries compact so worker rules remain dominant", () => {
+  const prompt = topicPolicyToSystemPrompt({
+    topic: "Energie",
+    behavior: Array.from({ length: 8 }, (_, index) => `Regel ${index + 1}`).join("\n"),
+  });
+
+  assert.match(prompt, /Regel 1/);
+  assert.match(prompt, /Regel 4/);
+  assert.doesNotMatch(prompt, /Regel 5/);
+});

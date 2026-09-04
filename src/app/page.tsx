@@ -432,6 +432,108 @@ function normalizeLineCount(value?: string) {
     .filter(Boolean).length;
 }
 
+function getTopicPolicySuggestions(topic: Topic, field: keyof TopicPolicyConfig): string[] {
+  const subject = topic.toLowerCase();
+  const isPkv = subject.includes("private krankenversicherung");
+
+  switch (field) {
+    case "callObjective": return [
+      "Einen kurzen Orientierungstermin vereinbaren, damit der Interessent seine Situation mit Herrn Duic klar einordnen kann.",
+      "Relevanz schaffen, einen unverbindlichen nächsten Schritt anbieten und eine klare Absage respektvoll akzeptieren.",
+    ];
+    case "topicSummary": return [
+      `Es geht um ${topic}. Gloria erklärt den konkreten Anlass kurz und zeigt, welchen persönlichen oder unternehmerischen Nutzen ein Termin bietet.`,
+      "Der Termin dient einer verständlichen Einordnung der aktuellen Situation und möglicher nächster Schritte, nicht dem Verkauf am Telefon.",
+    ];
+    case "behavior": return [
+      "Natürlich, ruhig und auf Augenhöhe. Erst auf die letzte Aussage eingehen, dann mit einem kurzen nächsten Schritt und höchstens einer Frage weiterführen.",
+      "Warm und professionell, ohne Callcenter-Ton. Keine Monologe, keine Floskeln und keine Frageketten.",
+    ];
+    case "conversationGuardrails": return [
+      "Keine Garantien, keine erfundenen Fakten und keine individuellen Zusagen ohne Prüfung. Bei Unklarheit kurz nachfragen statt raten.",
+      "Nie drängen: Einwände zuerst ernst nehmen, eine klare Absage akzeptieren und nur tatsächlich freie Termine anbieten.",
+    ];
+    case "requiredQuestions": return isPkv ? [
+      "Darf ich Ihr Geburtsdatum aufnehmen?\nWie groß sind Sie ungefähr?\nWie hoch ist Ihr aktuelles Gewicht?\nBei welchem Krankenversicherer sind Sie versichert?\nWie hoch ist Ihr monatlicher Beitrag?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
+      "Nehmen Sie regelmäßig Medikamente ein?\nGab es stationäre Aufenthalte?\nGab es psychische Behandlungen?\nBestehen Allergien oder ist Zahnersatz geplant?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
+    ] : [
+      "Welche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?\nGibt es einen Punkt, den Herr Duic für den Termin vorbereiten soll?",
+      "Welche Situation möchten Sie im Termin zuerst klären?\nUnter welcher Nummer erreichen wir Sie bei Rückfragen am besten?",
+    ];
+    case "exampleSentences": return [
+      "Das klingt nachvollziehbar. Genau das kann Herr Duic im Termin kurz und konkret mit Ihnen einordnen.",
+      "Damit ich Sie nicht aufhalte: Darf ich Ihnen zwei passende Zeitfenster vorschlagen?",
+    ];
+    case "gatekeeperTask": return [
+      "Kurz vorstellen, den zuständigen Ansprechpartner erfragen und freundlich um Verbindung bitten. Kein fachlicher Pitch am Empfang.",
+      "Nur den Anlass in einem Satz nennen und die Verbindung zur bekannten Zielperson oder zuständigen Stelle erbitten.",
+    ];
+    case "gatekeeperBehavior": return [
+      "Erst ausreden lassen, dann freundlich und knapp antworten. Bei Rückfragen nur den Anlass nennen und nicht argumentieren.",
+      "Respektvoll, verbindlich und ohne Druck. Bei Weiterleitung kurz bestätigen, dass Gloria wartet.",
+    ];
+    case "receptionTopicReason": return [
+      `Es geht um eine kurze fachliche Einordnung zum Thema ${topic}.`,
+      "Es geht um einen kurzen Orientierungstermin mit Herrn Duic, nicht um ein Verkaufsgespräch am Empfang.",
+    ];
+    case "decisionMakerContext": return [
+      "Der Interessent soll verstehen, welche konkrete Situation geprüft wird und welchen nachvollziehbaren Nutzen ihm ein kurzer Termin bringt.",
+      "Erst Relevanz und Kundensicht klären, dann den Termin als unverbindliche Einordnung anbieten.",
+    ];
+    case "problemBuildup": return [
+      "Viele Menschen und Unternehmen prüfen dieses Thema erst, wenn sich Bedingungen, Kosten oder Anforderungen bereits verändert haben. Ein kurzer Blick schafft Klarheit über die aktuelle Lage.",
+      "Die Ausgangslage ist individuell. Deshalb geht es zuerst darum, die persönliche oder betriebliche Situation verständlich einzuordnen, bevor über Lösungen gesprochen wird.",
+    ];
+    case "conceptTransition": return [
+      "Herr Duic schaut im Termin auf die konkrete Ausgangslage, beantwortet offene Fragen und zeigt nachvollziehbar, welche Optionen überhaupt sinnvoll sind. Wäre das für Sie hilfreich?",
+      "Das lässt sich am Telefon nicht seriös pauschal beantworten. In einem kurzen Termin bekommen Sie eine klare Einordnung für Ihre Situation. Passt Ihnen dafür eher ein Vormittag oder ein Nachmittag?",
+    ];
+    case "knowledge": return [
+      "ERLAUBT:\n- Allgemeine, nachprüfbare Zusammenhänge erklären.\n- Den Termin als Einordnung anbieten.\n\nVERBOTEN:\n- Garantien, individuelle Zusagen oder Empfehlungen ohne Prüfung.",
+      "ERLAUBT:\n- Rückfragen sachlich und verständlich beantworten.\n\nVERBOTEN:\n- Druck aufbauen, spekulieren oder Aussagen außerhalb der freigegebenen Fakten treffen.",
+    ];
+    case "proofPoints": return [
+      "Nur belastbare, nachvollziehbare Fakten eintragen. Jede Aussage muss intern geprüft oder mit einer seriösen Quelle belegbar sein.",
+      "Keine pauschalen Ersparnis-, Erfolgs- oder Vergleichsquoten verwenden. Formulieren Sie Fakten als Anlass für eine individuelle Prüfung, nie als Versprechen.",
+    ];
+    case "objectionResponses": return [
+      "Keine Zeit: Verstehe ich. Deshalb ist der Termin kurz und auf Ihre Situation zugeschnitten. Passt Ihnen eher ein Vormittag oder ein Nachmittag?\nKein Interesse: In Ordnung, dann halte ich Sie nicht auf. Vielen Dank für das Gespräch. Auf Wiederhören.",
+      "Schon versorgt: Das ist gut. Der Termin dient nicht dem Wechsel, sondern einer kurzen Einordnung, ob Ihre aktuelle Lösung weiterhin zu Ihrer Situation passt.\nNur per Mail: Gern, welche E-Mail-Adresse sollen wir nutzen?",
+    ];
+    case "transferHandling": return [
+      "Nur bei ausdrücklichem Wunsch nach einem Menschen oder klarer KI-Ablehnung weiterleiten. Die Übergabe kurz ankündigen und danach technisch ausführen.",
+      "Keine ungefragte Weiterleitung. Bei einem konkreten Fachfall ohne Sofortlösung stattdessen Rückruf oder Termin sauber vereinbaren.",
+    ];
+    case "appointmentConfirmation": return [
+      "Perfekt, der Termin ist eingetragen. Herr Duic meldet sich am vereinbarten Termin. Die Bestätigung erhalten Sie per E-Mail.",
+      "Der Termin steht. Herr Duic bereitet sich anhand Ihrer Angaben vor; alle Details erhalten Sie in der Terminbestätigung.",
+    ];
+    default: return [];
+  }
+}
+
+function TopicPolicySuggestions({ topic, field, onSelect }: {
+  topic: Topic;
+  field: keyof TopicPolicyConfig;
+  onSelect: (value: string) => void;
+}) {
+  const suggestions = getTopicPolicySuggestions(topic, field);
+  return (
+    <div className="top-gap" style={{ display: "grid", gap: 8 }}>
+      {suggestions.map((suggestion, index) => (
+        <div key={suggestion} style={{ borderTop: "1px solid var(--mist-200)", paddingTop: 8 }}>
+          <p className="subtle" style={{ margin: "0 0 6px", whiteSpace: "pre-line" }}>
+            <strong>Vorschlag {index + 1}:</strong> {suggestion}
+          </p>
+          <button type="button" className="btn ghost" onClick={() => onSelect(suggestion)}>
+            Diesen Vorschlag übernehmen
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfig> {
   const normalized = topic.trim().toLowerCase();
   const completeDefault = topicPolicyDefaults.find(
@@ -4983,6 +5085,7 @@ export default function HomePage() {
                           rows={5}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], callObjective: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="callObjective" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], callObjective: value } }))} />
                       </div>
 
                       <div className="mini-panel playbook-card">
@@ -4996,6 +5099,7 @@ export default function HomePage() {
                           rows={8}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], topicSummary: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="topicSummary" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], topicSummary: value } }))} />
                       </div>
 
                       <div className="mini-panel playbook-card">
@@ -5008,6 +5112,7 @@ export default function HomePage() {
                           rows={9}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], behavior: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="behavior" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], behavior: value } }))} />
                       </div>
 
                       <div className="mini-panel playbook-card">
@@ -5020,6 +5125,7 @@ export default function HomePage() {
                           rows={9}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conversationGuardrails: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="conversationGuardrails" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], conversationGuardrails: value } }))} />
                       </div>
 
                       <div className="mini-panel playbook-card">
@@ -5032,6 +5138,7 @@ export default function HomePage() {
                           rows={10}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], requiredQuestions: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="requiredQuestions" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], requiredQuestions: value } }))} />
                       </div>
 
                       <div className="mini-panel playbook-card">
@@ -5044,6 +5151,7 @@ export default function HomePage() {
                           rows={10}
                           onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], exampleSentences: event.target.value } }))}
                         />
+                        <TopicPolicySuggestions topic={detailTopic} field="exampleSentences" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], exampleSentences: value } }))} />
                       </div>
                     </div>
 
@@ -5062,6 +5170,7 @@ export default function HomePage() {
                             rows={6}
                             onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperTask: event.target.value } }))}
                           />
+                          <TopicPolicySuggestions topic={detailTopic} field="gatekeeperTask" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], gatekeeperTask: value } }))} />
                         </div>
 
                         <div>
@@ -5071,6 +5180,7 @@ export default function HomePage() {
                             rows={6}
                             onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], gatekeeperBehavior: event.target.value } }))}
                           />
+                          <TopicPolicySuggestions topic={detailTopic} field="gatekeeperBehavior" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], gatekeeperBehavior: value } }))} />
                         </div>
 
                         <div>
@@ -5080,6 +5190,7 @@ export default function HomePage() {
                             rows={6}
                             onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], receptionTopicReason: event.target.value } }))}
                           />
+                          <TopicPolicySuggestions topic={detailTopic} field="receptionTopicReason" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], receptionTopicReason: value } }))} />
                         </div>
                       </div>
                     </div>
@@ -5098,6 +5209,7 @@ export default function HomePage() {
                             rows={7}
                             onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], decisionMakerContext: event.target.value } }))}
                           />
+                          <TopicPolicySuggestions topic={detailTopic} field="decisionMakerContext" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], decisionMakerContext: value } }))} />
                         </div>
                       </div>
                     </div>
@@ -5109,10 +5221,12 @@ export default function HomePage() {
                         <div>
                           <h4 className="sub-heading">Problemaufbau</h4>
                           <textarea value={activeDraft.problemBuildup ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], problemBuildup: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="problemBuildup" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], problemBuildup: value } }))} />
                         </div>
                         <div>
                           <h4 className="sub-heading">Übergang zum nächsten Schritt</h4>
                           <textarea value={activeDraft.conceptTransition ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], conceptTransition: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="conceptTransition" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], conceptTransition: value } }))} />
                         </div>
                       </div>
                     </details>
@@ -5124,18 +5238,22 @@ export default function HomePage() {
                         <div>
                           <h4 className="sub-heading">Erlaubtes Wissen & Grenzen</h4>
                           <textarea value={activeDraft.knowledge ?? ""} rows={9} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], knowledge: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="knowledge" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], knowledge: value } }))} />
                         </div>
                         <div>
                           <h4 className="sub-heading">Belegpunkte / belastbare Fakten</h4>
                           <textarea value={activeDraft.proofPoints ?? ""} rows={8} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], proofPoints: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="proofPoints" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], proofPoints: value } }))} />
                         </div>
                         <div>
                           <h4 className="sub-heading">Einwandbibliothek</h4>
                           <textarea value={activeDraft.objectionResponses ?? ""} rows={8} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], objectionResponses: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="objectionResponses" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], objectionResponses: value } }))} />
                         </div>
                         <div>
                           <h4 className="sub-heading">Menschliche Übergabe</h4>
                           <textarea value={activeDraft.transferHandling ?? ""} rows={7} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], transferHandling: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="transferHandling" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], transferHandling: value } }))} />
                         </div>
                       </div>
                     </details>
@@ -5147,6 +5265,7 @@ export default function HomePage() {
                         <div>
                           <h4 className="sub-heading">Terminbestätigung</h4>
                           <textarea value={activeDraft.appointmentConfirmation ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
+                          <TopicPolicySuggestions topic={detailTopic} field="appointmentConfirmation" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], appointmentConfirmation: value } }))} />
                         </div>
                       </div>
                     </details>
