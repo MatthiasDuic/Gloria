@@ -758,16 +758,33 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   return (
     <div className={`app-container ${embedded ? "embedded" : ""}`}>
-      <header className="app-header">
-        <div className="header-left">
-          <h1>Gloria CRM</h1>
+      {embedded ? (
+        <div className="embedded-hero">
+          <div>
+            <div className="embedded-kicker">Kundenmanagement</div>
+            <h2>CRM-Arbeitsbereich</h2>
+            <p>
+              Kontakte, Termine, Follow-ups und Kampagnen direkt im Gloria-Dashboard.
+            </p>
+          </div>
+          <div className="embedded-meta">
+            <span className="embedded-chip">{filteredLeads.length} Kontakte</span>
+            <span className="embedded-chip">{campaignLists.length} Listen</span>
+            <a className="embedded-link" href="/crm">Vollansicht öffnen</a>
+          </div>
         </div>
-        <div className="header-right">
-          <span className="user-name">{currentUser?.realName}</span>
-        </div>
-      </header>
+      ) : (
+        <header className="app-header">
+          <div className="header-left">
+            <h1>Gloria CRM</h1>
+          </div>
+          <div className="header-right">
+            <span className="user-name">{currentUser?.realName}</span>
+          </div>
+        </header>
+      )}
 
-      <nav className="app-nav">
+      <nav className={`app-nav ${embedded ? "embedded" : ""}`}>
         <button
           className={`nav-btn ${activeView === "dashboard" ? "active" : ""}`}
           onClick={() => setActiveView("dashboard")}
@@ -800,7 +817,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         </button>
       </nav>
 
-      <main className="app-main">
+      <main className={`app-main ${embedded ? "embedded" : ""}`}>
         {activeView === "dashboard" && renderDashboard()}
         {activeView === "contacts" && renderContacts()}
         {activeView === "calendar" && renderCalendar()}
@@ -820,9 +837,74 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .app-container.embedded {
           height: auto;
           min-height: 100%;
-          border-radius: 18px;
+          border-radius: 24px;
           overflow: hidden;
-          border: 1px solid #d8e0ea;
+          border: 1px solid rgba(195, 208, 224, 0.9);
+          box-shadow: 0 24px 60px rgba(17, 24, 39, 0.08);
+        }
+
+        .embedded-hero {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 1rem;
+          padding: 1.4rem 1.5rem 1rem;
+          background: linear-gradient(135deg, #f9fbff, #eef4fb 60%, #f5f8fc);
+          border-bottom: 1px solid #dde6f0;
+        }
+
+        .embedded-kicker {
+          font-size: 0.78rem;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #3b5f8a;
+          margin-bottom: 0.4rem;
+        }
+
+        .embedded-hero h2 {
+          margin: 0;
+          font-size: 1.55rem;
+          color: #142235;
+        }
+
+        .embedded-hero p {
+          margin: 0.45rem 0 0;
+          max-width: 42rem;
+          color: #56708f;
+          line-height: 1.5;
+        }
+
+        .embedded-meta {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 0.6rem;
+        }
+
+        .embedded-chip {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.5rem 0.8rem;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.86);
+          border: 1px solid #d9e3ef;
+          color: #234264;
+          font-size: 0.82rem;
+          font-weight: 700;
+        }
+
+        .embedded-link {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.5rem 0.85rem;
+          border-radius: 999px;
+          background: #17365d;
+          color: white;
+          text-decoration: none;
+          font-size: 0.82rem;
+          font-weight: 700;
         }
 
         .loading {
@@ -864,6 +946,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           overflow-x: auto;
         }
 
+        .app-nav.embedded {
+          padding: 0.8rem 1.25rem;
+          background: #f7fafd;
+          border-bottom: 1px solid #e1e9f2;
+          gap: 0.4rem;
+        }
+
         .nav-btn {
           padding: 1rem 1.5rem;
           border: none;
@@ -886,6 +975,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           border-bottom-color: #2563eb;
         }
 
+        .app-nav.embedded .nav-btn {
+          border-bottom: none;
+          border: 1px solid transparent;
+          border-radius: 999px;
+          padding: 0.75rem 1.05rem;
+          background: transparent;
+        }
+
+        .app-nav.embedded .nav-btn.active {
+          background: white;
+          border-color: #d9e3ef;
+          color: #163b68;
+          box-shadow: 0 8px 18px rgba(23, 54, 93, 0.08);
+        }
+
         .app-main {
           flex: 1;
           overflow-y: auto;
@@ -894,6 +998,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
         .app-container.embedded .app-main {
           min-height: 70vh;
+          padding: 1.4rem;
+          background: linear-gradient(180deg, #f6f9fc 0%, #f3f7fb 100%);
+        }
+
+        .app-main.embedded {
+          overflow-y: visible;
         }
 
         /* KPI Grid */
@@ -953,7 +1063,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .view-header {
           background: white;
           padding: 1.5rem;
-          border-radius: 8px;
+          border-radius: 16px;
           box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
 
@@ -985,7 +1095,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           width: 100%;
           background: white;
           border-collapse: collapse;
-          border-radius: 8px;
+          border-radius: 16px;
           overflow: hidden;
           box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
@@ -1091,6 +1201,16 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           box-shadow: -4px 0 12px rgba(0,0,0,0.15);
           overflow-y: auto;
           z-index: 100;
+        }
+
+        @media (max-width: 900px) {
+          .embedded-hero {
+            flex-direction: column;
+          }
+
+          .embedded-meta {
+            justify-content: flex-start;
+          }
         }
 
         .detail-header {
