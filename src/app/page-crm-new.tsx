@@ -179,6 +179,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [filterTopic, setFilterTopic] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterOwner, setFilterOwner] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
+  const [filterCustomerKind, setFilterCustomerKind] = useState<"" | "privat" | "firma">("");
   const [filterPipeline, setFilterPipeline] = useState<string>("");
   const [filterContact, setFilterContact] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
@@ -187,6 +189,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [leadNoteDraft, setLeadNoteDraft] = useState("");
   const [leadTaskTitleDraft, setLeadTaskTitleDraft] = useState("");
   const [leadTaskDueAtDraft, setLeadTaskDueAtDraft] = useState("");
+  const [leadPipelineStageDraft, setLeadPipelineStageDraft] = useState("");
+  const [outlookSubjectDraft, setOutlookSubjectDraft] = useState("");
+  const [outlookBodyDraft, setOutlookBodyDraft] = useState("");
+  const [outlookToDraft, setOutlookToDraft] = useState("");
 
   // Import & Campaign State
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
@@ -234,6 +240,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     if (filterTopic) {
       leads = leads.filter((l) => l.topic === filterTopic);
     }
+    if (filterOwner) {
+      leads = leads.filter((l) => (l.customerOwner || "") === filterOwner);
+    }
+    if (filterCustomerKind) {
+      leads = leads.filter((l) => (l.customerKind || "") === filterCustomerKind);
+    }
     if (filterPipeline) {
       leads = leads.filter((l) => String(l.crmPipeline || "") === filterPipeline);
     }
@@ -256,7 +268,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     }
     return leads;
-  }, [data.leads, filterStatus, filterTopic, filterPipeline, filterContact, searchQuery]);
+  }, [data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterPipeline, filterContact, searchQuery]);
 
   const availablePipelineStages = useMemo(
     () => Array.from(new Set((data.leads || []).map((lead) => String(lead.crmPipeline || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "de")),
@@ -293,6 +305,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       if (prefsRes.ok && prefsPayload.preferences) {
         const prefs = prefsPayload.preferences;
         if (typeof prefs.crmSearch === "string") setSearchQuery(prefs.crmSearch);
+        if (prefs.crmTypeFilter !== undefined) setFilterOwner(prefs.crmTypeFilter || "");
+        if (prefs.crmCustomerKindFilter !== undefined) setFilterCustomerKind(prefs.crmCustomerKindFilter || "");
         if (prefs.crmPipelineFilter !== undefined) setFilterPipeline(prefs.crmPipelineFilter || "");
         if (prefs.crmContactFilter !== undefined) setFilterContact(prefs.crmContactFilter || "");
         if (prefs.crmTab === "customers") setActiveView("contacts");
@@ -301,6 +315,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         crmPrefsLastSavedKeyRef.current = JSON.stringify({
           crmTab: prefs.crmTab || "customers",
           crmSearch: prefs.crmSearch || "",
+          crmTypeFilter: prefs.crmTypeFilter || "",
+          crmCustomerKindFilter: prefs.crmCustomerKindFilter || "",
           crmPipelineFilter: prefs.crmPipelineFilter || "",
           crmContactFilter: prefs.crmContactFilter || "",
         });
@@ -354,8 +370,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       search: searchQuery,
-      owner: "",
-      customerKind: "",
+      owner: filterOwner,
+      customerKind: filterCustomerKind,
       pipelineStage: filterPipeline as CrmSavedView["pipelineStage"],
       contactFilter: filterContact,
       createdAt: new Date().toISOString(),
@@ -373,6 +389,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   function applySavedView(view: CrmSavedView) {
     setSearchQuery(view.search || "");
+    setFilterOwner(view.owner || "");
+    setFilterCustomerKind(view.customerKind || "");
     setFilterPipeline(view.pipelineStage || "");
     setFilterContact(view.contactFilter || "");
     setActiveView(view.pipelineStage ? "pipeline" : "contacts");
@@ -507,6 +525,82 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [selectedLead]);
 
+  const handleUpdatePipelineStage = useCallback(async () => {
+    if (!selectedLead || !leadPipelineStageDraft) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_lead_details",
+          leadId: selectedLead.id,
+          updates: {
+            crmPipeline: {
+              stage: leadPipelineStageDraft,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!res.ok || !payload.lead) {
+        throw new Error(payload.error || "Pipeline-Stufe konnte nicht gespeichert werden.");
+      }
+      const updatedLead = payload.lead;
+      setData((current) => ({
+        ...current,
+        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      }));
+      setSelectedLead(updatedLead);
+      setNotice("✓ Pipeline-Stufe gespeichert");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Pipeline-Update fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }, [leadPipelineStageDraft, selectedLead]);
+
+  const handleAddOutlookEmail = useCallback(async () => {
+    if (!selectedLead || !outlookSubjectDraft.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_outlook_email",
+          leadId: selectedLead.id,
+          email: {
+            subject: outlookSubjectDraft,
+            body: outlookBodyDraft || undefined,
+            to: outlookToDraft || selectedLead.email || undefined,
+            sentAt: new Date().toISOString(),
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!res.ok || !payload.lead) {
+        throw new Error(payload.error || "E-Mail-Historie konnte nicht gespeichert werden.");
+      }
+      const updatedLead = payload.lead;
+      setData((current) => ({
+        ...current,
+        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      }));
+      setSelectedLead(updatedLead);
+      setOutlookSubjectDraft("");
+      setOutlookBodyDraft("");
+      setNotice("✓ Outlook-E-Mail protokolliert");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "E-Mail-Historie fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  }, [outlookBodyDraft, outlookSubjectDraft, outlookToDraft, selectedLead]);
+
   const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete") => {
     setBusy(true);
     try {
@@ -617,6 +711,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const snapshot: CrmUiPreferences = {
       crmTab: activeCrmTab,
       crmSearch: searchQuery,
+      crmTypeFilter: filterOwner,
+      crmCustomerKindFilter: filterCustomerKind,
       crmPipelineFilter: filterPipeline as CrmUiPreferences["crmPipelineFilter"],
       crmContactFilter: filterContact,
     };
@@ -639,12 +735,16 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [activeCrmTab, crmPrefsReady, searchQuery, filterPipeline, filterContact]);
+  }, [activeCrmTab, crmPrefsReady, searchQuery, filterOwner, filterCustomerKind, filterPipeline, filterContact]);
 
   useEffect(() => {
     setLeadNoteDraft(selectedLead?.note || "");
     setLeadTaskTitleDraft("");
     setLeadTaskDueAtDraft("");
+    setLeadPipelineStageDraft(selectedLead?.crmPipeline?.stage || "");
+    setOutlookSubjectDraft("");
+    setOutlookBodyDraft("");
+    setOutlookToDraft(selectedLead?.email || "");
   }, [selectedLead]);
 
   // ========================================================================
@@ -732,6 +832,16 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             >
               <option value="">Alle Themen</option>
               {TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value as typeof filterOwner)} className="filter-select">
+              <option value="">Alle Owner</option>
+              <option value="BarmeniaGothaer">BarmeniaGothaer</option>
+              <option value="Agentur-Duic">Agentur-Duic</option>
+            </select>
+            <select value={filterCustomerKind} onChange={(e) => setFilterCustomerKind(e.target.value as typeof filterCustomerKind)} className="filter-select">
+              <option value="">Alle Kundentypen</option>
+              <option value="privat">Privat</option>
+              <option value="firma">Firma</option>
             </select>
             <select
               value={filterPipeline}
@@ -838,6 +948,27 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <div><label>Ort</label><p>{selectedLead.location || "-"}</p></div>
                   <div><label>Thema</label><p>{selectedLead.topic}</p></div>
                   <div><label>Status</label><p>{leadAmpelById.get(selectedLead.id)?.label}</p></div>
+                  <div><label>Owner</label><p>{selectedLead.customerOwner || "-"}</p></div>
+                  <div><label>Kundentyp</label><p>{selectedLead.customerKind || "-"}</p></div>
+                </div>
+              </div>
+
+              <div className="detail-section">
+                <h4>CRM-Pipeline</h4>
+                <div className="task-form-grid">
+                  <select className="input" value={leadPipelineStageDraft} onChange={(event) => setLeadPipelineStageDraft(event.target.value)}>
+                    <option value="">Bitte wählen</option>
+                    <option value="neu">neu</option>
+                    <option value="qualifiziert">qualifiziert</option>
+                    <option value="angebot">angebot</option>
+                    <option value="verhandlung">verhandlung</option>
+                    <option value="gewonnen">gewonnen</option>
+                    <option value="verloren">verloren</option>
+                  </select>
+                  <div className="subtle">Aktuell: {selectedLead.crmPipeline?.stage || "-"}</div>
+                  <button className="btn" disabled={busy || !leadPipelineStageDraft} onClick={() => void handleUpdatePipelineStage()}>
+                    Pipeline speichern
+                  </button>
                 </div>
               </div>
 
@@ -916,6 +1047,51 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                             </button>
                           </div>
                         ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="detail-section">
+                <h4>Kommunikation</h4>
+                <div className="task-form-grid">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Betreff"
+                    value={outlookSubjectDraft}
+                    onChange={(event) => setOutlookSubjectDraft(event.target.value)}
+                  />
+                  <input
+                    type="email"
+                    className="input"
+                    placeholder="Empfänger"
+                    value={outlookToDraft}
+                    onChange={(event) => setOutlookToDraft(event.target.value)}
+                  />
+                  <button className="btn" disabled={busy || !outlookSubjectDraft.trim()} onClick={() => void handleAddOutlookEmail()}>
+                    Mail protokollieren
+                  </button>
+                </div>
+                <textarea
+                  placeholder="Inhalt / Gesprächsnotiz zur E-Mail"
+                  className="notes-input top-gap"
+                  value={outlookBodyDraft}
+                  onChange={(event) => setOutlookBodyDraft(event.target.value)}
+                />
+                <div className="activity-timeline top-gap">
+                  {(selectedLead.emailHistory || []).length === 0 ? (
+                    <p className="subtle">Keine Kommunikationshistorie vorhanden</p>
+                  ) : (
+                    (selectedLead.emailHistory || []).map((entry) => (
+                      <div key={entry.id} className="activity-item">
+                        <div className="activity-date">{formatDate(entry.sentAt || entry.createdAt)}</div>
+                        <div className="activity-content">
+                          <div className="activity-outcome">{entry.source === "outlook" ? "Outlook" : "Gloria"}: {entry.subject}</div>
+                          {entry.to ? <div className="activity-summary">An: {entry.to}</div> : null}
+                          {entry.body ? <div className="activity-summary">{entry.body}</div> : null}
+                        </div>
                       </div>
                     ))
                   )}
