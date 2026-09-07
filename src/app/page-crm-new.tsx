@@ -76,6 +76,14 @@ type ManualCustomerDraft = {
   note: string;
 };
 
+type PipelineMoveSnapshot = {
+  leadId: string;
+  leadCompany: string;
+  fromStage: string;
+  toStage: string;
+  expiresAt: number;
+};
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -212,6 +220,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [pipelineDropStage, setPipelineDropStage] = useState<string>("");
+  const [quickPipelineStageByLeadId, setQuickPipelineStageByLeadId] = useState<Record<string, string>>({});
+  const [lastPipelineMove, setLastPipelineMove] = useState<PipelineMoveSnapshot | null>(null);
+  const [undoTick, setUndoTick] = useState(0);
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState<ManualCustomerDraft>({
     company: "",
@@ -240,6 +251,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
   const crmPrefsLastSavedKeyRef = useRef("");
   const crmPrefsAbortRef = useRef<AbortController | null>(null);
+  const pipelineUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Computed Values
   const appointmentsByDay = useMemo(() => {
@@ -300,10 +312,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     return leads;
   }, [data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterPipeline, filterContact, searchQuery]);
 
-  const availablePipelineStages = useMemo(
-    () => Array.from(new Set((data.leads || []).map((lead) => String(lead.crmPipeline || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "de")),
-    [data.leads],
-  );
+  const availablePipelineStages = useMemo(() => {
+    const defaults = ["neu", "qualifiziert", "angebot", "verhandlung", "gewonnen", "verloren"];
+    const dynamic = (data.leads || []).map((lead) => String(lead.crmPipeline || "").trim()).filter(Boolean);
+    return Array.from(new Set([...defaults, ...dynamic])).sort((a, b) => a.localeCompare(b, "de"));
+  }, [data.leads]);
 
   const reportingStats = useMemo(() => {
     const reports = data.reports || [];
@@ -320,6 +333,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const activeCrmTab = activeView === "tasks" ? "callbacks" : activeView === "pipeline" ? "pipeline" : "customers";
 
   const allFilteredSelected = filteredLeads.length > 0 && filteredLeads.every((lead) => selectedLeadIds.includes(lead.id));
+  const undoSecondsLeft = useMemo(() => {
+    if (!lastPipelineMove) return 0;
+    return Math.max(0, Math.ceil((lastPipelineMove.expiresAt - Date.now()) / 1000));
+  }, [lastPipelineMove, undoTick]);
 
   const loadCrmPreferences = useCallback(async () => {
     try {
@@ -799,7 +816,34 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [selectedLead]);
 
-  const updateLeadPipelineStage = useCallback(async (leadId: string, stage: string) => {
+  const clearPipelineUndo = useCallback(() => {
+    if (pipelineUndoTimerRef.current) {
+      clearTimeout(pipelineUndoTimerRef.current);
+      pipelineUndoTimerRef.current = null;
+    }
+    setLastPipelineMove(null);
+  }, []);
+
+  const stageLabel = useCallback((value: string) => value || "ohne Stage", []);
+
+  const rememberPipelineMoveForUndo = useCallback((snapshot: PipelineMoveSnapshot) => {
+    if (pipelineUndoTimerRef.current) {
+      clearTimeout(pipelineUndoTimerRef.current);
+    }
+    setLastPipelineMove(snapshot);
+    pipelineUndoTimerRef.current = setTimeout(() => {
+      setLastPipelineMove(null);
+      pipelineUndoTimerRef.current = null;
+    }, 5000);
+  }, []);
+
+  const updateLeadPipelineStage = useCallback(async (
+    leadId: string,
+    stage: string,
+    options?: { fromStage?: string; createUndo?: boolean; noticePrefix?: string },
+  ) => {
+    const leadBeforeUpdate = (data.leads || []).find((lead) => lead.id === leadId);
+    const fromStage = options?.fromStage ?? String(leadBeforeUpdate?.crmPipeline?.stage || "").trim();
     setBusy(true);
     try {
       const res = await fetch("/api/campaigns/lists", {
@@ -827,8 +871,24 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
       }));
       setSelectedLead((current) => (current && current.id === updatedLead.id ? updatedLead : current));
+      setQuickPipelineStageByLeadId((current) => {
+        const next = { ...current };
+        delete next[leadId];
+        return next;
+      });
       setLeadPipelineStageDraft(updatedLead.crmPipeline?.stage || stage);
-      setNotice(`✓ Pipeline-Stufe aktualisiert: ${updatedLead.company} -> ${stage}`);
+      if (options?.createUndo) {
+        rememberPipelineMoveForUndo({
+          leadId: updatedLead.id,
+          leadCompany: updatedLead.company,
+          fromStage,
+          toStage: stage,
+          expiresAt: Date.now() + 5000,
+        });
+      }
+      setNotice(
+        `${options?.noticePrefix || "✓ Pipeline-Stufe aktualisiert"}: ${updatedLead.company} (${stageLabel(fromStage)} -> ${stageLabel(stage)})`,
+      );
       return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Pipeline-Update fehlgeschlagen.");
@@ -836,11 +896,14 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [data.leads, rememberPipelineMoveForUndo, stageLabel]);
 
   const handleUpdatePipelineStage = useCallback(async () => {
     if (!selectedLead || !leadPipelineStageDraft) return;
-    const ok = await updateLeadPipelineStage(selectedLead.id, leadPipelineStageDraft);
+    const ok = await updateLeadPipelineStage(selectedLead.id, leadPipelineStageDraft, {
+      fromStage: String(selectedLead.crmPipeline?.stage || "").trim(),
+      createUndo: true,
+    });
     if (ok) {
       setNotice("✓ Pipeline-Stufe gespeichert");
     }
@@ -863,10 +926,20 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       return;
     }
 
-    await updateLeadPipelineStage(lead.id, targetStage);
+    await updateLeadPipelineStage(lead.id, targetStage, { fromStage: currentStage, createUndo: true });
     setDraggedLeadId(null);
     setPipelineDropStage("");
   }
+
+  const handleUndoPipelineMove = useCallback(async () => {
+    if (!lastPipelineMove) return;
+    const snapshot = lastPipelineMove;
+    clearPipelineUndo();
+    await updateLeadPipelineStage(snapshot.leadId, snapshot.fromStage, {
+      fromStage: snapshot.toStage,
+      noticePrefix: "↩ Rückgängig",
+    });
+  }, [clearPipelineUndo, lastPipelineMove, updateLeadPipelineStage]);
 
   const handleAddOutlookEmail = useCallback(async () => {
     if (!selectedLead || !outlookSubjectDraft.trim()) return;
@@ -1056,6 +1129,20 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const validLeadIds = new Set((data.leads || []).map((lead) => lead.id));
     setSelectedLeadIds((current) => current.filter((id) => validLeadIds.has(id)));
   }, [data.leads]);
+
+  useEffect(() => {
+    if (!lastPipelineMove) return;
+    const timer = setInterval(() => setUndoTick((value) => value + 1), 250);
+    return () => clearInterval(timer);
+  }, [lastPipelineMove]);
+
+  useEffect(() => {
+    return () => {
+      if (pipelineUndoTimerRef.current) {
+        clearTimeout(pipelineUndoTimerRef.current);
+      }
+    };
+  }, []);
 
   // ========================================================================
   // RENDER FUNCTIONS
@@ -1591,22 +1678,48 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   </div>
                   <div className="pipeline-column-body">
                     {stageLeads.map((lead) => (
-                      <button
-                        key={lead.id}
-                        className={`pipeline-card ${draggedLeadId === lead.id ? "dragging" : ""}`}
-                        onClick={() => setSelectedLead(lead)}
-                        draggable={!busy && currentUser?.role === "master"}
-                        onDragStart={() => setDraggedLeadId(lead.id)}
-                        onDragEnd={() => {
-                          setDraggedLeadId(null);
-                          setPipelineDropStage("");
-                        }}
-                        title={currentUser?.role === "master" ? "Ziehen zum Verschieben der Stage" : "Nur Master-User können Stages ändern"}
-                      >
-                        <strong>{lead.company}</strong>
-                        <span>{lead.contactName || "-"}</span>
-                        <small>{lead.topic}</small>
-                      </button>
+                      <div key={lead.id} className={`pipeline-card-wrap ${draggedLeadId === lead.id ? "dragging" : ""}`}>
+                        <button
+                          className="pipeline-card"
+                          onClick={() => setSelectedLead(lead)}
+                          draggable={!busy && currentUser?.role === "master"}
+                          onDragStart={() => setDraggedLeadId(lead.id)}
+                          onDragEnd={() => {
+                            setDraggedLeadId(null);
+                            setPipelineDropStage("");
+                          }}
+                          title={currentUser?.role === "master" ? "Ziehen zum Verschieben der Stage" : "Nur Master-User können Stages ändern"}
+                        >
+                          <strong>{lead.company}</strong>
+                          <span>{lead.contactName || "-"}</span>
+                          <small>{lead.topic}</small>
+                        </button>
+                        <div className="pipeline-quick-controls" onClick={(event) => event.stopPropagation()}>
+                          <select
+                            className="input"
+                            value={quickPipelineStageByLeadId[lead.id] || stage}
+                            onChange={(event) => {
+                              const nextStage = event.target.value;
+                              setQuickPipelineStageByLeadId((current) => ({ ...current, [lead.id]: nextStage }));
+                            }}
+                            aria-label={`Pipeline-Stufe für ${lead.company}`}
+                          >
+                            {availablePipelineStages.map((candidateStage) => (
+                              <option key={`${lead.id}-${candidateStage}`} value={candidateStage}>{candidateStage}</option>
+                            ))}
+                          </select>
+                          <button
+                            className="btn-small ghost"
+                            disabled={busy || currentUser?.role !== "master" || (quickPipelineStageByLeadId[lead.id] || stage) === stage}
+                            onClick={() => void updateLeadPipelineStage(lead.id, quickPipelineStageByLeadId[lead.id] || stage, {
+                              fromStage: stage,
+                              createUndo: true,
+                            })}
+                          >
+                            Setzen
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -1733,6 +1846,18 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   return (
     <div className={`app-container ${embedded ? "embedded" : ""}`}>
+      {lastPipelineMove ? (
+        <div className="pipeline-toast" role="status" aria-live="polite">
+          <div>
+            <strong>{lastPipelineMove.leadCompany}</strong>
+            <span> verschoben: {stageLabel(lastPipelineMove.fromStage)} {"->"} {stageLabel(lastPipelineMove.toStage)}</span>
+          </div>
+          <div className="pipeline-toast-actions">
+            <span className="pipeline-toast-timer">{undoSecondsLeft}s</span>
+            <button className="btn-small ghost" disabled={busy} onClick={() => void handleUndoPipelineMove()}>Rückgängig</button>
+          </div>
+        </div>
+      ) : null}
       {embedded ? (
         <div className="embedded-hero">
           <div>
@@ -1814,6 +1939,37 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           height: 100vh;
           background: #f5f7fa;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        .pipeline-toast {
+          position: fixed;
+          right: 18px;
+          bottom: 18px;
+          z-index: 110;
+          display: flex;
+          gap: 1rem;
+          align-items: center;
+          justify-content: space-between;
+          background: #0f2d4d;
+          color: #f3f8ff;
+          border: 1px solid #355a83;
+          border-radius: 10px;
+          padding: 0.7rem 0.85rem;
+          min-width: 340px;
+          box-shadow: 0 14px 34px rgba(10, 24, 44, 0.34);
+        }
+
+        .pipeline-toast-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.55rem;
+        }
+
+        .pipeline-toast-timer {
+          font-size: 0.8rem;
+          color: #a9c0dc;
+          min-width: 2rem;
+          text-align: right;
         }
 
         .app-container.embedded {
@@ -2543,12 +2699,52 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           background: #eef5ff;
         }
 
-        .pipeline-card.dragging {
+        .pipeline-card-wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          padding: 0.35rem;
+          border: 1px solid #d8e2ee;
+          border-radius: 8px;
+          background: #ffffff;
+          margin-bottom: 0.55rem;
+        }
+
+        .pipeline-card-wrap.dragging {
           opacity: 0.55;
           transform: scale(0.98);
         }
 
+        .pipeline-card {
+          width: 100%;
+          text-align: left;
+          border: 1px solid #d8e2ee;
+          border-radius: 8px;
+          background: #f8fbff;
+          padding: 0.75rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+          cursor: pointer;
+        }
+
+        .pipeline-quick-controls {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 0.5rem;
+        }
+
         @media (max-width: 900px) {
+          .pipeline-toast {
+            left: 12px;
+            right: 12px;
+            min-width: 0;
+          }
+
+          .pipeline-quick-controls {
+            grid-template-columns: 1fr;
+          }
+
           .task-form-grid {
             grid-template-columns: 1fr;
           }
