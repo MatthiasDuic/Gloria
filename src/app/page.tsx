@@ -2448,6 +2448,10 @@ export default function HomePage() {
             <span className="nav-icon" aria-hidden>≡</span>
             <span>Offene Firmenliste</span>
           </button>
+          <a className="nav-item" href="/crm">
+            <span className="nav-icon" aria-hidden>◫</span>
+            <span>CRM</span>
+          </a>
           <button
             className={`nav-item ${activeView === "calendar" ? "active" : ""}`}
             onClick={() => setActiveView("calendar")}
