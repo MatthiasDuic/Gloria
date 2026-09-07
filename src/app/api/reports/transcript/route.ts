@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { getDashboardData } from "@/lib/storage";
+import { getConversationEventsForCallSid, getDashboardData } from "@/lib/storage";
 import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
 
 export const runtime = "nodejs";
@@ -33,5 +33,40 @@ export async function GET(request: NextRequest) {
   }
 
   const events = await listCallTranscriptEventsFromPostgres(callSid);
-  return NextResponse.json({ ok: true, events });
+  if (events.length > 0) {
+    return NextResponse.json({ ok: true, events, source: "transcript_events" });
+  }
+
+  const conversationEvents = await getConversationEventsForCallSid(callSid, {
+    userId: sessionUser.role === "master" ? undefined : sessionUser.id,
+  });
+
+  const fallbackEvents = conversationEvents
+    .filter((event) => {
+      if (!event.text?.trim()) {
+        return false;
+      }
+      const eventType = (event.eventType || "").toLowerCase();
+      return eventType.includes("utterance")
+        || eventType.includes("realtime.user_said")
+        || eventType.includes("realtime.gloria_said");
+    })
+    .map((event) => {
+      const normalizedType = (event.eventType || "").toLowerCase();
+      const speaker: "Gloria" | "Interessent" =
+        normalizedType.includes("gloria") || normalizedType.includes("assistant")
+          ? "Gloria"
+          : "Interessent";
+      return {
+        id: `conv-${event.id}`,
+        callSid,
+        userId: sessionUser.role === "master" ? undefined : sessionUser.id,
+        speaker,
+        text: event.text?.trim() || "",
+        phase: event.step,
+        createdAt: event.createdAt,
+      };
+    });
+
+  return NextResponse.json({ ok: true, events: fallbackEvents, source: "conversation_events" });
 }

@@ -1083,6 +1083,23 @@ export async function getRecentConversationEvents(
     .slice(0, limit);
 }
 
+export async function getConversationEventsForCallSid(
+  callSid: string,
+  options?: { userId?: string; limit?: number },
+): Promise<ConversationEvent[]> {
+  const sid = (callSid || "").trim();
+  if (!sid) {
+    return [];
+  }
+
+  const limit = Math.max(20, Math.min(2000, options?.limit ?? 500));
+  const events = await readConversationEvents(options?.userId);
+  return events
+    .filter((event) => (event.callSid || "").trim() === sid)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .slice(-limit);
+}
+
 export async function appendConversationEvent(
   event: Omit<ConversationEvent, "id" | "createdAt"> & { createdAt?: string },
   options?: { userId?: string },

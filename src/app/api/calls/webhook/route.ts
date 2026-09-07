@@ -242,7 +242,9 @@ async function persistTranscriptArray(
   callSid: string | undefined,
   userId: string | undefined,
 ) {
-  if (!Array.isArray(entries) || entries.length === 0 || !callSid) return;
+  if (!Array.isArray(entries) || entries.length === 0 || !callSid) {
+    return { inputCount: Array.isArray(entries) ? entries.length : 0, normalizedCount: 0, persisted: true };
+  }
   const transcriptEvents = entries.flatMap((entry) => {
     const text = (entry.text || "").trim();
     if (!text) return [];
@@ -261,7 +263,12 @@ async function persistTranscriptArray(
       spokenAt: typeof entry.at === "number" ? entry.at : undefined,
     }];
   });
-  await appendCallTranscriptEventsToPostgres(transcriptEvents);
+  const persisted = await appendCallTranscriptEventsToPostgres(transcriptEvents);
+  return {
+    inputCount: entries.length,
+    normalizedCount: transcriptEvents.length,
+    persisted,
+  };
 }
 
 export async function POST(request: Request) {
@@ -302,7 +309,14 @@ export async function POST(request: Request) {
   }
 
   // Transcript always persisted regardless of recording consent (for report detail).
-  await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
+  const transcriptPersist = await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
+  if (!transcriptPersist.persisted && transcriptPersist.normalizedCount > 0) {
+    console.warn("transcript.persist_failed", {
+      callSid: payload.callSid,
+      inputCount: transcriptPersist.inputCount,
+      normalizedCount: transcriptPersist.normalizedCount,
+    });
+  }
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
     // Recovery path for incomplete finalize payloads: if leadId/callSid is present,

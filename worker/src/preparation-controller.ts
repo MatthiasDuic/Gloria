@@ -66,6 +66,8 @@ export type PreparationState = {
   stage: PreparationStage;
   questions: string[];
   currentQuestionIndex?: number;
+  consentRetryCount?: number;
+  questionRetryCount?: number;
 };
 
 export type PreparationTransition = {
@@ -150,7 +152,12 @@ export function buildPreparationQuestions(policy: PreparationPolicy | null): str
 }
 
 export function createPreparationState(policy: PreparationPolicy | null = null): PreparationState {
-  return { stage: "inactive", questions: buildPreparationQuestions(policy) };
+  return {
+    stage: "inactive",
+    questions: buildPreparationQuestions(policy),
+    consentRetryCount: 0,
+    questionRetryCount: 0,
+  };
 }
 
 function preparationConsent(text: string): "granted" | "declined" | "unknown" {
@@ -252,7 +259,13 @@ export function beginPreparation(
     };
   }
   return {
-    state: { ...state, stage: "awaiting_consent", currentQuestionIndex: undefined },
+    state: {
+      ...state,
+      stage: "awaiting_consent",
+      currentQuestionIndex: undefined,
+      consentRetryCount: 0,
+      questionRetryCount: 0,
+    },
     instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?"`,
   };
 }
@@ -271,8 +284,15 @@ export function advancePreparation(
       };
     }
     if (consent === "unknown") {
+      const retries = (state.consentRetryCount || 0) + 1;
+      if (retries >= 2) {
+        return {
+          state: { ...state, consentRetryCount: retries },
+          instruction: "Die Antwort blieb unklar. Frage exakt: 'Ist es für Sie in Ordnung: ja oder nein?' Stelle keine weitere Frage.",
+        };
+      }
       return {
-        state,
+        state: { ...state, consentRetryCount: retries },
         instruction: "Die Antwort war unklar. Sage nur noch einmal: 'Sind zwei Minuten für kurze Vorbereitungsfragen in Ordnung?' Stelle keine andere Frage.",
       };
     }
@@ -284,7 +304,13 @@ export function advancePreparation(
       };
     }
     return {
-      state: { ...state, stage: "asking", currentQuestionIndex: next.index },
+      state: {
+        ...state,
+        stage: "asking",
+        currentQuestionIndex: next.index,
+        consentRetryCount: 0,
+        questionRetryCount: 0,
+      },
       instruction: `Sage keine Einleitung und stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
     };
   }
@@ -294,7 +320,7 @@ export function advancePreparation(
       const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
       if (next) {
         return {
-          state: { ...state, currentQuestionIndex: next.index },
+          state: { ...state, currentQuestionIndex: next.index, questionRetryCount: 0 },
           instruction: `Akzeptiere die Absage freundlich in höchstens einem kurzen Satz. Stelle danach ausschließlich diese eine nächste Frage: "${next.question}".`,
         };
       }
@@ -305,8 +331,15 @@ export function advancePreparation(
     }
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
     if (currentQuestion && !isAnswerPlausible(currentQuestion, userText)) {
+      const retries = (state.questionRetryCount || 0) + 1;
+      if (retries >= 2) {
+        return {
+          state: { ...state, questionRetryCount: retries },
+          instruction: `Die Antwort bleibt unklar. Stelle dieselbe Frage noch einmal, aber mit Antwortformat-Hinweis: "${currentQuestion}" und ergänze kurz "Bitte kurz mit Ja oder Nein oder mit einem konkreten Wert antworten."`,
+        };
+      }
       return {
-        state,
+        state: { ...state, questionRetryCount: retries },
         instruction: `Die Antwort passt noch nicht eindeutig zur Frage. Stelle ausschließlich dieselbe Vorbereitungsfrage noch einmal, ohne dich zu bedanken: "${currentQuestion}"`,
       };
     }
@@ -315,14 +348,19 @@ export function advancePreparation(
       const questions = [...state.questions];
       questions.splice((state.currentQuestionIndex ?? -1) + 1, 0, ...followUps);
       return {
-        state: { ...state, questions, currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1 },
+        state: {
+          ...state,
+          questions,
+          currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1,
+          questionRetryCount: 0,
+        },
         instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${followUps[0]}". Warte danach vollständig auf die Antwort.`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
     if (next) {
       return {
-        state: { ...state, currentQuestionIndex: next.index },
+        state: { ...state, currentQuestionIndex: next.index, questionRetryCount: 0 },
         instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
       };
     }

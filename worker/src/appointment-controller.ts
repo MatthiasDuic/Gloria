@@ -112,9 +112,21 @@ export function decideAppointment(params: {
   const slotPhrase = params.slotPhrase?.trim() || "";
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
   const assistantText = params.turns.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
+  const askedForConcreteSelection = /welcher\s+termin\s+passt\s+ihnen\s+besser|welcher\s+termin\s+passt\s+ihnen|welcher\s+passt\s+ihnen\s+besser/i.test(assistantText);
+  const userNamedConcreteSlot = /\b(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b/i.test(latestUserText)
+    || /\b\d{1,2}:\d{2}\b/.test(latestUserText)
+    || /\b\d{1,2}\.\s*(?:januar|februar|m[äa]rz|april|mai|juni|juli|august|september|oktober|november|dezember)\b/i.test(latestUserText)
+    || /\berste[rn]?\b|\bzweite[rn]?\b/.test(latestUserText);
   const confirmationWasAsked = /(?:meinen\s+sie|passt\s+der|ist\s+das\s+so|richtig\s+verstanden)[^.?!]*(?:uhr|termin|donnerstag|freitag|montag|dienstag|mittwoch)/i.test(assistantText);
   const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText)
     || /\b(?:montag|dienstag|mittwoch|donnerstag|freitag)\b[^.!?]{0,20}\b(?:passt|passt\s+gut|gut\s+so|stimmt|klingt\s+gut|besser)\b/i.test(latestUserText);
+  if (askedForConcreteSelection && !userNamedConcreteSlot) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Die Auswahl ist noch nicht eindeutig. Frage kurz: 'Meinen Sie den ersten oder den zweiten vorgeschlagenen Termin?' Bestätige erst nach klarer Zuordnung.",
+    };
+  }
   if (confirmationWasAsked && !explicitConfirmation) {
     return {
       ok: false,
