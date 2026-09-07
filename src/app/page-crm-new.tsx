@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DashboardData, TopicPolicyConfig, Topic } from "@/lib/types";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { CrmSavedView, CrmUiPreferences, DashboardData, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
@@ -173,12 +173,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
 
   // View & Filter State
-  const [activeView, setActiveView] = useState<"dashboard" | "contacts" | "calendar" | "tasks" | "settings">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "contacts" | "pipeline" | "calendar" | "tasks" | "settings">("dashboard");
   const [selectedLead, setSelectedLead] = useState<DashboardData["leads"][number] | null>(null);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [filterTopic, setFilterTopic] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterPipeline, setFilterPipeline] = useState<string>("");
+  const [filterContact, setFilterContact] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
+  const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
+  const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
+  const [crmPrefsReady, setCrmPrefsReady] = useState(false);
 
   // Import & Campaign State
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
@@ -194,6 +199,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
+  const crmPrefsLastSavedKeyRef = useRef("");
+  const crmPrefsAbortRef = useRef<AbortController | null>(null);
 
   // Computed Values
   const appointmentsByDay = useMemo(() => {
@@ -224,6 +231,18 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     if (filterTopic) {
       leads = leads.filter((l) => l.topic === filterTopic);
     }
+    if (filterPipeline) {
+      leads = leads.filter((l) => String(l.crmPipeline || "") === filterPipeline);
+    }
+    if (filterContact === "mitEmail") {
+      leads = leads.filter((l) => Boolean((l.email || "").trim()));
+    }
+    if (filterContact === "ohneEmail") {
+      leads = leads.filter((l) => !(l.email || "").trim());
+    }
+    if (filterContact === "mitTelefon") {
+      leads = leads.filter((l) => Boolean((l.phone || l.directDial || "").trim()));
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       leads = leads.filter((l) =>
@@ -234,7 +253,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     }
     return leads;
-  }, [data.leads, filterStatus, filterTopic, searchQuery]);
+  }, [data.leads, filterStatus, filterTopic, filterPipeline, filterContact, searchQuery]);
+
+  const availablePipelineStages = useMemo(
+    () => Array.from(new Set((data.leads || []).map((lead) => String(lead.crmPipeline || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "de")),
+    [data.leads],
+  );
 
   const reportingStats = useMemo(() => {
     const reports = data.reports || [];
@@ -247,6 +271,110 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
     return { total, appointments, rejections, callbacks, contactRate, appointmentRate };
   }, [data.reports]);
+
+  const activeCrmTab = activeView === "tasks" ? "callbacks" : activeView === "pipeline" ? "pipeline" : "customers";
+
+  const loadCrmPreferences = useCallback(async () => {
+    try {
+      const [viewsRes, prefsRes] = await Promise.all([
+        fetch("/api/crm/views", { credentials: "include", cache: "no-store" }),
+        fetch("/api/crm/preferences", { credentials: "include", cache: "no-store" }),
+      ]);
+
+      const viewsPayload = (await viewsRes.json().catch(() => ({}))) as { views?: CrmSavedView[] };
+      if (viewsRes.ok) {
+        setCrmSavedViews(Array.isArray(viewsPayload.views) ? viewsPayload.views.slice(0, 20) : []);
+      }
+
+      const prefsPayload = (await prefsRes.json().catch(() => ({}))) as { preferences?: CrmUiPreferences };
+      if (prefsRes.ok && prefsPayload.preferences) {
+        const prefs = prefsPayload.preferences;
+        if (typeof prefs.crmSearch === "string") setSearchQuery(prefs.crmSearch);
+        if (prefs.crmPipelineFilter !== undefined) setFilterPipeline(prefs.crmPipelineFilter || "");
+        if (prefs.crmContactFilter !== undefined) setFilterContact(prefs.crmContactFilter || "");
+        if (prefs.crmTab === "customers") setActiveView("contacts");
+        if (prefs.crmTab === "pipeline") setActiveView("pipeline");
+        if (prefs.crmTab === "callbacks") setActiveView("tasks");
+        crmPrefsLastSavedKeyRef.current = JSON.stringify({
+          crmTab: prefs.crmTab || "customers",
+          crmSearch: prefs.crmSearch || "",
+          crmPipelineFilter: prefs.crmPipelineFilter || "",
+          crmContactFilter: prefs.crmContactFilter || "",
+        });
+      }
+    } catch {
+      // Preference sync is optional for this CRM view.
+    } finally {
+      setCrmPrefsReady(true);
+    }
+  }, []);
+
+  async function persistCrmSavedViews(nextViews: CrmSavedView[]) {
+    const response = await fetch("/api/crm/views", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ views: nextViews.slice(0, 20) }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; views?: CrmSavedView[] };
+    if (!response.ok) {
+      throw new Error(payload.error || "CRM-Ansichten konnten nicht gespeichert werden.");
+    }
+    return Array.isArray(payload.views) ? payload.views.slice(0, 20) : nextViews.slice(0, 20);
+  }
+
+  async function persistCrmUiPreferences(nextPreferences: CrmUiPreferences, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const response = await fetch("/api/crm/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ preferences: nextPreferences }),
+        signal,
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "CRM-Layout konnte nicht gespeichert werden.");
+      }
+      return true;
+    } catch (error) {
+      if (signal?.aborted || error instanceof TypeError) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async function saveCurrentCrmSearch() {
+    const name = crmViewNameDraft.trim() || `Suche ${new Date().toLocaleDateString("de-DE")}`;
+    const entry: CrmSavedView = {
+      id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      search: searchQuery,
+      owner: "",
+      customerKind: "",
+      pipelineStage: filterPipeline as CrmSavedView["pipelineStage"],
+      contactFilter: filterContact,
+      createdAt: new Date().toISOString(),
+    };
+    const nextViews = [entry, ...crmSavedViews.filter((view) => view.name !== name)].slice(0, 20);
+    try {
+      const persisted = await persistCrmSavedViews(nextViews);
+      setCrmSavedViews(persisted);
+      setCrmViewNameDraft("");
+      setNotice(`Suche "${name}" gespeichert.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Suche konnte nicht gespeichert werden.");
+    }
+  }
+
+  function applySavedView(view: CrmSavedView) {
+    setSearchQuery(view.search || "");
+    setFilterPipeline(view.pipelineStage || "");
+    setFilterContact(view.contactFilter || "");
+    setActiveView(view.pipelineStage ? "pipeline" : "contacts");
+    setNotice(`Suche "${view.name}" geladen.`);
+  }
 
   // API Functions
   const handleFileImport = useCallback(async () => {
@@ -399,6 +527,40 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     };
   }, [activeView]);
 
+  useEffect(() => {
+    void loadCrmPreferences();
+  }, [loadCrmPreferences]);
+
+  useEffect(() => {
+    if (!crmPrefsReady) return;
+
+    const snapshot: CrmUiPreferences = {
+      crmTab: activeCrmTab,
+      crmSearch: searchQuery,
+      crmPipelineFilter: filterPipeline as CrmUiPreferences["crmPipelineFilter"],
+      crmContactFilter: filterContact,
+    };
+    const nextKey = JSON.stringify(snapshot);
+    if (nextKey === crmPrefsLastSavedKeyRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      crmPrefsAbortRef.current?.abort();
+      const controller = new AbortController();
+      crmPrefsAbortRef.current = controller;
+      void persistCrmUiPreferences(snapshot, controller.signal)
+        .then((saved) => {
+          if (saved) {
+            crmPrefsLastSavedKeyRef.current = nextKey;
+          }
+        })
+        .catch(() => undefined);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [activeCrmTab, crmPrefsReady, searchQuery, filterPipeline, filterContact]);
+
   // ========================================================================
   // RENDER FUNCTIONS
   // ========================================================================
@@ -485,7 +647,44 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               <option value="">Alle Themen</option>
               {TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            <select
+              value={filterPipeline}
+              onChange={(e) => setFilterPipeline(e.target.value)}
+              className="filter-select"
+            >
+              <option value="">Alle Pipeline-Stufen</option>
+              {availablePipelineStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+            </select>
+            <select
+              value={filterContact}
+              onChange={(e) => setFilterContact(e.target.value as typeof filterContact)}
+              className="filter-select"
+            >
+              <option value="">Alle Kontaktarten</option>
+              <option value="mitEmail">Mit E-Mail</option>
+              <option value="ohneEmail">Ohne E-Mail</option>
+              <option value="mitTelefon">Mit Telefon</option>
+            </select>
+            <input
+              type="text"
+              placeholder="Suche speichern als..."
+              value={crmViewNameDraft}
+              onChange={(e) => setCrmViewNameDraft(e.target.value)}
+              className="input"
+            />
+            <button className="btn-small ghost" onClick={() => void saveCurrentCrmSearch()}>
+              Suche speichern
+            </button>
           </div>
+          {crmSavedViews.length > 0 ? (
+            <div className="saved-views-row">
+              {crmSavedViews.map((view) => (
+                <button key={view.id} className="saved-view-chip" onClick={() => applySavedView(view)}>
+                  {view.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="contacts-list">
@@ -658,6 +857,45 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     );
   }
 
+  function renderPipeline() {
+    return (
+      <div className="contacts-view">
+        <div className="view-header">
+          <h3 style={{ margin: 0 }}>Pipeline-Ansicht</h3>
+          <p className="subtle" style={{ marginBottom: 0 }}>Kontakte nach CRM-Pipeline gruppiert.</p>
+        </div>
+        <div className="pipeline-board">
+          {availablePipelineStages.length === 0 ? (
+            <div className="empty-state">
+              <p>Keine Pipeline-Stufen vorhanden</p>
+            </div>
+          ) : (
+            availablePipelineStages.map((stage) => {
+              const stageLeads = filteredLeads.filter((lead) => String(lead.crmPipeline || "") === stage);
+              return (
+                <div key={stage} className="pipeline-column">
+                  <div className="pipeline-column-header">
+                    <strong>{stage}</strong>
+                    <span>{stageLeads.length}</span>
+                  </div>
+                  <div className="pipeline-column-body">
+                    {stageLeads.map((lead) => (
+                      <button key={lead.id} className="pipeline-card" onClick={() => setSelectedLead(lead)}>
+                        <strong>{lead.company}</strong>
+                        <span>{lead.contactName || "-"}</span>
+                        <small>{lead.topic}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+
   function renderTasks() {
     const callbacks = (data.reports || [])
       .filter((r) => r.outcome === "Wiedervorlage" && r.nextCallAt)
@@ -710,7 +948,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               onChange={(e) => setImportFile(e.target.files?.[0] || null)}
               className="input"
             />
-            <button className="btn" disabled={!importFile || !importListName}>
+            <button className="btn" disabled={!importFile || !importListName || busy} onClick={() => void handleFileImport()}>
               Importieren
             </button>
           </div>
@@ -728,9 +966,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       </div>
                     </div>
                     <div className="campaign-controls">
-                      <button className="btn-small" disabled={list.active}>Start</button>
-                      <button className="btn-small ghost" disabled={!list.active}>Stop</button>
-                      <button className="btn-small danger">Delete</button>
+                      <button className="btn-small" disabled={busy || list.active} onClick={() => void controlCampaignList(list.listId, "start")}>Start</button>
+                      <button className="btn-small ghost" disabled={busy || !list.active} onClick={() => void controlCampaignList(list.listId, "stop")}>Stop</button>
+                      <button className="btn-small danger" disabled={busy} onClick={() => void controlCampaignList(list.listId, "delete")}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -798,6 +1036,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           👥 Kontakte ({filteredLeads.length})
         </button>
         <button
+          className={`nav-btn ${activeView === "pipeline" ? "active" : ""}`}
+          onClick={() => setActiveView("pipeline")}
+        >
+          🧭 Pipeline
+        </button>
+        <button
           className={`nav-btn ${activeView === "calendar" ? "active" : ""}`}
           onClick={() => setActiveView("calendar")}
         >
@@ -820,6 +1064,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       <main className={`app-main ${embedded ? "embedded" : ""}`}>
         {activeView === "dashboard" && renderDashboard()}
         {activeView === "contacts" && renderContacts()}
+        {activeView === "pipeline" && renderPipeline()}
         {activeView === "calendar" && renderCalendar()}
         {activeView === "tasks" && renderTasks()}
         {activeView === "settings" && renderSettings()}
