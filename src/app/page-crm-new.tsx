@@ -65,6 +65,17 @@ type AdminUser = {
   allowedPlaybookTopics?: string[];
 };
 
+type ManualCustomerDraft = {
+  company: string;
+  contactName: string;
+  phone: string;
+  email: string;
+  topic: Topic;
+  owner: "BarmeniaGothaer" | "Agentur-Duic";
+  customerKind: "privat" | "firma";
+  note: string;
+};
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -124,6 +135,11 @@ function phoneLooksEqual(a?: string, b?: string) {
   const shortLeft = left.length > 8 ? left.slice(-8) : left;
   const shortRight = right.length > 8 ? right.slice(-8) : right;
   return shortLeft === shortRight;
+}
+
+function escapeCsvCell(value?: string) {
+  const normalized = String(value || "").replace(/\r?\n/g, " ").trim();
+  return `"${normalized.replace(/"/g, '""')}"`;
 }
 
 function reportMatchesLead(
@@ -193,6 +209,18 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [outlookSubjectDraft, setOutlookSubjectDraft] = useState("");
   const [outlookBodyDraft, setOutlookBodyDraft] = useState("");
   const [outlookToDraft, setOutlookToDraft] = useState("");
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
+  const [addCustomerDraft, setAddCustomerDraft] = useState<ManualCustomerDraft>({
+    company: "",
+    contactName: "",
+    phone: "",
+    email: "",
+    topic: TOPICS[0],
+    owner: "Agentur-Duic",
+    customerKind: "firma",
+    note: "",
+  });
 
   // Import & Campaign State
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
@@ -288,6 +316,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }, [data.reports]);
 
   const activeCrmTab = activeView === "tasks" ? "callbacks" : activeView === "pipeline" ? "pipeline" : "customers";
+
+  const allFilteredSelected = filteredLeads.length > 0 && filteredLeads.every((lead) => selectedLeadIds.includes(lead.id));
 
   const loadCrmPreferences = useCallback(async () => {
     try {
@@ -397,6 +427,249 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setNotice(`Suche "${view.name}" geladen.`);
   }
 
+  const reloadLiveData = useCallback(async () => {
+    const dataRes = await fetch("/api/live", { credentials: "include", cache: "no-store" });
+    if (dataRes.ok) {
+      const payload = await dataRes.json();
+      setData(payload || EMPTY_DATA);
+    }
+  }, []);
+
+  function toggleLeadSelection(leadId: string, enabled: boolean) {
+    setSelectedLeadIds((current) => {
+      if (enabled) {
+        return current.includes(leadId) ? current : [...current, leadId];
+      }
+      return current.filter((id) => id !== leadId);
+    });
+  }
+
+  function toggleSelectAllFiltered(enabled: boolean) {
+    if (!enabled) {
+      const filteredSet = new Set(filteredLeads.map((lead) => lead.id));
+      setSelectedLeadIds((current) => current.filter((id) => !filteredSet.has(id)));
+      return;
+    }
+    const filteredIds = filteredLeads.map((lead) => lead.id);
+    setSelectedLeadIds((current) => [...new Set([...current, ...filteredIds])]);
+  }
+
+  async function handleDeleteLeads(leadIds: string[]) {
+    if (leadIds.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_leads", leadIds }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; removed?: number };
+      if (!res.ok) {
+        throw new Error(payload.error || "Kontakte konnten nicht gelöscht werden.");
+      }
+      setSelectedLeadIds((current) => current.filter((id) => !leadIds.includes(id)));
+      if (selectedLead && leadIds.includes(selectedLead.id)) {
+        setSelectedLead(null);
+      }
+      await reloadLiveData();
+      setNotice(`✓ ${payload.removed ?? leadIds.length} Kontakt(e) gelöscht`);
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteSelectedCustomers() {
+    if (selectedLeadIds.length === 0) return;
+    if (!confirm(`${selectedLeadIds.length} ausgewählte Kontakte wirklich löschen?`)) {
+      return;
+    }
+    await handleDeleteLeads(selectedLeadIds);
+  }
+
+  function handleExportSelectedCustomers() {
+    const selected = filteredLeads.filter((lead) => selectedLeadIds.includes(lead.id));
+    if (selected.length === 0) {
+      setNotice("Bitte zuerst Kontakte auswählen.");
+      return;
+    }
+
+    const header = [
+      "customerOwner",
+      "customerKind",
+      "company",
+      "contactName",
+      "phone",
+      "email",
+      "topic",
+      "status",
+      "nextCallAt",
+      "note",
+    ].join(",");
+
+    const rows = selected.map((lead) => [
+      escapeCsvCell(lead.customerOwner),
+      escapeCsvCell(lead.customerKind),
+      escapeCsvCell(lead.company),
+      escapeCsvCell(lead.contactName),
+      escapeCsvCell(lead.phone || lead.directDial),
+      escapeCsvCell(lead.email),
+      escapeCsvCell(lead.topic),
+      escapeCsvCell(lead.status),
+      escapeCsvCell(lead.nextCallAt),
+      escapeCsvCell(lead.note),
+    ].join(","));
+
+    const csv = `${header}\n${rows.join("\n")}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `crm-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setNotice(`✓ ${selected.length} Kontakt(e) exportiert`);
+  }
+
+  async function handleAddCustomerManually() {
+    const draft = addCustomerDraft;
+    if (!draft.company.trim() || !draft.phone.trim()) {
+      setNotice("Firma und Telefonnummer sind Pflichtfelder.");
+      return;
+    }
+
+    const listName = `${draft.owner} | Manuell hinzugefügt`;
+    const header = "customerOwner,customerKind,company,contactName,phone,email,topic,note";
+    const row = [
+      escapeCsvCell(draft.owner),
+      escapeCsvCell(draft.customerKind),
+      escapeCsvCell(draft.company),
+      escapeCsvCell(draft.contactName),
+      escapeCsvCell(draft.phone),
+      escapeCsvCell(draft.email),
+      escapeCsvCell(draft.topic),
+      escapeCsvCell(draft.note),
+    ].join(",");
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvText: `${header}\n${row}`, listName }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; imported?: number };
+      if (!res.ok) {
+        throw new Error(payload.error || "Kunde konnte nicht angelegt werden.");
+      }
+      await reloadLiveData();
+      setShowAddCustomerForm(false);
+      setAddCustomerDraft({
+        company: "",
+        contactName: "",
+        phone: "",
+        email: "",
+        topic: TOPICS[0],
+        owner: "Agentur-Duic",
+        customerKind: "firma",
+        note: "",
+      });
+      setNotice(`✓ Kunde angelegt (${payload.imported ?? 1} Datensatz)`);
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function getLeadForCallbackReport(report: DashboardData["reports"][number]) {
+    return (data.leads || []).find((lead) => reportMatchesLead(report, lead)) || null;
+  }
+
+  async function handleCompleteCallback(report: DashboardData["reports"][number]) {
+    const lead = getLeadForCallbackReport(report);
+    if (!lead) {
+      setNotice("Kein passender Lead zur Wiedervorlage gefunden.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_lead_details",
+          leadId: lead.id,
+          updates: {
+            nextCallAt: undefined,
+            status: "angerufen",
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(payload.error || "Wiedervorlage konnte nicht abgeschlossen werden.");
+      }
+      await reloadLiveData();
+      setNotice("✓ Wiedervorlage als erledigt markiert");
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRescheduleCallback(report: DashboardData["reports"][number]) {
+    const lead = getLeadForCallbackReport(report);
+    if (!lead) {
+      setNotice("Kein passender Lead zur Wiedervorlage gefunden.");
+      return;
+    }
+
+    const suggested = report.nextCallAt ? new Date(report.nextCallAt).toISOString().slice(0, 16) : "";
+    const next = window.prompt("Neuer Zeitpunkt (YYYY-MM-DDTHH:mm)", suggested);
+    if (!next) return;
+    const parsed = new Date(next);
+    if (Number.isNaN(parsed.getTime())) {
+      setNotice("Ungültiges Datum für die Wiedervorlage.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_lead_details",
+          leadId: lead.id,
+          updates: {
+            nextCallAt: parsed.toISOString(),
+            status: "wiedervorlage",
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(payload.error || "Wiedervorlage konnte nicht verschoben werden.");
+      }
+      await reloadLiveData();
+      setNotice("✓ Wiedervorlage verschoben");
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // API Functions
   const handleFileImport = useCallback(async () => {
     if (!importFile || !importListName.trim()) return;
@@ -421,14 +694,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setImportListName("");
       
       // Reload data
-      const dataRes = await fetch("/api/live", { credentials: "include" });
-      if (dataRes.ok) setData(await dataRes.json());
+      await reloadLiveData();
     } catch (error) {
       setNotice(`✗ Import-Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
     } finally {
       setBusy(false);
     }
-  }, [importFile, importListName, importTopic]);
+  }, [importFile, importListName, importTopic, reloadLiveData]);
 
   const handleSaveNote = useCallback(async (leadId: string, note: string) => {
     if (!selectedLead) return;
@@ -617,14 +889,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setNotice(`✓ Kampagne ${action === "start" ? "gestartet" : action === "stop" ? "gestoppt" : "gelöscht"}`);
       
       // Reload data
-      const dataRes = await fetch("/api/live", { credentials: "include" });
-      if (dataRes.ok) setData(await dataRes.json());
+      await reloadLiveData();
     } catch (error) {
       setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [reloadLiveData]);
 
   // Initialization & Polling
   useEffect(() => {
@@ -747,6 +1018,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setOutlookToDraft(selectedLead?.email || "");
   }, [selectedLead]);
 
+  useEffect(() => {
+    const validLeadIds = new Set((data.leads || []).map((lead) => lead.id));
+    setSelectedLeadIds((current) => current.filter((id) => validLeadIds.has(id)));
+  }, [data.leads]);
+
   // ========================================================================
   // RENDER FUNCTIONS
   // ========================================================================
@@ -805,6 +1081,54 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     return (
       <div className="contacts-view">
         <div className="view-header">
+          <div className="contacts-toolbar">
+            <div className="subtle">Primärer Workflow: CRM Kontakte und Pipeline</div>
+            <div className="bulk-actions-row">
+              <button className="btn-small ghost" onClick={() => setShowAddCustomerForm((value) => !value)}>
+                {showAddCustomerForm ? "Formular schließen" : "Kunde manuell anlegen"}
+              </button>
+              <button className="btn-small ghost" disabled={selectedLeadIds.length === 0} onClick={handleExportSelectedCustomers}>
+                Export ({selectedLeadIds.length})
+              </button>
+              <button className="btn-small danger" disabled={busy || selectedLeadIds.length === 0} onClick={() => void handleDeleteSelectedCustomers()}>
+                Löschen ({selectedLeadIds.length})
+              </button>
+            </div>
+          </div>
+          {showAddCustomerForm ? (
+            <div className="add-customer-panel top-gap">
+              <div className="add-customer-grid">
+                <input className="input" placeholder="Firma *" value={addCustomerDraft.company} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, company: event.target.value }))} />
+                <input className="input" placeholder="Ansprechpartner" value={addCustomerDraft.contactName} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, contactName: event.target.value }))} />
+                <input className="input" placeholder="Telefon *" value={addCustomerDraft.phone} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, phone: event.target.value }))} />
+                <input className="input" placeholder="E-Mail" value={addCustomerDraft.email} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, email: event.target.value }))} />
+                <select className="input" value={addCustomerDraft.topic} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, topic: event.target.value as Topic }))}>
+                  {TOPICS.map((topic) => (
+                    <option key={topic} value={topic}>{topic}</option>
+                  ))}
+                </select>
+                <select className="input" value={addCustomerDraft.owner} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, owner: event.target.value as ManualCustomerDraft["owner"] }))}>
+                  <option value="Agentur-Duic">Agentur-Duic</option>
+                  <option value="BarmeniaGothaer">BarmeniaGothaer</option>
+                </select>
+                <select className="input" value={addCustomerDraft.customerKind} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, customerKind: event.target.value as ManualCustomerDraft["customerKind"] }))}>
+                  <option value="firma">Firma</option>
+                  <option value="privat">Privat</option>
+                </select>
+              </div>
+              <textarea
+                className="notes-input top-gap"
+                placeholder="Notiz"
+                value={addCustomerDraft.note}
+                onChange={(event) => setAddCustomerDraft((current) => ({ ...current, note: event.target.value }))}
+              />
+              <div className="detail-actions-row">
+                <button className="btn" disabled={busy} onClick={() => void handleAddCustomerManually()}>
+                  Kunde speichern
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="search-filters">
             <input
               type="text"
@@ -892,6 +1216,14 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <table className="contacts-table">
               <thead>
                 <tr>
+                  <th className="checkbox-col">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={(event) => toggleSelectAllFiltered(event.target.checked)}
+                      aria-label="Alle gefilterten Kontakte auswählen"
+                    />
+                  </th>
                   <th>Firma</th>
                   <th>Kontakt</th>
                   <th>Telefon</th>
@@ -906,6 +1238,14 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   const status = leadAmpelById.get(lead.id);
                   return (
                     <tr key={lead.id} className="lead-row">
+                      <td className="checkbox-col" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedLeadIds.includes(lead.id)}
+                          onChange={(event) => toggleLeadSelection(lead.id, event.target.checked)}
+                          aria-label={`Kontakt ${lead.company} auswählen`}
+                        />
+                      </td>
                       <td><strong>{lead.company}</strong></td>
                       <td>{lead.contactName || "-"}</td>
                       <td>{lead.phone || lead.directDial || "-"}</td>
@@ -917,12 +1257,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                         </span>
                       </td>
                       <td>
-                        <button
-                          className="btn-small"
-                          onClick={() => setSelectedLead(lead)}
-                        >
-                          Details
-                        </button>
+                        <div className="task-actions">
+                          <button
+                            className="btn-small"
+                            onClick={() => setSelectedLead(lead)}
+                          >
+                            Details
+                          </button>
+                          <button
+                            className="btn-small danger"
+                            disabled={busy}
+                            onClick={() => void handleDeleteLeads([lead.id])}
+                          >
+                            Löschen
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1228,8 +1577,23 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <div className="task-summary">{task.summary}</div>
                 </div>
                 <div className="task-actions">
-                  <button className="btn-small">Fertig</button>
-                  <button className="btn-small ghost">Verschieben</button>
+                  <button className="btn-small ghost" onClick={() => {
+                    const lead = getLeadForCallbackReport(task);
+                    if (lead) {
+                      setSelectedLead(lead);
+                      setActiveView("contacts");
+                    } else {
+                      setNotice("Kein zugehöriger Lead gefunden.");
+                    }
+                  }}>
+                    Öffnen
+                  </button>
+                  <button className="btn-small" disabled={busy} onClick={() => void handleCompleteCallback(task)}>
+                    Fertig
+                  </button>
+                  <button className="btn-small ghost" disabled={busy} onClick={() => void handleRescheduleCallback(task)}>
+                    Verschieben
+                  </button>
                 </div>
               </div>
             ))}
@@ -1629,6 +1993,34 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           flex-wrap: wrap;
         }
 
+        .contacts-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: wrap;
+          margin-bottom: 1rem;
+        }
+
+        .bulk-actions-row {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+        }
+
+        .add-customer-panel {
+          border: 1px solid #dbe4ef;
+          border-radius: 10px;
+          padding: 1rem;
+          background: #f8fbff;
+        }
+
+        .add-customer-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 0.75rem;
+        }
+
         .search-input,
         .filter-select,
         .input {
@@ -1674,6 +2066,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .contacts-table td {
           padding: 1rem;
           border-bottom: 1px solid #f0f0f0;
+        }
+
+        .checkbox-col {
+          width: 44px;
+          text-align: center;
         }
 
         .contacts-table tr:hover {

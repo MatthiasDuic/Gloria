@@ -2447,7 +2447,7 @@ export default function HomePage() {
             onClick={() => setActiveView("leads")}
           >
             <span className="nav-icon" aria-hidden>≡</span>
-            <span>Offene Firmenliste</span>
+            <span>Offene Firmenliste (Legacy)</span>
           </button>
           <button
             className={`nav-item ${activeView === "crm" ? "active" : ""}`}
@@ -2493,7 +2493,7 @@ export default function HomePage() {
             <h1 className="topbar-title">
               {activeView === "overview" ? "Übersicht" : null}
               {activeView === "calls" ? "Anrufe" : null}
-              {activeView === "leads" ? "Offene Firmenliste" : null}
+              {activeView === "leads" ? "Offene Firmenliste (Legacy)" : null}
               {activeView === "crm" ? "CRM" : null}
               {activeView === "calendar" ? "Kalender" : null}
               {activeView === "settings" ? "Einstellungen" : null}
@@ -2791,6 +2791,16 @@ export default function HomePage() {
 
       {activeView === "leads" ? (
       <section className="stack top-section">
+        <div className="mini-panel" style={{ borderLeft: "4px solid #b78722" }}>
+          <h3>Hinweis: Legacy-Bereich</h3>
+          <p className="subtle">
+            Für tägliche Arbeit bitte den CRM-Bereich verwenden. Die Legacy-Ansicht bleibt nur für Übergangsprozesse verfügbar.
+          </p>
+          <div className="row top-gap">
+            <button className="btn" onClick={() => setActiveView("crm")}>Zum CRM wechseln</button>
+          </div>
+        </div>
+
         <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
           <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
           <label>Listenname</label>
