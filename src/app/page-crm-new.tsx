@@ -210,6 +210,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [outlookBodyDraft, setOutlookBodyDraft] = useState("");
   const [outlookToDraft, setOutlookToDraft] = useState("");
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  const [pipelineDropStage, setPipelineDropStage] = useState<string>("");
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState<ManualCustomerDraft>({
     company: "",
@@ -797,8 +799,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [selectedLead]);
 
-  const handleUpdatePipelineStage = useCallback(async () => {
-    if (!selectedLead || !leadPipelineStageDraft) return;
+  const updateLeadPipelineStage = useCallback(async (leadId: string, stage: string) => {
     setBusy(true);
     try {
       const res = await fetch("/api/campaigns/lists", {
@@ -807,10 +808,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "update_lead_details",
-          leadId: selectedLead.id,
+          leadId,
           updates: {
             crmPipeline: {
-              stage: leadPipelineStageDraft,
+              stage,
               updatedAt: new Date().toISOString(),
             },
           },
@@ -825,14 +826,47 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         ...current,
         leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
       }));
-      setSelectedLead(updatedLead);
-      setNotice("✓ Pipeline-Stufe gespeichert");
+      setSelectedLead((current) => (current && current.id === updatedLead.id ? updatedLead : current));
+      setLeadPipelineStageDraft(updatedLead.crmPipeline?.stage || stage);
+      setNotice(`✓ Pipeline-Stufe aktualisiert: ${updatedLead.company} -> ${stage}`);
+      return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Pipeline-Update fehlgeschlagen.");
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [leadPipelineStageDraft, selectedLead]);
+  }, []);
+
+  const handleUpdatePipelineStage = useCallback(async () => {
+    if (!selectedLead || !leadPipelineStageDraft) return;
+    const ok = await updateLeadPipelineStage(selectedLead.id, leadPipelineStageDraft);
+    if (ok) {
+      setNotice("✓ Pipeline-Stufe gespeichert");
+    }
+  }, [leadPipelineStageDraft, selectedLead, updateLeadPipelineStage]);
+
+  async function handlePipelineDrop(targetStage: string) {
+    if (!draggedLeadId) return;
+    if (currentUser?.role !== "master") {
+      setNotice("Nur Master-User können Pipeline-Stufen ändern.");
+      setDraggedLeadId(null);
+      setPipelineDropStage("");
+      return;
+    }
+
+    const lead = (data.leads || []).find((entry) => entry.id === draggedLeadId);
+    const currentStage = String(lead?.crmPipeline?.stage || "").trim();
+    if (!lead || !targetStage || currentStage === targetStage) {
+      setDraggedLeadId(null);
+      setPipelineDropStage("");
+      return;
+    }
+
+    await updateLeadPipelineStage(lead.id, targetStage);
+    setDraggedLeadId(null);
+    setPipelineDropStage("");
+  }
 
   const handleAddOutlookEmail = useCallback(async () => {
     if (!selectedLead || !outlookSubjectDraft.trim()) return;
@@ -1533,14 +1567,42 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             availablePipelineStages.map((stage) => {
               const stageLeads = filteredLeads.filter((lead) => String(lead.crmPipeline || "") === stage);
               return (
-                <div key={stage} className="pipeline-column">
+                <div
+                  key={stage}
+                  className={`pipeline-column ${pipelineDropStage === stage ? "drop-target" : ""}`}
+                  onDragOver={(event) => {
+                    if (!draggedLeadId || busy) return;
+                    event.preventDefault();
+                    setPipelineDropStage(stage);
+                  }}
+                  onDragLeave={() => {
+                    if (pipelineDropStage === stage) {
+                      setPipelineDropStage("");
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void handlePipelineDrop(stage);
+                  }}
+                >
                   <div className="pipeline-column-header">
                     <strong>{stage}</strong>
                     <span>{stageLeads.length}</span>
                   </div>
                   <div className="pipeline-column-body">
                     {stageLeads.map((lead) => (
-                      <button key={lead.id} className="pipeline-card" onClick={() => setSelectedLead(lead)}>
+                      <button
+                        key={lead.id}
+                        className={`pipeline-card ${draggedLeadId === lead.id ? "dragging" : ""}`}
+                        onClick={() => setSelectedLead(lead)}
+                        draggable={!busy && currentUser?.role === "master"}
+                        onDragStart={() => setDraggedLeadId(lead.id)}
+                        onDragEnd={() => {
+                          setDraggedLeadId(null);
+                          setPipelineDropStage("");
+                        }}
+                        title={currentUser?.role === "master" ? "Ziehen zum Verschieben der Stage" : "Nur Master-User können Stages ändern"}
+                      >
                         <strong>{lead.company}</strong>
                         <span>{lead.contactName || "-"}</span>
                         <small>{lead.topic}</small>
@@ -2473,6 +2535,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .task-actions {
           display: flex;
           gap: 0.5rem;
+        }
+
+        .pipeline-column.drop-target {
+          border: 2px dashed #2563eb;
+          border-radius: 10px;
+          background: #eef5ff;
+        }
+
+        .pipeline-card.dragging {
+          opacity: 0.55;
+          transform: scale(0.98);
         }
 
         @media (max-width: 900px) {
