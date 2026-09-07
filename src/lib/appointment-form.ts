@@ -116,11 +116,7 @@ export function shouldIncludeHealthSection(topic?: string) {
   const normalized = normalizeTopic(topic);
   if (!normalized) return false;
 
-  const explicitPrivateHealthPattern = /(private\s*krankenversicherung|privat(?:e|en)?\s*krankenversicherung|privatversicherung|pkv)/.test(normalized);
-  const hasPrivateSignal = normalized.includes("privat") || normalized.includes("private");
-  const hasHealthInsuranceSignal = /(krankenversicherung|gesundheitsversicherung|krankenkasse)/.test(normalized);
-
-  return explicitPrivateHealthPattern || (hasPrivateSignal && hasHealthInsuranceSignal);
+  return /(krankenversicherung|gesundheitsversicherung|krankenkasse|pkv|gkv)/.test(normalized);
 }
 
 export function getAppointmentFormFilename(input: AppointmentFormInput) {

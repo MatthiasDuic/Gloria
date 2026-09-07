@@ -128,5 +128,5 @@ test("shouldIncludeHealthSection recognizes common PKV topic variants", () => {
   assert.equal(shouldIncludeHealthSection("PKV"), true);
   assert.equal(shouldIncludeHealthSection("Privatversicherung"), true);
   assert.equal(shouldIncludeHealthSection("private Krankenversicherung / Zusatzversicherung"), true);
-  assert.equal(shouldIncludeHealthSection("gesetzliche Krankenversicherung"), false);
+  assert.equal(shouldIncludeHealthSection("gesetzliche Krankenversicherung"), true);
 });
