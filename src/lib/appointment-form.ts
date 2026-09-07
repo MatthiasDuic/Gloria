@@ -261,17 +261,13 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     if (shouldIncludeHealthSection(input.topic)) {
       y = section("Gesundheitsangaben", y + 59);
       const healthFields = [
-        ["Körpergröße / Gewicht", formatValue(input.heightWeight)],
         ["Laufende Behandlungen", formatValue(input.ongoingTreatment)],
         ["Bestehende Diagnosen", formatValue(input.diagnoses)],
-        ["Regelmäßige Medikamente", formatValue(input.medication)],
-        ["Psychische Behandlungen, letzte 10 Jahre", formatValue(input.therapy)],
-        ["Fehlende Zähne / Allergien", formatValue(input.dentalAllergies)],
       ];
       healthFields.forEach(([fieldLabel, value], index) => {
         field(fieldLabel, value, left + (index % 2) * (columnWidth + columnGap), y + Math.floor(index / 2) * 44);
       });
-      y += 132;
+      y += 44;
     }
 
     y = section("Notizen für den Termin", y + 18);
