@@ -164,7 +164,7 @@ function getLeadStatus(lead: DashboardData["leads"][number], leadReports: Dashbo
 // MAIN COMPONENT
 // ============================================================================
 
-export default function CRMDashboard() {
+export default function CRMDashboard({ embedded = false }: { embedded?: boolean }) {
   // State Management
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -748,7 +748,7 @@ export default function CRMDashboard() {
 
   if (loading) {
     return (
-      <div className="app-container loading">
+      <div className={`app-container ${embedded ? "embedded" : ""} loading`}>
         <div className="loading-spinner">
           <p>{notice}</p>
         </div>
@@ -757,7 +757,7 @@ export default function CRMDashboard() {
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${embedded ? "embedded" : ""}`}>
       <header className="app-header">
         <div className="header-left">
           <h1>Gloria CRM</h1>
@@ -815,6 +815,14 @@ export default function CRMDashboard() {
           height: 100vh;
           background: #f5f7fa;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        .app-container.embedded {
+          height: auto;
+          min-height: 100%;
+          border-radius: 18px;
+          overflow: hidden;
+          border: 1px solid #d8e0ea;
         }
 
         .loading {
@@ -882,6 +890,10 @@ export default function CRMDashboard() {
           flex: 1;
           overflow-y: auto;
           padding: 2rem;
+        }
+
+        .app-container.embedded .app-main {
+          min-height: 70vh;
         }
 
         /* KPI Grid */

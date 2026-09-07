@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import CRMDashboard from "./page-crm-new";
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
@@ -1034,7 +1035,7 @@ export default function HomePage() {
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   void settingsOpen; void setSettingsOpen;
-  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "calendar" | "settings" | "compliance">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "crm" | "calendar" | "settings" | "compliance">("overview");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2448,10 +2449,13 @@ export default function HomePage() {
             <span className="nav-icon" aria-hidden>≡</span>
             <span>Offene Firmenliste</span>
           </button>
-          <a className="nav-item" href="/crm">
+          <button
+            className={`nav-item ${activeView === "crm" ? "active" : ""}`}
+            onClick={() => setActiveView("crm")}
+          >
             <span className="nav-icon" aria-hidden>◫</span>
             <span>CRM</span>
-          </a>
+          </button>
           <button
             className={`nav-item ${activeView === "calendar" ? "active" : ""}`}
             onClick={() => setActiveView("calendar")}
@@ -2490,6 +2494,7 @@ export default function HomePage() {
               {activeView === "overview" ? "Übersicht" : null}
               {activeView === "calls" ? "Anrufe" : null}
               {activeView === "leads" ? "Offene Firmenliste" : null}
+              {activeView === "crm" ? "CRM" : null}
               {activeView === "calendar" ? "Kalender" : null}
               {activeView === "settings" ? "Einstellungen" : null}
               {activeView === "compliance" ? "Compliance & Ablauf" : null}
@@ -2897,6 +2902,12 @@ export default function HomePage() {
             </div>
           )}
         </CollapsiblePanel>
+      </section>
+      ) : null}
+
+      {activeView === "crm" ? (
+      <section className="top-section">
+        <CRMDashboard embedded />
       </section>
       ) : null}
 
