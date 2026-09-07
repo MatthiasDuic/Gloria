@@ -116,7 +116,7 @@ export function shouldIncludeHealthSection(topic?: string) {
   const normalized = normalizeTopic(topic);
   if (!normalized) return false;
 
-  return /(krankenversicherung|gesundheitsversicherung|krankenkasse|pkv|gkv)/.test(normalized);
+  return /(krankenversicherung|gesundheitsversicherung|krankenkasse|privatversicherung|pkv|gkv)/.test(normalized);
 }
 
 export function getAppointmentFormFilename(input: AppointmentFormInput) {
