@@ -80,6 +80,42 @@ test("requires explicit confirmation after a slot clarification question", () =>
   assert.equal(decision.ok, true);
 });
 
+test("accepts selected offered slot without re-asking when latest turn is appointment mode", () => {
+  const turns: ConversationTurn[] = [
+    ...readyPkvTurns(),
+    { role: "assistant", text: "Welcher Termin passt Ihnen besser: Mittwoch, 26. August um 11:00 Uhr oder Donnerstag, 27. August um 15:30 Uhr?" },
+    { role: "user", text: "Der zweite Termin passt besser." },
+    { role: "assistant", text: "Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?" },
+    { role: "user", text: "Bei mir vor Ort." },
+  ];
+  const decision = decideAppointment({
+    turns,
+    topicKind: "pkv",
+    freeSlotsPrompt: freeSlots,
+    slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",
+  });
+  assert.equal(decision.ok, true);
+});
+
+test("requires asking for customer-proposed slot when both offered slots are rejected", () => {
+  const turns: ConversationTurn[] = [
+    ...readyPkvTurns(),
+    { role: "assistant", text: "Welcher Termin passt Ihnen besser: Mittwoch, 26. August um 11:00 Uhr oder Donnerstag, 27. August um 15:30 Uhr?" },
+    { role: "user", text: "Beide passen leider nicht." },
+  ];
+  const decision = decideAppointment({
+    turns,
+    topicKind: "pkv",
+    freeSlotsPrompt: freeSlots,
+    slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",
+  });
+  assert.equal(decision.ok, false);
+  if (!decision.ok) {
+    assert.equal(decision.error, "conversation_not_ready");
+    assert.match(decision.instruction, /Welchen Termin würden Sie vorschlagen\?/i);
+  }
+});
+
 test("detects the selected appointment mode from the customer answer", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Am liebsten bei mir vor Ort." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Ich komme zu Ihnen in die Agentur." }]), "In der Agentur");
