@@ -184,6 +184,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
+  const [leadNoteDraft, setLeadNoteDraft] = useState("");
+  const [leadTaskTitleDraft, setLeadTaskTitleDraft] = useState("");
+  const [leadTaskDueAtDraft, setLeadTaskDueAtDraft] = useState("");
 
   // Import & Campaign State
   const [csvText, setCsvText] = useState(SAMPLE_CSV);
@@ -413,12 +416,23 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     if (!selectedLead) return;
     setBusy(true);
     try {
-      // In real implementation, would save to database
-      const updatedLeads = data.leads.map(l => 
-        l.id === leadId ? { ...l, note } : l
-      );
-      setData({ ...data, leads: updatedLeads });
-      setSelectedLead({ ...selectedLead, note });
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_note", leadId, note }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!res.ok || !payload.lead) {
+        throw new Error(payload.error || "Notiz konnte nicht gespeichert werden.");
+      }
+      const updatedLead = payload.lead;
+      setData((current) => ({
+        ...current,
+        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      }));
+      setSelectedLead(updatedLead);
+      setLeadNoteDraft(updatedLead.note || "");
       setNotice("✓ Notiz gespeichert");
     } catch (error) {
       setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
@@ -426,6 +440,72 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setBusy(false);
     }
   }, [data.leads, selectedLead]);
+
+  const handleAddLeadTask = useCallback(async () => {
+    if (!selectedLead || !leadTaskTitleDraft.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_lead_task",
+          leadId: selectedLead.id,
+          task: {
+            title: leadTaskTitleDraft,
+            topic: selectedLead.topic,
+            dueAt: leadTaskDueAtDraft || undefined,
+          },
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!res.ok || !payload.lead) {
+        throw new Error(payload.error || "Aufgabe konnte nicht erstellt werden.");
+      }
+      const updatedLead = payload.lead;
+      setData((current) => ({
+        ...current,
+        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      }));
+      setSelectedLead(updatedLead);
+      setLeadTaskTitleDraft("");
+      setLeadTaskDueAtDraft("");
+      setNotice("✓ Aufgabe erstellt");
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [leadTaskDueAtDraft, leadTaskTitleDraft, selectedLead]);
+
+  const handleCompleteLeadTask = useCallback(async (taskId: string) => {
+    if (!selectedLead) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete_lead_task", leadId: selectedLead.id, taskId }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!res.ok || !payload.lead) {
+        throw new Error(payload.error || "Aufgabe konnte nicht abgeschlossen werden.");
+      }
+      const updatedLead = payload.lead;
+      setData((current) => ({
+        ...current,
+        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
+      }));
+      setSelectedLead(updatedLead);
+      setNotice("✓ Aufgabe abgeschlossen");
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [selectedLead]);
 
   const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete") => {
     setBusy(true);
@@ -560,6 +640,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
     return () => clearTimeout(timer);
   }, [activeCrmTab, crmPrefsReady, searchQuery, filterPipeline, filterContact]);
+
+  useEffect(() => {
+    setLeadNoteDraft(selectedLead?.note || "");
+    setLeadTaskTitleDraft("");
+    setLeadTaskDueAtDraft("");
+  }, [selectedLead]);
 
   // ========================================================================
   // RENDER FUNCTIONS
@@ -782,9 +868,58 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 <textarea
                   placeholder="Notiz hinzufügen..."
                   className="notes-input"
-                  defaultValue={selectedLead.note || ""}
+                  value={leadNoteDraft}
+                  onChange={(event) => setLeadNoteDraft(event.target.value)}
                 />
-                <button className="btn">Speichern</button>
+                <div className="detail-actions-row">
+                  <button className="btn" disabled={busy} onClick={() => void handleSaveNote(selectedLead.id, leadNoteDraft)}>
+                    Notiz speichern
+                  </button>
+                </div>
+              </div>
+
+              <div className="detail-section">
+                <h4>Aufgaben</h4>
+                <div className="task-form-grid">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Neue Aufgabe..."
+                    value={leadTaskTitleDraft}
+                    onChange={(event) => setLeadTaskTitleDraft(event.target.value)}
+                  />
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={leadTaskDueAtDraft}
+                    onChange={(event) => setLeadTaskDueAtDraft(event.target.value)}
+                  />
+                  <button className="btn" disabled={busy || !leadTaskTitleDraft.trim()} onClick={() => void handleAddLeadTask()}>
+                    Aufgabe anlegen
+                  </button>
+                </div>
+                <div className="tasks-list top-gap">
+                  {(selectedLead.tasks || []).length === 0 ? (
+                    <p className="subtle">Keine Aufgaben vorhanden</p>
+                  ) : (
+                    (selectedLead.tasks || []).map((task) => (
+                      <div key={task.id} className="task-card compact">
+                        <div className="task-content">
+                          <strong>{task.title}</strong>
+                          <div className="subtle">{task.dueAt ? `Fällig: ${formatDate(task.dueAt)}` : "Ohne Fälligkeitsdatum"}</div>
+                          <div className="subtle">Status: {task.status === "done" ? "Erledigt" : "Offen"}</div>
+                        </div>
+                        {task.status !== "done" ? (
+                          <div className="task-actions">
+                            <button className="btn-small" disabled={busy} onClick={() => void handleCompleteLeadTask(task.id)}>
+                              Erledigt
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1561,6 +1696,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           resize: vertical;
         }
 
+        .detail-actions-row {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 0.75rem;
+        }
+
+        .task-form-grid {
+          display: grid;
+          grid-template-columns: 1.6fr 1fr auto;
+          gap: 0.75rem;
+          align-items: center;
+        }
+
         .btn {
           padding: 0.75rem 1.5rem;
           background: #2563eb;
@@ -1727,6 +1875,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           align-items: start;
         }
 
+        .task-card.compact {
+          padding: 0.9rem 1rem;
+        }
+
         .task-date {
           font-weight: 600;
           color: #2563eb;
@@ -1748,6 +1900,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .task-actions {
           display: flex;
           gap: 0.5rem;
+        }
+
+        @media (max-width: 900px) {
+          .task-form-grid {
+            grid-template-columns: 1fr;
+          }
         }
 
         /* Settings */
