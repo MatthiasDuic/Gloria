@@ -441,8 +441,8 @@ function getTopicPolicySuggestions(topic: Topic, field: keyof TopicPolicyConfig)
       "Nie drängen: Einwände zuerst ernst nehmen, eine klare Absage akzeptieren und nur tatsächlich freie Termine anbieten.",
     ];
     case "requiredQuestions": return isPkv ? [
-      "Darf ich Ihr Geburtsdatum aufnehmen?\nWie groß sind Sie ungefähr?\nWie hoch ist Ihr aktuelles Gewicht?\nBei welchem Krankenversicherer sind Sie versichert?\nWie hoch ist Ihr monatlicher Beitrag?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
-      "Nehmen Sie regelmäßig Medikamente ein?\nGab es stationäre Aufenthalte?\nGab es psychische Behandlungen?\nBestehen Allergien oder ist Zahnersatz geplant?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
+      "Sind Sie aktuell privat oder gesetzlich krankenversichert?\nBei welchem Krankenversicherer sind Sie derzeit versichert?\nWie hoch ist Ihr aktueller Monatsbeitrag?\nDarf ich Ihr Geburtsdatum aufnehmen?\nGibt es aktuell laufende Behandlungen?\nGibt es bestehende Diagnosen, die wir berücksichtigen sollten?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
+      "Versicherungsstatus, aktueller Versicherer, Monatsbeitrag und Geburtsdatum aufnehmen. Danach nach laufenden Behandlungen und bestehenden Diagnosen fragen; bei Ja jeweils eine konkrete Vertiefungsfrage stellen. Zum Abschluss die E-Mail-Adresse für die Terminbestätigung aufnehmen.",
     ] : [
       "Welche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?\nGibt es einen Punkt, den Herr Duic für den Termin vorbereiten soll?",
       "Welche Situation möchten Sie im Termin zuerst klären?\nUnter welcher Nummer erreichen wir Sie bei Rückfragen am besten?",

@@ -17,6 +17,7 @@ export interface AppointmentFormInput {
   healthInsurance?: string;
   monthlyContribution?: string;
   heightWeight?: string;
+  ongoingTreatment?: string;
   medication?: string;
   diagnoses?: string;
   therapy?: string;
@@ -74,6 +75,8 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
   const email = transcriptText.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0]
     || report.summary.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
   const dental = answerAfter(/zähne|zahnersatz/i);
+  const ongoingTreatment = answerAfter(/laufende behandlungen?/i);
+  const diagnosis = answerAfter(/bestehende diagnosen|bekannte diagnosen|diagnosen/i);
   const allergyDetail = answerAfter(/welche allergie liegt|welche allergien/i, /^(?!\s*(?:ja|nein)\b).+/i);
   const allergy = allergyDetail || answerAfter(/allergien|allergisch/i);
   const dentalAllergies = [
@@ -95,8 +98,9 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     healthInsurance: answerAfter(/krankenversicherer|krankenkasse/i),
     monthlyContribution: answerAfter(/aktuellen beitrag/i),
     heightWeight: [height, weight].filter(Boolean).join(" / ") || undefined,
+    ongoingTreatment,
     medication: answerAfter(/medikamente/i),
-    diagnoses: answerAfter(/diagnosen/i),
+    diagnoses: diagnosis,
     therapy: answerAfter(/psychische behandlungen/i),
     hospitalizations: answerAfter(/krankenhausaufenthalte/i),
     dentalAllergies,
@@ -262,10 +266,10 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
       y = section("Gesundheitsangaben", y + 59);
       const healthFields = [
         ["Körpergröße / Gewicht", formatValue(input.heightWeight)],
+        ["Laufende Behandlungen", formatValue(input.ongoingTreatment)],
+        ["Bestehende Diagnosen", formatValue(input.diagnoses)],
         ["Regelmäßige Medikamente", formatValue(input.medication)],
-        ["Bestehende Erkrankungen", formatValue(input.diagnoses)],
         ["Psychische Behandlungen, letzte 10 Jahre", formatValue(input.therapy)],
-        ["KH-Aufenthalte, letzte 10 Jahre", formatValue(input.hospitalizations)],
         ["Fehlende Zähne / Allergien", formatValue(input.dentalAllergies)],
       ];
       healthFields.forEach(([fieldLabel, value], index) => {

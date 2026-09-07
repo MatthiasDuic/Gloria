@@ -127,17 +127,11 @@ const ADAPTIVE_FOLLOW_UP_TOPICS: AdaptiveFollowUpTopic[] = [
 
 const PKV_FALLBACK_QUESTIONS = [
   "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
-  "Darf ich bitte zuerst Ihr Geburtsdatum aufnehmen?",
-  "Könnten Sie mir Ihre Körpergröße nennen?",
-  "Wie ist Ihr aktuelles Gewicht?",
   "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
   "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
-  "Gibt es aktuell laufende Behandlungen oder bekannte Diagnosen, die wir berücksichtigen sollten?",
-  "Nehmen Sie regelmäßig Medikamente ein, und wenn ja, welche?",
-  "Gab es in den letzten fünf Jahren stationäre Aufenthalte im Krankenhaus?",
-  "Gab es in den letzten zehn Jahren psychische Behandlungen?",
-  "Fehlen aktuell Zähne oder ist Zahnersatz geplant?",
-  "Bestehen bei Ihnen bekannte Allergien?",
+  "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
+  "Gibt es aktuell laufende Behandlungen?",
+  "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
 ].join("\n");
 
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
@@ -221,6 +215,12 @@ function isAnswerPlausible(question: string, text: string): boolean {
 
 function followUpQuestions(question: string, answer: string): string[] {
   const normalizedAnswer = answer.trim().toLowerCase();
+  if (/laufende behandlungen/i.test(question) && /^ja\b/i.test(normalizedAnswer)) {
+    return ["Um welche laufende Behandlung geht es genau?"];
+  }
+  if (/bestehende diagnosen|bekannte diagnosen/i.test(question) && /^ja\b/i.test(normalizedAnswer)) {
+    return ["Um welche Diagnose geht es genau?"];
+  }
   const topic = adaptiveTopicForQuestion(question);
   if (topic) {
     const role = adaptiveRoleForQuestion(question, topic);

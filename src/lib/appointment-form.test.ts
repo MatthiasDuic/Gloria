@@ -50,6 +50,10 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
       { speaker: "Interessent", text: "Continentale BKK." },
       { speaker: "Gloria", text: "Fehlen aktuell Zähne oder ist Zahnersatz geplant?" },
       { speaker: "Interessent", text: "Nein." },
+      { speaker: "Gloria", text: "Gibt es aktuell laufende Behandlungen?" },
+      { speaker: "Interessent", text: "Nein." },
+      { speaker: "Gloria", text: "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?" },
+      { speaker: "Interessent", text: "Keine." },
       { speaker: "Gloria", text: "Bestehen bekannte Allergien?" },
       { speaker: "Interessent", text: "Ja." },
       { speaker: "Gloria", text: "Welche Allergie liegt bei Ihnen vor?" },
@@ -62,6 +66,8 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
   assert.equal(input.insuranceStatus, "Ich bin privat versichert.");
   assert.equal(input.birthDate, "2. Mai 1987.");
   assert.equal(input.heightWeight, "96 Kilogramm.");
+  assert.equal(input.ongoingTreatment, "Nein.");
+  assert.equal(input.diagnoses, "Keine.");
   assert.equal(input.healthInsurance, "Continentale BKK.");
   assert.equal(input.dentalAllergies, "Zähne/Zahnersatz: Nein.; Allergien: Ich habe eine Tierhaarallergie.");
   assert.equal(input.email, "muster@muster.de");

@@ -40,6 +40,33 @@ test("does not confuse insurance status with the current insurer", () => {
   assert.match(transition.instruction, /Krankenversicherer/);
 });
 
+test("uses the same compact health precheck regardless of insurance status", () => {
+  assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
+    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+    "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
+    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
+    "Gibt es aktuell laufende Behandlungen?",
+    "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
+  ]);
+});
+
+test("asks for one treatment detail after yes", () => {
+  const treatmentPolicy = { topic: "PKV", requiredQuestions: "Gibt es aktuell laufende Behandlungen?" };
+  let transition = beginPreparation(createPreparationState(treatmentPolicy), "Freitag um 10 Uhr", knownStatusTurns);
+  transition = advancePreparation(transition.state, "Ja.", knownStatusTurns);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Um welche laufende Behandlung/);
+});
+
+test("asks for one diagnosis detail after yes", () => {
+  const diagnosisPolicy = { topic: "PKV", requiredQuestions: "Gibt es bestehende Diagnosen?" };
+  let transition = beginPreparation(createPreparationState(diagnosisPolicy), "Freitag um 10 Uhr", knownStatusTurns);
+  transition = advancePreparation(transition.state, "Ja.", knownStatusTurns);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.match(transition.instruction, /Um welche Diagnose/);
+});
+
 test("repeats only the consent request when the answer is unclear", () => {
   const started = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
   const transition = advancePreparation(started.state, "Vielleicht.", []);
