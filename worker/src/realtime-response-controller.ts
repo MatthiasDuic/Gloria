@@ -68,6 +68,8 @@ export class RealtimeResponseController {
     const sent = this.sendResponse(instructions);
     if (sent) {
       this.lastSentInstructionHash = instrHash;
+      // response.created arrives asynchronously; reserve the response slot now.
+      this.active = true;
     }
     return sent;
   }

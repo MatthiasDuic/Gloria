@@ -287,10 +287,12 @@ async function postWithRetry(
   headers: Record<string, string>,
   body: Record<string, unknown>,
 ): Promise<boolean> {
-  const maxAttempts = 5;
+  const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
       const text = await res.text();
       if (res.ok) return true;
       const retryable = res.status >= 500 || res.status === 429;
@@ -302,6 +304,8 @@ async function postWithRetry(
       log.error("finalize.post_error", { error: message, attempt });
       if (attempt >= maxAttempts) return false;
       await wait(Math.min(4000, 400 * (2 ** (attempt - 1))));
+    } finally {
+      clearTimeout(timeout);
     }
   }
   return false;

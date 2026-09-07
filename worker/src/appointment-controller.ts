@@ -43,10 +43,13 @@ export function detectAppointmentPreference(turns: ConversationTurn[]): Appointm
 }
 
 export function detectAppointmentMode(turns: ConversationTurn[]): AppointmentMode | undefined {
-  const latestUserText = [...turns].reverse().find((turn) => turn.role === "user")?.text || "";
-  if (/\b(?:teams|video(?:termin|call)?|online)\b/i.test(latestUserText)) return "Microsoft Teams";
-  if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(latestUserText)) return "In der Agentur";
-  if (/\b(?:bei\s+mir|bei\s+uns|zu\s+hause|in\s+meinem\s+betrieb|bei\s+mir\s+vor\s+ort)\b/i.test(latestUserText)) return "Beim Kunden vor Ort";
+  const recentUserTurns = turns.filter((turn) => turn.role === "user").slice(-4).reverse();
+  for (const turn of recentUserTurns) {
+    const text = turn.text;
+    if (/\b(?:teams|video(?:termin|call)?|online)\b/i.test(text)) return "Microsoft Teams";
+    if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(text)) return "In der Agentur";
+    if (/\b(?:bei\s+mir|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
+  }
   return undefined;
 }
 

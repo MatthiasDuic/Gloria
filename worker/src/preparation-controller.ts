@@ -273,7 +273,7 @@ export function advancePreparation(
     if (consent === "unknown") {
       return {
         state,
-        instruction: "Die Antwort war unklar. Frage freundlich noch einmal nur, ob zwei Minuten für kurze Vorbereitungsfragen passen.",
+        instruction: "Die Antwort war unklar. Sage nur noch einmal: 'Sind zwei Minuten für kurze Vorbereitungsfragen in Ordnung?' Stelle keine andere Frage.",
       };
     }
     const next = nextUnansweredQuestion(state, turns, 0);
@@ -285,7 +285,7 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "asking", currentQuestionIndex: next.index },
-      instruction: `Stelle ausschließlich diese Vorbereitungsfrage: "${next.question}"`,
+      instruction: `Sage keine Einleitung und stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
     };
   }
 
@@ -295,7 +295,7 @@ export function advancePreparation(
       if (next) {
         return {
           state: { ...state, currentQuestionIndex: next.index },
-          instruction: `Akzeptiere die Absage freundlich ohne Nachfassen. Stelle ausschließlich die nächste Frage: "${next.question}"`,
+          instruction: `Akzeptiere die Absage freundlich in höchstens einem kurzen Satz. Stelle danach ausschließlich diese eine nächste Frage: "${next.question}".`,
         };
       }
       return {
@@ -316,14 +316,14 @@ export function advancePreparation(
       questions.splice((state.currentQuestionIndex ?? -1) + 1, 0, ...followUps);
       return {
         state: { ...state, questions, currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1 },
-        instruction: `Stelle ausschließlich die nächste Vorbereitungsfrage: "${followUps[0]}"`,
+        instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${followUps[0]}". Warte danach vollständig auf die Antwort.`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
     if (next) {
       return {
         state: { ...state, currentQuestionIndex: next.index },
-        instruction: `Stelle ausschließlich die nächste Vorbereitungsfrage: "${next.question}"`,
+        instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
       };
     }
     return {

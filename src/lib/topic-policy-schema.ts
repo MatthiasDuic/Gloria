@@ -66,5 +66,13 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
       type: "string",
       description: "Pflichtfragen, die in der Terminierungs-/Vorbereitungsphase gestellt oder in die Terminbestätigungsmail übernommen werden sollen.",
     },
+    greetingGatekeeper: { type: "string" },
+    greetingDecisionMaker: { type: "string" },
+    reasonForCall: { type: "string" },
+    relevanceQuestion: { type: "string" },
+    contributionQuestion: { type: "string" },
+    projectionText: { type: "string" },
+    conceptTransition: { type: "string" },
+    appointmentConfirmation: { type: "string" },
   },
 } as const;

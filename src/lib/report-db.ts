@@ -2493,6 +2493,76 @@ export async function appendCallTranscriptEventToPostgres(payload: {
   }
 }
 
+export async function appendCallTranscriptEventsToPostgres(
+  payloads: Array<{
+    callSid: string;
+    userId?: string;
+    speaker: "Gloria" | "Interessent";
+    text: string;
+    phase?: string;
+    latencyMs?: number;
+    spokenAt?: number;
+  }>,
+): Promise<boolean> {
+  if (!shouldUsePostgres() || payloads.length === 0) {
+    return false;
+  }
+
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const rows = payloads.map((payload, index) => ({
+      id: `tx-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
+      callSid: payload.callSid,
+      userId: payload.userId || null,
+      speaker: payload.speaker,
+      text: payload.text,
+      phase: payload.phase || null,
+      latencyMs:
+        typeof payload.latencyMs === "number" && Number.isFinite(payload.latencyMs)
+          ? Math.round(payload.latencyMs)
+          : null,
+      spokenAt:
+        typeof payload.spokenAt === "number" && Number.isFinite(payload.spokenAt)
+          ? new Date(payload.spokenAt).toISOString()
+          : null,
+    }));
+
+    await db.query(
+      `
+      INSERT INTO call_transcript_events
+        (id, call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at, created_at)
+      SELECT row.id, row.call_sid, row.user_id, row.speaker, row.text_value,
+        row.phase, row.latency_ms, row.spoken_at::timestamptz, NOW()
+      FROM jsonb_to_recordset($1::jsonb) AS row(
+        id text,
+        call_sid text,
+        user_id text,
+        speaker text,
+        text_value text,
+        phase text,
+        latency_ms integer,
+        spoken_at text
+      )
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM call_transcript_events existing
+        WHERE existing.call_sid = row.call_sid
+          AND existing.speaker = row.speaker
+          AND existing.text_value = row.text_value
+          AND existing.latency_ms IS NOT DISTINCT FROM row.latency_ms
+          AND existing.spoken_at IS NOT DISTINCT FROM row.spoken_at::timestamptz
+      );
+      `,
+      [JSON.stringify(rows)],
+    );
+    return true;
+  } catch (error) {
+    console.error("Postgres transcript batch write failed", error);
+    return false;
+  }
+}
+
 export type TranscriptEvent = {
   id: string;
   callSid: string;

@@ -100,3 +100,15 @@ test("interruption discards stale queued instructions before cancellation comple
   controller.markCancelled();
   assert.deepEqual(sent, ["active"]);
 });
+
+test("reserves the response slot before response.created arrives", () => {
+  const sent: string[] = [];
+  const controller = new RealtimeResponseController({
+    sendResponse: (instructions) => { sent.push(instructions); return true; },
+    isPlaybackPending: () => false,
+  });
+
+  assert.equal(controller.request("first"), true);
+  assert.equal(controller.request("second"), false);
+  assert.deepEqual(sent, ["first"]);
+});

@@ -385,18 +385,20 @@ const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
   "behavior",
   "conversationGuardrails",
   "requiredQuestions",
-  "exampleSentences",
   "gatekeeperTask",
   "gatekeeperBehavior",
   "receptionTopicReason",
   "decisionMakerContext",
   "problemBuildup",
   "conceptTransition",
-  "knowledge",
-  "proofPoints",
   "objectionResponses",
-  "transferHandling",
   "appointmentConfirmation",
+  "greetingGatekeeper",
+  "greetingDecisionMaker",
+  "reasonForCall",
+  "relevanceQuestion",
+  "contributionQuestion",
+  "projectionText",
 ];
 
 function countFilledTopicPolicyFields(config?: TopicPolicyConfig) {
@@ -777,11 +779,7 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
     behavior: pickText(existing?.behavior, preset.behavior),
     conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
     requiredQuestions: pickText(existing?.requiredQuestions || existing?.requiredData, preset.requiredQuestions),
-    exampleSentences: pickText(existing?.exampleSentences, ""),
-    knowledge: pickText(existing?.knowledge, ""),
     objectionResponses: pickText(existing?.objectionResponses, ""),
-    proofPoints: pickText(existing?.proofPoints, ""),
-    transferHandling: pickText(existing?.transferHandling, ""),
     gatekeeperTask: pickText(existing?.gatekeeperTask, ""),
     gatekeeperBehavior: pickText(existing?.gatekeeperBehavior, ""),
     decisionMakerContext: pickText(existing?.decisionMakerContext, ""),
@@ -789,6 +787,12 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
     problemBuildup: pickText(existing?.problemBuildup, ""),
     conceptTransition: pickText(existing?.conceptTransition, ""),
     appointmentConfirmation: pickText(existing?.appointmentConfirmation, ""),
+    greetingGatekeeper: pickText(existing?.greetingGatekeeper, ""),
+    greetingDecisionMaker: pickText(existing?.greetingDecisionMaker, ""),
+    reasonForCall: pickText(existing?.reasonForCall, ""),
+    relevanceQuestion: pickText(existing?.relevanceQuestion, ""),
+    contributionQuestion: pickText(existing?.contributionQuestion, ""),
+    projectionText: pickText(existing?.projectionText, ""),
   };
 }
 
@@ -2333,15 +2337,17 @@ export default function HomePage() {
       behavior: draft.behavior || "",
       conversationGuardrails: draft.conversationGuardrails || "",
       requiredQuestions: draft.requiredQuestions || "",
-      exampleSentences: draft.exampleSentences || "",
+      greetingGatekeeper: draft.greetingGatekeeper || "",
+      greetingDecisionMaker: draft.greetingDecisionMaker || "",
+      reasonForCall: draft.reasonForCall || "",
+      relevanceQuestion: draft.relevanceQuestion || "",
+      contributionQuestion: draft.contributionQuestion || "",
+      projectionText: draft.projectionText || "",
       gatekeeperTask: draft.gatekeeperTask || "",
       gatekeeperBehavior: draft.gatekeeperBehavior || "",
       receptionTopicReason: draft.receptionTopicReason || "",
       decisionMakerContext: draft.decisionMakerContext || "",
-      knowledge: draft.knowledge || "",
-      proofPoints: draft.proofPoints || "",
       objectionResponses: draft.objectionResponses || "",
-      transferHandling: draft.transferHandling || "",
       problemBuildup: draft.problemBuildup || "",
       conceptTransition: draft.conceptTransition || "",
       appointmentConfirmation: draft.appointmentConfirmation || "",
@@ -5186,7 +5192,33 @@ export default function HomePage() {
                       </div>
                     </details>
 
-                    <details className="mini-panel playbook-card playbook-details top-gap">
+                    <details className="mini-panel playbook-card playbook-details top-gap" open>
+                      <summary><strong>10. Beispiele für jeden geplanten Gloria-Satz</strong></summary>
+                      <p className="subtle">Hinterlegen Sie pro Gesprächsschritt genau eine natürliche Beispiel-Formulierung. Gloria passt sie an die letzte Kundenaussage an und liest sie nicht als Monolog vor.</p>
+                      <div className="playbook-grid">
+                        {([
+                          ["greetingGatekeeper", "Begrüßung am Empfang"],
+                          ["greetingDecisionMaker", "Begrüßung beim Entscheider"],
+                          ["reasonForCall", "Anlass in einem Satz"],
+                          ["relevanceQuestion", "Relevanzfrage"],
+                          ["contributionQuestion", "Beitrags- oder Bedarfsermittlung"],
+                          ["projectionText", "Hochrechnung und Nutzenbrücke"],
+                          ["conceptTransition", "Konzept- und Terminüberleitung"],
+                          ["appointmentConfirmation", "Terminbestätigung"],
+                        ] as Array<[keyof TopicPolicyConfig, string]>).map(([field, label]) => (
+                          <div key={field}>
+                            <h4 className="sub-heading">{label}</h4>
+                            <textarea
+                              value={(activeDraft[field] as string | undefined) ?? ""}
+                              rows={4}
+                              onChange={(event) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], [field]: event.target.value } }))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    {false && (<details className="mini-panel playbook-card playbook-details top-gap">
                       <summary><strong>10. Fachwissen, Belege & Einwände</strong></summary>
                       <p className="subtle">Themenspezifischer Wissensrahmen und erlaubte Reaktionslinien für Rückfragen und Einwände.</p>
                       <div className="playbook-grid">
@@ -5211,19 +5243,7 @@ export default function HomePage() {
                           <TopicPolicySuggestions topic={detailTopic} field="transferHandling" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], transferHandling: value } }))} />
                         </div>
                       </div>
-                    </details>
-
-                    <details className="mini-panel playbook-card playbook-details top-gap">
-                      <summary><strong>11. Terminbestätigung</strong></summary>
-                      <p className="subtle">Formulierung, nachdem ein Termin erfolgreich bestätigt wurde.</p>
-                      <div className="playbook-grid">
-                        <div>
-                          <h4 className="sub-heading">Terminbestätigung</h4>
-                          <textarea value={activeDraft.appointmentConfirmation ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], appointmentConfirmation: event.target.value } }))} />
-                          <TopicPolicySuggestions topic={detailTopic} field="appointmentConfirmation" onSelect={(value) => setDraftScripts((current) => ({ ...current, [detailTopic]: { ...current[detailTopic], appointmentConfirmation: value } }))} />
-                        </div>
-                      </div>
-                    </details>
+                    </details>)}
 
                     <div className="row top-gap">
                       <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Topic Policy speichern</button>

@@ -158,13 +158,15 @@ export function advancePkvStep(
       return { nextStep: 0, shouldEnd: false };
     }
 
-    case 1:
-      // Any response to relevance question → emotional follow-up
-      return { nextStep: 2, shouldEnd: false };
+    case 1: {
+      const relevant = /\b(?:ja|nein|beitrag\w*|steig\w*|gestieg\w*|erh[öo]h\w*|teuer\w*|hoch|belast\w*|sorge\w*|sp[üu]r\w*|merk\w*|ruhestand|rente|planung|problem\w*|betrifft|noch\s+nicht|bisher\s+nicht)\b/i.test(text);
+      return { nextStep: relevant ? 2 : 1, shouldEnd: false };
+    }
 
-    case 2:
-      // Any response to emotional follow-up → ask for contribution
-      return { nextStep: 3, shouldEnd: false };
+    case 2: {
+      const relevant = /\b(?:ja|nein|plan|vorsorge|abgesichert|absicherung|ruhestand|rente|gedanken|gek[üu]mmert|beraten|beratung|makler|noch\s+nicht|bisher\s+nicht|wei[ßs]\s+ich\s+nicht)\b/i.test(text);
+      return { nextStep: relevant ? 3 : 2, shouldEnd: false };
+    }
 
     case 3: {
       const hasAmount = /\b(?:\d{2,5}|hundert|tausend|euro|€)\b/i.test(text);
@@ -172,9 +174,12 @@ export function advancePkvStep(
       return { nextStep: 3, shouldEnd: false };
     }
 
-    case 4:
-      // Any response to projection → concept
-      return { nextStep: 5, shouldEnd: false };
+    case 4: {
+      const hasOnlyRepeatedAmount = /\b(?:\d{2,5}|hundert|tausend)\b.*\b(?:euro|€)\b/i.test(text)
+        && !/\b(?:ja|nein|durchgerechnet|gerechnet|gewusst|bewusst|viel|hoch|heftig|überrasch|erschreck|interessant|belast|sorge)\b/i.test(text);
+      const relevant = /\b(?:ja|nein|durchgerechnet|gerechnet|gewusst|bewusst|viel|hoch|heftig|überrasch|erschreck|interessant|belast|sorge|noch\s+nie|noch\s+nicht)\b/i.test(text);
+      return { nextStep: relevant && !hasOnlyRepeatedAmount ? 5 : 4, shouldEnd: false };
+    }
 
     case 5: {
       const interested = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|sicher\b|natürlich\b|m[oö]chte|sehr\s+gerne|würde\s+gerne|relevant\b|schon\b)\b/i.test(text);

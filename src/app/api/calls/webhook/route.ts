@@ -3,6 +3,7 @@ import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
 import { getDashboardData, getLeadById, storeCallReport } from "@/lib/storage";
 import {
   appendCallTranscriptEventToPostgres,
+  appendCallTranscriptEventsToPostgres,
   findUserById,
   listCallTranscriptEventsFromPostgres,
   releaseCampaignCallLock,
@@ -242,12 +243,12 @@ async function persistTranscriptArray(
   userId: string | undefined,
 ) {
   if (!Array.isArray(entries) || entries.length === 0 || !callSid) return;
-  for (const entry of entries) {
+  const transcriptEvents = entries.flatMap((entry) => {
     const text = (entry.text || "").trim();
-    if (!text) continue;
+    if (!text) return [];
     const speaker: "Gloria" | "Interessent" =
       entry.speaker === "Gloria" || entry.role === "assistant" ? "Gloria" : "Interessent";
-    await appendCallTranscriptEventToPostgres({
+    return [{
       callSid,
       userId,
       speaker,
@@ -258,8 +259,9 @@ async function persistTranscriptArray(
           ? entry.latencyMs
           : undefined,
       spokenAt: typeof entry.at === "number" ? entry.at : undefined,
-    });
-  }
+    }];
+  });
+  await appendCallTranscriptEventsToPostgres(transcriptEvents);
 }
 
 export async function POST(request: Request) {

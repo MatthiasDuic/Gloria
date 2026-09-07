@@ -20,6 +20,12 @@ export type TopicPolicyFields = {
   gatekeeperTask?: string;
   gatekeeperBehavior?: string;
   appointmentConfirmation?: string;
+  greetingGatekeeper?: string;
+  greetingDecisionMaker?: string;
+  reasonForCall?: string;
+  relevanceQuestion?: string;
+  contributionQuestion?: string;
+  projectionText?: string;
 };
 
 function compactPolicyText(value: string, maxLines = 5, maxLength = 700): string {
@@ -104,6 +110,16 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const gatekeeperTask = compactPolicyText(policy.gatekeeperTask || "", 2, 260);
   const gatekeeperBehavior = compactPolicyText(policy.gatekeeperBehavior || "", 3, 320);
   const appointmentConfirmation = compactPolicyText(policy.appointmentConfirmation || "", 2, 260);
+  const sentenceExamples = [
+    ["Empfangsbegrüßung", policy.greetingGatekeeper],
+    ["Entscheiderbegrüßung", policy.greetingDecisionMaker],
+    ["Anlass", policy.reasonForCall],
+    ["Relevanzfrage", policy.relevanceQuestion],
+    ["Beitragsfrage", policy.contributionQuestion],
+    ["Hochrechnung / Überleitung", policy.projectionText],
+    ["Konzept- und Terminbrücke", policy.conceptTransition],
+    ["Terminbestätigung", policy.appointmentConfirmation],
+  ].filter(([, value]) => value?.trim()).map(([label, value]) => `${label}: ${compactPolicyText(value!, 2, 300)}`);
 
   if (
     !topicSummary &&
@@ -174,6 +190,9 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   }
   if (appointmentConfirmation) {
     parts.push("", "NACH ERFOLGREICHER TERMINBESTÄTIGUNG (sinngemäß):", appointmentConfirmation);
+  }
+  if (sentenceExamples.length) {
+    parts.push("", "BEISPIELE FÜR GEPLANTE GLORIA-SÄTZE (situativ anpassen, nicht als Monolog aufsagen):", ...sentenceExamples);
   }
 
   return parts.join("\n");

@@ -53,6 +53,15 @@ test("does not advance from step 0 on a plain greeting", () => {
   assert.deepEqual(advancePkvStep(0, "Ja, gerne."), { nextStep: 1, shouldEnd: false });
 });
 
+test("does not advance PKV stages on unrelated or repeated utterances", () => {
+  assert.deepEqual(advancePkvStep(1, "Hallo, willkommen."), { nextStep: 1, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(1, "Die Beiträge sind schon stark gestiegen."), { nextStep: 2, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(2, "Dann lass mich das mal eben fertig machen."), { nextStep: 2, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(2, "Nein, dafür habe ich noch keinen Plan."), { nextStep: 3, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(4, "Ich zahle derzeit 850 Euro."), { nextStep: 4, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(4, "Nein, so habe ich das noch nie durchgerechnet."), { nextStep: 5, shouldEnd: false });
+});
+
 test("uses a deterministic 10-year projection instead of inventing a wrong value", () => {
   const instruction = instructionForPkvStep(4, "1000 Euro");
   assert.match(instruction, /1000 Euro.*1480 Euro.*480 Euro mehr pro Monat/i);

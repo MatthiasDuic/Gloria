@@ -84,9 +84,12 @@ test("detects the selected appointment mode from the customer answer", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Am liebsten bei mir vor Ort." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Ich komme zu Ihnen in die Agentur." }]), "In der Agentur");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Machen wir das per Teams." }]), "Microsoft Teams");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Vor Ort." }]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Herr Duic kann zu mir kommen." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Der Montag passt besser." }]), undefined);
   assert.equal(detectAppointmentMode([
-    { role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." },
+    { role: "user", text: "Bei mir." },
     { role: "user", text: "Der Montag passt besser." },
-  ]), undefined);
+  ]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." }]), undefined);
 });
