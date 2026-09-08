@@ -72,6 +72,8 @@ test("uses a deterministic 10-year projection instead of inventing a wrong value
 test("requires an unambiguous interest statement before starting appointment scheduling", () => {
   assert.equal(isClearPkvInterest("Ja, gerne."), true);
   assert.equal(isClearPkvInterest("Das würde ich gerne machen."), true);
+  assert.equal(isClearPkvInterest("Das klingt interessant."), true);
+  assert.equal(isClearPkvInterest("Das macht Sinn."), true);
   assert.equal(isClearPkvInterest("Auf kommt mir aus."), false);
   assert.equal(isClearPkvInterest("Mhm."), false);
 });

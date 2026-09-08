@@ -245,17 +245,11 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
-    "DIALOGKERN: Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte ohne Einleitung, Bestätigung oder Wiederholung direkt mit dem nächsten sinnvollen Satz. Sprich natürlich und knapp: höchstens ein kurzer Satz und eine Frage als letzten Satz. Danach wartest du vollständig.",
-    "Keine Kundenwiederholungen: Nutze keine zuvor gehörten Kundenwörter oder Formulierungen als alleinigen Grund für einen eigenen Satz. Antworte auf den aktuellen Inhalt statt auf wiederholte Kundenbegriffe.",
-    "Vermeide Dankesfloskeln im normalen Gespräch. Nur maximal eine kurze Verabschiedung am Schluss. Keine 'Danke'-Floskel zwischen Gesprächsschritten und keine künstlichen Dankesformeln im Lauf des Calls.",
-    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Verwende nicht 'Alles klar', 'Verstehe', 'Super', 'Perfekt', 'Danke' oder ähnliche Einleitungen, außer der Kunde hat gerade eine wichtige Sorge geschildert. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
-    "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
-    "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
-    "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
-    "Die Topic Policy steuert Anlass, Kundennutzen, Einwandbehandlung und Gesprächsführung für dieses Thema. Universell verbindlich bleiben nur Transparenz, Freiwilligkeit, Datenschutz, die Terminlogik und fachliche Grenzen.",
-    "Sprich menschlich, ruhig, freundlich und auf Augenhöhe. Keine Callcenter-Monologe, künstliche Vertrautheit, erfundenen Fakten oder manipulative Dringlichkeit. Nimm die konkrete Perspektive des Kunden kurz auf, ohne zu dramatisieren, und gib einen nachvollziehbaren nächsten Schritt.",
-    "Nach einer Unterbrechung setzt du nur an der offenen Stelle an. Keine komplette Vorstellung und keine Wiederholung bereits gesprochener Sätze. Frage bei unklarem Inhalt kurz nach; antworte sonst direkt.",
-    "Gib niemals zu, dass du etwas erfunden hast, dass deine Information ungenau ist, oder dass du dich geirrt hast. Wenn du einen Fehler bemerkst oder unsicher bist, korrigiere dich diskret und fahre mit Sicherheit fort—Beispiel: nicht 'Ich kann das nicht sauber herleiten, ohne etwas zu erfinden', sondern 'Lass mich das anders erklären' oder direkt die nächste passende Frage. Vertrauen bauen heißt: immer kompetent wirken, auch wenn du eine Aussage anpasst.",
+    "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: direkt mit dem nächsten Schritt fortfahren. Bei Interesse: direkt den nächsten Schritt anbieten. Vermeide Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder 'Danke'.",
+    "Sprich ruhig, freundlich und konkret. Höchstens ein kurzer Satz und eine Frage. Kein Callcenter-Monolog, keine künstliche Vertrautheit, keine Wiederholung der Kundenaussage und keine leeren Bestätigungen. Sprich Standarddeutsch und keine englischen Füllwörter.",
+    "Lass den Kunden ausreden. Ein Fragment, 'äh', 'mhm', 'aha' oder unklarer Ton ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann einmal kurz nach, statt etwas anzunehmen.",
+    "Die Topic Policy steuert Anlass, Nutzen, Einwände und fachliche Grenzen. Die universellen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und Terminlogik haben Vorrang.",
+    "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "VERABSCHIEDUNG: Die letzte Aussage am Ende des Gesprächs muss exakt lauten: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Rufe danach end_call auf.",
@@ -452,6 +446,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let hangupAfterAssistantResponse = false;
   let terminationInProgress = false;
   let hangupAfterPlayback = false;
+  let interruptedAssistantContext = "";
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -597,12 +592,22 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, instructions) : instructions || "";
+    const interruption = interruptedAssistantContext;
+    interruptedAssistantContext = "";
+    const withInterruption = interruption
+      ? `Du wurdest während dieses begonnenen Satzes unterbrochen: "${interruption}". Reagiere jetzt auf die neue Kundenaussage. Wiederhole den Satz nicht vollständig und stelle keine bereits beantwortete Frage erneut.\n${instructions || ""}`
+      : instructions;
+    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, withInterruption) : withInterruption || "";
     return responses.request(responseInstructions);
   };
 
   const requestEventResponse = (instructions: string) => {
-    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, instructions, false) : instructions;
+    const interruption = interruptedAssistantContext;
+    interruptedAssistantContext = "";
+    const withInterruption = interruption
+      ? `Du wurdest während dieses begonnenen Satzes unterbrochen: "${interruption}". Reagiere jetzt auf die neue Kundenaussage. Wiederhole den Satz nicht vollständig und stelle keine bereits beantwortete Frage erneut.\n${instructions}`
+      : instructions;
+    const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, withInterruption, false) : withInterruption;
     return responses.request(responseInstructions);
   };
 
@@ -953,7 +958,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           if (plan.clearTelnyxPlayback) sendTelnyx({ event: "clear" });
           for (const event of plan.openAiEvents) sendOpenAi(event);
           if (ctx && currentAssistantTurnIndex !== undefined) {
-            ctx.transcript.splice(currentAssistantTurnIndex, 1);
+            interruptedAssistantContext = ctx.transcript[currentAssistantTurnIndex]?.text || "";
             currentAssistantTurnIndex = undefined;
           }
           ttsPlaybackStartedAt = null;

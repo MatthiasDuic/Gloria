@@ -196,8 +196,9 @@ export function advancePkvStep(
 
 export function isClearPkvInterest(text: string): boolean {
   const normalized = text.toLowerCase().trim();
-  return /^(?:ja|gerne|sehr gerne|interessant|klingt gut|das klingt gut|das möchte ich|würde ich gerne|machen wir|passt|einverstanden)\b/i.test(normalized)
-    || /\b(?:das|es)\s+(?:möchte|würde)\s+ich\s+(?:gern|gerne)\b/i.test(normalized);
+  return /^(?:ja|gerne|sehr gerne|interessant|klingt gut|das klingt gut|das möchte ich|würde ich gerne|machen wir|passt|einverstanden|gute idee|guter gedanke)\b/i.test(normalized)
+    || /\b(?:das|es)\s+(?:möchte|würde)\s+ich\s+(?:gern|gerne)\b/i.test(normalized)
+    || /\b(?:macht sinn|sinnvoll|interessant|hört sich gut an|hoert sich gut an|genau das brauche ich|bringt mich weiter|zeigen sie mir das)\b/i.test(normalized);
 }
 
 // ============================================================================
