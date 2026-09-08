@@ -127,7 +127,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
 
     case 6:
       return (
-        "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Vor-Ort-Termin bei Ihm. Geh professionell vor:\n" +
+        "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin bei ihm vor Ort. Geh professionell vor:\n" +
         "1. Frage: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
         "2. Biete zwei passende Termine an: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
         "3. Falls keiner passt: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Wunsch.\n" +

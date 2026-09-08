@@ -23,9 +23,8 @@ test("buildAppointmentFormInputFromReport extracts appointment preparation data"
   assert.equal(input.birthDate, "2. Mai 87.");
   assert.equal(input.healthInsurance, "Allianz.");
   assert.equal(input.monthlyContribution, "Circa 690 Euro.");
-  assert.equal(input.heightWeight, "Ein Meter achtundachtzig. / 96 Kilogramm.");
-  assert.equal(input.medication, "Nein.");
-  assert.equal(input.dentalAllergies, "Allergien: Nein.");
+  assert.equal(input.ongoingTreatment, undefined);
+  assert.equal(input.diagnoses, undefined);
   assert.equal(input.notes, "Nur diese Zusammenfassung soll in die Notizen.");
 });
 
@@ -40,24 +39,16 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
     transcriptEvents: [
       { speaker: "Gloria", text: "Sind Sie aktuell privat oder gesetzlich krankenversichert?" },
       { speaker: "Interessent", text: "Ich bin privat versichert." },
+      { speaker: "Gloria", text: "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?" },
+      { speaker: "Interessent", text: "980 Euro." },
       { speaker: "Gloria", text: "Ihr Geburtsdatum?" },
       { speaker: "Interessent", text: "2. Mai 1987." },
-      { speaker: "Gloria", text: "Ihr aktuelles Gewicht?" },
-      { speaker: "Interessent", text: "Lexamon ist zurückkommen." },
-      { speaker: "Gloria", text: "Ihr aktuelles Gewicht?" },
-      { speaker: "Interessent", text: "96 Kilogramm." },
       { speaker: "Gloria", text: "Bei welchem Krankenversicherer sind Sie aktuell versichert?" },
       { speaker: "Interessent", text: "Continentale BKK." },
-      { speaker: "Gloria", text: "Fehlen aktuell Zähne oder ist Zahnersatz geplant?" },
-      { speaker: "Interessent", text: "Nein." },
       { speaker: "Gloria", text: "Gibt es aktuell laufende Behandlungen?" },
       { speaker: "Interessent", text: "Nein." },
       { speaker: "Gloria", text: "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?" },
       { speaker: "Interessent", text: "Keine." },
-      { speaker: "Gloria", text: "Bestehen bekannte Allergien?" },
-      { speaker: "Interessent", text: "Ja." },
-      { speaker: "Gloria", text: "Welche Allergie liegt bei Ihnen vor?" },
-      { speaker: "Interessent", text: "Ich habe eine Tierhaarallergie." },
       { speaker: "Interessent", text: "muster@muster.de" },
     ],
   });
@@ -65,11 +56,10 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
   assert.equal(input.appointmentMode, "Microsoft Teams");
   assert.equal(input.insuranceStatus, "Ich bin privat versichert.");
   assert.equal(input.birthDate, "2. Mai 1987.");
-  assert.equal(input.heightWeight, "96 Kilogramm.");
+  assert.equal(input.monthlyContribution, "980 Euro.");
   assert.equal(input.ongoingTreatment, "Nein.");
   assert.equal(input.diagnoses, "Keine.");
   assert.equal(input.healthInsurance, "Continentale BKK.");
-  assert.equal(input.dentalAllergies, "Zähne/Zahnersatz: Nein.; Allergien: Ich habe eine Tierhaarallergie.");
   assert.equal(input.email, "muster@muster.de");
 });
 
@@ -90,12 +80,7 @@ test("buildAppointmentFormPdf creates a valid PDF document", async () => {
     insuranceStatus: "Privat versichert",
     healthInsurance: "Beispiel Versicherung",
     monthlyContribution: "980 EUR",
-    heightWeight: "182 cm / 84 kg",
-    medication: "Keine Angaben",
     diagnoses: "Keine Angaben",
-    therapy: "Keine Angaben",
-    hospitalizations: "Keine Angaben",
-    dentalAllergies: "Keine Angaben",
     notes: "Gesundheitsangaben werden beim Termin bei Bedarf ergänzt.",
   });
 

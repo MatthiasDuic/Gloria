@@ -1003,11 +1003,13 @@ export default function HomePage() {
     createdAt: string;
   }>>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptSource, setTranscriptSource] = useState<"transcript_events" | "conversation_events" | "none">("none");
 
   useEffect(() => {
     const callSid = selectedReport?.callSid?.trim();
     if (!callSid) {
       setTranscriptEvents([]);
+      setTranscriptSource("none");
       return;
     }
     let cancelled = false;
@@ -1017,13 +1019,15 @@ export default function HomePage() {
         if (!res.ok) throw new Error(`http ${res.status}`);
         return res.json();
       })
-      .then((data: { events?: typeof transcriptEvents }) => {
+      .then((data: { events?: typeof transcriptEvents; source?: "transcript_events" | "conversation_events" }) => {
         if (cancelled) return;
         setTranscriptEvents(Array.isArray(data.events) ? data.events : []);
+        setTranscriptSource(data.source || "none");
       })
       .catch(() => {
         if (cancelled) return;
         setTranscriptEvents([]);
+        setTranscriptSource("none");
       })
       .finally(() => {
         if (!cancelled) setTranscriptLoading(false);
@@ -3954,6 +3958,23 @@ export default function HomePage() {
 
       {selectedReport && (() => {
         const conversationLines = buildConversationLines(selectedReport.summary || "");
+        const timelineEntries = transcriptEvents.length > 0
+          ? transcriptEvents
+          : conversationLines.map((entry, index) => ({
+            id: `summary-${index}`,
+            speaker: entry.speaker as "Gloria" | "Interessent",
+            text: entry.text,
+            createdAt: selectedReport.conversationDate,
+            spokenAt: undefined,
+            latencyMs: undefined,
+          }));
+        const gloriaLatencies = transcriptEvents
+          .filter((entry) => entry.speaker === "Gloria" && typeof entry.latencyMs === "number")
+          .map((entry) => entry.latencyMs as number);
+        const averageLatency = gloriaLatencies.length
+          ? Math.round(gloriaLatencies.reduce((sum, latency) => sum + latency, 0) / gloriaLatencies.length)
+          : undefined;
+        const slowLatencyCount = gloriaLatencies.filter((latency) => latency > 1500).length;
         const lostStage = selectedReport.outcome !== "Termin" && selectedReport.outcome !== "Wiedervorlage"
           ? detectLostStage(selectedReport.summary || "")
           : null;
@@ -3968,6 +3989,7 @@ export default function HomePage() {
                   {selectedReport.outcome}
                 </span>
                 <span className="subtle" style={{ fontSize: "0.85rem" }}>{formatDate(selectedReport.conversationDate)}</span>
+                {selectedReport.summary.includes("Testanruf ohne CRM-Zuordnung") ? <span className="subtle" style={{ fontSize: "0.85rem" }}>Testanruf ohne CRM-Kontakt</span> : null}
               </div>
 
               <div className="report-detail-grid">
@@ -4013,55 +4035,23 @@ export default function HomePage() {
                   )}
                 </div>
 
-                {/* Conversation flow */}
-                {conversationLines.length > 0 && (
-                  <div className="report-detail-field report-detail-full">
-                    <label>Gesprächsverlauf</label>
-                    <div style={{ display: "grid", gap: 6, marginTop: 4 }}>
-                      {conversationLines.map((line, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            fontSize: "0.88rem",
-                            background: line.speaker === "Gloria" ? "rgba(43,101,217,0.07)" : "rgba(32,57,93,0.05)",
-                            borderLeft: `3px solid ${line.speaker === "Gloria" ? "var(--blue-500)" : "var(--gold-500)"}`,
-                          }}
-                        >
-                          <span style={{ fontWeight: 700, fontSize: "0.78rem", color: line.speaker === "Gloria" ? "var(--blue-600)" : "var(--gold-600)" }}>
-                            {line.speaker}
-                          </span>
-                          <br />
-                          {line.text}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 <div className="report-detail-field report-detail-full">
-                  <label>Gesprächsprotokoll (Reaktionszeit pro Gloria-Antwort)</label>
+                  <label>Gesprächsprotokoll</label>
                   <p className="subtle" style={{ marginTop: 0, marginBottom: 8 }}>
-                    Vollständiger textbasierter Verlauf aus der Live-Transkription, damit nachvollziehbar bleibt, was gesprochen wurde.
+                    {transcriptSource === "transcript_events" ? "Vollständiger Live-Mitschnitt mit Reaktionszeit pro Gloria-Antwort." : timelineEntries.length > 0 ? "Im Report gesicherter Fallback-Mitschnitt; Reaktionszeiten sind hierfür nicht verfügbar." : "Lade den vollständigen Gesprächsverlauf."}
                   </p>
                   {transcriptLoading ? (
                     <p className="subtle" style={{ marginTop: 6 }}>Wird geladen …</p>
-                  ) : transcriptEvents.length === 0 ? (
-                    conversationLines.length > 0 ? (
-                      <p className="subtle" style={{ marginTop: 6 }}>
-                        Kein technischer Live-Mitschnitt gespeichert. Es liegt aber ein Gesprächsverlauf in der
-                        Zusammenfassung vor (oben angezeigt).
-                      </p>
-                    ) : (
-                      <p className="subtle" style={{ marginTop: 6 }}>
-                        Für diesen Anruf liegt kein Live-Mitschnitt vor. Das passiert typischerweise bei älteren
-                        Calls ohne Streaming oder wenn die Pipeline vorzeitig beendet wurde.
-                      </p>
-                    )
+                  ) : timelineEntries.length === 0 ? (
+                    <p className="subtle" style={{ marginTop: 6 }}>Für diesen Anruf liegt kein technischer Mitschnitt vor. Die Gesprächszusammenfassung finden Sie direkt darunter.</p>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                      {transcriptEvents.map((entry) => {
+                      {averageLatency !== undefined && (
+                        <p className="subtle" style={{ margin: "0 0 4px" }}>
+                          Durchschnitt: {(averageLatency / 1000).toFixed(2)} s | Langsame Antworten über 1,5 s: {slowLatencyCount} | Höchste Reaktionszeit: {(Math.max(...gloriaLatencies) / 1000).toFixed(2)} s
+                        </p>
+                      )}
+                      {timelineEntries.map((entry) => {
                         const isGloria = entry.speaker === "Gloria";
                         const ts = entry.spokenAt || entry.createdAt;
                         const tsLabel = ts

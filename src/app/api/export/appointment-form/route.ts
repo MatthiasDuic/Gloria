@@ -62,13 +62,8 @@ export async function POST(request: Request) {
       insuranceStatus: typeof payload.insuranceStatus === "string" ? payload.insuranceStatus : undefined,
       healthInsurance: typeof payload.healthInsurance === "string" ? payload.healthInsurance : undefined,
       monthlyContribution: typeof payload.monthlyContribution === "string" ? payload.monthlyContribution : undefined,
-      heightWeight: typeof payload.heightWeight === "string" ? payload.heightWeight : undefined,
       ongoingTreatment: typeof payload.ongoingTreatment === "string" ? payload.ongoingTreatment : undefined,
-      medication: typeof payload.medication === "string" ? payload.medication : undefined,
       diagnoses: typeof payload.diagnoses === "string" ? payload.diagnoses : undefined,
-      therapy: typeof payload.therapy === "string" ? payload.therapy : undefined,
-      hospitalizations: typeof payload.hospitalizations === "string" ? payload.hospitalizations : undefined,
-      dentalAllergies: typeof payload.dentalAllergies === "string" ? payload.dentalAllergies : undefined,
       notes: typeof payload.notes === "string" ? payload.notes : undefined,
     });
 

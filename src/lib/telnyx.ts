@@ -153,6 +153,7 @@ function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     ownerCompanyName: payload.ownerCompanyName,
     ownerGesellschaft: payload.ownerGesellschaft,
     voiceId: payload.voiceId,
+    isTestCall: payload.isTestCall === true,
     isCallback: payload.isCallback ? 1 : 0,
     previousSummary: (payload.previousSummary || "").slice(0, 320),
   };

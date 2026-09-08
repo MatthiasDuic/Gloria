@@ -16,13 +16,8 @@ export interface AppointmentFormInput {
   insuranceStatus?: string;
   healthInsurance?: string;
   monthlyContribution?: string;
-  heightWeight?: string;
   ongoingTreatment?: string;
-  medication?: string;
   diagnoses?: string;
-  therapy?: string;
-  hospitalizations?: string;
-  dentalAllergies?: string;
   notes?: string;
 }
 
@@ -69,20 +64,11 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     }
     return undefined;
   };
-  const height = answerAfter(/körpergröße|koerpergroesse/i);
-  const weight = answerAfter(/(?:aktuelles\s+)?gewicht/i, /(?:\d{2,3}|[a-zäöüß-]+)\s*(?:kg|kilo|kilogramm)\b/i);
   const transcriptText = turns.map((turn) => turn.text).join("\n");
   const email = transcriptText.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0]
     || report.summary.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
-  const dental = answerAfter(/zähne|zahnersatz/i);
   const ongoingTreatment = answerAfter(/laufende behandlungen?/i);
   const diagnosis = answerAfter(/bestehende diagnosen|bekannte diagnosen|diagnosen/i);
-  const allergyDetail = answerAfter(/welche allergie liegt|welche allergien/i, /^(?!\s*(?:ja|nein)\b).+/i);
-  const allergy = allergyDetail || answerAfter(/allergien|allergisch/i);
-  const dentalAllergies = [
-    dental && `Zähne/Zahnersatz: ${dental}`,
-    allergy && `Allergien: ${allergy}`,
-  ].filter(Boolean).join("; ") || undefined;
 
   return {
     title: "Kundenterminbogen",
@@ -96,14 +82,9 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     birthDate: answerAfter(/geburtsdatum/i),
     insuranceStatus: answerAfter(/privat\s+oder\s+gesetzlich|versicherungsstatus/i),
     healthInsurance: answerAfter(/krankenversicherer|krankenkasse/i),
-    monthlyContribution: answerAfter(/aktuellen beitrag/i),
-    heightWeight: [height, weight].filter(Boolean).join(" / ") || undefined,
+    monthlyContribution: answerAfter(/aktuellen beitrag|monatsbeitrag/i),
     ongoingTreatment,
-    medication: answerAfter(/medikamente/i),
     diagnoses: diagnosis,
-    therapy: answerAfter(/psychische behandlungen/i),
-    hospitalizations: answerAfter(/krankenhausaufenthalte/i),
-    dentalAllergies,
     notes: getReportSummary(report.summary),
   };
 }

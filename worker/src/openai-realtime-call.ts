@@ -51,6 +51,7 @@ type ClientState = {
   ownerGesellschaft?: string;
   previousSummary?: string;
   isCallback?: number;
+  isTestCall?: boolean;
 };
 
 type RealtimeToolCall = {
@@ -1176,6 +1177,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ownerGesellschaft: state.ownerGesellschaft,
         previousSummary: state.previousSummary,
         isCallback: state.isCallback === 1,
+        isTestCall: state.isTestCall === true,
       });
       contactRouting = createContactRoutingState(state.contactName);
       log.info("realtime.call_started", {

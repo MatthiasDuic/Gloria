@@ -17,37 +17,26 @@ export const maxDuration = 60;
 const BASIS_FIELD_RULES: Array<{
   key:
     | "birthDate"
-    | "height"
-    | "weight"
+    | "insuranceStatus"
     | "insurer"
     | "monthlyPremium"
-    | "diagnoses"
-    | "medication"
-    | "hospitalStays"
-    | "psychTreatment"
-    | "teeth"
-    | "allergies";
+    | "treatments"
+    | "diagnoses";
   question: string;
   promptPatterns: RegExp[];
   answerPatterns?: RegExp[];
 }> = [
   {
+    key: "insuranceStatus",
+    question: "Versicherungsstatus (privat oder gesetzlich)",
+    promptPatterns: [/privat\s+oder\s+gesetzlich|versicherungsstatus/i],
+    answerPatterns: [/\b(?:privat|gesetzlich|pkv|gkv)\b/i],
+  },
+  {
     key: "birthDate",
     question: "Geburtsdatum",
     promptPatterns: [/geburtsdatum|geboren/i],
     answerPatterns: [/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b/i],
-  },
-  {
-    key: "height",
-    question: "Koerpergroesse (cm)",
-    promptPatterns: [/k[oö]rpergr[oö][sß]e|groesse|gr[oö][sß]e/i],
-    answerPatterns: [/\b(1\d{2}|2\d{2})\s*(cm|zentimeter)\b/i],
-  },
-  {
-    key: "weight",
-    question: "Gewicht (kg)",
-    promptPatterns: [/\bgewicht\b/i],
-    answerPatterns: [/\b\d{2,3}\s*(kg|kilo)\b/i],
   },
   {
     key: "insurer",
@@ -65,34 +54,16 @@ const BASIS_FIELD_RULES: Array<{
     answerPatterns: [/\b\d{2,5}\s*(euro|eur)\b|\b\d{2,5}\b/i],
   },
   {
+    key: "treatments",
+    question: "Laufende Behandlungen",
+    promptPatterns: [/laufende\s+behandlungen?/i],
+    answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
+  },
+  {
     key: "diagnoses",
-    question: "Laufende Diagnosen/Behandlungen",
-    promptPatterns: [/diagnosen|behandlungen|erkrankungen/i],
-  },
-  {
-    key: "medication",
-    question: "Regelmaessige Medikamente",
-    promptPatterns: [/medikamente|medikation/i],
-  },
-  {
-    key: "hospitalStays",
-    question: "Stationaere Aufenthalte (letzte 5 Jahre)",
-    promptPatterns: [/station[aä]r|krankenhausaufenthalt|aufenthalte/i],
-  },
-  {
-    key: "psychTreatment",
-    question: "Psychische Behandlungen (letzte 10 Jahre)",
-    promptPatterns: [/psychisch|psychotherapie|psycholog/i],
-  },
-  {
-    key: "teeth",
-    question: "Zaehne/Zahnersatz",
-    promptPatterns: [/z[aä]hne|zahnersatz/i],
-  },
-  {
-    key: "allergies",
-    question: "Allergien",
-    promptPatterns: [/allergien?|allergisch/i],
+    question: "Bekannte Diagnosen",
+    promptPatterns: [/bestehende\s+diagnosen|bekannte\s+diagnosen/i],
+    answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
   },
 ];
 
@@ -263,12 +234,29 @@ async function persistTranscriptArray(
       spokenAt: typeof entry.at === "number" ? entry.at : undefined,
     }];
   });
-  const persisted = await appendCallTranscriptEventsToPostgres(transcriptEvents);
+  let persisted = false;
+  let attempts = 0;
+  for (attempts = 1; attempts <= 3; attempts += 1) {
+    persisted = await appendCallTranscriptEventsToPostgres(transcriptEvents);
+    if (persisted) break;
+    await new Promise((resolve) => setTimeout(resolve, attempts * 200));
+  }
   return {
     inputCount: entries.length,
     normalizedCount: transcriptEvents.length,
     persisted,
+    attempts,
   };
+}
+
+function buildTranscriptFallback(entries: IncomingTranscriptEntry[] | undefined): string {
+  const lines = (entries || []).flatMap((entry) => {
+    const text = entry.text?.trim();
+    if (!text) return [];
+    const speaker = entry.speaker === "Gloria" || entry.role === "assistant" ? "Gloria" : "Interessent";
+    return [`${speaker}: ${text}`];
+  });
+  return lines.length ? `--- GESPRAECHSPROTOKOLL (Fallback ohne Latenzdaten) ---\n${lines.join("\n")}` : "";
 }
 
 export async function POST(request: Request) {
@@ -315,8 +303,10 @@ export async function POST(request: Request) {
       callSid: payload.callSid,
       inputCount: transcriptPersist.inputCount,
       normalizedCount: transcriptPersist.normalizedCount,
+      attempts: transcriptPersist.attempts,
     });
   }
+  const transcriptFallback = transcriptPersist.persisted ? "" : buildTranscriptFallback(payload.transcript);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
     // Recovery path for incomplete finalize payloads: if leadId/callSid is present,
@@ -456,7 +446,7 @@ export async function POST(request: Request) {
     company: payload.company,
     contactName: payload.contactName,
     topic: payload.topic,
-    summary: payload.summary,
+    summary: [payload.summary, transcriptFallback].filter(Boolean).join("\n\n"),
     summaryChunk: payload.summaryChunk,
     outcome: payload.outcome,
     appointmentAt: payload.appointmentAt,
@@ -511,5 +501,10 @@ export async function POST(request: Request) {
     report,
     emailResult,
     inviteResult,
+    transcript: {
+      persisted: transcriptPersist.persisted,
+      events: transcriptPersist.normalizedCount,
+      attempts: transcriptPersist.attempts,
+    },
   });
 }
