@@ -198,8 +198,11 @@ function getSocietyName(ctx: Pick<CallContext, "ownerGesellschaft">): string {
   return ctx.ownerGesellschaft?.trim() || "Agentur Duic Sprockhövel";
 }
 
-function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerGesellschaft">): string {
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic aus dem Hause ${getSocietyName(ctx)}. Darf ich Ihnen kurz sagen, worum es geht?`;
+function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerRealName">): string {
+  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
+  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
+  // "Gothar" gives ElevenLabs the intended pronunciation of Barmenia Gothaer.
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Darf ich Ihnen kurz sagen, worum es geht?`;
 }
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
@@ -235,10 +238,10 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
-    "DIALOGKERN: Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Reagiere zuerst konkret darauf und führe dann im aktiven Gesprächsschritt weiter. Sprich natürlich und knapp: höchstens zwei kurze Sätze und eine Frage als letzten Satz. Danach wartest du vollständig.",
+    "DIALOGKERN: Höre auf Bedeutung, Ton und Absicht der letzten Äußerung. Antworte ohne Einleitung, Bestätigung oder Wiederholung direkt mit dem nächsten sinnvollen Satz. Sprich natürlich und knapp: höchstens ein kurzer Satz und eine Frage als letzten Satz. Danach wartest du vollständig.",
     "Keine Kundenwiederholungen: Nutze keine zuvor gehörten Kundenwörter oder Formulierungen als alleinigen Grund für einen eigenen Satz. Antworte auf den aktuellen Inhalt statt auf wiederholte Kundenbegriffe.",
     "Vermeide Dankesfloskeln im normalen Gespräch. Nur maximal eine kurze Verabschiedung am Schluss. Keine 'Danke'-Floskel zwischen Gesprächsschritten und keine künstlichen Dankesformeln im Lauf des Calls.",
-    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
+    "Keine Vorrede und keine zweiteilige Antwort bei normalen Gesprächsbeiträgen. Verwende nicht 'Alles klar', 'Verstehe', 'Super', 'Perfekt', 'Danke' oder ähnliche Einleitungen, außer der Kunde hat gerade eine wichtige Sorge geschildert. Beginne direkt mit der eigentlichen Antwort und formuliere den vollständigen Turn in einer zusammenhängenden Audioantwort. Verwende im PKV-Gespräch nicht das abstrakte Wort 'Arbeitsweise'; sprich stattdessen konkret über Vertrag, Beitragsverlauf, Zahlen und mögliche Optionen.",
     "Sprich ausschließlich klares Standarddeutsch. Verwende niemals Englisch, keine englischen Füllwörter und keinen hörbaren fremden Akzent oder Dialekt. Wenn eine Äußerung unklar ist, frage kurz auf Deutsch nach.",
     "Lass den Gesprächspartner vollständig ausreden. Eine kurze Pause, ein Atemholen, ein 'äh', 'mhm' oder eine Korrektur beendet den Kundenturn nicht. Warte, bis der Gedanke erkennbar abgeschlossen ist, statt dazwischenzusprechen.",
     "WICHTIG BEI UNKLAREM AUDIO: Ein einzelnes Wort, ein Fragment, ein fremdsprachig wirkender Text oder ein kurzer Laut wie 'mhm', 'aha', 'okay' oder 'Anlıyorum' ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann genau einmal kurz auf Deutsch nach, was der Kunde meint. Beende den Anruf niemals auf dieser Grundlage.",
@@ -250,7 +253,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "VERABSCHIEDUNG: Die letzte Aussage am Ende des Gesprächs muss exakt lauten: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Rufe danach end_call auf.",
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst nur nach Vormittag oder Nachmittag und biete danach zwei Optionen an verschiedenen Kalendertagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits die verbindliche Terminwahl; verlange kein zusätzliches 'Ja, das passt'. Frage danach exakt: 'Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?' Erst nach dieser Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Frage nur zurück, wenn Termin oder Durchführungsart nicht eindeutig sind. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zwingend zuerst und ausschließlich: 'Passt Ihnen grundsätzlich eher ein Vormittag oder ein Nachmittag?' Biete erst nach der Kundenantwort zwei Optionen an verschiedenen Kalendertagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits die verbindliche Terminwahl; verlange kein zusätzliches 'Ja, das passt'. Frage danach exakt: 'Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?' Erst nach dieser Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Frage nur zurück, wenn Termin oder Durchführungsart nicht eindeutig sind. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -734,6 +737,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
         // Step 6: appointment scheduling — use existing appointment logic
         if (currentContext.dialogState.pkvStep === 6) {
+          if (!currentContext.appointmentPreferenceAsked) {
+            currentContext.appointmentPreferenceAsked = true;
+            requestEventResponse("Frage exakt und ohne Einleitung: 'Passt Ihnen grundsätzlich eher ein Vormittag oder ein Nachmittag?' Biete in diesem Turn keinen Termin an.");
+            return;
+          }
+          if (detectAppointmentPreference(currentContext.transcript) === "unknown") {
+            requestEventResponse("Die zeitliche Präferenz ist noch unklar. Frage exakt und ohne Einleitung: 'Passt Ihnen eher ein Vormittag oder ein Nachmittag?' Biete in diesem Turn keinen Termin an.");
+            return;
+          }
           const offer = appointmentOfferInstruction(
             currentContext.freeSlotsPrompt,
             detectAppointmentPreference(currentContext.transcript),
@@ -1189,6 +1201,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
       });
       connectOpenAi();
 
+      const greeting = buildDecisionMakerIntro(ctx);
+      playback.startResponse();
+      ctx.transcript.push({ role: "assistant", text: greeting, at: Date.now(), phase: ctx.dialogState.phase });
+      log.info("realtime.gloria_said", { callSid: ctx.callSid, text: greeting, immediate: true });
+      void speakWithElevenLabs(greeting);
+
       const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
@@ -1214,17 +1232,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
       // Single session.update after both background tasks complete.
       void Promise.allSettled([policyTask, calendarTask]).then(() => { if (ctx) updateSession(); });
 
-      const silenceMs = Math.max(2500, Number.parseInt(process.env.TELNYX_SILENCE_OPENER_MS || "8000", 10));
-      silenceOpenerTimer = setTimeout(() => {
-        if (!ctx || responses.isActive() || userIsSpeaking) return;
-        // Only play a very short signal — never the full intro proactively
-        sendOpenAi({
-          type: "response.create",
-          response: {
-            instructions: "Sage nur 'Guten Tag?' und warte vollständig schweigend. Keine weitere Vorstellung.",
-          },
-        });
-      }, silenceMs);
       return;
     }
 

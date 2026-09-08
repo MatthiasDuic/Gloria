@@ -142,7 +142,7 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic/);
+  assert.match(instructions, /Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
   assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);

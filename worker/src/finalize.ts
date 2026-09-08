@@ -186,7 +186,6 @@ export async function postReport(ctx: CallContext): Promise<void> {
   const prelimSummaryText = ctx.confirmedSlotPhrase
     ? `Termin vereinbart: ${ctx.confirmedSlotPhrase}.${ctx.appointmentMode ? ` Durchführung: ${ctx.appointmentMode}.` : ""} Vollständige Auswertung folgt.`
     : `Anruf bei ${ctx.company || "?"} zum Thema ${ctx.topic || "?"}. Auswertung folgt.`;
-  const testCallNote = ctx.isTestCall && !ctx.leadId ? " Testanruf ohne CRM-Zuordnung." : "";
 
   const transcriptEntries = ctx.transcript.map((entry) => ({
     role: entry.role,
@@ -216,7 +215,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     contactName: ctx.contactName,
     topic: ctx.topic,
     // summaryChunk triggers transcript-only storage path (no email sent).
-    summaryChunk: `${prelimSummaryText}${testCallNote}`,
+    summaryChunk: prelimSummaryText,
     recordingConsent,
     transcript: transcriptEntries,
   });
@@ -240,7 +239,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
 
   let outcome: Outcome = resolvedExtraction.outcome;
   let appointmentAt: string | undefined = resolvedExtraction.appointmentAt;
-  let summary = `${resolvedExtraction.summary}${testCallNote}`;
+  let summary = resolvedExtraction.summary;
 
   if (ctx.confirmedSlotPhrase) {
     outcome = "Termin";

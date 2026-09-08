@@ -20,6 +20,7 @@ function readyPkvTurns(): ConversationTurn[] {
 
 test("detects the latest explicit appointment preference", () => {
   assert.equal(detectAppointmentPreference(readyPkvTurns()), "afternoon");
+  assert.equal(detectAppointmentPreference([{ role: "user", text: "Das ist mir egal." }]), "unknown");
 });
 
 test("accepts only slots supplied by the calendar", () => {

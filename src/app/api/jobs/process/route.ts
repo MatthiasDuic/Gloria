@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { globalJobQueue, type Job } from "@/lib/job-queue";
 import { sendReportEmail, sendAppointmentInvite } from "@/lib/mailer";
+import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
 import type { CallReport } from "@/lib/types";
 
 export const maxDuration = 300; // 5 minutes for job processing
@@ -31,13 +33,21 @@ async function processInviteJob(job: Job): Promise<void> {
 
   try {
     const report = payload.report;
-    // Simplified invite sending without complex basis question collection
-    // In production, this would look up the lead email from leadId
+    const transcriptEvents = report.callSid
+      ? await listCallTranscriptEventsFromPostgres(report.callSid)
+      : [];
+    const appointmentForm = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
+    const appointmentPdf = await buildAppointmentFormPdf(appointmentForm);
+    if (appointmentPdf.length < 1000) {
+      throw new Error("Kundenterminbogen konnte nicht erzeugt werden.");
+    }
     const result = await sendAppointmentInvite({
       report,
-      attendeeEmail: undefined, // Simplified: let mailer handle default
+      attendeeEmail: undefined,
       organizerName: "Gloria Consultant",
       missingBasisQuestions: [],
+      appointmentPdf,
+      appointmentPdfFilename: getAppointmentFormFilename(appointmentForm),
     });
 
     if (!result.delivered) {

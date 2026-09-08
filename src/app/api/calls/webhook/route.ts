@@ -306,7 +306,6 @@ export async function POST(request: Request) {
       attempts: transcriptPersist.attempts,
     });
   }
-  const transcriptFallback = transcriptPersist.persisted ? "" : buildTranscriptFallback(payload.transcript);
 
   if (!payload.company || !payload.topic || !payload.summary || !payload.outcome) {
     // Recovery path for incomplete finalize payloads: if leadId/callSid is present,
@@ -446,7 +445,7 @@ export async function POST(request: Request) {
     company: payload.company,
     contactName: payload.contactName,
     topic: payload.topic,
-    summary: [payload.summary, transcriptFallback].filter(Boolean).join("\n\n"),
+    summary: payload.summary,
     summaryChunk: payload.summaryChunk,
     outcome: payload.outcome,
     appointmentAt: payload.appointmentAt,

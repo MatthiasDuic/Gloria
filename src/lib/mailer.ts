@@ -90,6 +90,8 @@ export interface AppointmentInviteOptions {
   organizerName?: string;
   durationMinutes?: number;
   missingBasisQuestions?: string[];
+  appointmentPdf?: Buffer;
+  appointmentPdfFilename?: string;
 }
 
 export function buildAppointmentIcs(options: AppointmentInviteOptions): string | null {
@@ -193,6 +195,9 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
   if (!ics) {
     return { delivered: false, reason: "Kein gueltiger Termin im Report." };
   }
+  if (!options.appointmentPdf || options.appointmentPdf.length < 1000) {
+    return { delivered: false, reason: "Kundenterminbogen fehlt oder ist unvollständig." };
+  }
 
   const recipients = [brokerEmail, attendeeEmail].filter(
     (entry): entry is string => Boolean(entry && entry.includes("@")),
@@ -231,7 +236,7 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     `Zeitpunkt: ${when}`,
     ...questionBlock,
     "",
-    "Die Kalendereinladung ist als .ics-Datei angehaengt.",
+    "Die Kalendereinladung und der Kundenterminbogen sind angehaengt.",
     "",
     "Freundliche Gruesse",
     organizerName,
@@ -252,6 +257,11 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
         filename: "termin.ics",
         content: ics,
         contentType: "text/calendar; method=REQUEST; charset=UTF-8",
+      },
+      {
+        filename: options.appointmentPdfFilename || "Kundenterminbogen.pdf",
+        content: options.appointmentPdf,
+        contentType: "application/pdf",
       },
     ],
   });
