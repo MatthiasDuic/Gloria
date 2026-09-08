@@ -75,58 +75,6 @@ export type PreparationTransition = {
   instruction: string;
 };
 
-type AdaptiveFollowUpTopic = {
-  name: "medication" | "inpatient" | "psychological" | "dental" | "allergy";
-  baseRegex: RegExp;
-  detailQuestion: string;
-  detailRegex: RegExp;
-  moreQuestion: string;
-  moreRegex: RegExp;
-};
-
-const ADAPTIVE_FOLLOW_UP_TOPICS: AdaptiveFollowUpTopic[] = [
-  {
-    name: "medication",
-    baseRegex: /medikament/i,
-    detailQuestion: "Welche Medikamente nehmen Sie regelmäßig ein?",
-    detailRegex: /welche\s+medikamente\s+nehmen\s+sie/i,
-    moreQuestion: "Gibt es weitere Medikamente, die wir aufnehmen sollten?",
-    moreRegex: /weitere\s+medikamente/i,
-  },
-  {
-    name: "inpatient",
-    baseRegex: /station[äa]r|krankenhaus/i,
-    detailQuestion: "Was war der Grund für den stationären Aufenthalt?",
-    detailRegex: /grund\s+f[üu]r\s+den\s+station[äa]ren\s+aufenthalt/i,
-    moreQuestion: "Gab es weitere stationäre Aufenthalte?",
-    moreRegex: /weitere\s+station[äa]re\s+aufenthalte/i,
-  },
-  {
-    name: "psychological",
-    baseRegex: /psychisch/i,
-    detailQuestion: "Worum ging es bei der psychischen Behandlung?",
-    detailRegex: /worum\s+ging\s+es\s+bei\s+der\s+psychischen\s+behandlung/i,
-    moreQuestion: "Gab es weitere psychische Behandlungen?",
-    moreRegex: /weitere\s+psychische\s+behandlungen/i,
-  },
-  {
-    name: "dental",
-    baseRegex: /z[äa]hne|zahnersatz/i,
-    detailQuestion: "Welcher Zahnersatz fehlt aktuell oder ist konkret geplant?",
-    detailRegex: /welcher\s+zahnersatz\s+fehlt\s+aktuell|konkret\s+geplant/i,
-    moreQuestion: "Gibt es weiteren fehlenden oder geplanten Zahnersatz?",
-    moreRegex: /weiteren\s+fehlenden\s+oder\s+geplanten\s+zahnersatz/i,
-  },
-  {
-    name: "allergy",
-    baseRegex: /allerg/i,
-    detailQuestion: "Welche Allergie liegt bei Ihnen vor?",
-    detailRegex: /welche\s+allergie\s+liegt\s+bei\s+ihnen\s+vor/i,
-    moreQuestion: "Gibt es weitere Allergien?",
-    moreRegex: /weitere\s+allergien/i,
-  },
-];
-
 const PKV_FALLBACK_QUESTIONS = [
   "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
   "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
@@ -138,6 +86,7 @@ const PKV_FALLBACK_QUESTIONS = [
 
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
   const isPkv = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "");
+  if (isPkv) return PKV_FALLBACK_QUESTIONS.split("\n");
   const source = isPkv
     ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData || PKV_FALLBACK_QUESTIONS
     : policy?.requiredQuestions || policy?.requiredData || "";
@@ -145,9 +94,6 @@ export function buildPreparationQuestions(policy: PreparationPolicy | null): str
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
     .filter((line) => line.length > 3);
-  if (isPkv && !questions.some((question) => /privat\s+oder\s+gesetzlich|versicherungsstatus/i.test(question))) {
-    questions.unshift("Sind Sie aktuell privat oder gesetzlich krankenversichert?");
-  }
   return questions;
 }
 
@@ -176,22 +122,6 @@ function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]):
   return false;
 }
 
-function adaptiveTopicForQuestion(question: string): AdaptiveFollowUpTopic | undefined {
-  return ADAPTIVE_FOLLOW_UP_TOPICS.find((topic) =>
-    topic.baseRegex.test(question) || topic.detailRegex.test(question) || topic.moreRegex.test(question),
-  );
-}
-
-function adaptiveRoleForQuestion(
-  question: string,
-  topic: AdaptiveFollowUpTopic,
-): "base" | "detail" | "more" | undefined {
-  if (topic.moreRegex.test(question)) return "more";
-  if (topic.detailRegex.test(question)) return "detail";
-  if (topic.baseRegex.test(question)) return "base";
-  return undefined;
-}
-
 function nextUnansweredQuestion(
   state: PreparationState,
   turns: ConversationTurn[],
@@ -207,38 +137,12 @@ function nextUnansweredQuestion(
 function isAnswerPlausible(question: string, text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!normalized || /^(?:hallo|okay|ok|mhm|äh+|hm+|keine ahnung)[.!?]*$/i.test(normalized)) return false;
-  const adaptiveTopic = adaptiveTopicForQuestion(question);
-  if (adaptiveTopic) {
-    const role = adaptiveRoleForQuestion(question, adaptiveTopic);
-    if (role === "base" || role === "more") return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
-    if (role === "detail") return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
-  }
-  if (/geburtsdatum/i.test(question)) return /\b(?:\d{1,2}\.\s*)?(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|\d{1,2}[./-]\d{1,2})\b|\b(?:19|20)\d{2}\b/i.test(normalized);
-  if (/körpergröße|groesse/i.test(question)) return /\b(?:\d[,.]?\d?\s*(?:m|meter|cm|zentimeter)|ein[e]?\s+meter)\b/i.test(normalized);
-  if (/gewicht/i.test(question)) return /\b\d{2,3}\s*(?:kg|kilo|kilogramm)\b/i.test(normalized) || /\b(?:\w+\s+){0,2}(?:kilo|kilogramm)\b/i.test(normalized);
-  if (/medikament|behandlung|diagnos|allerg|stationär|krankenhaus|psychisch|zähne|zahnersatz/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
+  if (/privat\s+oder\s+gesetzlich/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(normalized);
+  if (/krankenversicherer/i.test(question)) return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
+  if (/monatsbeitrag/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(normalized);
+  if (/geburtsdatum/i.test(question)) return /\b\d{1,2}[.\s]+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)[.\s,]+(?:19|20)\d{2}\b|\b\d{1,2}[./-]\d{1,2}[./-](?:19|20)\d{2}\b/i.test(normalized);
+  if (/behandlung|diagnos/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
   return normalized.length >= 3;
-}
-
-function followUpQuestions(question: string, answer: string): string[] {
-  const normalizedAnswer = answer.trim().toLowerCase();
-  if (/laufende behandlungen/i.test(question) && /^ja\b/i.test(normalizedAnswer)) {
-    return ["Um welche laufende Behandlung geht es genau?"];
-  }
-  if (/bestehende diagnosen|bekannte diagnosen/i.test(question) && /^ja\b/i.test(normalizedAnswer)) {
-    return ["Um welche Diagnose geht es genau?"];
-  }
-  const topic = adaptiveTopicForQuestion(question);
-  if (topic) {
-    const role = adaptiveRoleForQuestion(question, topic);
-    if (role === "base" && /^ja\b/i.test(normalizedAnswer)) return [topic.detailQuestion, topic.moreQuestion];
-    if (role === "detail") return [];
-    if (role === "more" && /^ja\b/i.test(normalizedAnswer)) return [topic.detailQuestion, topic.moreQuestion];
-    return [];
-  }
-  if (!/^ja\b/i.test(normalizedAnswer)) return [];
-  if (/laufende behandlungen|diagnos/i.test(question)) return ["Um welche Behandlung oder Diagnose geht es genau?"];
-  return [];
 }
 export function beginPreparation(
   state: PreparationState,
@@ -341,20 +245,6 @@ export function advancePreparation(
       return {
         state: { ...state, questionRetryCount: retries },
         instruction: `Die Antwort passt noch nicht eindeutig zur Frage. Stelle ausschließlich dieselbe Vorbereitungsfrage noch einmal, ohne dich zu bedanken: "${currentQuestion}"`,
-      };
-    }
-    const followUps = currentQuestion ? followUpQuestions(currentQuestion, userText) : [];
-    if (followUps.length) {
-      const questions = [...state.questions];
-      questions.splice((state.currentQuestionIndex ?? -1) + 1, 0, ...followUps);
-      return {
-        state: {
-          ...state,
-          questions,
-          currentQuestionIndex: (state.currentQuestionIndex ?? -1) + 1,
-          questionRetryCount: 0,
-        },
-        instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${followUps[0]}". Warte danach vollständig auf die Antwort.`,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);

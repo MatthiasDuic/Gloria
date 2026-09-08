@@ -32,14 +32,14 @@ function roundToFive(n: number): number {
 }
 
 function buildTenYearProjectionSentence(contributionPhrase?: string): string {
-  if (!contributionPhrase) return "Bei Ihrem Beitrag wären das in 10 Jahren rund 100 Euro mehr pro Monat — das ist schon eine spürbare Veränderung.";
+  if (!contributionPhrase) return "Bei einer Beispielrechnung mit rund vier Prozent Steigerung pro Jahr wären das in zehn Jahren rund hundert Euro mehr pro Monat.";
 
   const amount = parseGermanEuroAmount(contributionPhrase);
-  if (!amount) return "Bei Ihrem Beitrag wären das in 10 Jahren rund 100 Euro mehr pro Monat — das ist schon eine spürbare Veränderung.";
+  if (!amount) return "Bei einer Beispielrechnung mit rund vier Prozent Steigerung pro Jahr wären das in zehn Jahren rund hundert Euro mehr pro Monat.";
 
   const futureAmount = roundToFive(Math.round(amount * (1.04 ** 10)));
   const increase = roundToFive(futureAmount - amount);
-  return `Bei Ihrem Beitrag wären das in 10 Jahren rund ${increase} Euro mehr pro Monat — das ist schon eine spürbare Veränderung. Gesamt dann etwa ${futureAmount} Euro pro Monat.`;
+  return `Wenn wir beispielhaft mit rund vier Prozent Steigerung pro Jahr rechnen, wären das in zehn Jahren rund ${increase} Euro mehr pro Monat. Ihr Beitrag läge dann bei etwa ${futureAmount} Euro monatlich.`;
 }
 
 export function extractContributionPhrase(userText: string): string | undefined {
@@ -88,7 +88,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
 
     case 3:
       return (
-        "Greife die Antwort des Kunden kurz auf (ein Satz). " +
+        "Greife die Antwort des Kunden kurz auf, ohne ihm einen fehlenden Beitrag zu unterstellen. " +
         "Leite dann über: 'Damit Sie ein Gefühl dafür bekommen, worüber wir genau reden möchten und was in den nächsten Jahren auf Sie zukommen wird, nennen Sie mir kurz Ihren aktuellen Beitrag.' " +
         "Nur diese eine Frage. Warte auf die Antwort."
       );
@@ -192,6 +192,12 @@ export function advancePkvStep(
     default:
       return { nextStep: currentStep, shouldEnd: false };
   }
+}
+
+export function isClearPkvInterest(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  return /^(?:ja|gerne|sehr gerne|interessant|klingt gut|das klingt gut|das möchte ich|würde ich gerne|machen wir|passt|einverstanden)\b/i.test(normalized)
+    || /\b(?:das|es)\s+(?:möchte|würde)\s+ich\s+(?:gern|gerne)\b/i.test(normalized);
 }
 
 // ============================================================================

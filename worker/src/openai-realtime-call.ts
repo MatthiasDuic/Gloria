@@ -11,7 +11,7 @@ import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractContributionPhrase } from "./pkv-conversation-controller.js";
+import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractContributionPhrase, isClearPkvInterest } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -440,6 +440,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
   let hangupAfterAssistantResponse = false;
   let terminationInProgress = false;
+  let hangupAfterPlayback = false;
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
 
@@ -460,7 +461,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
       stream_id: streamId,
       media: { payload: frame.toString("base64") },
     }),
-    onIdle: () => responses.flush(),
+    onIdle: () => {
+      responses.flush();
+      if (hangupAfterPlayback && ctx && !responses.isActive()) {
+        hangupAfterPlayback = false;
+        setTimeout(() => {
+          if (!ctx || terminationInProgress) return;
+          terminationInProgress = true;
+          log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
+          void notifyCallAction(ctx, "hangup");
+        }, 350);
+      }
+    },
   });
 
   const responses = new RealtimeResponseController({
@@ -593,6 +605,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und frage nur: 'Darf ich Ihnen kurz sagen, worum es geht?' Danach vollständig warten.");
   };
 
+  const requestHangupAfterPlayback = () => {
+    hangupAfterPlayback = true;
+    if (!playback.isPending() && !responses.isActive() && ctx) {
+      hangupAfterPlayback = false;
+      terminationInProgress = true;
+      log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
+      void notifyCallAction(ctx, "hangup");
+    }
+  };
+
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
     sendOpenAi({
       type: "conversation.item.create",
@@ -610,6 +632,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (isSyntheticTranscriptionPrompt(transcript)) {
       log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
       return;
+    }
+    if (playback.isPending()) {
+      ttsTurn += 1;
+      ttsAbortController?.abort();
+      playback.interrupt();
+      sendTelnyx({ event: "clear" });
+      log.info("realtime.playback_interrupted_by_user", { callSid: ctx.callSid });
     }
     const currentContext = ctx;
     assistantContinuationRequested = false;
@@ -674,6 +703,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
       // ── PKV: step-based state machine ──────────────────────────────────────
       if (currentContext.topicKind === "pkv") {
         const currentStep = currentContext.dialogState.pkvStep;
+
+        if (currentStep === 5 && !isClearPkvInterest(transcript)) {
+          requestEventResponse("Die Kundenaussage ist keine eindeutige Zustimmung zum Termin. Sage exakt: 'Habe ich Sie richtig verstanden: Soll Herr Duic Ihnen das einmal persönlich zeigen?' Warte dann auf ein klares Ja oder Nein. Vereinbare noch keinen Termin.");
+          return;
+        }
 
         // Customer asks a question or raises an objection → answer then return to current step
         if (event.type === "customer_question" || event.type === "objection") {
@@ -801,13 +835,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse("Das habe ich nicht eindeutig verstanden. Möchten Sie das Gespräch beenden, oder sollen wir kurz weitermachen?");
         return;
       }
-      terminationInProgress = true;
       hangupAfterAssistantResponse = false;
       pendingUserTranscripts.splice(0);
-      responses.stop();
       sendToolResult(tool.callId, { ok: true });
-      log.info("realtime.hangup", { callSid: ctx.callSid });
-      await notifyCallAction(ctx, "hangup");
+      requestHangupAfterPlayback();
     }
   };
 
@@ -1060,7 +1091,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             callSid: ctx?.callSid,
             text: transcript,
           });
-          requestResponse("Deine letzte Antwort wurde technisch mitten im Satz beendet. Setze den angefangenen Satz unmittelbar und natürlich zu Ende. Wiederhole den bereits gesprochenen Teil nicht. Stelle danach höchstens eine kurze Frage und warte dann auf den Kunden.");
+          requestResponse("Deine letzte Antwort wurde technisch vor der Audioausgabe abgeschnitten. Formuliere die vollständige, fachlich korrekte Antwort jetzt neu in höchstens zwei kurzen Sätzen. Beginne mit einem vollständigen Satz, nie mit einer Satzfortsetzung. Stelle danach höchstens eine kurze Frage und warte auf den Kunden.");
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
           return;
@@ -1071,11 +1102,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
         if (transcript && hangupAfterAssistantResponse && ctx) {
           hangupAfterAssistantResponse = false;
-          terminationInProgress = true;
           pendingUserTranscripts.splice(0);
-          responses.stop();
-          log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
-          await notifyCallAction(ctx, "hangup");
+          requestHangupAfterPlayback();
         }
 
         assistantContinuationRequested = false;

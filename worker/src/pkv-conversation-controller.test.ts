@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePkvStep, assessPkvConversation, instructionForPkvStage, instructionForPkvStep, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { advancePkvStep, assessPkvConversation, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -65,5 +65,13 @@ test("does not advance PKV stages on unrelated or repeated utterances", () => {
 test("uses a deterministic 10-year projection instead of inventing a wrong value", () => {
   const instruction = instructionForPkvStep(4, "1000 Euro");
   assert.match(instruction, /1000 Euro.*1480 Euro.*480 Euro mehr pro Monat/i);
+  assert.match(instruction, /vier Prozent Steigerung pro Jahr/i);
   assert.doesNotMatch(instruction, /25 Euro mehr|rund 25|rund X Euro/i);
+});
+
+test("requires an unambiguous interest statement before starting appointment scheduling", () => {
+  assert.equal(isClearPkvInterest("Ja, gerne."), true);
+  assert.equal(isClearPkvInterest("Das würde ich gerne machen."), true);
+  assert.equal(isClearPkvInterest("Auf kommt mir aus."), false);
+  assert.equal(isClearPkvInterest("Mhm."), false);
 });
