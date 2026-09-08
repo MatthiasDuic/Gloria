@@ -4114,6 +4114,19 @@ export default function HomePage() {
                     <p style={{ fontFamily: "monospace", fontSize: "0.82rem", color: "#4f6588" }}>{selectedReport.callSid}</p>
                   </div>
                 )}
+                {selectedReport.outcome === "Termin" && selectedReport.callSid && (
+                  <div className="report-detail-field">
+                    <label>Kundenterminbogen</label>
+                    <a
+                      className="btn ghost"
+                      href={`/api/export/appointment-form?callSid=${encodeURIComponent(selectedReport.callSid)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      PDF öffnen
+                    </a>
+                  </div>
+                )}
                 <div className="report-detail-field">
                   <label>E-Mail-Report an</label>
                   <p>{selectedReport.emailedTo || "–"}</p>

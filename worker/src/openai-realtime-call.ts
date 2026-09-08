@@ -499,8 +499,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const updateSession = () => {
     if (!ctx || !openaiSession?.isReady()) return;
-    const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.75");
-    const silenceDurationMs = Number.parseInt(process.env.OPENAI_REALTIME_SILENCE_MS?.trim() || "400", 10);
+    const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.7");
+    const silenceDurationMs = Number.parseInt(
+      process.env.OPENAI_REALTIME_SILENCE_MS?.trim()
+        || process.env.OPENAI_ASR_SILENCE_MS?.trim()
+        || "650",
+      10,
+    );
     const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "300", 10);
     const maxOutputTokens = Number.parseInt(process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS?.trim() || "220", 10);
     sendOpenAi({
