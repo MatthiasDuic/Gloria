@@ -45,6 +45,14 @@ test("recognizes a direct name-based decision maker phrase", () => {
   assert.equal(state2.stage, "decision_maker");
 });
 
+test("treats a company greeting from another named person as a gatekeeper", () => {
+  const state = advanceContactRouting(
+    createContactRoutingState("Herr Neumann"),
+    "Musterbau GmbH, mein Name ist Müller. Was kann ich für Sie tun?",
+  );
+  assert.equal(state.stage, "gatekeeper");
+});
+
 test("makes voicemail a terminal routing state", () => {
   let state = advanceContactRouting(
     createContactRoutingState("Herr Neumann"),

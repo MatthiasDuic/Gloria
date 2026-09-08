@@ -1123,7 +1123,20 @@ export default function HomePage() {
       setDetailTopic(visiblePlaybookTopics[0]);
     }
   }, [playbookCategoryFilter, visiblePlaybookTopics, detailTopic]);
-  const reportRows = useMemo(() => data.reports, [data.reports]);
+  const reportRows = useMemo(() => {
+    const priority: Record<string, number> = {
+      Termin: 0,
+      Wiedervorlage: 1,
+      "Gespräch abgebrochen": 2,
+      Absage: 3,
+      "Nicht erreicht / kein Kontakt": 4,
+    };
+    return [...data.reports].sort((left, right) => {
+      const priorityDiff = (priority[left.outcome] ?? 5) - (priority[right.outcome] ?? 5);
+      if (priorityDiff !== 0) return priorityDiff;
+      return (Date.parse(right.conversationDate) || 0) - (Date.parse(left.conversationDate) || 0);
+    });
+  }, [data.reports]);
   const appointmentReports = useMemo(
     () =>
       data.reports.filter(
@@ -2729,13 +2742,14 @@ export default function HomePage() {
           </div>
         </CollapsiblePanel>
 
-        <LiveMonitorPanel />
-
         <CollapsiblePanel title="Gesprächsreports" defaultOpen>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            <span className="subtle">
-              Für jeden Anruf wird genau ein Report geführt. Veraltete Einträge werden automatisch verworfen.
-            </span>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <span className="pill">{reportRows.length} Anrufe</span>
+              <span className="pill" style={{ background: "rgba(47,143,87,0.14)" }}>{reportingInsights.appointments} Termine</span>
+              <span className="pill" style={{ background: "rgba(192,135,38,0.14)" }}>{reportingInsights.callbacks} Wiedervorlagen</span>
+              <span className="pill" style={{ background: "rgba(194,77,77,0.12)" }}>{reportingInsights.rejections} Absagen</span>
+            </div>
             <button
               className="btn danger"
               onClick={() => void deleteAllReports()}
@@ -2745,41 +2759,20 @@ export default function HomePage() {
               Alle Reports löschen
             </button>
           </div>
-          <table>
-            <thead>
-              <tr><th>Firma</th><th>Thema</th><th>Ergebnis</th><th>Termin / Callback</th><th></th></tr>
-            </thead>
-            <tbody>
-              {reportRows.map((report) => (
-                <tr key={report.id}>
-                  <td><strong>{report.company}</strong>{report.contactName ? <div className="subtle">{report.contactName}</div> : null}</td>
-                  <td>{report.topic}</td>
-                  <td>
-                    <span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
-                      {formatOutcomeLabel(report.outcome)}
-                    </span>
-                  </td>
-                  <td>{formatDate(report.appointmentAt || report.nextCallAt)}</td>
-                  <td>
-                    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
-                        onClick={() => setSelectedReport(report)}
-                      >Details</button>
-                      <button
-                        className="btn danger"
-                        style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }}
-                        onClick={() => void deleteReport(report.id)}
-                        disabled={busy}
-                        title="Report löschen"
-                      >🗑</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {reportRows.length === 0 ? <p className="subtle">Noch keine Gesprächsreports vorhanden.</p> : <div style={{ overflowX: "auto" }}><table>
+            <thead><tr><th>Kontakt</th><th>Ergebnis</th><th>Gespräch</th><th>Nächste Aktion</th><th>Zusammenfassung</th><th></th></tr></thead>
+            <tbody>{reportRows.map((report) => {
+              const followUp = report.appointmentAt ? "Termin" : report.nextCallAt ? "Rückruf" : "Abgeschlossen";
+              return <tr key={report.id}>
+                <td><strong>{report.company}</strong><div className="subtle">{report.contactName || "Kein Ansprechpartner"}</div><div className="subtle">{report.topic}</div></td>
+                <td><span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>{formatOutcomeLabel(report.outcome)}</span></td>
+                <td><strong>{formatDate(report.conversationDate)}</strong><div className="subtle">{report.attempts} Versuch{report.attempts === 1 ? "" : "e"}</div></td>
+                <td><strong>{followUp}</strong><div className="subtle">{report.appointmentAt || report.nextCallAt ? formatDate(report.appointmentAt || report.nextCallAt) : "Keine Aktion offen"}</div></td>
+                <td style={{ minWidth: 260, maxWidth: 380 }}><span className="subtle">{(report.summary || "Keine Zusammenfassung verfügbar.").replace(/---\s*GESPRAECHSPROTOKOLL[\s\S]*$/i, "").slice(0, 220)}{report.summary.length > 220 ? " ..." : ""}</span></td>
+                <td><div className="row" style={{ gap: 6, flexWrap: "nowrap" }}><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }} onClick={() => setSelectedReport(report)}>Details</button><button className="btn danger" style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }} onClick={() => void deleteReport(report.id)} disabled={busy} title="Report löschen">🗑</button></div></td>
+              </tr>;
+            })}</tbody>
+          </table></div>}
         </CollapsiblePanel>
 
       </section>

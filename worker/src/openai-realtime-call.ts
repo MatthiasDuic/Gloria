@@ -205,6 +205,13 @@ function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerRealName">): strin
   return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Darf ich Ihnen kurz sagen, worum es geht?`;
 }
 
+function buildGatekeeperIntro(ctx: Pick<CallContext, "ownerRealName" | "contactName">): string {
+  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
+  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
+  const targetName = ctx.contactName?.trim() || "der zuständigen Person";
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Könnten Sie mich bitte mit ${targetName} verbinden?`;
+}
+
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
   if (ctx.topicKind !== "pkv") return { ok: true };
   if (ctx.dialogState.pkvStep >= 6) return { ok: true };
@@ -604,6 +611,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"${buildDecisionMakerIntro(ctx!)}\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
   };
 
+  const speakDeterministicIntro = (text: string, route: "decision_maker" | "gatekeeper") => {
+    if (!ctx) return;
+    playback.startResponse();
+    ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
+    log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
+    void speakWithElevenLabs(text);
+  };
+
   const requestInterruptedIntroContinuation = () => {
     decisionMakerIntroPending = false;
     requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und frage nur: 'Darf ich Ihnen kurz sagen, worum es geht?' Danach vollständig warten.");
@@ -696,10 +711,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (contactRouting.stage !== "decision_maker") {
-        requestEventResponse(instructionForContactRouting(contactRouting));
+        speakDeterministicIntro(buildGatekeeperIntro(currentContext), "gatekeeper");
         return;
       }
-      requestDecisionMakerIntro();
+      speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
       return;
     }
 
@@ -1200,12 +1215,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         topic: ctx.topic,
       });
       connectOpenAi();
-
-      const greeting = buildDecisionMakerIntro(ctx);
-      playback.startResponse();
-      ctx.transcript.push({ role: "assistant", text: greeting, at: Date.now(), phase: ctx.dialogState.phase });
-      log.info("realtime.gloria_said", { callSid: ctx.callSid, text: greeting, immediate: true });
-      void speakWithElevenLabs(greeting);
 
       const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
