@@ -1035,7 +1035,7 @@ export default function HomePage() {
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   void settingsOpen; void setSettingsOpen;
-  const [activeView, setActiveView] = useState<"overview" | "calls" | "leads" | "crm" | "calendar" | "settings" | "compliance">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "calls" | "crm" | "calendar" | "settings" | "compliance">("overview");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2443,13 +2443,6 @@ export default function HomePage() {
             <span>Anrufe</span>
           </button>
           <button
-            className={`nav-item ${activeView === "leads" ? "active" : ""}`}
-            onClick={() => setActiveView("leads")}
-          >
-            <span className="nav-icon" aria-hidden>≡</span>
-            <span>Offene Firmenliste (Legacy)</span>
-          </button>
-          <button
             className={`nav-item ${activeView === "crm" ? "active" : ""}`}
             onClick={() => setActiveView("crm")}
           >
@@ -2493,7 +2486,6 @@ export default function HomePage() {
             <h1 className="topbar-title">
               {activeView === "overview" ? "Übersicht" : null}
               {activeView === "calls" ? "Anrufe" : null}
-              {activeView === "leads" ? "Offene Firmenliste (Legacy)" : null}
               {activeView === "crm" ? "CRM" : null}
               {activeView === "calendar" ? "Kalender" : null}
               {activeView === "settings" ? "Einstellungen" : null}
@@ -2786,132 +2778,6 @@ export default function HomePage() {
           </table>
         </CollapsiblePanel>
 
-      </section>
-      ) : null}
-
-      {activeView === "leads" ? (
-      <section className="stack top-section">
-        <div className="mini-panel" style={{ borderLeft: "4px solid #b78722" }}>
-          <h3>Hinweis: Legacy-Bereich</h3>
-          <p className="subtle">
-            Für tägliche Arbeit bitte den CRM-Bereich verwenden. Die Legacy-Ansicht bleibt nur für Übergangsprozesse verfügbar.
-          </p>
-          <div className="row top-gap">
-            <button className="btn" onClick={() => setActiveView("crm")}>Zum CRM wechseln</button>
-          </div>
-        </div>
-
-        <CollapsiblePanel title="Aufträge per CSV laden" defaultOpen>
-          <p className="subtle">Format: company, contactName, phone, email, topic, note, nextCallAt</p>
-          <label>Listenname</label>
-          <input
-            value={importListName}
-            onChange={(event) => setImportListName(event.target.value)}
-            placeholder="z. B. April-Kampagne Industrie"
-          />
-          <label>Thema (optional, überschreibt Wert aus Datei)</label>
-          <select value={importTopic} onChange={(event) => setImportTopic((event.target.value as Topic) || "")}>
-            <option value="">-- Thema aus Datei verwenden --</option>
-            {TOPICS.map((topic) => (
-              <option key={topic} value={topic}>
-                {topic}
-              </option>
-            ))}
-          </select>
-          <label>Datei hochladen (CSV / XLSX / XLS)</label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            onChange={(event) => setImportFile(event.target.files?.[0] || null)}
-          />
-          <div className="row top-gap">
-            <button className="btn" onClick={() => void handleFileImport()} disabled={busy || !importFile}>Datei importieren</button>
-            {importFile ? <span className="subtle">Ausgewählt: {importFile.name}</span> : null}
-          </div>
-        </CollapsiblePanel>
-
-        <CollapsiblePanel title="Offene Firmenliste" defaultOpen>
-          {campaignLists.length === 0 ? (
-            <p className="subtle">Noch keine Listen vorhanden. Bitte zuerst CSV oder Excel hochladen.</p>
-          ) : (
-            <div className="stack">
-              <p className="subtle">
-                Aktive Listen werden automatisch Mo–Fr von 09:00–12:00 und 13:00–17:00 (Europe/Berlin) abgearbeitet. Bei „Kein Kontakt“ wird der Lead nach 1 Tag und danach nach 3 Tagen erneut versucht (max. 3 Versuche).
-              </p>
-              {campaignLists.map((list) => {
-                const leadsForList = data.leads.filter((lead) => (lead.listId || "legacy") === list.listId);
-                const isRunning = list.active || Boolean(list.currentlyDialing) || runningListSet.has(list.listId);
-
-                return (
-                  <div key={list.listId} className="mini-panel">
-                    <div className="row spread">
-                      <h3>{list.listName}</h3>
-                      <div className="row">
-                        <span className="pill">Gesamt: {list.total}</span>
-                        <span className="pill">Offen: {list.pending}</span>
-                        <span className="pill">Termine: {list.appointments}</span>
-                        {isRunning ? <span className="pill campaign-status running">Status: läuft</span> : <span className="pill campaign-status stopped">Status: gestoppt</span>}
-                        <button
-                          className="btn"
-                          onClick={() => void controlCampaignList(list.listId, "start")}
-                          disabled={busy || isRunning || list.pending === 0}
-                        >
-                          Starten
-                        </button>
-                        <button
-                          className="btn ghost"
-                          onClick={() => void controlCampaignList(list.listId, "stop")}
-                          disabled={busy || !isRunning}
-                        >
-                          Stoppen
-                        </button>
-                        <button
-                          className="btn danger"
-                          onClick={() => void controlCampaignList(list.listId, "delete")}
-                          disabled={busy}
-                        >
-                          Loeschen
-                        </button>
-                      </div>
-                    </div>
-
-                    <table className="top-gap">
-                      <thead>
-                        <tr><th>Firma</th><th>Ort</th><th>Ansprechpartner</th><th>Telefon</th><th>Email</th><th>Thema</th><th>Status</th><th>Ampel</th></tr>
-                      </thead>
-                      <tbody>
-                        {leadsForList.map((lead) => (
-                          <tr key={lead.id}>
-                            <td>
-                              <button
-                                className="link-button"
-                                onClick={() => setSelectedLeadForHistory(lead)}
-                                title="Auftragshistorie anzeigen"
-                              >
-                                <strong>{lead.company}</strong>
-                              </button>
-                            </td>
-                            <td style={{ fontSize: "0.9rem" }}>{lead.location || "-"}</td>
-                            <td>{lead.contactName || "-"}</td>
-                            <td style={{ fontSize: "0.85rem" }}>{lead.phone || lead.directDial || "-"}</td>
-                            <td style={{ fontSize: "0.85rem", wordBreak: "break-word", maxWidth: "200px" }}>{lead.email || "-"}</td>
-                            <td>{lead.topic}</td>
-                            <td>{lead.status}</td>
-                            <td>
-                              <span className={`auftrag-ampel ${leadAmpelById[lead.id]?.tone || "info"}`} title={leadAmpelById[lead.id]?.text || ""}>
-                                {leadAmpelById[lead.id]?.label || "Blau"}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CollapsiblePanel>
       </section>
       ) : null}
 

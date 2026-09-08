@@ -207,6 +207,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [filterCustomerKind, setFilterCustomerKind] = useState<"" | "privat" | "firma">("");
   const [filterPipeline, setFilterPipeline] = useState<string>("");
   const [filterContact, setFilterContact] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
+  const [filterCampaignListId, setFilterCampaignListId] = useState("");
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
@@ -300,6 +301,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     if (filterContact === "mitTelefon") {
       leads = leads.filter((l) => Boolean((l.phone || l.directDial || "").trim()));
     }
+    if (filterCampaignListId) {
+      leads = leads.filter((l) => (l.listId || "legacy") === filterCampaignListId);
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       leads = leads.filter((l) =>
@@ -310,7 +314,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     }
     return leads;
-  }, [data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterPipeline, filterContact, searchQuery]);
+  }, [data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterPipeline, filterContact, filterCampaignListId, searchQuery]);
 
   const availablePipelineStages = useMemo(() => {
     const defaults = ["neu", "qualifiziert", "angebot", "verhandlung", "gewonnen", "verloren"];
@@ -447,10 +451,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   const reloadLiveData = useCallback(async () => {
-    const dataRes = await fetch("/api/live", { credentials: "include", cache: "no-store" });
+    const [dataRes, listsRes] = await Promise.all([
+      fetch("/api/live", { credentials: "include", cache: "no-store" }),
+      fetch("/api/campaigns/lists", { credentials: "include", cache: "no-store" }),
+    ]);
     if (dataRes.ok) {
       const payload = await dataRes.json();
       setData(payload || EMPTY_DATA);
+    }
+    if (listsRes.ok) {
+      const payload = (await listsRes.json()) as { lists?: CampaignListSummary[] };
+      setCampaignLists(payload.lists || []);
     }
   }, []);
 
@@ -981,18 +992,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }, [outlookBodyDraft, outlookSubjectDraft, outlookToDraft, selectedLead]);
 
   const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete") => {
+    if (action === "delete" && !window.confirm("Diese Liste und alle zugehörigen Kontakte wirklich löschen?")) {
+      return;
+    }
     setBusy(true);
     try {
-      const res = await fetch("/api/campaigns/run-active", {
+      const res = await fetch("/api/campaigns/lists", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, listId }),
       });
 
-      if (!res.ok) throw new Error("Aktion fehlgeschlagen");
-      
-      const result = await res.json();
+      const result = (await res.json()) as { error?: string; lists?: CampaignListSummary[] };
+      if (!res.ok) throw new Error(result.error || "Aktion fehlgeschlagen");
+      if (result.lists) setCampaignLists(result.lists);
       setNotice(`✓ Kampagne ${action === "start" ? "gestartet" : action === "stop" ? "gestoppt" : "gelöscht"}`);
       
       // Reload data
@@ -1011,37 +1025,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
     const load = async () => {
       try {
-        const [dataRes, userRes] = await Promise.all([
+        const [dataRes, userRes, listsRes] = await Promise.all([
           fetch("/api/live", { credentials: "include" }),
           fetch("/api/auth/me", { credentials: "include" }),
+          fetch("/api/campaigns/lists", { credentials: "include", cache: "no-store" }),
         ]);
 
         if (dataRes.ok && !cancelled) {
           const d = await dataRes.json();
           setData(d || EMPTY_DATA);
           
-          // Extract campaign lists from data
-          const lists: CampaignListSummary[] = [];
-          const processed = new Set<string>();
-          for (const lead of (d.leads || [])) {
-            const listId = lead.listId || "legacy";
-            if (!processed.has(listId)) {
-              const leadsInList = (d.leads || []).filter((l: DashboardData["leads"][number]) => (l.listId || "legacy") === listId);
-              lists.push({
-                listId,
-                listName: listId === "legacy" ? "Importierte Kontakte" : listId,
-                active: false,
-                total: leadsInList.length,
-                pending: leadsInList.filter((l: DashboardData["leads"][number]) => !l.status || l.status === "neu").length,
-                called: leadsInList.filter((l: DashboardData["leads"][number]) => l.attempts && l.attempts > 0).length,
-                appointments: leadsInList.filter((l: DashboardData["leads"][number]) => l.status === "termin").length,
-                callbacks: leadsInList.filter((l: DashboardData["leads"][number]) => l.status === "wiedervorlage").length,
-                rejections: leadsInList.filter((l: DashboardData["leads"][number]) => l.status === "absage").length,
-              });
-              processed.add(listId);
-            }
-          }
-          setCampaignLists(lists);
+        }
+
+        if (listsRes.ok && !cancelled) {
+          const payload = (await listsRes.json()) as { lists?: CampaignListSummary[] };
+          setCampaignLists(payload.lists || []);
         }
 
         if (userRes.ok && !cancelled) {
@@ -1735,9 +1733,49 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const callbacks = (data.reports || [])
       .filter((r) => r.outcome === "Wiedervorlage" && r.nextCallAt)
       .sort((a, b) => Date.parse(a.nextCallAt || "0") - Date.parse(b.nextCallAt || "0"));
+    const runningListIds = new Set(campaignLists.filter((list) => list.active || list.currentlyDialing).map((list) => list.listId));
+    const activeLists = campaignLists.filter((list) => runningListIds.has(list.listId));
+    const completedLists = campaignLists.filter((list) => !runningListIds.has(list.listId));
+
+    const renderCampaignList = (list: CampaignListSummary) => {
+      const leads = (data.leads || []).filter((lead) => (lead.listId || "legacy") === list.listId);
+      const isRunning = runningListIds.has(list.listId);
+      return (
+        <article key={list.listId} className={`campaign-item ${isRunning ? "campaign-running" : ""}`}>
+          <div className="campaign-heading">
+            <div>
+              <strong>{list.listName}</strong>
+              <div className="subtle">{list.total} Kontakte | {list.pending} offen | {list.called} angerufen | {list.appointments} Termine</div>
+            </div>
+            <span className={`campaign-state ${isRunning ? "running" : "stopped"}`}>{isRunning ? (list.currentlyDialing ? "Gloria ruft an" : "Aktiv") : (list.pending === 0 ? "Beendet" : "Gestoppt")}</span>
+          </div>
+          <div className="campaign-controls">
+            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => void controlCampaignList(list.listId, "start")}>Starten</button>
+            <button className="btn-small ghost" disabled={busy || !isRunning} onClick={() => void controlCampaignList(list.listId, "stop")}>Stoppen</button>
+            <button className="btn-small ghost" onClick={() => { setFilterCampaignListId(list.listId); setActiveView("contacts"); }}>Bearbeiten</button>
+          </div>
+          <div className="campaign-leads">
+            {leads.length === 0 ? <span className="subtle">Keine Kontakte in dieser Liste</span> : leads.map((lead) => (
+              <button key={lead.id} className="campaign-lead" onClick={() => { setSelectedLead(lead); setActiveView("contacts"); }}>
+                <span>{lead.company}</span><span>{lead.status || "neu"}</span>
+              </button>
+            ))}
+          </div>
+        </article>
+      );
+    };
 
     return (
       <div className="tasks-view">
+        <section className="task-section">
+          <div className="section-heading"><h3>Aktive Anruflisten</h3><span className="subtle">Gloria bearbeitet diese Listen automatisch.</span></div>
+          {activeLists.length === 0 ? <p className="subtle">Keine aktive Anrufliste.</p> : <div className="campaign-list">{activeLists.map(renderCampaignList)}</div>}
+        </section>
+        <section className="task-section">
+          <div className="section-heading"><h3>Beendete & gestoppte Listen</h3><span className="subtle">Listen können weiterbearbeitet und erneut gestartet werden.</span></div>
+          {completedLists.length === 0 ? <p className="subtle">Keine beendeten oder gestoppten Listen.</p> : <div className="campaign-list">{completedLists.map(renderCampaignList)}</div>}
+        </section>
+        <section className="task-section">
         <h3>Follow-ups & Wiedervorlagen</h3>
         {callbacks.length === 0 ? (
           <p className="subtle">Keine ausstehenden Follow-ups</p>
@@ -1774,6 +1812,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             ))}
           </div>
         )}
+        </section>
       </div>
     );
   }
@@ -1803,28 +1842,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             </button>
           </div>
 
-          {campaignLists.length > 0 && (
-            <div className="settings-panel">
-              <h4>Aktive Kampagnen</h4>
-              <div className="campaign-list">
-                {campaignLists.map((list) => (
-                  <div key={list.listId} className="campaign-item">
-                    <div>
-                      <strong>{list.listName}</strong>
-                      <div className="subtle">
-                        {list.pending} offen | {list.appointments} Termine | {list.rejections} Absagen
-                      </div>
-                    </div>
-                    <div className="campaign-controls">
-                      <button className="btn-small" disabled={busy || list.active} onClick={() => void controlCampaignList(list.listId, "start")}>Start</button>
-                      <button className="btn-small ghost" disabled={busy || !list.active} onClick={() => void controlCampaignList(list.listId, "stop")}>Stop</button>
-                      <button className="btn-small danger" disabled={busy} onClick={() => void controlCampaignList(list.listId, "delete")}>Delete</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </section>
       </div>
     );
@@ -2782,17 +2799,57 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
         .campaign-item {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 0.75rem;
           padding: 1rem;
           background: #f9fafb;
           border-radius: 6px;
           border-left: 3px solid #2563eb;
         }
 
+        .campaign-running { border-left-color: #16a34a; }
+
+        .campaign-heading, .section-heading {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .campaign-state { font-size: 0.8rem; font-weight: 600; }
+        .campaign-state.running { color: #15803d; }
+        .campaign-state.stopped { color: #6b7280; }
+
         .campaign-controls {
           display: flex;
           gap: 0.5rem;
+          flex-wrap: wrap;
+        }
+
+        .campaign-leads {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 0.5rem;
+          border-top: 1px solid #e5e7eb;
+          padding-top: 0.75rem;
+        }
+
+        .campaign-lead {
+          display: flex;
+          justify-content: space-between;
+          gap: 0.5rem;
+          padding: 0.45rem 0.6rem;
+          border: 1px solid #e5e7eb;
+          border-radius: 4px;
+          background: white;
+          color: #374151;
+          cursor: pointer;
+          text-align: left;
+        }
+
+        .campaign-lead:hover { border-color: #93c5fd; }
+        .task-section { margin-bottom: 2rem; }
         }
 
         .subtle {
