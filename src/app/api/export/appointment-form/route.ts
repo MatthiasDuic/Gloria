@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
-import { getDashboardData } from "@/lib/storage";
-import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
+import { getConversationEventsForCallSid, getDashboardData } from "@/lib/storage";
+import { listCallTranscriptEventsFromPostgres, listUsers } from "@/lib/report-db";
 
 export async function GET(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);
@@ -22,8 +22,34 @@ export async function GET(request: Request) {
   }
 
   try {
-    const transcriptEvents = await listCallTranscriptEventsFromPostgres(callSid);
-    const input = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
+    const storedTranscriptEvents = await listCallTranscriptEventsFromPostgres(callSid);
+    const conversationEvents = storedTranscriptEvents.length > 0
+      ? []
+      : await getConversationEventsForCallSid(callSid, {
+          userId: sessionUser.role === "master" ? undefined : sessionUser.id,
+        });
+    const transcriptEvents = storedTranscriptEvents.length > 0
+      ? storedTranscriptEvents
+      : conversationEvents
+          .filter((event) => event.text?.trim() && /utterance|realtime\.(?:user|gloria)_said/i.test(event.eventType || ""))
+          .map((event) => ({
+            speaker: /gloria|assistant/i.test(event.eventType || "") ? "Gloria" as const : "Interessent" as const,
+            text: event.text?.trim() || "",
+          }));
+    const lead = report.leadId ? data.leads.find((entry) => entry.id === report.leadId) : undefined;
+    const owner = report.userId === sessionUser.id
+      ? sessionUser
+      : (await listUsers()).find((entry) => entry.id === report.userId);
+    const location = lead?.location
+      || [lead?.addressStreet, [lead?.addressPostalCode, lead?.addressCity].filter(Boolean).join(" ")].filter(Boolean).join(", ")
+      || undefined;
+    const input = buildAppointmentFormInputFromReport({
+      ...report,
+      directDial: report.directDial || lead?.directDial || lead?.phone,
+      location,
+      advisor: owner?.realName || owner?.username,
+      transcriptEvents,
+    });
     const pdf = await buildAppointmentFormPdf(input);
     return new NextResponse(new Uint8Array(pdf), {
       headers: {

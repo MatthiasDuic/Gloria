@@ -1106,6 +1106,34 @@ td {
   grid-column: 1 / -1;
 }
 
+.conversation-history-section {
+  border-top: 2px solid #d7e3f4;
+  border-bottom: 1px solid #d7e3f4;
+  background: #f8fbff;
+  margin: 4px -14px 0;
+  padding: 18px 14px;
+}
+
+.conversation-history-section > label {
+  display: block;
+  margin: 0 0 3px;
+  font-size: 0.78rem;
+  color: #365c91;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.conversation-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  margin-top: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .summary-box {
   background: var(--mist-100);
   border: 1px solid var(--mist-200);

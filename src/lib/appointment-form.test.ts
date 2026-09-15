@@ -12,6 +12,9 @@ test("buildAppointmentFormInputFromReport extracts appointment preparation data"
   const input = buildAppointmentFormInputFromReport({
     company: "Musterbau GmbH",
     contactName: "Herr Neumann",
+    directDial: "+49 170 1234567",
+    location: "Musterstraße 12, 45525 Musterstadt",
+    advisor: "Matthias Duic",
     topic: "private Krankenversicherung",
     conversationDate: "2026-09-03T07:55:59.830Z",
     appointmentAt: "2026-09-10T16:30:00.000Z",
@@ -19,6 +22,9 @@ test("buildAppointmentFormInputFromReport extracts appointment preparation data"
   });
 
   assert.equal(input.appointmentDate, "2026-09-10T16:30:00.000Z");
+  assert.equal(input.location, "Musterstraße 12, 45525 Musterstadt");
+  assert.equal(input.advisor, "Matthias Duic");
+  assert.equal(input.phone, "+49 170 1234567");
   assert.equal(input.email, "muster@muster.de");
   assert.equal(input.birthDate, "2. Mai 87.");
   assert.equal(input.healthInsurance, "Allianz.");
@@ -87,7 +93,18 @@ test("buildAppointmentFormPdf creates a valid PDF document", async () => {
   assert.ok(Buffer.isBuffer(pdf));
   assert.ok(pdf.length > 1000);
   assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
+  assert.match(pdf.toString("latin1"), /appointment_location/);
   assert.equal(shouldIncludeHealthSection("private Krankenversicherung"), true);
+});
+
+test("buildAppointmentFormPdf keeps long notes across clean page breaks", async () => {
+  const pdf = await buildAppointmentFormPdf({
+    topic: "private Krankenversicherung",
+    notes: "Ausführliche Gesprächszusammenfassung. ".repeat(180),
+  });
+
+  const pageCount = pdf.toString("latin1").match(/\/Type \/Page\b/g)?.length || 0;
+  assert.ok(pageCount >= 2);
 });
 
 test("buildAppointmentFormPdf hides health questions for commercial and retirement topics", async () => {

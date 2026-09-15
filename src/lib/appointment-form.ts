@@ -24,6 +24,9 @@ export interface AppointmentFormInput {
 export interface AppointmentReportSource {
   company: string;
   contactName?: string;
+  directDial?: string;
+  location?: string;
+  advisor?: string;
   topic: string;
   summary: string;
   conversationDate: string;
@@ -76,7 +79,10 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     createdAt: report.conversationDate,
     appointmentDate: report.appointmentAt,
     appointmentMode: report.summary.match(/Durchführung:\s*([^\n.]+)/i)?.[1]?.trim(),
+    location: report.location,
+    advisor: report.advisor,
     contactName: report.contactName,
+    phone: report.directDial,
     email,
     company: report.company,
     birthDate: answerAfter(/geburtsdatum/i),
@@ -147,6 +153,7 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     const doc = new PDFDocument({
       size: "A4",
       margins: { top: 50, bottom: 50, left: 50, right: 50 },
+      bufferPages: true,
       info: {
         Title: input.title || "Kundenterminbogen",
         Author: "Gloria KI-Assistent",
@@ -159,6 +166,7 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", (error) => reject(error));
+    doc.initForm();
 
     const ink = "#172338";
     const muted = "#5d6d7f";
@@ -208,7 +216,13 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     doc.fillColor(ink).font("Helvetica-Bold").fontSize(11.5).text(formatValue(input.appointmentMode), left + columnWidth + 13, bannerY + 23, { width: columnWidth - 20 });
 
     let y = section("Termindetails", 204);
-    field("Ort des Termins", formatValue(input.location), left, y);
+    label("Ort des Termins", left, y + 7);
+    doc.formText("appointment_location", left, y + 18, columnWidth, 24, {
+      value: input.location?.trim() || "",
+      fontSize: 10.5,
+      borderWidth: 0,
+    });
+    doc.strokeColor(line).lineWidth(0.7).moveTo(left, y + 44).lineTo(left + columnWidth, y + 44).stroke();
     field("Berater", formatValue(input.advisor), left + columnWidth + columnGap, y);
     y += 54;
     label("Terminart", left, y + 7);
@@ -251,11 +265,24 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
       y += 44;
     }
 
-    y = section("Notizen für den Termin", y + 18);
-    doc.fillColor(ink).font("Helvetica").fontSize(9.5).text(formatValue(input.notes), left, y + 8, { width: contentWidth, height: 58, lineGap: 2 });
-    doc.strokeColor(line).lineWidth(0.7).moveTo(left, y + 66).lineTo(left + contentWidth, y + 66).stroke();
-    doc.strokeColor(line).lineWidth(0.7).moveTo(left, 790).lineTo(left + contentWidth, 790).stroke();
-    doc.fillColor(muted).font("Helvetica").fontSize(7.5).text("Kundenterminbogen | Agentur Duic | Interne Arbeitsunterlage", left, 798, { width: contentWidth });
+    const notes = formatValue(input.notes);
+    doc.font("Helvetica").fontSize(9.5);
+    const notesHeight = doc.heightOfString(notes, { width: contentWidth, lineGap: 2 });
+    if (y + 44 + notesHeight > 760) {
+      doc.addPage();
+      y = 58;
+    } else {
+      y += 18;
+    }
+    y = section("Notizen für den Termin", y);
+    doc.fillColor(ink).font("Helvetica").fontSize(9.5).text(notes, left, y + 8, { width: contentWidth, lineGap: 2 });
+
+    const pageRange = doc.bufferedPageRange();
+    for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
+      doc.switchToPage(pageIndex);
+      doc.strokeColor(line).lineWidth(0.7).moveTo(left, 772).lineTo(left + contentWidth, 772).stroke();
+      doc.fillColor(muted).font("Helvetica").fontSize(7.5).text("Kundenterminbogen | Agentur Duic | Interne Arbeitsunterlage", left, 779, { width: contentWidth, lineBreak: false });
+    }
 
     doc.end();
   });

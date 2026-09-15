@@ -296,12 +296,16 @@ function speakText(text: string) {
 function buildConversationLines(summary: string) {
   return summary
     .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith("Gloria:") || l.startsWith("Interessent:"))
-    .map((l) => {
-      const isGloria = l.startsWith("Gloria:");
-      return { speaker: isGloria ? "Gloria" : "Interessent", text: l.replace(/^Gloria:|^Interessent:/, "").trim() };
-    });
+    .map((line) => line.trim().match(/^(?:-\s*)?(?:\[[^\]]+\]\s*)?(Gloria|Interessent)(?:\s*\([^)]*\))?:\s*(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => ({ speaker: match[1], text: match[2].trim() }));
+}
+
+function getConversationSummary(summary: string) {
+  const withoutTranscript = summary
+    .split(/\n---\s*(?:GESPRAECHSPROTOKOLL|GESPRÄCHSPROTOKOLL|GESPRÄCHSVERLAUF)[^\n]*---/i, 1)[0]
+    .trim();
+  return withoutTranscript.match(/(?:^|\n)Zusammenfassung:\s*\n([\s\S]*)$/i)?.[1]?.trim() || withoutTranscript;
 }
 
 function readDocumentationField(summary: string, field: string): string | undefined {
@@ -4029,6 +4033,13 @@ export default function HomePage() {
                 </div>
 
                 <div className="report-detail-field report-detail-full">
+                  <label>Gesprächszusammenfassung</label>
+                  <p className="summary-box" style={{ whiteSpace: "pre-wrap" }}>
+                    {getConversationSummary(selectedReport.summary) || "Keine Zusammenfassung vorhanden."}
+                  </p>
+                </div>
+
+                <section className="conversation-history-section report-detail-full">
                   <label>Gesprächsprotokoll</label>
                   <p className="subtle" style={{ marginTop: 0, marginBottom: 8 }}>
                     {transcriptSource === "transcript_events" ? "Vollständiger Live-Mitschnitt mit Reaktionszeit pro Gloria-Antwort." : timelineEntries.length > 0 ? "Im Report gesicherter Fallback-Mitschnitt; Reaktionszeiten sind hierfür nicht verfügbar." : "Lade den vollständigen Gesprächsverlauf."}
@@ -4038,7 +4049,7 @@ export default function HomePage() {
                   ) : timelineEntries.length === 0 ? (
                     <p className="subtle" style={{ marginTop: 6 }}>Für diesen Anruf liegt kein technischer Mitschnitt vor. Die Gesprächszusammenfassung finden Sie direkt darunter.</p>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                    <div className="conversation-history-list">
                       {averageLatency !== undefined && (
                         <p className="subtle" style={{ margin: "0 0 4px" }}>
                           Durchschnitt: {(averageLatency / 1000).toFixed(2)} s | Langsame Antworten über 1,5 s: {slowLatencyCount} | Höchste Reaktionszeit: {(Math.max(...gloriaLatencies) / 1000).toFixed(2)} s
@@ -4099,14 +4110,7 @@ export default function HomePage() {
                       })}
                     </div>
                   )}
-                </div>
-
-                <div className="report-detail-field report-detail-full">
-                  <label>Zusammenfassung (Rohdaten)</label>
-                  <pre className="code-box" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-                    {selectedReport.summary || "Kein Protokoll vorhanden."}
-                  </pre>
-                </div>
+                </section>
 
                 {selectedReport.callSid && (
                   <div className="report-detail-field">
