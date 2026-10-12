@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -49,6 +50,15 @@ test("recovers once when a barge-in produces only the configured transcription p
   assert.equal(shouldRecoverInterruptedBargeIn(true, syntheticPrompt), true);
   assert.equal(shouldRecoverInterruptedBargeIn(false, syntheticPrompt), false);
   assert.equal(shouldRecoverInterruptedBargeIn(true, "Ja, sagen Sie bitte."), false);
+});
+
+test("retries only fast ElevenLabs failures before any audio was streamed", () => {
+  assert.equal(shouldRetryElevenLabsStream(new Error("fetch failed"), 0, 0), true);
+  assert.equal(shouldRetryElevenLabsStream(new Error("ElevenLabs TTS antwortete 502"), 0, 0), true);
+  assert.equal(shouldRetryElevenLabsStream(new Error("ElevenLabs stream stalled after 6s"), 0, 0), false);
+  assert.equal(shouldRetryElevenLabsStream(new Error("fetch failed"), 320, 0), false);
+  assert.equal(shouldRetryElevenLabsStream(new Error("fetch failed"), 0, 1), false);
+  assert.equal(shouldRetryElevenLabsStream(new Error("The operation was aborted"), 0, 0), false);
 });
 
 test("does not recover a complete preparation introduction ending with a colon", () => {
@@ -205,6 +215,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /HOCHRECHNUNG:.*Zehn-Jahres-Beispielrechnung/);
   assert.match(instructions, /ÜBERLEITUNG:.*Herr Duic/);
   assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instructions, /PROSODIE:.*menschlich.*hörbar warm/);
   assert.match(instructions, /digital per Microsoft Teams oder bei der Kundin\/dem Kunden vor Ort/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);

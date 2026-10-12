@@ -17,6 +17,13 @@ export function isElevenLabsConfigured(): boolean {
   return Boolean(getApiKey() && getVoiceId());
 }
 
+export function shouldRetryElevenLabsStream(error: unknown, streamedAudioBytes: number, retryCount: number): boolean {
+  if (streamedAudioBytes > 0 || retryCount > 0) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort|stalled after/i.test(message)) return false;
+  return /\b429\b|\b5\d\d\b|fetch failed|econnreset|econnrefused|eai_again|etimedout|socket hang up|network/i.test(message);
+}
+
 export async function streamElevenLabsAudio(
   text: string,
   outputFormat: ElevenLabsOutputFormat,

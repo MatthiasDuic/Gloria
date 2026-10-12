@@ -10,7 +10,7 @@ import { classifyConversationEvent, instructionForConversationEvent, isConversat
 import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
-import { isElevenLabsConfigured, streamElevenLabsAudio } from "./elevenlabs-tts.js";
+import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractCurrentContributionPhrase, isClearPkvInterest } from "./pkv-conversation-controller.js";
 import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
@@ -249,6 +249,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: direkt mit dem nächsten Schritt fortfahren. Bei Interesse: direkt den nächsten Schritt anbieten. Vermeide Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder 'Danke'.",
     "Sprich ruhig, freundlich und konkret. Höchstens ein kurzer Satz und eine Frage. Kein Callcenter-Monolog, keine künstliche Vertrautheit, keine Wiederholung der Kundenaussage und keine leeren Bestätigungen. Sprich Standarddeutsch und keine englischen Füllwörter.",
+    "PROSODIE: Klinge menschlich, zugewandt und emotional präsent. Nutze natürliche Tonhöhenbewegung, leichte Betonung wichtiger Wörter und kleine Pausen an Satzzeichen; variiere das Tempo passend zum Sinn. Anteilnahme soll hörbar warm, echte Neugier offen und die Begrüßung mit einem Lächeln klingen. Lies nie gleichförmig oder silbenweise ab. Sprich keine Regieanweisungen oder Emotionslabels aus.",
     "Lass den Kunden ausreden. Ein Fragment, 'äh', 'mhm', 'aha' oder unklarer Ton ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann einmal kurz nach, statt etwas anzunehmen.",
     "Die Topic Policy steuert Anlass, Nutzen, Einwände und fachliche Grenzen. Die universellen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und Terminlogik haben Vorrang.",
     "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
@@ -558,28 +559,41 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ttsAbortController = controller;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
     let audioBytes = 0;
+    let retryCount = 0;
 
     try {
-      await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
-        if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
-        if (audioBytes === 0) {
-          const now = Date.now();
-          ttsPlaybackStartedAt = now; // set on first real audio chunk
-          firstTtsChunkAt = now;
-          const userFinalAt = ctx?.lastUserFinalAt;
-          if (ctx && userFinalAt) {
-            log.info("realtime.turn_latency", {
-              callSid: ctx.callSid,
-              asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - userFinalAt : undefined,
-              asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - userFinalAt : undefined,
-              asrFinalToFirstTtsChunkMs: now - userFinalAt,
-              responseCreatedToFirstTtsChunkMs: responseCreatedAt ? now - responseCreatedAt : undefined,
-            });
+      while (true) {
+        try {
+          await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
+            if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+            if (audioBytes === 0) {
+              const now = Date.now();
+              ttsPlaybackStartedAt = now;
+              firstTtsChunkAt = now;
+              const userFinalAt = ctx?.lastUserFinalAt;
+              if (ctx && userFinalAt) {
+                log.info("realtime.turn_latency", {
+                  callSid: ctx.callSid,
+                  asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - userFinalAt : undefined,
+                  asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - userFinalAt : undefined,
+                  asrFinalToFirstTtsChunkMs: now - userFinalAt,
+                  responseCreatedToFirstTtsChunkMs: responseCreatedAt ? now - responseCreatedAt : undefined,
+                });
+              }
+            }
+            audioBytes += chunk.length;
+            playback.appendBase64Audio(chunk.toString("base64"));
+          }, ctx?.voiceProfile);
+          break;
+        } catch (error) {
+          if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, audioBytes, retryCount)) {
+            retryCount += 1;
+            log.warn("realtime.elevenlabs_retry", { callSid: ctx?.callSid, retryCount, error: error instanceof Error ? error.message : String(error) });
+            continue;
           }
+          throw error;
         }
-        audioBytes += chunk.length;
-        playback.appendBase64Audio(chunk.toString("base64"));
-      }, ctx?.voiceProfile);
+      }
       if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
         playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
         if (audioBytes === 0) {
@@ -592,6 +606,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         log.error("realtime.elevenlabs_failed", {
           callSid: ctx?.callSid,
           error: error instanceof Error ? error.message : String(error),
+          audioBytes,
+          retryCount,
         });
         playback.interrupt();
       }

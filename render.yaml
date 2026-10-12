@@ -32,15 +32,15 @@ services:
       - key: ELEVENLABS_MODEL
         value: eleven_multilingual_v2
       - key: ELEVENLABS_STABILITY
-        value: "0.27"
+        value: "0.38"
       - key: ELEVENLABS_SIMILARITY
-        value: "0.86"
+        value: "0.84"
       - key: ELEVENLABS_STYLE
-        value: "0.62"
+        value: "0.36"
       - key: ELEVENLABS_SPEED
-        value: "0.90"
+        value: "0.96"
       - key: ELEVENLABS_SPEAKER_BOOST
-        value: "false"
+        value: "true"
       - key: TELNYX_STREAM_BIDIRECTIONAL_CODEC
         value: PCMA
       - key: APP_BASE_URL
