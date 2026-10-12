@@ -809,6 +809,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
 
         const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+        if (currentStep === 1 && nextStep === 1) {
+          requestEventResponse("Die Kundenaussage enthält noch keinen früheren Beitrag und auch keine Aussage, dass der Kunde ihn nicht mehr weiß. Frage ohne Einleitung exakt: 'Mit welchem Beitrag haben Sie einmal angefangen?' Wiederhole weder den Anlass noch die Aussage des PKV Verbands.");
+          return;
+        }
         if (nextStep !== currentStep) {
           currentContext.dialogState.pkvStep = nextStep;
           log.info("realtime.pkv_step_advanced", { callSid: currentContext.callSid, from: currentStep, to: nextStep });

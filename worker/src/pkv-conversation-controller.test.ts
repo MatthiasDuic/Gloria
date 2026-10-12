@@ -68,7 +68,9 @@ test("does not advance from step 0 on a plain greeting", () => {
 
 test("does not advance PKV stages on unrelated or repeated utterances", () => {
   assert.deepEqual(advancePkvStep(1, "Hallo, willkommen."), { nextStep: 1, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(1, "Die Beiträge sind schon stark gestiegen."), { nextStep: 2, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(1, "Die Beiträge sind schon stark gestiegen."), { nextStep: 1, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(1, "Ja, das tue ich."), { nextStep: 1, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(1, "Ich kann mich nicht mehr erinnern."), { nextStep: 2, shouldEnd: false });
   assert.deepEqual(advancePkvStep(2, "Dann lass mich das mal eben fertig machen."), { nextStep: 2, shouldEnd: false });
   assert.deepEqual(advancePkvStep(2, "Weiß ich nicht."), { nextStep: 3, shouldEnd: false });
   assert.deepEqual(advancePkvStep(3, "Nein, so habe ich das noch nie durchgerechnet."), { nextStep: 4, shouldEnd: false });
@@ -106,9 +108,10 @@ test("follows the short PKV sequence and asks about each contribution separately
   assert.match(instructionForPkvStep(1), /um 3-5%.*mit welchem Beitrag Sie einmal angefangen haben/i);
   assert.doesNotMatch(instructionForPkvStep(1), /Es geht um die Beitragsentwicklung/i);
   assert.match(instructionForPkvStep(2), /welchen Beitrag zahlen Sie heute/i);
+  assert.match(instructionForPkvStep(2), /ohne Einleitung, Bestätigung oder Dankesfloskel/i);
   assert.match(instructionForPkvStep(3, "980 Euro"), /Haben Sie das schon einmal für sich hochgerechnet\?/i);
   assert.match(instructionForPkvStep(4), /Herr Duic jeden Tag.*Wäre es für Sie interessant/i);
-  assert.deepEqual(advancePkvStep(1, "Ja, einen Moment."), { nextStep: 2, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(1, "Ja, einen Moment."), { nextStep: 1, shouldEnd: false });
   assert.deepEqual(advancePkvStep(2, "Damals waren es 450 Euro."), { nextStep: 3, shouldEnd: false });
   assert.deepEqual(advancePkvStep(2, "Heute zahle ich 980 Euro."), { nextStep: 3, shouldEnd: false });
   assert.deepEqual(advancePkvStep(3, "Nein, das hatte ich noch nicht berechnet."), { nextStep: 4, shouldEnd: false });
