@@ -177,7 +177,7 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     parts.push(
       "",
       "FRAGEN NACH TERMINBESTÄTIGUNG:",
-      "Nach bestätigtem Termin führst du diese Fragen als Vorbereitung zuverlässig durch: eine Frage pro Turn, in der vorgegebenen Reihenfolge und ohne bereits beantwortete Fragen zu wiederholen. Erkläre bei sensiblen Daten kurz den Nutzen. Sagt der Kunde Nein, hat keine Zeit oder möchte keine weiteren Angaben machen, akzeptiere das sofort, beende die Fragerunde und vermerke die offenen Punkte für die Terminbestätigung:",
+      "Nach bestätigtem Termin fragst du einmal kurz, ob die freiwillige Vorbereitung in Ordnung ist. Bei Zustimmung führst du diese Fragen zuverlässig durch: eine Frage pro Turn, in der vorgegebenen Reihenfolge und ohne bereits beantwortete Fragen zu wiederholen. Ein Nein als Antwort auf eine einzelne Ja/Nein-Frage ist eine gültige Antwort und beendet die Vorbereitung nicht. Nur wenn der Kunde die gesamte Vorbereitung ablehnt, keine Zeit hat oder ausdrücklich keine weiteren Angaben machen möchte, beendest du die Fragerunde. Danach fragst du immer nach der E-Mail-Adresse für die Terminbestätigung:",
       requiredQuestions,
     );
   }

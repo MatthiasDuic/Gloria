@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 
@@ -50,6 +50,21 @@ test("recovers once when a barge-in produces only the configured transcription p
   assert.equal(shouldRecoverInterruptedBargeIn(true, syntheticPrompt), true);
   assert.equal(shouldRecoverInterruptedBargeIn(false, syntheticPrompt), false);
   assert.equal(shouldRecoverInterruptedBargeIn(true, "Ja, sagen Sie bitte."), false);
+});
+
+test("accepts a direct answer to an end question without asking twice", () => {
+  const ctx = buildPkvContext();
+  ctx.transcript.push(
+    { role: "assistant", text: "Möchten Sie das Gespräch jetzt beenden?", at: 9 },
+    { role: "user", text: "Ja.", at: 10 },
+  );
+  assert.equal(hasAffirmedAssistantEndQuestion(ctx), true);
+
+  ctx.transcript.push(
+    { role: "assistant", text: "Soll der Termin am Montag stattfinden?", at: 11 },
+    { role: "user", text: "Ja.", at: 12 },
+  );
+  assert.equal(hasAffirmedAssistantEndQuestion(ctx), false);
 });
 
 test("retries only fast ElevenLabs failures before any audio was streamed", () => {

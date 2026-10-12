@@ -88,9 +88,7 @@ const PKV_FALLBACK_QUESTIONS = [
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
   const isPkv = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "");
   if (isPkv) return PKV_FALLBACK_QUESTIONS.split("\n");
-  const source = isPkv
-    ? policy?.pkvHealthQuestions || policy?.requiredQuestions || policy?.requiredData || PKV_FALLBACK_QUESTIONS
-    : policy?.requiredQuestions || policy?.requiredData || "";
+  const source = policy?.requiredQuestions || policy?.requiredData || "";
   const questions = source
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
@@ -119,9 +117,16 @@ function preparationConsent(text: string): "granted" | "declined" | "unknown" {
 }
 
 function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]): boolean {
-  const userText = turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
+  const userTurns = turns.filter((turn) => turn.role === "user");
+  const userText = userTurns.map((turn) => turn.text).join(" ");
   if (/privat\s+oder\s+gesetzlich|versicherungsstatus/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
-  if (/krankenversicherer/i.test(question)) return /\bbei\s+(?:(?:der|dem|den)\s+)?[a-zäöüß][a-zäöüß0-9&.-]{2,}\b/i.test(userText);
+  if (/krankenversicherer/i.test(question)) {
+    return userTurns.some((turn) => {
+      if (!/\bversichert\b/i.test(turn.text)) return false;
+      const insurer = turn.text.match(/\bbei\s+(?:(?:der|dem)\s+)?([a-zäöüß][a-zäöüß0-9&.-]{2,})\b/i)?.[1];
+      return Boolean(insurer && !/^(?:mir|uns|ihnen|euch|hause|ort)$/i.test(insurer));
+    });
+  }
   if (/monatsbeitrag|beitrag.*krankenversicherung/i.test(question)) {
     return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
   }
@@ -147,8 +152,12 @@ function isAnswerPlausible(question: string, text: string): boolean {
   if (/krankenversicherer/i.test(question)) return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
   if (/monatsbeitrag/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(normalized);
   if (/geburtsdatum/i.test(question)) return /\b\d{1,2}[.\s]+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)[.\s,]+(?:19|20)\d{2}\b|\b\d{1,2}[./-]\d{1,2}[./-](?:19|20)\d{2}\b/i.test(normalized);
-  if (/groß|gross|groess/i.test(question)) return /\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter))\b/i.test(normalized);
-  if (/gewicht/i.test(question)) return /\b\d{2,3}(?:[.,]\d)?\s*(?:kg|kilo(?:gramm)?s?)?\b/i.test(normalized);
+  if (/groß|gross|groess/i.test(question)) {
+    return /\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter)|(?:ein|eins|eine)\s+meter(?:\s+[a-zäöüß-]+)?)\b/i.test(normalized);
+  }
+  if (/gewicht/i.test(question)) {
+    return /\b(?:\d{2,3}(?:[.,]\d)?\s*(?:kg|kilo(?:gramm)?s?)?|[a-zäöüß-]+\s+(?:kg|kilo(?:gramm)?s?))\b/i.test(normalized);
+  }
   if (/behandlung|diagnos/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
   return normalized.length >= 3;
 }

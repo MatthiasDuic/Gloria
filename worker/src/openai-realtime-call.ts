@@ -126,6 +126,21 @@ function hasClearFarewellOrRejection(ctx: CallContext): boolean {
   return isConversationEndingText(latestUserText);
 }
 
+export function hasAffirmedAssistantEndQuestion(ctx: CallContext): boolean {
+  let latestUserIndex = -1;
+  for (let index = ctx.transcript.length - 1; index >= 0; index -= 1) {
+    if (ctx.transcript[index]?.role === "user") {
+      latestUserIndex = index;
+      break;
+    }
+  }
+  if (latestUserIndex < 1) return false;
+  const latestUserText = ctx.transcript[latestUserIndex]?.text.trim() || "";
+  const previousAssistantText = [...ctx.transcript.slice(0, latestUserIndex)].reverse().find((turn) => turn.role === "assistant")?.text || "";
+  return /^(?:ja|genau|bitte|ja[, ]+bitte|das\s+war'?s|das\s+wars)[.!?]*$/i.test(latestUserText)
+    && /\b(?:gespr[äa]ch|telefonat)\b[^.!?]{0,40}\b(?:beenden|abschlie[ßs]en)\b/i.test(previousAssistantText);
+}
+
 function buildKnownConversationFacts(ctx: CallContext): string {
   const userText = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
   const facts: string[] = [];
@@ -837,7 +852,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
           const selectedSlot = matchOfferedAppointmentSelection(transcript, currentContext.appointmentOfferedSlots || []);
           if (selectedSlot) {
             currentContext.selectedAppointmentSlot = selectedSlot;
-            requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt. Sage kurz 'Das passt.' und frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Frage nicht erneut, ob der Termin passt.`);
+            const selectedMode = detectAppointmentMode([{ role: "user", text: transcript }]);
+            if (selectedMode) {
+              requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt und ${selectedMode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${selectedSlot}" auf. Stelle keine Rückfrage, bestätige die Auswahl nicht zusätzlich und wiederhole den Termin nicht.`);
+              return;
+            }
+            requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt. Frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Bestätige die Auswahl nicht zusätzlich und frage nicht erneut, ob der Termin passt.`);
             return;
           }
 
@@ -939,10 +959,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (tool.name === "end_call") {
       const canTerminateFromPreparation = preparationState.stage === "completed" || hangupAfterAssistantResponse;
-      if (!canTerminateFromPreparation && !hasClearFarewellOrRejection(ctx)) {
+      if (!canTerminateFromPreparation && !hasClearFarewellOrRejection(ctx) && !hasAffirmedAssistantEndQuestion(ctx)) {
         handledToolCalls.delete(tool.callId);
-        sendToolResult(tool.callId, { ok: false, error: "unclear_hangup_request", instruction: "Frage auf Deutsch kurz nach, ob der Kunde das Gespräch beenden möchte. Hänge nicht auf." });
-        requestResponse("Das habe ich nicht eindeutig verstanden. Möchten Sie das Gespräch beenden, oder sollen wir kurz weitermachen?");
+        const instruction = "Beende das Gespräch nicht und verlange keine Bestätigung zum Auflegen. Fahre mit dem noch offenen Gesprächsschritt fort.";
+        sendToolResult(tool.callId, { ok: false, error: "unclear_hangup_request", instruction });
+        requestResponse(instruction);
         return;
       }
       hangupAfterAssistantResponse = false;

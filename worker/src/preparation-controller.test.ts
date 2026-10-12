@@ -33,6 +33,17 @@ test("asks for consent and skips facts already answered in the call", () => {
   assert.match(transition.instruction, /Sage keine Einleitung/);
 });
 
+test("does not mistake appointment location for a known health insurer", () => {
+  const turns: ConversationTurn[] = [
+    { role: "user", text: "Ich bin gesetzlich versichert." },
+    { role: "user", text: "Der Termin kann bei mir vor Ort stattfinden." },
+  ];
+  let transition = beginPreparation(createPreparationState(policy), "Montag um 10 Uhr", turns);
+  transition = advancePreparation(transition.state, "Ja, gerne.", turns);
+  assert.equal(transition.state.currentQuestionIndex, 1);
+  assert.match(transition.instruction, /Krankenversicherer/);
+});
+
 test("asks for insurance status, insurer, and all required health details", () => {
   assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
     "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
@@ -97,6 +108,20 @@ test("requires a complete birth date before continuing", () => {
   assert.match(transition.instruction, /Sind Sie derzeit in Behandlung/);
   transition = advancePreparation(transition.state, "Nein.", []);
   assert.match(transition.instruction, /Bestehen bekannte Diagnosen/);
+});
+
+test("accepts naturally spoken height and weight values", () => {
+  const knownInsurance: ConversationTurn[] = [
+    { role: "user", text: "Ich bin privat versichert." },
+    { role: "user", text: "Ich bin bei der Debeka versichert." },
+  ];
+  let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", knownInsurance);
+  transition = advancePreparation(transition.state, "Ja.", knownInsurance);
+  transition = advancePreparation(transition.state, "2. Mai 1987.", []);
+  transition = advancePreparation(transition.state, "Ein Meter achtundachtzig.", []);
+  assert.match(transition.instruction, /Wie viel wiegen Sie/);
+  transition = advancePreparation(transition.state, "Fünfundachtzig Kilo.", []);
+  assert.match(transition.instruction, /Sind Sie derzeit in Behandlung/);
 });
 
 test("completes all required PKV preparation questions before email", () => {

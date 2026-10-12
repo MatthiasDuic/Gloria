@@ -152,6 +152,10 @@ test("offers only two different-day calendar slots within the requested time win
     "Mittwoch, 21. Oktober um 13:00 Uhr",
     "Donnerstag, 22. Oktober um 17:30 Uhr",
   ]);
+  const offer = appointmentOfferInstruction(slots, "morning");
+  assert.match(offer || "", /Ich kann Ihnen Montag, 19\. Oktober um 08:30 Uhr oder Dienstag, 20\. Oktober um 11:00 Uhr anbieten/);
+  assert.doesNotMatch(offer || "", /ausschließlich|nur diese/i);
+  assert.match(offer || "", /Stelle in diesem Turn keine weitere Frage/);
   assert.equal(appointmentOfferInstruction("- Montag, 19. Oktober um 09:00 Uhr", "morning"), undefined);
   assert.deepEqual(getAppointmentOfferSlots(slots, "unknown"), []);
 });
@@ -165,6 +169,16 @@ test("resolves a clear slot choice once without requiring another confirmation",
   assert.equal(matchOfferedAppointmentSelection("Montag wäre gut.", offered), offered[0]);
   assert.equal(matchOfferedAppointmentSelection("Um 11:00 Uhr bitte.", offered), offered[1]);
   assert.equal(matchOfferedAppointmentSelection("Vielleicht.", offered), undefined);
+});
+
+test("detects appointment selection and mode from one customer answer", () => {
+  const offered = [
+    "Freitag, 6. November um 10:00 Uhr",
+    "Montag, 9. November um 10:00 Uhr",
+  ];
+  const answer = "Der Montag klingt sehr gut und wir können das gerne bei mir vor Ort machen.";
+  assert.equal(matchOfferedAppointmentSelection(answer, offered), offered[1]);
+  assert.equal(detectAppointmentMode([{ role: "user", text: answer }]), "Beim Kunden vor Ort");
 });
 
 test("calendar generates only weekday slots within the requested business windows", () => {

@@ -149,7 +149,7 @@ export function matchOfferedAppointmentSelection(text: string, offeredSlots: str
 export function appointmentOfferInstruction(freeSlotsPrompt: string | undefined, preference: AppointmentPreference): string | undefined {
   const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
   if (choices.length < 2) return undefined;
-  return `Biete ausschließlich diese zwei echten freien Termine an: ${choices[0]} oder ${choices[1]}. Beide liegen im gewünschten Zeitfenster. Frage, welcher Termin passt. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
+  return `Sage natürlich und ohne einschränkende Formulierungen: "Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?" Stelle in diesem Turn keine weitere Frage. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
 }
 
 export function decideAppointment(params: {
