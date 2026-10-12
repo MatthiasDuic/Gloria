@@ -4006,6 +4006,10 @@ export default function HomePage() {
                   <label>Gesprächsversuche</label>
                   <p>{selectedReport.attempts}</p>
                 </div>
+                <div className="report-detail-field">
+                  <label>Terminart</label>
+                  <p>{selectedReport.appointmentMode || selectedReport.summary.match(/Durchführung:\s*([^\n.]+)/i)?.[1]?.trim() || "–"}</p>
+                </div>
                 {/* Outcome analysis */}
                 <div className="report-detail-field report-detail-full">
                   <label>Gesprächsergebnis</label>

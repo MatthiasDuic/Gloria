@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
+import { APPOINTMENT_FORM_MODES, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
 
 test("getAppointmentFormFilename uses the KTB contact naming convention", () => {
   assert.equal(getAppointmentFormFilename({ contactName: "Herr Neumann" }), "KTB_Herr_Neumann.pdf");
@@ -43,6 +43,8 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
     topic: "private Krankenversicherung",
     conversationDate: "2026-09-03T11:03:23.414Z",
     appointmentAt: "2026-09-14T11:30:00.000Z",
+    appointmentMode: "Beim Kunden vor Ort",
+    calledPhone: "+49 234 567890",
     summary: "Durchführung: Microsoft Teams.\n\nZusammenfassung ohne eingebettetes Protokoll.",
     transcriptEvents: [
       { speaker: "Gloria", text: "Sind Sie aktuell privat oder gesetzlich krankenversichert?" },
@@ -65,7 +67,8 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
     ],
   });
 
-  assert.equal(input.appointmentMode, "Microsoft Teams");
+  assert.equal(input.appointmentMode, "Beim Kunden vor Ort");
+  assert.equal(input.phone, "+49 234 567890");
   assert.equal(input.insuranceStatus, "Ich bin privat versichert.");
   assert.equal(input.birthDate, "2. Mai 1987.");
   assert.equal(input.monthlyContribution, "980 Euro.");
@@ -75,6 +78,11 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
   assert.equal(input.diagnoses, "Keine.");
   assert.equal(input.healthInsurance, "Continentale BKK.");
   assert.equal(input.email, "muster@muster.de");
+});
+
+test("appointment form offers only customer location and Microsoft Teams", () => {
+  assert.deepEqual(APPOINTMENT_FORM_MODES, ["Beim Kunden vor Ort", "Microsoft Teams"]);
+  assert.equal(APPOINTMENT_FORM_MODES.includes("In unserem Büro" as never), false);
 });
 
 test("buildAppointmentFormPdf creates a valid PDF document", async () => {

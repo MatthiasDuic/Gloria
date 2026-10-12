@@ -139,9 +139,10 @@ function getTelnyxMediaStreamUrl(): string {
   return fallback;
 }
 
-function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
+export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
   const data = {
     v: 1,
+    calledPhone: payload.to,
     company: payload.company,
     contactName: payload.contactName,
     leadNote: payload.leadNote,

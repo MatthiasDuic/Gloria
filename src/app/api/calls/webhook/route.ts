@@ -280,6 +280,8 @@ export async function POST(request: Request) {
     summaryChunk?: string;
     outcome?: ReportOutcome;
     appointmentAt?: string;
+    appointmentMode?: string;
+    calledPhone?: string;
     nextCallAt?: string;
     directDial?: string;
     attempts?: number;
@@ -353,6 +355,8 @@ export async function POST(request: Request) {
           summaryChunk: payload.summaryChunk,
           outcome: payload.outcome,
           appointmentAt: payload.appointmentAt,
+          appointmentMode: payload.appointmentMode,
+          calledPhone: payload.calledPhone,
           nextCallAt: payload.nextCallAt,
           directDial: payload.directDial,
           attempts: payload.attempts,
@@ -378,6 +382,8 @@ export async function POST(request: Request) {
         contactName: payload.contactName,
         topic: payload.topic,
         summaryChunk: payload.summaryChunk,
+        appointmentMode: payload.appointmentMode,
+        calledPhone: payload.calledPhone,
         attempts: payload.attempts,
       });
 
@@ -465,6 +471,8 @@ export async function POST(request: Request) {
     summaryChunk: payload.summaryChunk,
     outcome: payload.outcome,
     appointmentAt: payload.appointmentAt,
+    appointmentMode: payload.appointmentMode,
+    calledPhone: payload.calledPhone,
     nextCallAt: payload.nextCallAt,
     directDial: payload.directDial,
     attempts: payload.attempts,

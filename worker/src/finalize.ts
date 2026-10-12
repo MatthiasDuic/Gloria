@@ -212,6 +212,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     leadId: ctx.leadId,
     callSid: ctx.callSid,
     company: ctx.company,
+    calledPhone: ctx.calledPhone,
+    appointmentMode: ctx.appointmentMode,
     contactName: ctx.contactName,
     topic: ctx.topic,
     // summaryChunk triggers transcript-only storage path (no email sent).
@@ -274,6 +276,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     followUpPlanned: fullDocumentation.followUpPlanned,
     followUpAt: fullDocumentation.followUpAt,
     appointmentAt,
+    appointmentMode: ctx.appointmentMode,
+    calledPhone: ctx.calledPhone,
     nextCallAt: resolvedExtraction.nextCallAt,
     directDial: resolvedExtraction.directDial,
     recordingConsent,
@@ -509,7 +513,7 @@ const NUMBER_WORD: Record<string, number> = {
  * Parsed eine Slot-Phrase wie "Donnerstag, den siebten Mai um vierzehn Uhr dreißig"
  * in ein ISO-Datum (Berlin-TZ). Best effort – gibt undefined zurück, wenn unklar.
  */
-function parseSlotPhraseToIso(phrase: string): string | undefined {
+export function parseSlotPhraseToIso(phrase: string): string | undefined {
   const lower = phrase.toLowerCase();
   let day: number | undefined;
   const dayNumeric = /\b(?:den\s+)?(\d{1,2})\.?\b/.exec(lower);

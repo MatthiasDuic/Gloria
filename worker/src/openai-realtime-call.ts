@@ -37,6 +37,7 @@ type TelnyxFrame =
   | { event: "error"; payload?: { code?: number; title?: string; detail?: string } };
 
 type ClientState = {
+  calledPhone?: string;
   company?: string;
   contactName?: string;
   leadNote?: string;
@@ -981,7 +982,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
       } else {
         const speechSlotPhrase = convertSlotPhraseForSpeech(decision.slotPhrase);
-        ctx.confirmedSlotPhrase = speechSlotPhrase;
+        ctx.confirmedSlotPhrase = decision.slotPhrase;
         ctx.appointmentMode = appointmentMode;
         log.info("realtime.slot_locked", { callSid: ctx.callSid, slot: decision.slotPhrase, speechSlot: speechSlotPhrase, preference: decision.preference, appointmentMode });
         sendToolResult(tool.callId, { ok: true, confirmed_slot: speechSlotPhrase, appointment_mode: appointmentMode });
@@ -1305,6 +1306,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         userId: state.userId,
         leadId: state.leadId,
         company: state.company,
+        calledPhone: state.calledPhone,
         contactName: state.contactName,
         leadNote: state.leadNote,
         topic: state.topic,

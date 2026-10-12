@@ -24,16 +24,20 @@ export interface AppointmentFormInput {
   notes?: string;
 }
 
+export const APPOINTMENT_FORM_MODES = ["Beim Kunden vor Ort", "Microsoft Teams"] as const;
+
 export interface AppointmentReportSource {
   company: string;
   contactName?: string;
   directDial?: string;
+  calledPhone?: string;
   location?: string;
   advisor?: string;
   topic: string;
   summary: string;
   conversationDate: string;
   appointmentAt?: string;
+  appointmentMode?: string;
   transcriptEvents?: Array<{
     speaker: "Gloria" | "Interessent";
     text: string;
@@ -77,11 +81,12 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     topic: report.topic,
     createdAt: report.conversationDate,
     appointmentDate: report.appointmentAt,
-    appointmentMode: report.summary.match(/Durchführung:\s*([^\n.]+)/i)?.[1]?.trim(),
+    appointmentMode: report.appointmentMode
+      || report.summary.match(/Durchführung:\s*([^\n.]+)/i)?.[1]?.trim(),
     location: report.location,
     advisor: report.advisor,
     contactName: report.contactName,
-    phone: report.directDial,
+    phone: report.calledPhone || report.directDial,
     email,
     company: report.company,
     birthDate: answerAfter(/geburtsdatum/i),
@@ -227,11 +232,11 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     field("Berater", formatValue(input.advisor), left + columnWidth + columnGap, y);
     y += 54;
     label("Terminart", left, y + 7);
-    const appointmentModes = ["Beim Kunden vor Ort", "In unserem Büro", "Microsoft Teams"];
+    const appointmentModes = APPOINTMENT_FORM_MODES;
     let choiceX = left;
     for (const mode of appointmentModes) {
       const selected = mode === input.appointmentMode;
-      const choiceWidth = mode === "Beim Kunden vor Ort" ? 119 : mode === "In unserem Büro" ? 101 : 94;
+      const choiceWidth = mode === "Beim Kunden vor Ort" ? 150 : 130;
       doc.fillColor(selected ? blueSoft : "#ffffff").rect(choiceX, y + 20, choiceWidth, 20).fill();
       doc.strokeColor(selected ? blue : line).lineWidth(0.7).rect(choiceX, y + 20, choiceWidth, 20).stroke();
       doc.fillColor(selected ? blue : ink).font(selected ? "Helvetica-Bold" : "Helvetica").fontSize(8.5).text(mode, choiceX + 6, y + 26, { width: choiceWidth - 12, align: "center" });

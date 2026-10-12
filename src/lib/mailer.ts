@@ -39,6 +39,7 @@ export async function sendReportEmail(report: CallReport) {
     `Gespräch am: ${report.conversationDate}`,
     `Wählversuche: ${report.attempts}`,
     `Termin: ${report.appointmentAt || "-"}`,
+    `Terminart: ${report.appointmentMode || "-"}`,
     `Wiedervorlage: ${report.nextCallAt || "-"}`,
     `Aufnahme zugestimmt: ${report.recordingConsent ? "Ja" : "Nein"}`,
     `Aufnahme-Link: ${report.recordingUrl || "-"}`,
@@ -115,6 +116,7 @@ export function buildAppointmentIcs(options: AppointmentInviteOptions): string |
       `Thema: ${report.topic}`,
       `Firma: ${report.company}`,
       `Ansprechpartner: ${report.contactName || "-"}`,
+      `Terminart: ${report.appointmentMode || "-"}`,
       "",
       "Gespraechsnotiz (Gloria):",
       report.summary || "-",
@@ -272,4 +274,3 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     messageId: info.messageId,
   };
 }
-

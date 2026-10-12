@@ -208,6 +208,7 @@ export interface CallReport {
   callSid?: string;
   leadId?: string;
   directDial?: string;
+  calledPhone?: string;
   company: string;
   contactName?: string;
   topic: Topic;
@@ -215,6 +216,7 @@ export interface CallReport {
   outcome: ReportOutcome;
   conversationDate: string;
   appointmentAt?: string;
+  appointmentMode?: string;
   nextCallAt?: string;
   attempts: number;
   recordingConsent: boolean;

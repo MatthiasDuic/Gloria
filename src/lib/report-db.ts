@@ -546,11 +546,13 @@ async function initializeSchema() {
       company TEXT NOT NULL,
       contact_name TEXT,
       direct_dial TEXT,
+      called_phone TEXT,
       topic TEXT NOT NULL,
       summary TEXT NOT NULL,
       outcome TEXT NOT NULL,
       conversation_date TIMESTAMPTZ NOT NULL,
       appointment_at TIMESTAMPTZ,
+      appointment_mode TEXT,
       next_call_at TIMESTAMPTZ,
       attempts INTEGER NOT NULL,
       recording_consent BOOLEAN NOT NULL,
@@ -641,11 +643,13 @@ async function initializeSchema() {
       company TEXT NOT NULL,
       contact_name TEXT,
       direct_dial TEXT,
+      called_phone TEXT,
       topic TEXT NOT NULL,
       summary TEXT NOT NULL,
       outcome TEXT NOT NULL,
       conversation_date TIMESTAMPTZ NOT NULL,
       appointment_at TIMESTAMPTZ,
+      appointment_mode TEXT,
       next_call_at TIMESTAMPTZ,
       attempts INTEGER NOT NULL,
       recording_consent BOOLEAN NOT NULL,
@@ -658,6 +662,16 @@ async function initializeSchema() {
   await db.query(`
     ALTER TABLE gloria_reports
     ADD COLUMN IF NOT EXISTS direct_dial TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_reports
+    ADD COLUMN IF NOT EXISTS called_phone TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE gloria_reports
+    ADD COLUMN IF NOT EXISTS appointment_mode TEXT;
   `);
 
   await db.query(`
@@ -1404,11 +1418,13 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
         company,
         contact_name,
         direct_dial,
+        called_phone,
         topic,
         summary,
         outcome,
         conversation_date,
         appointment_at,
+        appointment_mode,
         next_call_at,
         attempts,
         recording_consent,
@@ -1442,11 +1458,13 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
       company: String(row.company),
       contactName: row.contact_name ? String(row.contact_name) : undefined,
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+      calledPhone: row.called_phone ? String(row.called_phone) : undefined,
       topic: normalizeTopic(String(row.topic)),
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
       conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
       appointmentAt: toIso(row.appointment_at),
+      appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
       nextCallAt: toIso(row.next_call_at),
       attempts: Number(row.attempts || 1),
       recordingConsent: Boolean(row.recording_consent),
@@ -1496,11 +1514,13 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             company,
             contact_name,
             direct_dial,
+            called_phone,
             topic,
             summary,
             outcome,
             conversation_date,
             appointment_at,
+            appointment_mode,
             next_call_at,
             attempts,
             recording_consent,
@@ -1508,7 +1528,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             emailed_to,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW()
           )
           ON CONFLICT (call_sid) WHERE call_sid IS NOT NULL
           DO UPDATE SET
@@ -1519,11 +1539,13 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             company = EXCLUDED.company,
             contact_name = EXCLUDED.contact_name,
             direct_dial = EXCLUDED.direct_dial,
+            called_phone = EXCLUDED.called_phone,
             topic = EXCLUDED.topic,
             summary = EXCLUDED.summary,
             outcome = EXCLUDED.outcome,
             conversation_date = EXCLUDED.conversation_date,
             appointment_at = EXCLUDED.appointment_at,
+            appointment_mode = EXCLUDED.appointment_mode,
             next_call_at = EXCLUDED.next_call_at,
             attempts = EXCLUDED.attempts,
             recording_consent = EXCLUDED.recording_consent,
@@ -1540,11 +1562,13 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             report.company,
             report.contactName || null,
             report.directDial || null,
+            report.calledPhone || null,
             report.topic,
             report.summary,
             report.outcome,
             report.conversationDate,
             report.appointmentAt || null,
+            report.appointmentMode || null,
             report.nextCallAt || null,
             report.attempts,
             report.recordingConsent,
@@ -2392,11 +2416,13 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
         company,
         contact_name,
         direct_dial,
+        called_phone,
         topic,
         summary,
         outcome,
         conversation_date,
         appointment_at,
+        appointment_mode,
         next_call_at,
         attempts,
         recording_consent,
@@ -2423,11 +2449,13 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
       company: String(row.company),
       contactName: row.contact_name ? String(row.contact_name) : undefined,
       directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+      calledPhone: row.called_phone ? String(row.called_phone) : undefined,
       topic: normalizeTopic(String(row.topic)),
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
       conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
       appointmentAt: toIso(row.appointment_at),
+      appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
       nextCallAt: toIso(row.next_call_at),
       attempts: Number(row.attempts || 1),
       recordingConsent: Boolean(row.recording_consent),

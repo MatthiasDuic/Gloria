@@ -1418,6 +1418,8 @@ export async function storeCallReport(payload: {
   summaryChunk?: string;
   outcome?: ReportOutcome;
   appointmentAt?: string;
+  appointmentMode?: string;
+  calledPhone?: string;
   nextCallAt?: string;
   directDial?: string;
   attempts?: number;
@@ -1491,6 +1493,7 @@ export async function storeCallReport(payload: {
     callSid: callSid || existingReport?.callSid,
     leadId: payload.leadId || existingReport?.leadId,
     directDial: payload.directDial || existingReport?.directDial,
+    calledPhone: payload.calledPhone || existingReport?.calledPhone,
     company: payload.company,
     contactName: payload.contactName || existingReport?.contactName,
     topic: payload.topic,
@@ -1498,6 +1501,7 @@ export async function storeCallReport(payload: {
     outcome: payload.outcome || existingReport?.outcome || "Nicht erreicht / kein Kontakt",
     conversationDate: existingReport?.conversationDate || new Date().toISOString(),
     appointmentAt: payload.appointmentAt || existingReport?.appointmentAt,
+    appointmentMode: payload.appointmentMode || existingReport?.appointmentMode,
     nextCallAt: payload.nextCallAt || existingReport?.nextCallAt,
     attempts: payload.attempts ?? existingReport?.attempts ?? 1,
     recordingConsent: Boolean(

@@ -32,6 +32,7 @@ export type CallContext = {
   userId?: string;
   leadId?: string;
   company?: string;
+  calledPhone?: string;
   contactName?: string;
   leadNote?: string;
   topic?: string;

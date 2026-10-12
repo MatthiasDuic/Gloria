@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       || undefined;
     const input = buildAppointmentFormInputFromReport({
       ...report,
-      directDial: report.directDial || lead?.directDial || lead?.phone,
+      calledPhone: report.calledPhone || lead?.directDial || lead?.phone,
       location,
       advisor: owner?.realName || owner?.username,
       transcriptEvents,

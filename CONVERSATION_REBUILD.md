@@ -32,6 +32,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Nach erfasster E-Mail-Adresse kündigt Gloria die Terminbestätigung an und weist darauf hin, dass vorab per Antwort auf die E-Mail Fragen gestellt werden können. Die kurze Standardverabschiedung bleibt Ablehnungen und Gesprächen ohne Termin vorbehalten.
 - Der PKV-Anlass und die Frage nach einem kurzen Moment werden im Entscheider-Einstieg genau einmal genannt; nach Zustimmung beginnt direkt die Beitragsentwicklung ohne Wiederholung.
 - Das vollständige Gespräch wird neben den Transkriptereignissen als Report-Fallback gesichert, damit Detailansicht und PDF auch bei einem Ausfall der separaten Transkripttabelle vollständig bleiben.
+- Der konkret bestätigte Kalender-Slot und die Terminart werden strukturiert im Gesprächsreport gespeichert; die ausgeschriebene Sprachform wird ausschließlich für ElevenLabs verwendet.
+- Der Kundenterminbogen übernimmt die tatsächlich angerufene Zielnummer. Bei der Terminart stehen nur „Beim Kunden vor Ort“ und „Microsoft Teams“ zur Auswahl.
 - Der Kundenterminbogen übernimmt Versicherungsstatus, Versicherer, Beitrag, Geburtsdatum, Größe, Gewicht, Behandlungen, Diagnosen und E-Mail aus den tatsächlich gestellten Vorbereitungsfragen.
 - Eine bloße Bestätigung, sich an den Einstiegsbeitrag zu erinnern, zählt nicht als Beitragsangabe; Gloria fragt den damaligen Betrag konkret nach und wechselt erst nach Betrag oder ausdrücklichem Nichtwissen zum heutigen Beitrag.
 - Eine persönliche Zehn-Jahres-Hochrechnung wird ausschließlich aus einer Beitragsangabe nach der expliziten Frage zum heutigen Beitrag erzeugt; der Einstiegsbeitrag wird technisch nie als Hochrechnungsbasis zurückgegeben.
