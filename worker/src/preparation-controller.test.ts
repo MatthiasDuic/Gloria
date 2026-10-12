@@ -137,8 +137,11 @@ test("completes all required PKV preparation questions before email", () => {
 
   transition = advancePreparation(transition.state, "kunde@example.de", []);
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /Vielen Dank für das Gespräch\. Auf Wiederhören\./);
-  assert.equal(transition.speechText, "Vielen Dank für das Gespräch. Auf Wiederhören.");
+  assert.match(transition.instruction, /Terminbestätigung zukommen/);
+  assert.equal(
+    transition.speechText,
+    "Vielen Dank für das Gespräch, ich lasse Ihnen die Terminbestätigung zukommen. Sollten Sie vorab Fragen haben, können Sie gerne auf die Mail antworten. Auf Wiederhören.",
+  );
   assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
 });
 

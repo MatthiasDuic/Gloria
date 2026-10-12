@@ -1,3 +1,5 @@
+import { parseGermanEuroAmount } from "./german-number.js";
+
 export type ConversationTurn = {
   role: "user" | "assistant";
   text: string;
@@ -7,24 +9,6 @@ export type PkvConversationStage = "need_relevance" | "need_contribution" | "nee
 export type PkvConversationAssessment = { stage: PkvConversationStage; contributionPhrase?: string; projectionDelivered: boolean; conceptDelivered: boolean; interestConfirmed: boolean };
 
 const CONTRIBUTION_PATTERN = /\b(?:ca\.?|circa|rund|etwa)?\s*(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro\b/i;
-
-function parseGermanEuroAmount(phrase: string): number | undefined {
-  const normalized = phrase.replace(/\./g, "").replace(/,\d+/g, "").replace(/€/g, "euro");
-  const digitMatch = normalized.match(/\d+/);
-  if (digitMatch) {
-    const value = parseInt(digitMatch[0], 10);
-    if (value > 0 && value < 100_000) return value;
-  }
-  const wordMap: Record<string, number> = {
-    hundert: 100, zweihundert: 200, dreihundert: 300, vierhundert: 400, fünfhundert: 500,
-    sechshundert: 600, siebenhundert: 700, achthundert: 800, neunhundert: 900,
-    tausend: 1000, eintausend: 1000, zweitausend: 2000,
-  };
-  for (const [word, value] of Object.entries(wordMap)) {
-    if (normalized.toLowerCase().includes(word)) return value;
-  }
-  return undefined;
-}
 
 function roundToFive(n: number): number {
   return Math.round(n / 5) * 5;

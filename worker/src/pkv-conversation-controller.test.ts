@@ -32,6 +32,7 @@ test("derives one deterministic next step from the PKV transcript", () => {
 test("provides ready-to-speak text for deterministic PKV turns", () => {
   assert.equal(responseTextForPkvStep(2), "Und welchen Beitrag zahlen Sie heute?");
   assert.match(responseTextForPkvStep(3, "1280 Euro") || "", /615 Euro mehr.*1895 Euro monatlich.*hochgerechnet\?/);
+  assert.match(responseTextForPkvStep(3, "knapp neunhundert Euro") || "", /430 Euro mehr.*1330 Euro monatlich.*hochgerechnet\?/);
   assert.equal(responseTextForPkvStep(4), undefined);
 });
 

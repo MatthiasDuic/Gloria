@@ -142,6 +142,14 @@ test("keeps the full calendar out of static model instructions", () => {
   assert.doesNotMatch(instructions, /Mittwoch, 26\. August|Donnerstag, 27\. August/);
 });
 
+test("uses the appointment-specific farewell after a slot is confirmed", () => {
+  const ctx = buildPkvContext();
+  ctx.confirmedSlotPhrase = "Donnerstag, 22. Oktober um dreizehn Uhr";
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /ich lasse Ihnen die Terminbestätigung zukommen/);
+  assert.match(instructions, /können Sie gerne auf die Mail antworten/);
+});
+
 test("formats times and Euro amounts in dynamic response instructions", () => {
   const ctx = buildPkvContext();
   const response = buildRealtimeResponseInstructions(ctx, "Biete Donnerstag, 3. September um 18:00 Uhr und 1.800 Euro an.", false);

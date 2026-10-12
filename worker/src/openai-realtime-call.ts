@@ -11,7 +11,7 @@ import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractCurrentContributionPhrase, isClearPkvInterest, responseTextForPkvStep } from "./pkv-conversation-controller.js";
-import { advancePreparation, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
+import { advancePreparation, APPOINTMENT_FAREWELL_TEXT, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
@@ -259,7 +259,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
-    "VERABSCHIEDUNG: Die letzte Aussage am Ende des Gesprächs muss exakt lauten: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Rufe danach end_call auf.",
+    ctx.confirmedSlotPhrase
+      ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${APPOINTMENT_FAREWELL_TEXT}' Beende danach das Gespräch ohne weitere Frage.`
+      : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
@@ -932,7 +934,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     preparationState = transition.state;
 
     if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
-      requestDeterministicSpeech(transition.speechText || FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
+      requestDeterministicSpeech(transition.speechText || APPOINTMENT_FAREWELL_TEXT, { hangupAfterPlayback: true });
       return;
     }
 

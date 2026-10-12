@@ -2,6 +2,7 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 
 export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
+export const APPOINTMENT_FAREWELL_TEXT = "Vielen Dank für das Gespräch, ich lasse Ihnen die Terminbestätigung zukommen. Sollten Sie vorab Fragen haben, können Sie gerne auf die Mail antworten. Auf Wiederhören.";
 
 export function formatTimeForSpeech(timeStr: string): string {
   // Re-export for use in other modules (delegates to formatTimeGerman)
@@ -305,8 +306,8 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${FINAL_FAREWELL_TEXT}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
-      speechText: FINAL_FAREWELL_TEXT,
+      instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${APPOINTMENT_FAREWELL_TEXT}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
+      speechText: APPOINTMENT_FAREWELL_TEXT,
     };
   }
 
