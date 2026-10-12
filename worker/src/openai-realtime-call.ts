@@ -117,6 +117,10 @@ export function isSyntheticTranscriptionPrompt(text: string): boolean {
   return /deutsches telefonat zur (?:privaten krankenversicherung|beitragsentwicklung in der gesundheitsversorgung)|achte besonders auf eigennamen.*euro[- ]?betr[aä]ge/i.test(text.trim());
 }
 
+export function shouldRecoverInterruptedBargeIn(awaitingTranscript: boolean, transcript: string): boolean {
+  return awaitingTranscript && isSyntheticTranscriptionPrompt(transcript);
+}
+
 function hasClearFarewellOrRejection(ctx: CallContext): boolean {
   const latestUserText = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
   return isConversationEndingText(latestUserText);
@@ -421,6 +425,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let closed = false;
   let reportPosted = false;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
+  let bargeInAwaitingTranscript = false;
+  let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
   let assistantContinuationRequested = false;
@@ -614,6 +620,22 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
+  const clearBargeInRecovery = () => {
+    if (bargeInRecoveryTimer) clearTimeout(bargeInRecoveryTimer);
+    bargeInRecoveryTimer = null;
+  };
+
+  const recoverInterruptedBargeIn = (reason: "synthetic_transcript" | "transcript_timeout") => {
+    if (!bargeInAwaitingTranscript || !ctx || terminationInProgress) return;
+    bargeInAwaitingTranscript = false;
+    clearBargeInRecovery();
+    log.warn("realtime.barge_in_recovered", { callSid: ctx.callSid, reason });
+    const instruction = contactRouting?.stage === "decision_maker" && ctx.dialogState.pkvStep === 0
+      ? "Sage kurz und freundlich: 'Entschuldigung, die Leitung war gerade etwas undeutlich. Darf ich Ihnen kurz sagen, worum es geht?' Stelle keine weitere Frage und warte."
+      : "Sage kurz und freundlich: 'Entschuldigung, das habe ich akustisch nicht verstanden. Können Sie das bitte kurz wiederholen?' Stelle keine weitere Frage und warte.";
+    requestEventResponse(instruction);
+  };
+
   const requestDecisionMakerIntro = () => {
     decisionMakerIntroPending = true;
     requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"${buildDecisionMakerIntro(ctx!)}\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
@@ -623,6 +645,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (!ctx) return;
     playback.startResponse();
     ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
+    currentAssistantTurnIndex = ctx.transcript.length - 1;
+    decisionMakerIntroWasLastResponse = route === "decision_maker";
     log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
     void speakWithElevenLabs(text);
   };
@@ -951,6 +975,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
         // Only actually interrupt if: plan says to AND TTS has played long enough
         if (plan.interrupted && ttsAge >= MIN_TTS_PLAY_MS) {
+          bargeInAwaitingTranscript = true;
+          clearBargeInRecovery();
           ttsTurn += 1;
           ttsAbortController?.abort();
           const interruption = playback.interrupt();
@@ -982,6 +1008,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "input_audio_buffer.speech_stopped") {
         userIsSpeaking = false;
+        if (bargeInAwaitingTranscript && !bargeInRecoveryTimer) {
+          bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 2200);
+        }
         return;
       }
 
@@ -989,6 +1018,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const transcript = message.transcript?.trim();
         if (ctx && transcript) {
           if (terminationInProgress) return;
+          if (shouldRecoverInterruptedBargeIn(bargeInAwaitingTranscript, transcript)) {
+            log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
+            recoverInterruptedBargeIn("synthetic_transcript");
+            return;
+          }
+          if (bargeInAwaitingTranscript) {
+            bargeInAwaitingTranscript = false;
+            clearBargeInRecovery();
+          }
           if (isLikelyNoiseTranscript(transcript)) {
             log.info("realtime.unclear_transcript", { callSid: ctx.callSid, text: transcript });
           }
@@ -1276,6 +1314,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     responses.stop();
     playback.stop();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
+    clearBargeInRecovery();
     transferWaitingStartedAt = null;
     try {
       openaiSession?.close(1000, "telnyx_closed");

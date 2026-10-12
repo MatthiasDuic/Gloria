@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
 import { newContext } from "./state.js";
 
 function buildPkvContext() {
@@ -42,6 +42,13 @@ test("classifies unclear ASR fragments but keeps short German answers", () => {
 test("ignores the configured ASR prompt when it leaks into a transcript", () => {
   assert.equal(isSyntheticTranscriptionPrompt("Deutsches Telefonat zur privaten Krankenversicherung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Beträge sowie gesetzlich und privat."), true);
   assert.equal(isSyntheticTranscriptionPrompt("Ich zahle tausend Euro."), false);
+});
+
+test("recovers once when a barge-in produces only the configured transcription prompt", () => {
+  const syntheticPrompt = "Deutsches Telefonat zur Beitragsentwicklung in der Gesundheitsversorgung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Beträge.";
+  assert.equal(shouldRecoverInterruptedBargeIn(true, syntheticPrompt), true);
+  assert.equal(shouldRecoverInterruptedBargeIn(false, syntheticPrompt), false);
+  assert.equal(shouldRecoverInterruptedBargeIn(true, "Ja, sagen Sie bitte."), false);
 });
 
 test("does not recover a complete preparation introduction ending with a colon", () => {
