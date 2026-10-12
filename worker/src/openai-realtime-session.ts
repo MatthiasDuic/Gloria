@@ -34,7 +34,7 @@ export type RealtimeSocket = {
 export type OpenAiRealtimeSessionOptions = {
   apiKey: string;
   model: string;
-  onOpen?: () => void;
+  onOpen?: () => void | Promise<void>;
   onEvent: (event: RealtimeServerEvent) => void;
   onClose?: (code: number, reason: string) => void;
   onError?: (error: Error) => void;
@@ -61,11 +61,16 @@ export class OpenAiRealtimeSession {
     const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.options.model)}`;
     const factory = this.options.socketFactory ?? ((socketUrl, headers) => new WebSocket(socketUrl, { headers }) as RealtimeSocket);
     this.socket = factory(url, { Authorization: `Bearer ${this.options.apiKey}` });
+    const openedSocket = this.socket;
     this.socket.on("open", () => {
       this.reconnectAttempts = 0;
       this.ready = true;
-      this.options.onOpen?.();
-      for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
+      void Promise.resolve(this.options.onOpen?.()).then(() => {
+        if (!this.ready || this.socket !== openedSocket) return;
+        for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
+      }).catch((error) => {
+        this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      });
     });
     this.socket.on("message", (data) => {
       try {

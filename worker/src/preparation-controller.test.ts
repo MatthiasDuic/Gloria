@@ -25,12 +25,14 @@ test("asks for consent and skips facts already answered in the call", () => {
   const turns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert und zahle 1000 Euro im Monat." }];
   let transition = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", turns);
   assert.equal(transition.state.stage, "awaiting_consent");
+  assert.match(transition.speechText || "", /Termin Mittwoch um 11 Uhr ist bestätigt/);
 
   transition = advancePreparation(transition.state, "Ja, gerne.", turns);
   assert.equal(transition.state.stage, "asking");
   assert.equal(transition.state.currentQuestionIndex, 1);
   assert.match(transition.instruction, /Krankenversicherer/);
   assert.match(transition.instruction, /Sage keine Einleitung/);
+  assert.equal(transition.speechText, "Bei welchem Krankenversicherer sind Sie derzeit versichert?");
 });
 
 test("does not mistake appointment location for a known health insurer", () => {
@@ -136,6 +138,7 @@ test("completes all required PKV preparation questions before email", () => {
   transition = advancePreparation(transition.state, "kunde@example.de", []);
   assert.equal(transition.state.stage, "completed");
   assert.match(transition.instruction, /Vielen Dank für das Gespräch\. Auf Wiederhören\./);
+  assert.equal(transition.speechText, "Vielen Dank für das Gespräch. Auf Wiederhören.");
   assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
 });
 

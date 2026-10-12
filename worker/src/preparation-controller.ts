@@ -73,6 +73,7 @@ export type PreparationState = {
 export type PreparationTransition = {
   state: PreparationState;
   instruction: string;
+  speechText?: string;
 };
 
 const PKV_FALLBACK_QUESTIONS = [
@@ -170,6 +171,7 @@ export function beginPreparation(
     return {
       state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
+      speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
     };
   }
   const firstQuestion = nextUnansweredQuestion(state, turns, 0);
@@ -177,6 +179,7 @@ export function beginPreparation(
     return {
       state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
+      speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
     };
   }
   return {
@@ -188,6 +191,7 @@ export function beginPreparation(
       questionRetryCount: 0,
     },
     instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?"`,
+    speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?`,
   };
 }
 
@@ -202,6 +206,7 @@ export function advancePreparation(
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
+        speechText: "In Ordnung, Herr Duic klärt die offenen Punkte mit Ihnen im Termin. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
       };
     }
     if (consent === "unknown") {
@@ -210,11 +215,13 @@ export function advancePreparation(
         return {
           state: { ...state, consentRetryCount: retries },
           instruction: "Die Antwort blieb unklar. Frage exakt: 'Ist es für Sie in Ordnung: ja oder nein?' Stelle keine weitere Frage.",
+          speechText: "Ist es für Sie in Ordnung: ja oder nein?",
         };
       }
       return {
         state: { ...state, consentRetryCount: retries },
         instruction: "Die Antwort war unklar. Sage nur noch einmal: 'Sind zwei Minuten für kurze Vorbereitungsfragen in Ordnung?' Stelle keine andere Frage.",
+        speechText: "Sind zwei Minuten für kurze Vorbereitungsfragen in Ordnung?",
       };
     }
     const next = nextUnansweredQuestion(state, turns, 0);
@@ -222,6 +229,7 @@ export function advancePreparation(
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Die bereits geklärten Angaben reichen für die Vorbereitung. Sage exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
+        speechText: "Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
       };
     }
     return {
@@ -233,6 +241,7 @@ export function advancePreparation(
         questionRetryCount: 0,
       },
       instruction: `Sage keine Einleitung und stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
+      speechText: next.question,
     };
   }
 
@@ -243,11 +252,13 @@ export function advancePreparation(
         return {
           state: { ...state, currentQuestionIndex: next.index, questionRetryCount: 0 },
           instruction: `Akzeptiere die Absage freundlich in höchstens einem kurzen Satz. Stelle danach ausschließlich diese eine nächste Frage: "${next.question}".`,
+          speechText: `In Ordnung. ${next.question}`,
         };
       }
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
         instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
+        speechText: "In Ordnung, Herr Duic klärt die offenen Punkte mit Ihnen im Termin. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
       };
     }
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
@@ -257,11 +268,13 @@ export function advancePreparation(
         return {
           state: { ...state, questionRetryCount: retries },
           instruction: `Die Antwort bleibt unklar. Stelle dieselbe Frage noch einmal, aber mit Antwortformat-Hinweis: "${currentQuestion}" und ergänze kurz "Bitte kurz mit Ja oder Nein oder mit einem konkreten Wert antworten."`,
+          speechText: `${currentQuestion} Bitte kurz mit Ja oder Nein oder mit einem konkreten Wert antworten.`,
         };
       }
       return {
         state: { ...state, questionRetryCount: retries },
         instruction: `Die Antwort passt noch nicht eindeutig zur Frage. Stelle ausschließlich dieselbe Vorbereitungsfrage noch einmal, ohne dich zu bedanken: "${currentQuestion}"`,
+        speechText: currentQuestion,
       };
     }
     const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
@@ -269,11 +282,13 @@ export function advancePreparation(
       return {
         state: { ...state, currentQuestionIndex: next.index, questionRetryCount: 0 },
         instruction: `Stelle ausschließlich diese eine Vorbereitungsfrage: "${next.question}". Warte danach vollständig auf die Antwort.`,
+        speechText: next.question,
       };
     }
     return {
       state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
       instruction: "Die Vorbereitungsfragen sind vollständig. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.' Stelle keine weitere Frage.",
+      speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
     };
   }
 
@@ -282,11 +297,16 @@ export function advancePreparation(
     const hasAtIndicator = /@|\bat\b/i.test(userText);
     const hasDotIndicator = /\.|\bpunkt\b|\bdot\b/i.test(userText);
     if (!hasAtIndicator || !hasDotIndicator) {
-      return { state, instruction: "Sage ausschließlich: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.'" };
+      return {
+        state,
+        instruction: "Sage ausschließlich: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.'",
+        speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.",
+      };
     }
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
       instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${FINAL_FAREWELL_TEXT}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
+      speechText: FINAL_FAREWELL_TEXT,
     };
   }
 

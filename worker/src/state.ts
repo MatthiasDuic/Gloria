@@ -14,16 +14,13 @@ export type DialogPhase = "opener" | "discovery" | "objection" | "close" | "done
  * 2 = current contribution
  * 3 = 10-year projection
  * 4 = concept bridge and interest
- * 5 = legacy interest confirmation
  * 6 = appointment scheduling
  */
-export type PkvStep = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type PkvStep = 0 | 1 | 2 | 3 | 4 | 6;
 
 export type DialogState = {
   phase: DialogPhase;
   pkvStep: PkvStep; // Current step in PKV conversation flow
-  askedQuestions: Set<string>;
-  answeredQuestions: Set<string>;
   phaseStartedAt: number;
 };
 
@@ -56,20 +53,11 @@ export type CallContext = {
   // Sobald gesetzt, MUSS Phase 10 diese Phrase wortwörtlich übernehmen.
   confirmedSlotPhrase?: string;
   appointmentMode?: "Beim Kunden vor Ort" | "In der Agentur" | "Microsoft Teams";
-  // Bereits belegte Termin-Slots (für diesen User). In Berlin-Zeit-Strings,
-  // werden in den System-Prompt injiziert, damit Gloria keine Doppelbelegung vorschlägt.
-  busySlotsPrompt?: string;
   // Adaptive Slot-Vorschläge: 4–6 freie 30-Min-Slots in den nächsten 5 Geschäftstagen,
   // berechnet aus der Busy-Liste. Wenn der Anrufende einen Vorschlag ablehnt, kann
   // Gloria aus dieser Liste alternative Slots ziehen, ohne Doppelbelegung.
   freeSlotsPrompt?: string;
   // Conversation memory.
-  memory: {
-    facts: string[];
-    concerns: string[];
-    preferences: string[];
-    tone: "neutral" | "skeptical" | "open" | "rushed";
-  };
   // Dialog State Machine – tracks phase, asked/answered questions, prevents repetition
   dialogState: DialogState;
   appointmentPreferenceAsked?: boolean;
@@ -88,10 +76,6 @@ export type CallContext = {
   }>;
   /** Wall-clock ms des letzten user-Final – wird zur Latenz-Berechnung genutzt. */
   lastUserFinalAt?: number;
-  // Speaking flag — used for barge-in detection.
-  speaking: boolean;
-  // Counter for inbound user utterances during a Gloria turn (used to abort TTS).
-  userBytesWhileSpeaking: number;
   // Runtime-Klassifikation fuer Spezialfaelle im Call.
   detectedVoicemail?: boolean;
   waitingForDecisionMaker?: boolean;
@@ -101,22 +85,12 @@ export type CallContext = {
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {
   const topic = initial.topic;
   return {
-    memory: {
-      facts: [],
-      concerns: [],
-      preferences: [],
-      tone: "neutral",
-    },
     dialogState: {
       phase: "opener",
       pkvStep: 0,
-      askedQuestions: new Set(),
-      answeredQuestions: new Set(),
       phaseStartedAt: Date.now(),
     },
     transcript: [],
-    speaking: false,
-    userBytesWhileSpeaking: 0,
     startedAt: Date.now(),
     ...initial,
     topicKind: initial.topicKind || detectTopicKind(topic),

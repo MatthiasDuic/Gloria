@@ -3,22 +3,19 @@ import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
 import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, detectAppointmentPreference, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
-import { formatAmountForSpeech } from "./preparation-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
-import { advanceContactRouting, createContactRoutingState, instructionForContactRouting, type ContactRoutingState } from "./contact-routing-controller.js";
+import { advanceContactRouting, createContactRoutingState, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
 import { postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractCurrentContributionPhrase, isClearPkvInterest } from "./pkv-conversation-controller.js";
-import { advancePreparation, beginPreparation, createPreparationStateForCall, type PreparationState } from "./preparation-controller.js";
+import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractCurrentContributionPhrase, isClearPkvInterest, responseTextForPkvStep } from "./pkv-conversation-controller.js";
+import { advancePreparation, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
-
-const CANONICAL_PKV_TOPIC = "Beitragsentwicklung in der Gesundheitsversorgung";
 
 type TelnyxFrame =
   | { event: "connected" }
@@ -199,14 +196,6 @@ export function buildRealtimeResponseInstructions(
   return convertNumbersForSpeech(normalizePkvTerminology(merged));
 }
 
-export function shouldRestoreDecisionMakerIntro(params: {
-  decisionMakerIntroWasLastResponse: boolean;
-  playbackPending: boolean;
-}): boolean {
-  // Never replay the full intro after interruptions; continue contextually instead.
-  return false;
-}
-
 export function isLikelyIncompleteAssistantTurn(text: string): boolean {
   const normalized = text.replace(/["“”'»«]+$/g, "").replace(/\s+/g, " ").trim();
   if (normalized.length < 45) return false;
@@ -265,7 +254,6 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: direkt mit dem nächsten Schritt fortfahren. Bei Interesse: direkt den nächsten Schritt anbieten. Vermeide Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder 'Danke'.",
     "Sprich ruhig, freundlich und konkret. Höchstens ein kurzer Satz und eine Frage. Kein Callcenter-Monolog, keine künstliche Vertrautheit, keine Wiederholung der Kundenaussage und keine leeren Bestätigungen. Sprich Standarddeutsch und keine englischen Füllwörter.",
-    "PROSODIE: Klinge menschlich, zugewandt und emotional präsent. Nutze natürliche Tonhöhenbewegung, leichte Betonung wichtiger Wörter und kleine Pausen an Satzzeichen; variiere das Tempo passend zum Sinn. Anteilnahme soll hörbar warm, echte Neugier offen und die Begrüßung mit einem Lächeln klingen. Lies nie gleichförmig oder silbenweise ab. Sprich keine Regieanweisungen oder Emotionslabels aus.",
     "Lass den Kunden ausreden. Ein Fragment, 'äh', 'mhm', 'aha' oder unklarer Ton ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann einmal kurz nach, statt etwas anzunehmen.",
     "Die Topic Policy steuert Anlass, Nutzen, Einwände und fachliche Grenzen. Die universellen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und Terminlogik haben Vorrang.",
     "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
@@ -304,7 +292,6 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
   }
   if (ctx.topicPolicyPrompt) parts.push(ctx.topicPolicyPrompt);
-  if (ctx.freeSlotsPrompt) parts.push(ctx.freeSlotsPrompt);
   if (ctx.confirmedSlotPhrase) {
     parts.push(`Bereits bestätigter Termin: ${ctx.confirmedSlotPhrase}. Diesen Termin nicht verändern.`);
   }
@@ -407,12 +394,10 @@ function rotateTranscriptIfNeeded(ctx: CallContext): void {
     // Create brief summary of discarded turns (including dialog state info)
     const userTurnsCount = discardedTurns.filter(t => t.role === "user").length;
     const assistantTurnsCount = discardedTurns.filter(t => t.role === "assistant").length;
-    const askedQuestionsCount = ctx.dialogState.askedQuestions.size;
-    
     const summaryText = 
       `[Transcript Rotation: ${discardedTurns.length} älteren Turns gerotiert (${userTurnsCount} Kunde, ${assistantTurnsCount} Gloria). ` +
       `Gesprächsverlauf bis hierher: Termin-Qualifizierung fortlaufend. ` +
-      `Aktuelles Dialog-Fortschritt: Phase=${ctx.dialogState.phase}, ${askedQuestionsCount} Fragen bereits gestellt.]`;
+      `Aktuelles Dialog-Fortschritt: Phase=${ctx.dialogState.phase}.]`;
     
     ctx.transcript = [
       { role: "assistant", text: summaryText, at: discardedTurns[0]?.at || Date.now() },
@@ -424,7 +409,6 @@ function rotateTranscriptIfNeeded(ctx: CallContext): void {
       discarded: discardedTurns.length,
       retained: retainedTurns.length,
       dialogPhase: ctx.dialogState.phase,
-      askedQuestions: askedQuestionsCount,
     });
   }
 }
@@ -446,13 +430,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
   let assistantContinuationRequested = false;
-  let activeAssistantItemId = "";
-  let assistantAudioBytes = 0;
   let ttsAbortController: AbortController | null = null;
   let ttsTurn = 0;
   let responseInterrupted = false;
   let currentAssistantTurnIndex: number | undefined;
-  let decisionMakerIntroPending = false;
   let decisionMakerIntroWasLastResponse = false;
   let responseCreatedAt: number | null = null;
   let firstModelTokenAt: number | null = null;
@@ -463,12 +444,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
-  let hangupAfterAssistantResponse = false;
   let terminationInProgress = false;
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
   const pendingUserTranscripts: string[] = [];
   const handledToolCalls = new Set<string>();
+  let pendingDeterministicSpeech: { text: string; hangupAfterPlayback?: boolean } | null = null;
+  let flushDeterministicSpeech = () => undefined;
 
   const sendOpenAi = (event: Record<string, unknown>): boolean => {
     return openaiSession?.send(event) ?? false;
@@ -480,6 +462,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
+  const recordAssistantContext = (text: string) => {
+    sendOpenAi({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      },
+    });
+  };
+
   const playback = new TelnyxPlayback({
     prebufferFrames: 2,
     sendFrame: (frame) => sendTelnyx({
@@ -488,6 +481,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       media: { payload: frame.toString("base64") },
     }),
     onIdle: () => {
+      flushDeterministicSpeech();
       responses.flush();
       if (hangupAfterPlayback && ctx && !responses.isActive()) {
         hangupAfterPlayback = false;
@@ -523,7 +517,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const silenceDurationMs = Number.parseInt(
       process.env.OPENAI_REALTIME_SILENCE_MS?.trim()
         || process.env.OPENAI_ASR_SILENCE_MS?.trim()
-        || "650",
+        || "500",
       10,
     );
     const prefixPaddingMs = Number.parseInt(process.env.OPENAI_REALTIME_PREFIX_PADDING_MS?.trim() || "300", 10);
@@ -545,7 +539,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
               prompt: process.env.OPENAI_TRANSCRIBE_PROMPT?.trim()
-                || "Deutsches Telefonat zur Beitragsentwicklung in der Gesundheitsversorgung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Betraege.",
+                || "Deutsches Geschaeftstelefonat. Zahlen und Eigennamen exakt transkribieren.",
             },
             turn_detection: {
               type: "server_vad",
@@ -651,6 +645,43 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
+  const requestDeterministicSpeech = (text: string, options: { hangupAfterPlayback?: boolean } = {}) => {
+    interruptedAssistantContext = "";
+    const speechText = convertNumbersForSpeech(normalizePkvTerminology(text.replace(/\s+/g, " ").trim()));
+    if (!speechText || pendingDeterministicSpeech) return false;
+    pendingDeterministicSpeech = { text: speechText, ...options };
+    flushDeterministicSpeech();
+    return true;
+  };
+
+  flushDeterministicSpeech = () => {
+    if (!ctx || !pendingDeterministicSpeech || responses.isActive() || playback.isPending() || terminationInProgress) return;
+    const pending = pendingDeterministicSpeech;
+    pendingDeterministicSpeech = null;
+    playback.startResponse();
+    const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
+    ctx.transcript.push({
+      role: "assistant",
+      text: pending.text,
+      at: Date.now(),
+      latencyMs,
+      phase: ctx.dialogState.phase,
+    });
+    rotateTranscriptIfNeeded(ctx);
+    updateDialogPhase(ctx);
+    currentAssistantTurnIndex = ctx.transcript.length - 1;
+    log.info("realtime.gloria_said", {
+      callSid: ctx.callSid,
+      text: pending.text,
+      latencyMs,
+      deterministic: true,
+    });
+    recordAssistantContext(pending.text);
+    if (pending.hangupAfterPlayback) hangupAfterPlayback = true;
+    responseInterrupted = false;
+    void speakWithElevenLabs(pending.text);
+  };
+
   const clearBargeInRecovery = () => {
     if (bargeInRecoveryTimer) clearTimeout(bargeInRecoveryTimer);
     bargeInRecoveryTimer = null;
@@ -661,15 +692,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     bargeInAwaitingTranscript = false;
     clearBargeInRecovery();
     log.warn("realtime.barge_in_recovered", { callSid: ctx.callSid, reason });
-    const instruction = contactRouting?.stage === "decision_maker" && ctx.dialogState.pkvStep === 0
-      ? "Sage kurz und freundlich: 'Entschuldigung, die Leitung war gerade etwas undeutlich. Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Stelle keine weitere Frage und warte."
-      : "Sage kurz und freundlich: 'Entschuldigung, das habe ich akustisch nicht verstanden. Können Sie das bitte kurz wiederholen?' Stelle keine weitere Frage und warte.";
-    requestEventResponse(instruction);
-  };
-
-  const requestDecisionMakerIntro = () => {
-    decisionMakerIntroPending = true;
-    requestResponse(`Der Entscheider ist jetzt bestätigt. Sage exakt diesen Wortlaut und nichts anderes: \"${buildDecisionMakerIntro(ctx!)}\" Verwende nicht das Wort Anfrage. Starte noch nicht mit Beitrag, ${CANONICAL_PKV_TOPIC} oder Termin.`);
+    const text = contactRouting?.stage === "decision_maker" && ctx.dialogState.pkvStep === 0
+      ? "Entschuldigung, die Leitung war gerade etwas undeutlich. Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?"
+      : "Entschuldigung, das habe ich akustisch nicht verstanden. Können Sie das bitte kurz wiederholen?";
+    requestDeterministicSpeech(text);
   };
 
   const speakDeterministicIntro = (text: string, route: "decision_maker" | "gatekeeper") => {
@@ -679,12 +705,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     currentAssistantTurnIndex = ctx.transcript.length - 1;
     decisionMakerIntroWasLastResponse = route === "decision_maker";
     log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
+    recordAssistantContext(text);
     void speakWithElevenLabs(text);
-  };
-
-  const requestInterruptedIntroContinuation = () => {
-    decisionMakerIntroPending = false;
-    requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und sage nur: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Danach vollständig warten.");
   };
 
   const requestHangupAfterPlayback = () => {
@@ -722,6 +744,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       sendTelnyx({ event: "clear" });
       log.info("realtime.playback_interrupted_by_user", { callSid: ctx.callSid });
     }
+    pendingDeterministicSpeech = null;
     const currentContext = ctx;
     assistantContinuationRequested = false;
     currentContext.lastUserFinalAt = Date.now();
@@ -738,19 +761,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (event.type === "unclear") {
       if (!unclearClarificationPending) {
         unclearClarificationPending = true;
-        requestEventResponse(instructionForConversationEvent(event));
+        requestDeterministicSpeech("Entschuldigung, wie haben Sie das gemeint?");
       }
       return;
     }
     unclearClarificationPending = false;
 
-    if (contactRouting?.stage === "decision_maker" && decisionMakerIntroPending) {
-        requestInterruptedIntroContinuation();
-      return;
-    }
-
     if (event.type === "clear_rejection") {
-      requestEventResponse(instructionForConversationEvent(event));
+      requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
       return;
     }
 
@@ -786,16 +804,32 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (currentContext.topicKind === "pkv") {
         const currentStep = currentContext.dialogState.pkvStep;
 
-        if ((currentStep === 4 || currentStep === 5) && event.type !== "customer_question" && event.type !== "objection" && !isClearPkvInterest(transcript)) {
-          requestEventResponse("Die Kundenaussage ist keine eindeutige Zustimmung zum Termin. Sage exakt: 'Habe ich Sie richtig verstanden: Soll Herr Duic Ihnen das einmal persönlich zeigen?' Warte dann auf ein klares Ja oder Nein. Vereinbare noch keinen Termin.");
+        if (currentStep === 4 && event.type !== "customer_question" && event.type !== "objection" && !isClearPkvInterest(transcript)) {
+          requestDeterministicSpeech("Habe ich Sie richtig verstanden: Soll Herr Duic Ihnen das einmal persönlich zeigen?");
           return;
         }
 
         // Customer asks a question or raises an objection → answer then return to current step
         if (event.type === "customer_question" || event.type === "objection") {
-          const returnInstruction = currentStep === 6 && currentContext.appointmentSlotsOffered
-            ? "Beantworte die Frage kurz. Bei Fragen zum Ablauf sage: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Wiederhole die angebotenen Termine nicht und verlange keine erneute Bestätigung. Kehre danach zur offenen Terminauswahl oder zur Frage nach digitalem Termin beziehungsweise Termin bei der Kundin/dem Kunden vor Ort zurück."
-            : `Antworte kurz und konkret auf den Einwand oder die Frage. Kehre dann unmittelbar zum aktuellen Gesprächsschritt zurück und stelle genau eine passende Folgefrage: ${instructionForPkvStep(currentStep, extractCurrentContributionPhrase(currentContext.transcript))}`;
+          let returnInstruction: string;
+          if (currentStep === 6 && currentContext.appointmentSlotsOffered) {
+            returnInstruction = "Beantworte die Frage kurz. Bei Fragen zum Ablauf sage: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Wiederhole die angebotenen Termine nicht und verlange keine erneute Bestätigung. Kehre danach zur offenen Terminauswahl oder zur Frage nach digitalem Termin beziehungsweise Termin bei der Kundin/dem Kunden vor Ort zurück.";
+          } else if (currentStep === 6) {
+            const preference = detectAppointmentPreference(currentContext.transcript);
+            const slots = getAppointmentOfferSlots(currentContext.freeSlotsPrompt, preference);
+            if (preference === "unknown") {
+              currentContext.appointmentPreferenceAsked = true;
+              returnInstruction = "Beantworte die Frage kurz und frage danach ausschließlich: 'Passt Ihnen grundsätzlich eher ein Vormittag oder ein Nachmittag?' Nenne noch keinen Termin.";
+            } else if (slots.length === 2) {
+              currentContext.appointmentOfferedSlots = slots;
+              currentContext.appointmentSlotsOffered = true;
+              returnInstruction = `Beantworte die Frage kurz und biete danach ausschließlich diese beiden freien Termine an: ${slots[0]} oder ${slots[1]}. Frage, welcher Termin besser passt. Erfinde keine weiteren Termine.`;
+            } else {
+              returnInstruction = "Beantworte die Frage kurz. Sage danach, dass im gewünschten Zeitfenster aktuell nicht zwei passende freie Termine bereitstehen, und frage, ob das andere Zeitfenster möglich wäre. Erfinde keine Uhrzeit.";
+            }
+          } else {
+            returnInstruction = `Antworte kurz und konkret auf den Einwand oder die Frage. Kehre dann unmittelbar zum aktuellen Gesprächsschritt zurück und stelle genau eine passende Folgefrage: ${instructionForPkvStep(currentStep, extractCurrentContributionPhrase(currentContext.transcript))}`;
+          }
           requestEventResponse(instructionForConversationEvent(event, returnInstruction));
           return;
         }
@@ -804,13 +838,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const advance = advancePkvStep(currentStep, transcript);
 
         if (advance.shouldEnd) {
-          requestEventResponse("Verabschiede dich freundlich und rufe dann end_call auf. Nutze dabei nur die exakte Schlussformel 'Vielen Dank für das Gespräch. Auf Wiederhören.'");
+          requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
           return;
         }
 
-        const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+        const nextStep = advance.nextStep as 0 | 1 | 2 | 3 | 4 | 6;
         if (currentStep === 1 && nextStep === 1) {
-          requestEventResponse("Die Kundenaussage enthält noch keinen früheren Beitrag und auch keine Aussage, dass der Kunde ihn nicht mehr weiß. Frage ohne Einleitung exakt: 'Mit welchem Beitrag haben Sie einmal angefangen?' Wiederhole weder den Anlass noch die Aussage des PKV Verbands.");
+          requestDeterministicSpeech("Mit welchem Beitrag haben Sie einmal angefangen?");
           return;
         }
         if (nextStep !== currentStep) {
@@ -822,11 +856,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (currentContext.dialogState.pkvStep === 6) {
           if (!currentContext.appointmentPreferenceAsked) {
             currentContext.appointmentPreferenceAsked = true;
-            requestEventResponse("Frage exakt und ohne Einleitung: 'Passt Ihnen grundsätzlich eher ein Vormittag oder ein Nachmittag?' Biete in diesem Turn keinen Termin an.");
+            requestDeterministicSpeech("Passt Ihnen grundsätzlich eher ein Vormittag oder ein Nachmittag?");
             return;
           }
           if (detectAppointmentPreference(currentContext.transcript) === "unknown") {
-            requestEventResponse("Die zeitliche Präferenz ist noch unklar. Frage exakt und ohne Einleitung: 'Passt Ihnen eher ein Vormittag oder ein Nachmittag?' Biete in diesem Turn keinen Termin an.");
+            requestDeterministicSpeech("Passt Ihnen eher ein Vormittag oder ein Nachmittag?");
             return;
           }
           const preference = detectAppointmentPreference(currentContext.transcript);
@@ -836,7 +870,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             if (offer && slots.length === 2) {
               currentContext.appointmentOfferedSlots = slots;
               currentContext.appointmentSlotsOffered = true;
-              requestEventResponse(offer);
+              requestDeterministicSpeech(`Ich kann Ihnen ${slots[0]} oder ${slots[1]} anbieten. Welcher Termin passt Ihnen besser?`);
               return;
             }
             requestEventResponse("Im gewünschten Zeitfenster stehen aktuell nicht zwei passende freie Termine bereit. Erfinde und biete keine Uhrzeiten an. Sage das kurz und frage, ob das jeweils andere Zeitfenster grundsätzlich auch möglich wäre.");
@@ -849,7 +883,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               requestEventResponse(`Der Kunde hat verbindlich ${currentContext.selectedAppointmentSlot} gewählt und ${mode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${currentContext.selectedAppointmentSlot}" auf. Stelle keine Rückfrage zur Bestätigung und wiederhole den Termin nicht.`);
               return;
             }
-            requestEventResponse(`Der Termin ${currentContext.selectedAppointmentSlot} ist bereits verbindlich ausgewählt. Frage ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Frage nicht erneut, ob das Datum oder die Uhrzeit passt.`);
+            requestDeterministicSpeech("Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?");
             return;
           }
 
@@ -861,7 +895,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt und ${selectedMode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${selectedSlot}" auf. Stelle keine Rückfrage, bestätige die Auswahl nicht zusätzlich und wiederhole den Termin nicht.`);
               return;
             }
-            requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt. Frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Bestätige die Auswahl nicht zusätzlich und frage nicht erneut, ob der Termin passt.`);
+            requestDeterministicSpeech("Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?");
             return;
           }
 
@@ -870,12 +904,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
             return;
           }
 
-          requestEventResponse("Die zwei passenden Termine wurden bereits genannt. Wiederhole sie nicht. Wenn die Auswahl unklar ist, frage nur: 'Welcher der beiden Termine passt Ihnen besser?' Verlange keine zusätzliche Ja-Bestätigung.");
+          requestDeterministicSpeech("Welcher der beiden Termine passt Ihnen besser?");
           return;
         }
 
         const instruction = instructionForPkvStep(currentContext.dialogState.pkvStep, extractCurrentContributionPhrase(currentContext.transcript));
-        requestEventResponse(instruction);
+        const deterministicText = responseTextForPkvStep(
+          currentContext.dialogState.pkvStep,
+          extractCurrentContributionPhrase(currentContext.transcript),
+        );
+        if (deterministicText) requestDeterministicSpeech(deterministicText);
+        else requestEventResponse(instruction);
         return;
       }
 
@@ -893,12 +932,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
     preparationState = transition.state;
 
     if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
-      hangupAfterAssistantResponse = true;
-      requestEventResponse("Sage exakt: 'Vielen Dank für das Gespräch. Auf Wiederhören.' Stelle keine weitere Frage und füge keinen weiteren Satz hinzu.");
+      requestDeterministicSpeech(transition.speechText || FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
       return;
     }
 
-    requestEventResponse(transition.instruction);
+    if (transition.speechText) requestDeterministicSpeech(transition.speechText);
+    else requestEventResponse(transition.instruction);
   };
 
   const handleToolCall = async (tool: RealtimeToolCall) => {
@@ -947,7 +986,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         updateSession();
         const transition = beginPreparation(preparationState, speechSlotPhrase, ctx.transcript);
         preparationState = transition.state;
-        requestResponse(transition.instruction);
+        if (transition.speechText) requestDeterministicSpeech(transition.speechText);
+        else requestResponse(transition.instruction);
         return;
       }
       requestResponse();
@@ -962,7 +1002,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (tool.name === "end_call") {
-      const canTerminateFromPreparation = preparationState.stage === "completed" || hangupAfterAssistantResponse;
+      const canTerminateFromPreparation = preparationState.stage === "completed";
       if (!canTerminateFromPreparation && !hasClearFarewellOrRejection(ctx) && !hasAffirmedAssistantEndQuestion(ctx)) {
         handledToolCalls.delete(tool.callId);
         const instruction = "Beende das Gespräch nicht und verlange keine Bestätigung zum Auflegen. Fahre mit dem noch offenen Gesprächsschritt fort.";
@@ -970,7 +1010,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse(instruction);
         return;
       }
-      hangupAfterAssistantResponse = false;
       pendingUserTranscripts.splice(0);
       sendToolResult(tool.callId, { ok: true });
       requestHangupAfterPlayback();
@@ -1034,20 +1073,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
         const playbackPending = playback.isPending();
 
-        if (shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse, playbackPending })) {
-          decisionMakerIntroPending = true;
-        }
-
-        // Compute audioEndMs WITHOUT interrupting first
-        const sentBytes = playback.bytesSent();
-        const audioEndMs = Math.ceil(sentBytes / 160) * 20;
-
         const plan = planBargeIn({
           responseActive: responses.isActive(),
           playbackPending,
-          assistantItemId: activeAssistantItemId || undefined,
-          audioEndMs,
-          assistantAudioBytes,
         });
 
         // Only actually interrupt if: plan says to AND TTS has played long enough
@@ -1068,7 +1096,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
           ttsPlaybackStartedAt = null;
           log.info("realtime.barge_in", {
             callSid: ctx?.callSid,
-            itemId: activeAssistantItemId || undefined,
             audioEndMs: interruption.audioEndMs,
             playbackCleared: plan.clearTelnyxPlayback,
             ttsAgeMs: Math.round(ttsAge),
@@ -1122,37 +1149,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         firstModelTokenAt = null;
         firstTtsChunkAt = null;
         responses.markCreated();
-        playback.startResponse();
-        // ttsPlaybackStartedAt is set on first audio chunk in speakWithElevenLabs
-        activeAssistantItemId = "";
-        assistantAudioBytes = 0;
         responseInterrupted = false;
         decisionMakerIntroWasLastResponse = false;
         currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
-        return;
-      }
-
-      if (message.type === "response.output_audio.delta" || message.type === "response.audio.delta") {
-        if (!responseInterrupted && message.delta) {
-          activeAssistantItemId = message.item_id || activeAssistantItemId;
-          assistantAudioBytes += Buffer.from(message.delta, "base64").length;
-          playback.appendBase64Audio(message.delta);
-        }
-        return;
-      }
-
-      if (message.type === "response.output_audio.done") {
-        if (!responseInterrupted) playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
-        return;
-      }
-
-      if (message.type === "response.output_audio_transcript.delta" || message.type === "response.audio_transcript.delta") {
-        if (responseInterrupted) return;
-        if (!firstModelTokenAt) firstModelTokenAt = Date.now();
-        assistantTranscript += message.delta || "";
-        assistantTranscriptDeltaSeen = true;
         return;
       }
 
@@ -1165,9 +1166,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (
-        message.type === "response.output_audio_transcript.done"
-        || message.type === "response.audio_transcript.done"
-        || message.type === "response.output_text.done"
+        message.type === "response.output_text.done"
         || message.type === "response.text.done"
       ) {
         if (responseInterrupted) return;
@@ -1194,18 +1193,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
           responseCreatedAt = null;
           firstModelTokenAt = null;
           firstTtsChunkAt = null;
-          activeAssistantItemId = "";
-          assistantAudioBytes = 0;
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
           return;
         }
-        const wasDecisionMakerIntroPending = decisionMakerIntroPending;
-        if (decisionMakerIntroPending) decisionMakerIntroPending = false;
-        decisionMakerIntroWasLastResponse = wasDecisionMakerIntroPending;
-        const rawTranscript = wasDecisionMakerIntroPending
-          ? buildDecisionMakerIntro(ctx!)
-          : assistantTranscript.replace(/\s+/g, " ").trim();
+        const rawTranscript = assistantTranscript.replace(/\s+/g, " ").trim();
         const transcript = ctx?.topicKind === "pkv" ? normalizePkvTerminology(rawTranscript) : rawTranscript;
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
@@ -1250,12 +1242,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
           await speakWithElevenLabs(transcript);
         }
 
-        if (transcript && hangupAfterAssistantResponse && ctx) {
-          hangupAfterAssistantResponse = false;
-          pendingUserTranscripts.splice(0);
-          requestHangupAfterPlayback();
-        }
-
         assistantContinuationRequested = false;
         for (const item of message.response?.output || []) {
           if (item.type === "function_call" && item.name && item.call_id) {
@@ -1271,6 +1257,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           const pending = pendingUserTranscripts.splice(0);
           const nextUserTranscript = pending.at(-1)?.trim() ?? "";
           if (nextUserTranscript) processUserTranscript(nextUserTranscript);
+          flushDeterministicSpeech();
           responses.flush();
         } else {
           pendingUserTranscripts.splice(0);
@@ -1289,8 +1276,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         responseCreatedAt = null;
         firstModelTokenAt = null;
         firstTtsChunkAt = null;
-        activeAssistantItemId = "";
-        assistantAudioBytes = 0;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
       }

@@ -3,74 +3,42 @@ import test from "node:test";
 import { planBargeIn } from "./barge-in-controller.js";
 
 test("does nothing when Gloria is neither generating nor playing audio", () => {
-  assert.deepEqual(planBargeIn({ responseActive: false, playbackPending: false, audioEndMs: 0 }), {
+  assert.deepEqual(planBargeIn({ responseActive: false, playbackPending: false }), {
     interrupted: false,
     clearTelnyxPlayback: false,
     openAiEvents: [],
   });
 });
 
-test("cancels generation, clears Telnyx and truncates played audio", () => {
+test("cancels text generation and clears ElevenLabs playback", () => {
   assert.deepEqual(planBargeIn({
     responseActive: true,
     playbackPending: true,
-    assistantItemId: "item_123",
-    audioEndMs: 640,
   }), {
     interrupted: true,
     clearTelnyxPlayback: true,
-    openAiEvents: [
-      { type: "response.cancel" },
-      { type: "conversation.item.truncate", item_id: "item_123", content_index: 0, audio_end_ms: 640 },
-    ],
+    openAiEvents: [{ type: "response.cancel" }],
   });
 });
 
-test("clears and truncates remaining playback after generation already finished", () => {
+test("clears remaining ElevenLabs playback after generation already finished", () => {
   const plan = planBargeIn({
     responseActive: false,
     playbackPending: true,
-    assistantItemId: "item_456",
-    audioEndMs: 220,
   });
   assert.equal(plan.clearTelnyxPlayback, true);
-  assert.deepEqual(plan.openAiEvents, [
-    { type: "conversation.item.truncate", item_id: "item_456", content_index: 0, audio_end_ms: 220 },
-  ]);
+  assert.deepEqual(plan.openAiEvents, []);
 });
 
-test("does not truncate beyond audio delivered by OpenAI", () => {
-  const plan = planBargeIn({
-    responseActive: true,
-    playbackPending: true,
-    assistantItemId: "item_789",
-    audioEndMs: 19940,
-    assistantAudioBytes: 14650 * 8,
-  });
-
-  assert.deepEqual(plan.openAiEvents, [
-    { type: "response.cancel" },
-    { type: "conversation.item.truncate", item_id: "item_789", content_index: 0, audio_end_ms: 14650 },
-  ]);
-});
-
-test("keeps barge-in cancellation bounded to delivered audio and playback state", () => {
+test("keeps barge-in cancellation synchronous", () => {
   const startedAt = Date.now();
   const plan = planBargeIn({
     responseActive: true,
     playbackPending: true,
-    assistantItemId: "item_latency",
-    audioEndMs: 5000,
-    assistantAudioBytes: 8 * 1200,
   });
   const elapsedMs = Date.now() - startedAt;
   assert.equal(plan.interrupted, true);
   assert.equal(plan.clearTelnyxPlayback, true);
-  assert.deepEqual(plan.openAiEvents[1], {
-    type: "conversation.item.truncate",
-    item_id: "item_latency",
-    content_index: 0,
-    audio_end_ms: 1200,
-  });
+  assert.deepEqual(plan.openAiEvents, [{ type: "response.cancel" }]);
   assert.ok(elapsedMs < 100);
 });

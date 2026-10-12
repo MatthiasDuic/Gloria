@@ -3,7 +3,6 @@ export type ConversationTurn = {
   text: string;
 };
 
-// Legacy types kept for canConfirmRealtimeAppointment compatibility
 export type PkvConversationStage = "need_relevance" | "need_contribution" | "need_projection" | "need_concept" | "need_interest" | "ready_to_schedule";
 export type PkvConversationAssessment = { stage: PkvConversationStage; contributionPhrase?: string; projectionDelivered: boolean; conceptDelivered: boolean; interestConfirmed: boolean };
 
@@ -124,14 +123,6 @@ export function advancePkvStep(
       return { nextStep: 4, shouldEnd: false };
     }
 
-    case 5: {
-      const interested = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|sicher\b|natürlich\b|m[oö]chte|sehr\s+gerne|würde\s+gerne|relevant\b|schon\b)\b/i.test(text);
-      const notInterested = /\b(?:nein\b|nicht\s+interessiert|kein\s+interesse|lieber\s+nicht|danke\s+nein|eher\s+nicht)\b/i.test(text);
-      if (interested) return { nextStep: 6, shouldEnd: false };
-      if (notInterested) return { nextStep: 5, shouldEnd: true };
-      return { nextStep: 5, shouldEnd: false };
-    }
-
     default:
       return { nextStep: currentStep, shouldEnd: false };
   }
@@ -144,7 +135,6 @@ export function advancePkvStep(
 // Step 2: ask about the current contribution
 // Step 3: present a 10-year projection
 // Step 4: discuss the projection and introduce Herr Duic
-// Step 5: confirm interest
 // Step 6: schedule the appointment
 export function isClearPkvInterest(text: string): boolean {
   const normalized = text.toLowerCase().trim();
@@ -170,12 +160,25 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
       );
     case 4:
       return "Greife die Reaktion des Kunden auf die Hochrechnung kurz und empathisch auf. Sage knapp: 'Genau damit beschäftigt sich Herr Duic jeden Tag. Er zeigt Ihnen anhand Ihrer Situation, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten es gibt, ihn im Alter besser planbar und tragbar zu halten.' Erkläre den Ablauf nicht weiter und verspreche kein Ergebnis. Frage genau einmal: 'Wäre es für Sie interessant, sich das mit Herrn Duic persönlich anzuschauen?' Warte auf klares Interesse.";
-    case 5:
-      return "Der Kunde hat noch nicht eindeutig auf die Einladung reagiert. Frage einmal kurz: 'Wäre es für Sie interessant, sich das mit Herrn Duic persönlich anzuschauen?' Warte auf ein klares Ja oder Nein.";
     case 6:
       return "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin und erkläre den Ablauf nicht weiter. Frage zuerst, ob eher Vormittag oder Nachmittag passt, biete danach zwei echte freie Termine an und frage nach Auswahl ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Bei Ablauf-Fragen sage freundlich, dass Herr Duic sie im Termin klärt. Nach Bestätigung führe die kurze freiwillige Vorbereitung und Abschlussfragen durch, frage nach der E-Mail-Adresse und lasse die Bestätigung über den vorgesehenen Prozess versenden.";
     default:
       return "Führe das Gespräch natürlich weiter und warte auf den Kunden.";
+  }
+}
+
+export function responseTextForPkvStep(step: number, contributionPhrase?: string): string | undefined {
+  switch (step) {
+    case 0:
+      return "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?";
+    case 1:
+      return "Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?";
+    case 2:
+      return "Und welchen Beitrag zahlen Sie heute?";
+    case 3:
+      return `${buildTenYearProjectionSentence(contributionPhrase)} Haben Sie das schon einmal für sich hochgerechnet?`;
+    default:
+      return undefined;
   }
 }
 

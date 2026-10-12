@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePkvStep, assessPkvConversation, extractContributionPhrase, extractCurrentContributionPhrase, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { advancePkvStep, assessPkvConversation, extractContributionPhrase, extractCurrentContributionPhrase, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, responseTextForPkvStep, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -27,6 +27,12 @@ test("derives one deterministic next step from the PKV transcript", () => {
   turns.push({ role: "assistant", text: "Herr Duic zeigt Ihnen Ihre persönliche Entwicklung und prüfbare Optionen. Wäre diese Klarheit für Sie hilfreich?" });
   turns.push({ role: "user", text: "Ja, das wäre hilfreich." });
   assert.equal(assessPkvConversation(turns).stage, "ready_to_schedule");
+});
+
+test("provides ready-to-speak text for deterministic PKV turns", () => {
+  assert.equal(responseTextForPkvStep(2), "Und welchen Beitrag zahlen Sie heute?");
+  assert.match(responseTextForPkvStep(3, "1280 Euro") || "", /615 Euro mehr.*1895 Euro monatlich.*hochgerechnet\?/);
+  assert.equal(responseTextForPkvStep(4), undefined);
 });
 
 test("introduces the contribution trend before asking for the initial contribution", () => {

@@ -14,12 +14,16 @@ class FakeSocket extends EventEmitter implements RealtimeSocket {
   message(value: unknown): void { this.emit("message", Buffer.from(JSON.stringify(value))); }
 }
 
-test("buffers inbound audio until the socket opens", () => {
+test("buffers inbound audio until session initialization completes", async () => {
   const socket = new FakeSocket();
+  let finishInitialization: (() => void) | undefined;
   const session = new OpenAiRealtimeSession({
     apiKey: "test-key",
     model: "test-model",
     onEvent: () => undefined,
+    onOpen: () => new Promise<void>((resolve) => {
+      finishInitialization = resolve;
+    }),
     socketFactory: () => socket,
   });
   session.connect();
@@ -28,6 +32,9 @@ test("buffers inbound audio until the socket opens", () => {
 
   socket.open();
   assert.equal(session.isReady(), true);
+  assert.deepEqual(socket.sent, []);
+  finishInitialization?.();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(JSON.parse(socket.sent[0]), { type: "input_audio_buffer.append", audio: "audio-one" });
 });
 

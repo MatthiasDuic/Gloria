@@ -52,43 +52,6 @@ export async function loadBusySlots(opts: {
  * deutschen Liste in Berlin-Zeit. Beispiel:
  *   - Mittwoch, 13. Mai 2026, 14:30–16:00 Uhr
  */
-export function busySlotsToPrompt(slots: BusySlot[]): string {
-  if (slots.length === 0) {
-    return "BEREITS BELEGTE TERMINE: Aktuell keine. Du kannst innerhalb der Geschäftszeiten frei vorschlagen.";
-  }
-
-  const fmtDate = new Intl.DateTimeFormat("de-DE", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "Europe/Berlin",
-  });
-  const fmtTime = new Intl.DateTimeFormat("de-DE", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Berlin",
-    hour12: false,
-  });
-
-  const lines: string[] = [];
-  for (const s of slots) {
-    const start = new Date(s.start);
-    const end = new Date(s.end);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
-    lines.push(`- ${fmtDate.format(start)}, ${fmtTime.format(start)}–${fmtTime.format(end)} Uhr`);
-  }
-
-  return [
-    "BEREITS BELEGTE TERMINE (HARTE REGEL – KEINE DOPPELBELEGUNG):",
-    "Die folgenden Zeitfenster sind bereits durch andere Termine blockiert.",
-    "Schlage NIEMALS einen Slot vor, der sich mit einem dieser Fenster überschneidet.",
-    "Plane mindestens 90 Minuten Puffer pro neuem Termin ein.",
-    ...lines,
-    "",
-  ].join("\n");
-}
-
 /**
  * Berechnet bis zu `maxCount` 30-Minuten-Slots in den nächsten `daysAhead` Geschäftstagen
  * (Mo–Fr, 08:30–11:00 und 13:00–18:00 Berlin-Zeit), die NICHT mit den Busy-Slots kollidieren und
@@ -192,4 +155,3 @@ export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: strin
     "",
   ].join("\n");
 }
-

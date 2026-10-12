@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 
@@ -135,6 +135,13 @@ test("rejects invented slots and accepts exact supplied slots", () => {
   assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
+test("keeps the full calendar out of static model instructions", () => {
+  const ctx = buildPkvContext();
+  ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.doesNotMatch(instructions, /Mittwoch, 26\. August|Donnerstag, 27\. August/);
+});
+
 test("formats times and Euro amounts in dynamic response instructions", () => {
   const ctx = buildPkvContext();
   const response = buildRealtimeResponseInstructions(ctx, "Biete Donnerstag, 3. September um 18:00 Uhr und 1.800 Euro an.", false);
@@ -242,7 +249,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /ÜBERLEITUNG:.*Herr Duic/);
   assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.doesNotMatch(instructions, /Beitragsentwicklung in der privaten Krankenversicherung/i);
-  assert.match(instructions, /PROSODIE:.*menschlich.*hörbar warm/);
+  assert.doesNotMatch(instructions, /PROSODIE:/);
   assert.match(instructions, /digital per Microsoft Teams oder bei der Kundin\/dem Kunden vor Ort/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);
@@ -397,10 +404,4 @@ test("does not label the initial contribution as the current contribution", () =
   const afterCurrentAnswer = buildRealtimeResponseInstructions(ctx, undefined, false);
   assert.match(afterCurrentAnswer, /Aktueller Monatsbeitrag: neunhundert achtzig Euro/);
   assert.doesNotMatch(afterCurrentAnswer, /Aktueller Monatsbeitrag: vierhundert zwanzig Euro/);
-});
-
-test("does not restore the full decision-maker introduction after interruption", () => {
-  assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: true }), false);
-  assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: true, playbackPending: false }), false);
-  assert.equal(shouldRestoreDecisionMakerIntro({ decisionMakerIntroWasLastResponse: false, playbackPending: true }), false);
 });

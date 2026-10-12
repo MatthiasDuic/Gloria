@@ -40,8 +40,17 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Nicht mehr verwendete Response-, Playback- und Interrupt-Zustände wurden aus dem Realtime-Handler entfernt.
 - `worker/src/openai-realtime-session.ts` besitzt WebSocket-Aufbau, Ready-State, JSON-Ereignisverteilung und Eingangsaudio-Pufferung vor Verbindungsöffnung.
 - `worker/src/barge-in-controller.ts` plant Unterbrechungen mit den offiziellen Telnyx- und OpenAI-Ereignissen.
-- Bei Kundensprache während Glorias Ausgabe wird Telnyx mit `clear` geleert, die OpenAI-Antwort mit `response.cancel` gestoppt und das Assistant-Item mit `conversation.item.truncate` auf die abgespielte Audiozeit gekürzt.
+- Bei Kundensprache während Glorias Ausgabe wird Telnyx mit `clear` geleert und eine noch laufende OpenAI-Textantwort mit `response.cancel` gestoppt. Ein OpenAI-Audio-Truncate wird nicht mehr gesendet, weil die hörbare Ausgabe ausschließlich von ElevenLabs stammt.
 - Alte wartende Antworten und ungespielte fachliche Aussagen werden bei einer Unterbrechung nicht als erledigt übernommen.
+- Deterministische PKV-, Termin- und Vorbereitungsfragen laufen direkt vom Conversation Controller zu ElevenLabs. Sie warten nicht mehr auf eine inhaltlich überflüssige OpenAI-Textgenerierung.
+- Direkt gesprochene Controller-Texte werden zusätzlich als Assistant-Nachrichten in die OpenAI-Konversation eingetragen, damit freie Antworten und Einwandbehandlung den vollständigen Gesprächskontext behalten.
+- OpenAI Realtime ist konsequent text-only; nicht erreichbare OpenAI-Audio- und Audio-Transcript-Ereignispfade wurden entfernt.
+- Die vollständige Kalenderliste bleibt Maschinenzustand des Termincontrollers und wird nicht mehr in den statischen Modellprompt injiziert. Nur die zwei tatsächlich angebotenen Slots werden gesprochen.
+- Der Standard-ASR-Kontext wurde auf Zahlen und Eigennamen verkürzt, um synthetische Prompt-Transkripte zu vermeiden; der bestehende Leakage-Filter bleibt als Sicherheitsnetz aktiv.
+- Das serverseitige VAD wartet standardmäßig 500 statt 650 Millisekunden Stille. Der Wert bleibt über `OPENAI_REALTIME_SILENCE_MS` konfigurierbar.
+- Gepuffertes Eingangsaudio wird nach einem OpenAI-Reconnect erst geleert, nachdem die Sessioninitialisierung abgeschlossen ist.
+- `/health` und `/healthz` prüfen nur den lokalen Worker-Prozess. Der separate Endpoint `/readyz` prüft OpenAI, Telnyx und ElevenLabs und cached das Ergebnis standardmäßig 30 Sekunden.
+- Nicht aktive Topic-Architekturdateien, der ungenutzte Busy-Slot-Prompt und veraltete PKV-/Dialogzustände wurden entfernt.
 - `worker/src/dialog-evaluation.ts` bewertet Produktionscontroller auf Pflichtstufe, Kundenevent, Routing, Terminfreigabe, Fragen pro Turn, Wiederholungen, frühe Terminierung und Latenz.
 - `worker/src/dialog-evaluation-scenarios.ts` enthält 38 realistische Positiv- und Negativszenarien für PKV-Fluss, Kundenereignisse, Routing, Termine und Qualitätsregeln.
 - `npm run eval:dialogs` liefert einen reproduzierbaren Qualitätsbericht. Aktueller Stand: 38/38 Szenarien und 100/100 Punkte.
@@ -52,7 +61,9 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 1. Anonymisierte echte Gesprächstranskripte in ein Replay-Format überführen und als zusätzliche Evaluationsfälle aufnehmen.
 2. Kontrollierten Testanruf-Rollout mit Barge-in-, Latenz- und Terminmetriken durchführen.
 3. Telnyx-Mark-Bestätigungen nutzen, um `audio_end_ms` nicht nur aus gesendeten Frames, sondern aus netzwerkseitig bestätigter Wiedergabe abzuleiten.
-4. Alte, nicht mehr aktive Twilio- und ElevenLabs-Pfade nach Produktionsprüfung entfernen.
+4. ElevenLabs Flash/Turbo gegen das aktuelle Modell mit echten Telefonaufnahmen hinsichtlich First-Chunk-Latenz, Zahlen- und Namensaussprache testen.
+5. Freie OpenAI-Antworten erst nach einem kontrollierten Test satzweise an ElevenLabs weiterreichen; Tool-Calls, Unterbrechungen und Transkriptkonsistenz dürfen dadurch nicht überholt werden.
+6. Alte, nicht mehr aktive Twilio-Pfade nach Produktionsprüfung entfernen.
 
 ## Qualitätskriterien
 
