@@ -57,7 +57,15 @@ export function extractCurrentContributionPhrase(turns: ConversationTurn[]): str
   }
 
   const userTurns = turns.filter((turn, index) => turn.role === "user" && (currentContributionQuestion < 0 || index > currentContributionQuestion));
-  return extractContributionPhrase(userTurns.map((turn) => turn.text).join(" "));
+  const explicitContribution = extractContributionPhrase(userTurns.map((turn) => turn.text).join(" "));
+  if (explicitContribution) return explicitContribution;
+  if (currentContributionQuestion < 0) return undefined;
+
+  for (let index = userTurns.length - 1; index >= 0; index -= 1) {
+    const standaloneAmount = userTurns[index].text.trim().match(/^(?:ca\.?\s*|circa\s*|rund\s*|etwa\s*)?(\d{2,5}|\d{1,3}(?:\.\d{3})+)[.,]?\s*$/i)?.[1];
+    if (standaloneAmount) return `${standaloneAmount} Euro`;
+  }
+  return undefined;
 }
 
 export function advancePkvStep(
@@ -138,9 +146,9 @@ export function isClearPkvInterest(text: string): boolean {
 export function instructionForPkvStep(step: number, contributionPhrase?: string): string {
   switch (step) {
     case 0:
-      return "Der Kunde hat zugestimmt, den Anlass zu hören. Sage kurz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema, das uns alle betrifft. Haben Sie gerade einen kurzen Moment?' Keine weitere Erklärung und keine zusätzliche Frage. Bei Nein oder Zeitmangel respektvoll verabschieden; bei unklarer Reaktion kurz nachfragen.";
+      return "Sage kurz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Keine weitere Erklärung und keine zusätzliche Frage. Bei Nein oder Zeitmangel respektvoll verabschieden; bei unklarer Reaktion kurz nachfragen.";
     case 1:
-      return "Sage exakt und ohne Vor- oder Nachsatz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema was uns alle betrifft. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?' Warte danach auf die Antwort.";
+      return "Der Anlass wurde bereits genannt; wiederhole ihn nicht. Sage exakt und ohne Vor- oder Nachsatz: 'Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?' Warte danach auf die Antwort.";
     case 2:
       return "Reagiere freundlich und knapp auf die Antwort. Frage dann genau: 'Und welchen Beitrag zahlen Sie heute?' Stelle keine weitere Frage und warte vollständig auf die Antwort. Wenn der Kunde den früheren Beitrag nicht mehr weiß, akzeptiere das ohne Nachhaken und frage nach dem heutigen Beitrag.";
     case 3:

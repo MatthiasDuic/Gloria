@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       insuranceStatus: typeof payload.insuranceStatus === "string" ? payload.insuranceStatus : undefined,
       healthInsurance: typeof payload.healthInsurance === "string" ? payload.healthInsurance : undefined,
       monthlyContribution: typeof payload.monthlyContribution === "string" ? payload.monthlyContribution : undefined,
+      height: typeof payload.height === "string" ? payload.height : undefined,
+      weight: typeof payload.weight === "string" ? payload.weight : undefined,
       ongoingTreatment: typeof payload.ongoingTreatment === "string" ? payload.ongoingTreatment : undefined,
       diagnoses: typeof payload.diagnoses === "string" ? payload.diagnoses : undefined,
       notes: typeof payload.notes === "string" ? payload.notes : undefined,

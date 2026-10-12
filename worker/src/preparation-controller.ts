@@ -169,14 +169,14 @@ export function beginPreparation(
   if (state.questions.length === 0) {
     return {
       state: { ...state, stage: "awaiting_email" },
-      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach nur nach der E-Mail-Adresse für die Terminbestätigung.`,
+      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
     };
   }
   const firstQuestion = nextUnansweredQuestion(state, turns, 0);
   if (!firstQuestion) {
     return {
       state: { ...state, stage: "awaiting_email" },
-      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Frage danach nur nach der E-Mail-Adresse für die Terminbestätigung.`,
+      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
     };
   }
   return {
@@ -201,7 +201,7 @@ export function advancePreparation(
     if (consent === "declined") {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
+        instruction: "Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
       };
     }
     if (consent === "unknown") {
@@ -221,7 +221,7 @@ export function advancePreparation(
     if (!next) {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Die bereits geklärten Angaben reichen für die Vorbereitung. Frage nur noch nach der E-Mail-Adresse für die Terminbestätigung.",
+        instruction: "Die bereits geklärten Angaben reichen für die Vorbereitung. Sage exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
       };
     }
     return {
@@ -247,7 +247,7 @@ export function advancePreparation(
       }
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt, und frage dann nur nach der E-Mail-Adresse für die Terminbestätigung.",
+        instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
       };
     }
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
@@ -273,7 +273,7 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-      instruction: "Die Vorbereitungsfragen sind vollständig. Frage danach ausschließlich nach der E-Mail-Adresse für die Terminbestätigung.",
+      instruction: "Die Vorbereitungsfragen sind vollständig. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.' Stelle keine weitere Frage.",
     };
   }
 
@@ -282,7 +282,7 @@ export function advancePreparation(
     const hasAtIndicator = /@|\bat\b/i.test(userText);
     const hasDotIndicator = /\.|\bpunkt\b|\bdot\b/i.test(userText);
     if (!hasAtIndicator || !hasDotIndicator) {
-      return { state, instruction: "Frage ausschließlich noch einmal nach der E-Mail-Adresse für die Terminbestätigung." };
+      return { state, instruction: "Sage ausschließlich: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.'" };
     }
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },

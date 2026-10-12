@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { parseReportTranscriptFallback } from "./transcript-utils";
 
 export interface AppointmentFormInput {
   title?: string;
@@ -16,6 +17,8 @@ export interface AppointmentFormInput {
   insuranceStatus?: string;
   healthInsurance?: string;
   monthlyContribution?: string;
+  height?: string;
+  weight?: string;
   ongoingTreatment?: string;
   diagnoses?: string;
   notes?: string;
@@ -46,11 +49,7 @@ function getConversationTurns(report: AppointmentReportSource) {
   if (report.transcriptEvents?.length) {
     return report.transcriptEvents.map((event) => ({ speaker: event.speaker, text: event.text.trim() }));
   }
-  return report.summary
-    .split("\n")
-    .map((line) => line.trim().match(/^(?:-\s*)?(?:\[[^\]]+\]\s*)?(Gloria|Interessent)(?:\s*\([^)]*\))?:\s*(.+)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({ speaker: match[1], text: match[2].trim() }));
+  return parseReportTranscriptFallback(report.summary);
 }
 
 export function buildAppointmentFormInputFromReport(report: AppointmentReportSource): AppointmentFormInput {
@@ -88,7 +87,9 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     birthDate: answerAfter(/geburtsdatum/i),
     insuranceStatus: answerAfter(/privat\s+oder\s+gesetzlich|versicherungsstatus/i),
     healthInsurance: answerAfter(/krankenversicherer|krankenkasse/i),
-    monthlyContribution: answerAfter(/aktuellen beitrag|monatsbeitrag/i),
+    monthlyContribution: answerAfter(/aktuellen beitrag|monatsbeitrag|welchen beitrag zahlen sie heute|beitrag zahlen sie heute/i),
+    height: answerAfter(/wie gro[ßs] sind sie|körpergröße|groesse/i),
+    weight: answerAfter(/wie viel wiegen sie|aktuelles gewicht|gewicht/i),
     ongoingTreatment,
     diagnoses: diagnosis,
     notes: getReportSummary(report.summary),
@@ -252,6 +253,9 @@ export async function buildAppointmentFormPdf(input: AppointmentFormInput): Prom
     field("Derzeitiger Krankenversicherer", formatValue(input.healthInsurance), left + columnWidth + columnGap, y);
     y += 44;
     field("Aktueller Beitrag", formatValue(input.monthlyContribution), left, y);
+    field("Körpergröße", formatValue(input.height), left + columnWidth + columnGap, y);
+    y += 44;
+    field("Gewicht", formatValue(input.weight), left, y);
 
     if (shouldIncludeHealthSection(input.topic)) {
       y = section("Gesundheitsangaben", y + 59);

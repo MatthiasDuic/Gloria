@@ -29,6 +29,9 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Termin und Durchführungsart können in derselben Kundenantwort gewählt werden; es folgt keine doppelte Rückfrage oder Bestätigung.
 - Die zwei Kalenderoptionen werden natürlich angeboten, ohne einschränkende Formulierungen wie „ausschließlich diese Termine“.
 - Nach den freiwilligen Basisfragen wird immer die E-Mail-Adresse für die Terminbestätigung erfragt; danach folgt die feste Schlussformel ohne Bestätigung zum Auflegen.
+- Der PKV-Anlass und die Frage nach einem kurzen Moment werden im Entscheider-Einstieg genau einmal genannt; nach Zustimmung beginnt direkt die Beitragsentwicklung ohne Wiederholung.
+- Das vollständige Gespräch wird neben den Transkriptereignissen als Report-Fallback gesichert, damit Detailansicht und PDF auch bei einem Ausfall der separaten Transkripttabelle vollständig bleiben.
+- Der Kundenterminbogen übernimmt Versicherungsstatus, Versicherer, Beitrag, Geburtsdatum, Größe, Gewicht, Behandlungen, Diagnosen und E-Mail aus den tatsächlich gestellten Vorbereitungsfragen.
 - `worker/src/telnyx-playback.ts` übernimmt Audio-Restpuffer, 160-Byte-Frames, Codec-Padding und das zeitlich korrekte 20-ms-Playback.
 - Mehrere Frames aus einem OpenAI-Audio-Delta werden nicht mehr als ungebremster Burst an Telnyx gesendet.
 - `worker/src/realtime-response-controller.ts` steuert aktive Antworten, First-in-Queue, Playback-Sperre, Cooldown, Cancel und Shutdown.

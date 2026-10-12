@@ -221,7 +221,7 @@ function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerRealName">): strin
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
   const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
   // "Gothar" gives ElevenLabs the intended pronunciation of Barmenia Gothaer.
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen. Darf ich Ihnen kurz sagen, worum es geht?`;
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen. Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?`;
 }
 
 function buildGatekeeperIntro(ctx: Pick<CallContext, "ownerRealName" | "contactName">): string {
@@ -289,8 +289,8 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topicKind === "pkv") {
     parts.push(
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch transparent, charmant, kurz und ohne Druck.\n" +
-      "1. ERÖFFNUNG: Begrüße die zuständige Person natürlich und stelle dich transparent als digitale Assistentin vor. Sprich 'Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen' mit einem hörbaren Lächeln: warm, charmant und selbstbewusst, nie ironisch oder aufgesetzt. Frage danach, ob du kurz den Anlass nennen darfst. Kein Monolog.\n" +
-      "2. ANLASS UND EINSTIEGSBEITRAG: Bei Zustimmung zur Anlassfrage sage exakt den vorgegebenen Satz zur Beitragsentwicklung in der Gesundheitsversorgung einschließlich der Frage nach dem Einstiegsbeitrag. Stelle keine zusätzliche Moment-Frage und warte auf die Antwort.\n" +
+      "1. ERÖFFNUNG: Begrüße die zuständige Person natürlich und stelle dich transparent als digitale Assistentin vor. Sprich 'Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen' mit einem hörbaren Lächeln: warm, charmant und selbstbewusst, nie ironisch oder aufgesetzt. Nenne danach direkt einmal den Anlass Beitragsentwicklung in der Gesundheitsversorgung und frage, ob die Person gerade einen kurzen Moment hat. Kein zusätzlicher Erlaubnisschritt.\n" +
+      "2. ANLASS UND EINSTIEGSBEITRAG: Bei Zustimmung zur Momentfrage wiederhole den Anlass nicht. Beginne direkt mit der Aussage des PKV Verbands zur jährlichen Beitragssteigerung und frage nach dem Einstiegsbeitrag. Warte auf die Antwort.\n" +
       "3. HEUTIGER BEITRAG: Frage separat und genau einmal: 'Und welchen Beitrag zahlen Sie heute?' Warte auf die Antwort. Wenn der Kunde keinen Betrag weiß oder nennen möchte, akzeptiere das ohne Nachhaken.\n" +
       "4. HOCHRECHNUNG: Nutze für die persönliche Zehn-Jahres-Beispielrechnung den zuletzt genannten heutigen Beitrag, nie den Einstiegsbeitrag. Nenne die Annahme von rund vier Prozent kurz und frage: 'Haben Sie das schon einmal für sich hochgerechnet?' Erfinde keinen persönlichen Betrag.\n" +
       "5. ÜBERLEITUNG: Greife die Reaktion auf, sage in höchstens zwei kurzen Sätzen, dass Herr Duic die individuelle Entwicklung bis zum Ruhestand und Möglichkeiten für einen besser planbaren, tragbaren Beitrag im Alter zeigt. Wecke Interesse, ohne den Ablauf zu erklären oder ein Ergebnis zu versprechen, und frage, ob der Kunde das mit Herrn Duic anschauen möchte.\n" +
@@ -662,7 +662,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     clearBargeInRecovery();
     log.warn("realtime.barge_in_recovered", { callSid: ctx.callSid, reason });
     const instruction = contactRouting?.stage === "decision_maker" && ctx.dialogState.pkvStep === 0
-      ? "Sage kurz und freundlich: 'Entschuldigung, die Leitung war gerade etwas undeutlich. Darf ich Ihnen kurz sagen, worum es geht?' Stelle keine weitere Frage und warte."
+      ? "Sage kurz und freundlich: 'Entschuldigung, die Leitung war gerade etwas undeutlich. Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Stelle keine weitere Frage und warte."
       : "Sage kurz und freundlich: 'Entschuldigung, das habe ich akustisch nicht verstanden. Können Sie das bitte kurz wiederholen?' Stelle keine weitere Frage und warte.";
     requestEventResponse(instruction);
   };
@@ -684,7 +684,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestInterruptedIntroContinuation = () => {
     decisionMakerIntroPending = false;
-    requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und frage nur: 'Darf ich Ihnen kurz sagen, worum es geht?' Danach vollständig warten.");
+    requestResponse("Begrüße den Kunden kurz, ohne die vollständige Vorstellung zu wiederholen, und sage nur: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Danach vollständig warten.");
   };
 
   const requestHangupAfterPlayback = () => {

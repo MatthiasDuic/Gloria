@@ -10,6 +10,7 @@ import {
   type TranscriptEvent,
 } from "@/lib/report-db";
 import { globalJobQueue } from "@/lib/job-queue";
+import { buildReportTranscriptFallback } from "@/lib/transcript-utils";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -38,7 +39,7 @@ const BASIS_FIELD_RULES: Array<{
     key: "birthDate",
     question: "Geburtsdatum",
     promptPatterns: [/geburtsdatum|geboren/i],
-    answerPatterns: [/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b/i],
+    answerPatterns: [/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\.?\s+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+(?:19|20)\d{2}\b/i],
   },
   {
     key: "insurer",
@@ -59,7 +60,7 @@ const BASIS_FIELD_RULES: Array<{
     key: "height",
     question: "Größe",
     promptPatterns: [/wie\s+gro[ßs]|gr[öo]ße|groesse/i],
-    answerPatterns: [/\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter))\b/i],
+    answerPatterns: [/\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter)|(?:ein|eins|eine)\s+meter(?:\s+[a-zäöüß-]+)?)\b/i],
   },
   {
     key: "weight",
@@ -266,16 +267,6 @@ async function persistTranscriptArray(
   };
 }
 
-function buildTranscriptFallback(entries: IncomingTranscriptEntry[] | undefined): string {
-  const lines = (entries || []).flatMap((entry) => {
-    const text = entry.text?.trim();
-    if (!text) return [];
-    const speaker = entry.speaker === "Gloria" || entry.role === "assistant" ? "Gloria" : "Interessent";
-    return [`${speaker}: ${text}`];
-  });
-  return lines.length ? `--- GESPRAECHSPROTOKOLL (Fallback ohne Latenzdaten) ---\n${lines.join("\n")}` : "";
-}
-
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as {
     userId?: string;
@@ -346,6 +337,10 @@ export async function POST(request: Request) {
         payload.contactName || existingByCallSid?.contactName || lead?.contactName;
 
       if (recoveredCompany && recoveredTopic) {
+        const transcriptFallback = buildReportTranscriptFallback(payload.transcript);
+        const finalSummary = transcriptFallback
+          ? `${payload.summary}\n\n${transcriptFallback}`
+          : payload.summary;
         const report = await storeCallReport({
           userId: finalUserId,
           phoneNumberId: payload.phoneNumberId || existingByCallSid?.phoneNumberId,
@@ -354,7 +349,7 @@ export async function POST(request: Request) {
           company: recoveredCompany,
           contactName: recoveredContactName,
           topic: recoveredTopic,
-          summary: payload.summary,
+          summary: finalSummary,
           summaryChunk: payload.summaryChunk,
           outcome: payload.outcome,
           appointmentAt: payload.appointmentAt,
@@ -454,6 +449,10 @@ export async function POST(request: Request) {
     });
   }
 
+  const transcriptFallback = buildReportTranscriptFallback(payload.transcript);
+  const finalSummary = transcriptFallback
+    ? `${payload.summary}\n\n${transcriptFallback}`
+    : payload.summary;
   const report = await storeCallReport({
     userId: payload.userId,
     phoneNumberId: payload.phoneNumberId,
@@ -462,7 +461,7 @@ export async function POST(request: Request) {
     company: payload.company,
     contactName: payload.contactName,
     topic: payload.topic,
-    summary: payload.summary,
+    summary: finalSummary,
     summaryChunk: payload.summaryChunk,
     outcome: payload.outcome,
     appointmentAt: payload.appointmentAt,

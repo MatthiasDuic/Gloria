@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { getConversationEventsForCallSid, getDashboardData } from "@/lib/storage";
 import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
+import { parseReportTranscriptFallback } from "@/lib/transcript-utils";
 
 export const runtime = "nodejs";
 
@@ -24,12 +25,10 @@ export async function GET(request: NextRequest) {
 
   // Berechtigungsprüfung: gehört der callSid einem Report dieses Users?
   // (Master-User dürfen alles.)
-  if (sessionUser.role !== "master") {
-    const ownData = await getDashboardData({ userId: sessionUser.id, role: "user" });
-    const owns = ownData.reports.some((r) => r.callSid === callSid);
-    if (!owns) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    }
+  const reportData = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
+  const report = reportData.reports.find((entry) => entry.callSid === callSid);
+  if (sessionUser.role !== "master" && !report) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const events = await listCallTranscriptEventsFromPostgres(callSid);
@@ -68,5 +67,17 @@ export async function GET(request: NextRequest) {
       };
     });
 
-  return NextResponse.json({ ok: true, events: fallbackEvents, source: "conversation_events" });
+  if (fallbackEvents.length > 0) {
+    return NextResponse.json({ ok: true, events: fallbackEvents, source: "conversation_events" });
+  }
+
+  const reportEvents = parseReportTranscriptFallback(report?.summary || "").map((entry, index) => ({
+    id: `report-${index}`,
+    callSid,
+    userId: sessionUser.role === "master" ? undefined : sessionUser.id,
+    speaker: entry.speaker,
+    text: entry.text,
+    createdAt: report?.conversationDate || new Date().toISOString(),
+  }));
+  return NextResponse.json({ ok: true, events: reportEvents, source: "conversation_events" });
 }

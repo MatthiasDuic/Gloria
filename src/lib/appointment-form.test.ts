@@ -29,6 +29,8 @@ test("buildAppointmentFormInputFromReport extracts appointment preparation data"
   assert.equal(input.birthDate, "2. Mai 87.");
   assert.equal(input.healthInsurance, "Allianz.");
   assert.equal(input.monthlyContribution, "Circa 690 Euro.");
+  assert.equal(input.height, "Ein Meter achtundachtzig.");
+  assert.equal(input.weight, "96 Kilogramm.");
   assert.equal(input.ongoingTreatment, undefined);
   assert.equal(input.diagnoses, undefined);
   assert.equal(input.notes, "Nur diese Zusammenfassung soll in die Notizen.");
@@ -47,6 +49,10 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
       { speaker: "Interessent", text: "Ich bin privat versichert." },
       { speaker: "Gloria", text: "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?" },
       { speaker: "Interessent", text: "980 Euro." },
+      { speaker: "Gloria", text: "Wie groß sind Sie?" },
+      { speaker: "Interessent", text: "Ein Meter achtundachtzig." },
+      { speaker: "Gloria", text: "Wie viel wiegen Sie derzeit?" },
+      { speaker: "Interessent", text: "98 Kilogramm." },
       { speaker: "Gloria", text: "Ihr Geburtsdatum?" },
       { speaker: "Interessent", text: "2. Mai 1987." },
       { speaker: "Gloria", text: "Bei welchem Krankenversicherer sind Sie aktuell versichert?" },
@@ -63,6 +69,8 @@ test("buildAppointmentFormInputFromReport extracts answers from separate transcr
   assert.equal(input.insuranceStatus, "Ich bin privat versichert.");
   assert.equal(input.birthDate, "2. Mai 1987.");
   assert.equal(input.monthlyContribution, "980 Euro.");
+  assert.equal(input.height, "Ein Meter achtundachtzig.");
+  assert.equal(input.weight, "98 Kilogramm.");
   assert.equal(input.ongoingTreatment, "Nein.");
   assert.equal(input.diagnoses, "Keine.");
   assert.equal(input.healthInsurance, "Continentale BKK.");

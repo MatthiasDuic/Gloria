@@ -30,7 +30,8 @@ test("derives one deterministic next step from the PKV transcript", () => {
 
 test("introduces the contribution trend before asking for the initial contribution", () => {
   const instruction = instructionForPkvStep(1);
-  assert.match(instruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema was uns alle betrifft\. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
+  assert.match(instruction, /Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
+  assert.doesNotMatch(instruction, /Es geht um die Beitragsentwicklung/);
   assert.deepEqual(advancePkvStep(1, "Damals waren es 420 Euro."), { nextStep: 2, shouldEnd: false });
 });
 
@@ -90,9 +91,20 @@ test("uses the latest contribution when the customer gives an initial and curren
   assert.equal(extractCurrentContributionPhrase(turns), undefined);
 });
 
+test("accepts a bare amount as the answer to the current contribution question", () => {
+  const turns: ConversationTurn[] = [
+    { role: "user", text: "Angefangen habe ich mit circa 450 Euro." },
+    { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?" },
+    { role: "user", text: "1280." },
+  ];
+  assert.equal(extractCurrentContributionPhrase(turns), "1280 Euro");
+  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(turns)), /1280 Euro.*615 Euro mehr.*1895 Euro/i);
+});
+
 test("follows the short PKV sequence and asks about each contribution separately", () => {
   assert.match(instructionForPkvStep(0), /Beitragsentwicklung.*kurzen Moment/i);
   assert.match(instructionForPkvStep(1), /um 3-5%.*mit welchem Beitrag Sie einmal angefangen haben/i);
+  assert.doesNotMatch(instructionForPkvStep(1), /Es geht um die Beitragsentwicklung/i);
   assert.match(instructionForPkvStep(2), /welchen Beitrag zahlen Sie heute/i);
   assert.match(instructionForPkvStep(3, "980 Euro"), /Haben Sie das schon einmal für sich hochgerechnet\?/i);
   assert.match(instructionForPkvStep(4), /Herr Duic jeden Tag.*Wäre es für Sie interessant/i);

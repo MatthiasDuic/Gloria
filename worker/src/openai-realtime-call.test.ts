@@ -187,7 +187,7 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
   assert.match(instructions, /Auch wenn Sie das vielleicht öfter hören.*anders als die anderen/);
-  assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
+  assert.match(instructions, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung.*kurzen Moment/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
@@ -360,20 +360,21 @@ test("places the active PKV stage after optional response guidance", () => {
   assert.ok(response.indexOf("Begründe die Antwort knapp.") < response.indexOf("ZWINGENDER NÄCHSTER SCHRITT"));
 });
 
-test("requires the sensibilization and relevance question after permission to explain the call", () => {
+test("continues with the contribution trend after consent without repeating the topic", () => {
   const ctx = newContext({
     callSid: "test-realtime-concept-bridge",
     streamSid: "test-stream",
     topic: "private Krankenversicherung",
   });
   ctx.transcript.push(
-    { role: "assistant", text: "Darf ich Ihnen kurz sagen, worum es geht?", at: 1 },
-    { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
+    { role: "assistant", text: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?", at: 1 },
+    { role: "user", text: "Ja, einen kurzen Moment habe ich.", at: 2 },
   );
   const rawInstruction = buildRequiredPkvSequenceInstruction(ctx);
   const instruction = buildRealtimeResponseInstructions(ctx);
-  assert.match(rawInstruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(instruction, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.doesNotMatch(rawInstruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(rawInstruction, /Laut PKV Verband/);
+  assert.match(instruction, /Beiträge in der Gesundheitsversorgung/);
   assert.match(instruction, /drei bis fünf Prozent/);
   assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
 });
