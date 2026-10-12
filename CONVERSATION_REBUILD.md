@@ -33,6 +33,7 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Das vollständige Gespräch wird neben den Transkriptereignissen als Report-Fallback gesichert, damit Detailansicht und PDF auch bei einem Ausfall der separaten Transkripttabelle vollständig bleiben.
 - Der Kundenterminbogen übernimmt Versicherungsstatus, Versicherer, Beitrag, Geburtsdatum, Größe, Gewicht, Behandlungen, Diagnosen und E-Mail aus den tatsächlich gestellten Vorbereitungsfragen.
 - Eine bloße Bestätigung, sich an den Einstiegsbeitrag zu erinnern, zählt nicht als Beitragsangabe; Gloria fragt den damaligen Betrag konkret nach und wechselt erst nach Betrag oder ausdrücklichem Nichtwissen zum heutigen Beitrag.
+- Eine persönliche Zehn-Jahres-Hochrechnung wird ausschließlich aus einer Beitragsangabe nach der expliziten Frage zum heutigen Beitrag erzeugt; der Einstiegsbeitrag wird technisch nie als Hochrechnungsbasis zurückgegeben.
 - `worker/src/telnyx-playback.ts` übernimmt Audio-Restpuffer, 160-Byte-Frames, Codec-Padding und das zeitlich korrekte 20-ms-Playback.
 - Mehrere Frames aus einem OpenAI-Audio-Delta werden nicht mehr als ungebremster Burst an Telnyx gesendet.
 - `worker/src/realtime-response-controller.ts` steuert aktive Antworten, First-in-Queue, Playback-Sperre, Cooldown, Cancel und Shutdown.

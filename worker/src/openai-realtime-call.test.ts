@@ -318,6 +318,7 @@ test("forces the ten-year projection before scheduling after a contribution", ()
     streamSid: "test-stream",
     topic: "private Krankenversicherung",
   });
+  ctx.transcript.push({ role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?", at: 0.5 });
   ctx.transcript.push({ role: "user", text: "Ich zahle tausend Euro.", at: 1 });
   ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
 

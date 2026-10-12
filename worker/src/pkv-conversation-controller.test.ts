@@ -11,6 +11,7 @@ test("derives one deterministic next step from the PKV transcript", () => {
   turns.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter." });
   assert.equal(assessPkvConversation(turns).stage, "need_contribution");
 
+  turns.push({ role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?" });
   turns.push({ role: "user", text: "Ich zahle 1000 Euro im Monat." });
   const projection = assessPkvConversation(turns);
   assert.equal(projection.stage, "need_projection");
@@ -91,6 +92,29 @@ test("uses the latest contribution when the customer gives an initial and curren
     { role: "user", text: "Den möchte ich gerade nicht nennen." },
   ];
   assert.equal(extractCurrentContributionPhrase(turns), undefined);
+});
+
+test("never treats the initial contribution as the current contribution", () => {
+  const onlyInitialContribution: ConversationTurn[] = [
+    { role: "assistant", text: "Mit welchem Beitrag haben Sie einmal angefangen?" },
+    { role: "user", text: "Damals waren es 450 Euro." },
+  ];
+  assert.equal(extractCurrentContributionPhrase(onlyInitialContribution), undefined);
+  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(onlyInitialContribution)), /eineinhalbmal so hoch/i);
+  assert.doesNotMatch(instructionForPkvStep(3, extractCurrentContributionPhrase(onlyInitialContribution)), /450 Euro|665 Euro/i);
+
+  const withCurrentContribution: ConversationTurn[] = [
+    ...onlyInitialContribution,
+    { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?" },
+    { role: "user", text: "Aktuell sind es 1280 Euro." },
+  ];
+  assert.equal(extractCurrentContributionPhrase(withCurrentContribution), "1280 Euro");
+  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(withCurrentContribution)), /1280 Euro.*1895 Euro/i);
+
+  assert.equal(
+    extractCurrentContributionPhrase([{ role: "user", text: "Aktuell zahle ich 1280 Euro." }]),
+    "1280 Euro",
+  );
 });
 
 test("accepts a bare amount as the answer to the current contribution question", () => {

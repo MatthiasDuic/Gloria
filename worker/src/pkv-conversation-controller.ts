@@ -50,16 +50,27 @@ export function extractContributionPhrase(userText: string): string | undefined 
 export function extractCurrentContributionPhrase(turns: ConversationTurn[]): string | undefined {
   let currentContributionQuestion = -1;
   for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index].role === "assistant" && /welchen beitrag zahlen sie heute/i.test(turns[index].text)) {
+    if (
+      turns[index].role === "assistant"
+      && /welchen beitrag zahlen sie heute|aktuellen?\s+(?:monatlichen\s+)?beitrag|heutigen?\s+beitrag/i.test(turns[index].text)
+    ) {
       currentContributionQuestion = index;
       break;
     }
   }
 
+  if (currentContributionQuestion < 0) {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (turn.role !== "user" || !/\b(?:aktuell|heute|derzeit)\b/i.test(turn.text)) continue;
+      const explicitlyCurrentContribution = extractContributionPhrase(turn.text);
+      if (explicitlyCurrentContribution) return explicitlyCurrentContribution;
+    }
+    return undefined;
+  }
   const userTurns = turns.filter((turn, index) => turn.role === "user" && (currentContributionQuestion < 0 || index > currentContributionQuestion));
   const explicitContribution = extractContributionPhrase(userTurns.map((turn) => turn.text).join(" "));
   if (explicitContribution) return explicitContribution;
-  if (currentContributionQuestion < 0) return undefined;
 
   for (let index = userTurns.length - 1; index >= 0; index -= 1) {
     const standaloneAmount = userTurns[index].text.trim().match(/^(?:ca\.?\s*|circa\s*|rund\s*|etwa\s*)?(\d{2,5}|\d{1,3}(?:\.\d{3})+)[.,]?\s*$/i)?.[1];
@@ -196,7 +207,7 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
     : projectionDelivered && conceptDelivered ? "need_interest"
     : projectionDelivered ? "need_concept"
     : contributionPhrase ? "need_projection"
-    : /beitrag|entwicklung|versichert|gesundheitsversorgung/i.test(userText) ? "need_contribution" : "need_relevance";
+    : extractContributionPhrase(userText) || /beitrag|entwicklung|versichert|gesundheitsversorgung/i.test(userText) ? "need_contribution" : "need_relevance";
   return { stage, contributionPhrase, projectionDelivered, conceptDelivered, interestConfirmed: schedulingReady };
 }
 
