@@ -91,7 +91,7 @@ export function busySlotsToPrompt(slots: BusySlot[]): string {
 
 /**
  * Berechnet bis zu `maxCount` 30-Minuten-Slots in den nächsten `daysAhead` Geschäftstagen
- * (Mo–Fr, 09:00–19:00 Berlin-Zeit), die NICHT mit den Busy-Slots kollidieren und
+ * (Mo–Fr, 08:30–11:00 und 13:00–18:00 Berlin-Zeit), die NICHT mit den Busy-Slots kollidieren und
  * mindestens `bufferMinutes` Puffer zu jedem belegten Slot wahren.
  * Liefert ISO-Strings (UTC) plus eine Berlin-Zeit-Phrase ("Mittwoch, 13. Mai um 14:30 Uhr").
  */
@@ -145,9 +145,12 @@ export function computeFreeSlots(
 
   while (cursor < endHorizon) {
     const candidate = new Date(cursor);
-    const { hour, weekday } = berlinHourMinute(candidate);
+    const { hour, minute, weekday } = berlinHourMinute(candidate);
+    const timeOfDay = hour * 60 + minute;
+    const inMorningWindow = timeOfDay >= 8 * 60 + 30 && timeOfDay <= 11 * 60;
+    const inAfternoonWindow = timeOfDay >= 13 * 60 && timeOfDay <= 18 * 60;
     // Nur Mo–Fr.
-    if (weekday >= 1 && weekday <= 5 && hour >= 9 && hour < 19) {
+    if (weekday >= 1 && weekday <= 5 && (inMorningWindow || inAfternoonWindow)) {
       const slotEnd = cursor + 30 * 60 * 1000;
       const collides = busyRanges.some(
         (r) => cursor < r.end + bufferMs && slotEnd > r.start - bufferMs,

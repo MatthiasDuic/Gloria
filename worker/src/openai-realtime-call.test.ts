@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
+import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn, shouldRestoreDecisionMakerIntro } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 
@@ -150,6 +150,17 @@ test("formats percentages and larger amounts naturally for speech", () => {
   assert.doesNotMatch(response, /5%|1\.286 Euro/);
 });
 
+test("speaks euro cents and the singular euro amount correctly", () => {
+  const response = buildRealtimeResponseInstructions(
+    newContext({ callSid: "test-euro-cents", streamSid: "test-stream", topic: "private Krankenversicherung" }),
+    "Der Beitrag beträgt 1.250,50 Euro, der andere Betrag ist 1 Euro.",
+    false,
+  );
+  assert.match(response, /eintausend zweihundert fünfzig Euro und fünfzig Cent/);
+  assert.match(response, /ein Euro/);
+  assert.doesNotMatch(response, /1\.250,50 Euro|eins Euro/);
+});
+
 test("includes the required decision-maker and gatekeeper opening lines", () => {
   const ctx = newContext({
     callSid: "test-realtime-opening",
@@ -215,12 +226,20 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /HOCHRECHNUNG:.*Zehn-Jahres-Beispielrechnung/);
   assert.match(instructions, /ÜBERLEITUNG:.*Herr Duic/);
   assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.doesNotMatch(instructions, /Beitragsentwicklung in der privaten Krankenversicherung/i);
   assert.match(instructions, /PROSODIE:.*menschlich.*hörbar warm/);
   assert.match(instructions, /digital per Microsoft Teams oder bei der Kundin\/dem Kunden vor Ort/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
   assert.match(instructions, /Eine Frage pro Turn/);
+});
+
+test("canonicalizes generated PKV wording before it is spoken", () => {
+  assert.equal(
+    normalizePkvTerminology("Die Beitragsentwicklung in der privaten Krankenversicherung betrifft uns alle."),
+    "Die Beitragsentwicklung in der Gesundheitsversorgung betrifft uns alle.",
+  );
 });
 
 test("requires the exact final goodbye phrase in the realtime instructions", () => {
@@ -244,23 +263,20 @@ test("uses the requested PKV flow before appointment preparation", () => {
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const reasonIndex = instructions.search(/2\. ANLASS/);
-  const initialContributionIndex = instructions.search(/3\. EINSTIEGSBEITRAG/);
-  const currentContributionIndex = instructions.search(/4\. HEUTIGER BEITRAG/);
-  const projectionIndex = instructions.search(/5\. HOCHRECHNUNG/);
-  const conceptIndex = instructions.search(/6\. ÜBERLEITUNG/);
-  const appointmentIndex = instructions.search(/7\. TERMIN/);
-  const preparationIndex = instructions.search(/8\. ABSCHLUSS/);
+  const reasonIndex = instructions.search(/2\. ANLASS UND EINSTIEGSBEITRAG/);
+  const currentContributionIndex = instructions.search(/3\. HEUTIGER BEITRAG/);
+  const projectionIndex = instructions.search(/4\. HOCHRECHNUNG/);
+  const conceptIndex = instructions.search(/5\. ÜBERLEITUNG/);
+  const appointmentIndex = instructions.search(/6\. TERMIN/);
+  const preparationIndex = instructions.search(/7\. ABSCHLUSS/);
 
   assert.notEqual(reasonIndex, -1);
-  assert.notEqual(initialContributionIndex, -1);
   assert.notEqual(currentContributionIndex, -1);
   assert.notEqual(projectionIndex, -1);
   assert.notEqual(conceptIndex, -1);
   assert.notEqual(appointmentIndex, -1);
   assert.notEqual(preparationIndex, -1);
-  assert.ok(reasonIndex < initialContributionIndex);
-  assert.ok(initialContributionIndex < currentContributionIndex);
+  assert.ok(reasonIndex < currentContributionIndex);
   assert.ok(currentContributionIndex < projectionIndex);
   assert.ok(projectionIndex < conceptIndex);
   assert.ok(conceptIndex < appointmentIndex);
@@ -339,10 +355,31 @@ test("requires the sensibilization and relevance question after permission to ex
     { role: "assistant", text: "Darf ich Ihnen kurz sagen, worum es geht?", at: 1 },
     { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
   );
-  const instruction = buildRequiredPkvSequenceInstruction(ctx);
+  const rawInstruction = buildRequiredPkvSequenceInstruction(ctx);
+  const instruction = buildRealtimeResponseInstructions(ctx);
+  assert.match(rawInstruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instruction, /Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instruction, /drei bis fünf Prozent/);
   assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
+});
+
+test("does not label the initial contribution as the current contribution", () => {
+  const ctx = newContext({
+    callSid: "test-pkv-initial-vs-current-contribution",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+  ctx.transcript.push({ role: "user", text: "Damals waren es 420 Euro.", at: 1 });
+  const beforeCurrentQuestion = buildRealtimeResponseInstructions(ctx, undefined, false);
+  assert.doesNotMatch(beforeCurrentQuestion, /Aktueller Monatsbeitrag/);
+
+  ctx.transcript.push(
+    { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?", at: 2 },
+    { role: "user", text: "Heute zahle ich 980 Euro.", at: 3 },
+  );
+  const afterCurrentAnswer = buildRealtimeResponseInstructions(ctx, undefined, false);
+  assert.match(afterCurrentAnswer, /Aktueller Monatsbeitrag: neunhundert achtzig Euro/);
+  assert.doesNotMatch(afterCurrentAnswer, /Aktueller Monatsbeitrag: vierhundert zwanzig Euro/);
 });
 
 test("does not restore the full decision-maker introduction after interruption", () => {

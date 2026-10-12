@@ -30,9 +30,8 @@ test("derives one deterministic next step from the PKV transcript", () => {
 
 test("introduces the contribution trend before asking for the initial contribution", () => {
   const instruction = instructionForPkvStep(1);
-  assert.match(instruction, /Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(instruction, /drei bis fünf Prozent/);
-  assert.match(instruction, /mit welchem Beitrag Sie damals angefangen haben/);
+  assert.match(instruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema was uns alle betrifft\. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
+  assert.deepEqual(advancePkvStep(1, "Damals waren es 420 Euro."), { nextStep: 2, shouldEnd: false });
 });
 
 test("does not treat an earlier yes as scheduling consent", () => {
@@ -93,7 +92,7 @@ test("uses the latest contribution when the customer gives an initial and curren
 
 test("follows the short PKV sequence and asks about each contribution separately", () => {
   assert.match(instructionForPkvStep(0), /Beitragsentwicklung.*kurzen Moment/i);
-  assert.match(instructionForPkvStep(1), /drei bis fünf Prozent.*mit welchem Beitrag Sie damals angefangen haben/i);
+  assert.match(instructionForPkvStep(1), /um 3-5%.*mit welchem Beitrag Sie einmal angefangen haben/i);
   assert.match(instructionForPkvStep(2), /welchen Beitrag zahlen Sie heute/i);
   assert.match(instructionForPkvStep(3, "980 Euro"), /Haben Sie das schon einmal für sich hochgerechnet\?/i);
   assert.match(instructionForPkvStep(4), /Herr Duic jeden Tag.*Wäre es für Sie interessant/i);

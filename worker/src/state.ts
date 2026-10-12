@@ -73,6 +73,9 @@ export type CallContext = {
   // Dialog State Machine – tracks phase, asked/answered questions, prevents repetition
   dialogState: DialogState;
   appointmentPreferenceAsked?: boolean;
+  appointmentSlotsOffered?: boolean;
+  appointmentOfferedSlots?: string[];
+  selectedAppointmentSlot?: string;
   transcript: Array<{
     role: "user" | "assistant";
     text: string;

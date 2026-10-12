@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePreparation, beginPreparation, buildPreparationQuestions, createPreparationState } from "./preparation-controller.js";
+import { advancePreparation, beginPreparation, buildPreparationQuestions, createPreparationState, createPreparationStateForCall } from "./preparation-controller.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const policy = {
@@ -112,4 +112,12 @@ test("completes all required PKV preparation questions before email", () => {
   assert.equal(transition.state.stage, "completed");
   assert.match(transition.instruction, /Vielen Dank für das Gespräch\. Auf Wiederhören\./);
   assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
+});
+
+test("initializes PKV completion questions synchronously from the call topic", () => {
+  const state = createPreparationStateForCall("pkv", "Beitragsentwicklung in der Gesundheitsversorgung");
+  assert.equal(state.stage, "inactive");
+  assert.equal(state.questions.length, 7);
+  assert.match(state.questions[0], /privat oder gesetzlich/);
+  assert.match(state.questions[6], /Diagnosen/);
 });

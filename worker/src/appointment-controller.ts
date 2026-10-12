@@ -95,12 +95,61 @@ export function findSuppliedAppointmentSlot(freeSlotsPrompt: string | undefined,
   });
 }
 
+function slotTimeMinutes(line: string): number | undefined {
+  const match = line.match(/\b(?:um\s+)?(\d{1,2}):(\d{2})\b/i);
+  if (!match) return undefined;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export function getAppointmentOfferSlots(freeSlotsPrompt: string | undefined, preference: AppointmentPreference): string[] {
+  if (preference === "unknown") return [];
+  const minMinutes = preference === "morning" ? 8 * 60 + 30 : 13 * 60;
+  const maxMinutes = preference === "morning" ? 11 * 60 : 18 * 60;
+  const matching = (freeSlotsPrompt || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*]\s*/, "").trim())
+    .filter((line) => /\b(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag)\b/i.test(line))
+    .filter((line) => {
+      const time = slotTimeMinutes(line);
+      return time !== undefined && time >= minMinutes && time <= maxMinutes;
+    });
+
+  const choices: string[] = [];
+  const selectedDates = new Set<string>();
+  for (const line of matching) {
+    const date = line.replace(/\s+(?:um\s+)?\d{1,2}:\d{2}.*$/i, "").trim().toLowerCase();
+    if (selectedDates.has(date)) continue;
+    choices.push(line);
+    selectedDates.add(date);
+    if (choices.length === 2) break;
+  }
+  return choices;
+}
+
+export function matchOfferedAppointmentSelection(text: string, offeredSlots: string[]): string | undefined {
+  if (offeredSlots.length < 2) return undefined;
+  const normalized = normalizeSlot(text);
+  if (/\b(?:der\s+)?(?:erste|ersten|erster|erstes|1\.?|erste[nr]?)\b/i.test(normalized)) return offeredSlots[0];
+  if (/\b(?:der\s+)?(?:zweite|zweiten|zweiter|zweites|2\.?|zweite[nr]?)\b/i.test(normalized)) return offeredSlots[1];
+
+  const exact = offeredSlots.find((slot) => normalized.includes(normalizeSlot(slot)));
+  if (exact) return exact;
+  const weekday = normalized.match(/\b(montag|dienstag|mittwoch|donnerstag|freitag)\b/i)?.[1];
+  if (weekday) return offeredSlots.find((slot) => normalizeSlot(slot).includes(weekday));
+  const time = normalized.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (time) {
+    return offeredSlots.find((slot) => {
+      const slotTime = slot.match(/\b(\d{1,2}):(\d{2})\b/);
+      return slotTime?.[1] === time[1] && slotTime[2] === time[2];
+    });
+  }
+  return undefined;
+}
+
 export function appointmentOfferInstruction(freeSlotsPrompt: string | undefined, preference: AppointmentPreference): string | undefined {
-  const lines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter((line) => /\b(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag)\b/i.test(line));
-  const preferred = lines.filter((line) => preference === "morning" ? /\bum\s+(?:0?9|1[0-2]):/i.test(line) : /\bum\s+(?:1[3-8]):/i.test(line));
-  const choices = (preferred.length >= 2 ? preferred : lines).slice(0, 2);
+  const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
   if (choices.length < 2) return undefined;
-  return `Biete jetzt ausschließlich diese zwei echten freien Termine an: ${choices[0]} oder ${choices[1]}. Frage, welcher Termin besser passt. Erfinde keine gekürzten oder anderen Termine.`;
+  return `Biete ausschließlich diese zwei echten freien Termine an: ${choices[0]} oder ${choices[1]}. Beide liegen im gewünschten Zeitfenster. Frage, welcher Termin passt. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
 }
 
 export function decideAppointment(params: {

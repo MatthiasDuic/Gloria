@@ -107,6 +107,10 @@ export function createPreparationState(policy: PreparationPolicy | null = null):
   };
 }
 
+export function createPreparationStateForCall(topicKind: "pkv" | "other", topic?: string): PreparationState {
+  return createPreparationState({ topic: topicKind === "pkv" ? "private Krankenversicherung" : topic });
+}
+
 function preparationConsent(text: string): "granted" | "declined" | "unknown" {
   const normalized = text.trim().toLowerCase();
   if (/^(?:ja\b|gerne\b|klar\b|okay\b|ok\b|passt\b|in ordnung\b|machen wir\b)/i.test(normalized)) return "granted";

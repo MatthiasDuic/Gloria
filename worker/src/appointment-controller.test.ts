@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decideAppointment, detectAppointmentMode, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
+import { computeFreeSlots } from "./busy.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
@@ -129,4 +130,53 @@ test("detects the selected appointment mode from the customer answer", () => {
     { role: "user", text: "Der Montag passt besser." },
   ]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." }]), undefined);
+});
+
+test("offers only two different-day calendar slots within the requested time window", () => {
+  const slots = [
+    "- Montag, 19. Oktober um 08:30 Uhr",
+    "- Montag, 19. Oktober um 10:00 Uhr",
+    "- Dienstag, 20. Oktober um 11:00 Uhr",
+    "- Dienstag, 20. Oktober um 12:30 Uhr",
+    "- Mittwoch, 21. Oktober um 13:00 Uhr",
+    "- Donnerstag, 22. Oktober um 17:30 Uhr",
+    "- Freitag, 23. Oktober um 18:00 Uhr",
+    "- Freitag, 23. Oktober um 18:30 Uhr",
+  ].join("\n");
+
+  assert.deepEqual(getAppointmentOfferSlots(slots, "morning"), [
+    "Montag, 19. Oktober um 08:30 Uhr",
+    "Dienstag, 20. Oktober um 11:00 Uhr",
+  ]);
+  assert.deepEqual(getAppointmentOfferSlots(slots, "afternoon"), [
+    "Mittwoch, 21. Oktober um 13:00 Uhr",
+    "Donnerstag, 22. Oktober um 17:30 Uhr",
+  ]);
+  assert.equal(appointmentOfferInstruction("- Montag, 19. Oktober um 09:00 Uhr", "morning"), undefined);
+  assert.deepEqual(getAppointmentOfferSlots(slots, "unknown"), []);
+});
+
+test("resolves a clear slot choice once without requiring another confirmation", () => {
+  const offered = [
+    "Montag, 19. Oktober um 08:30 Uhr",
+    "Dienstag, 20. Oktober um 11:00 Uhr",
+  ];
+  assert.equal(matchOfferedAppointmentSelection("Der zweite passt.", offered), offered[1]);
+  assert.equal(matchOfferedAppointmentSelection("Montag wäre gut.", offered), offered[0]);
+  assert.equal(matchOfferedAppointmentSelection("Um 11:00 Uhr bitte.", offered), offered[1]);
+  assert.equal(matchOfferedAppointmentSelection("Vielleicht.", offered), undefined);
+});
+
+test("calendar generates only weekday slots within the requested business windows", () => {
+  const slots = computeFreeSlots([], { daysAhead: 21, maxCount: 300, minLeadDays: 7 });
+  assert.ok(slots.length > 0);
+  for (const slot of slots) {
+    const time = slot.phrase.match(/um (\d{2}):(\d{2}) Uhr/)?.slice(1).map(Number);
+    assert.ok(time, `expected a numeric time in ${slot.phrase}`);
+    const minutes = time![0] * 60 + time![1];
+    assert.ok(
+      (minutes >= 8 * 60 + 30 && minutes <= 11 * 60) || (minutes >= 13 * 60 && minutes <= 18 * 60),
+      `slot outside allowed windows: ${slot.phrase}`,
+    );
+  }
 });

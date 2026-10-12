@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
-import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, detectAppointmentPreference, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, detectAppointmentPreference, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { formatAmountForSpeech } from "./preparation-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
@@ -12,7 +12,7 @@ import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { assessPkvConversation, instructionForPkvStage, instructionForPkvStep, advancePkvStep, extractCurrentContributionPhrase, isClearPkvInterest } from "./pkv-conversation-controller.js";
-import { advancePreparation, beginPreparation, createPreparationState, type PreparationState } from "./preparation-controller.js";
+import { advancePreparation, beginPreparation, createPreparationStateForCall, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
@@ -131,14 +131,15 @@ function buildKnownConversationFacts(ctx: CallContext): string {
   const facts: string[] = [];
   if (/\b(?:gesetzlich|gkv)\b/i.test(userText)) facts.push("Status: gesetzlich versichert (bereits geklärt; nicht erneut fragen).");
   else if (/\b(?:privat|pkv)\b/i.test(userText)) facts.push("Status: privat versichert (bereits geklärt; nicht erneut fragen).");
-  const contribution = userText.match(/\b(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro\b/i)?.[0];
+  const askedCurrentContribution = ctx.transcript.some((turn) => turn.role === "assistant" && /welchen beitrag zahlen sie heute|aktuellen?\s+(?:monatlichen\s+)?beitrag/i.test(turn.text));
+  const contribution = askedCurrentContribution ? extractCurrentContributionPhrase(ctx.transcript) : undefined;
   if (contribution) facts.push(`Aktueller Monatsbeitrag: ${contribution} (bereits genannt; nicht erneut fragen).`);
   return facts.length ? `BEREITS GEKLÄRTE FAKTEN:\n- ${facts.join("\n- ")}\nDiese Angaben sind verbindlich und haben Vorrang vor allgemeinen Policy-Fragen.` : "";
 }
 
-function normalizePkvTerminology(text: string): string {
+export function normalizePkvTerminology(text: string): string {
   return text
-    .replace(/\bprivate\s+krankenversicherung\b/gi, "Gesundheitsversorgung")
+    .replace(/\bprivate[nr]?\s+krankenversicherung\b/gi, "Gesundheitsversorgung")
     .replace(/\bkrankenversicherung\b/gi, "Gesundheitsversorgung");
 }
 
@@ -274,13 +275,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch transparent, charmant, kurz und ohne Druck.\n" +
       "1. ERÖFFNUNG: Begrüße die zuständige Person natürlich und stelle dich transparent als digitale Assistentin vor. Sprich 'Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen' mit einem hörbaren Lächeln: warm, charmant und selbstbewusst, nie ironisch oder aufgesetzt. Frage danach, ob du kurz den Anlass nennen darfst. Kein Monolog.\n" +
-      "2. ANLASS: Bei Zustimmung sage kurz, dass es um die Beitragsentwicklung in der Gesundheitsversorgung geht, und frage, ob gerade ein kurzer Moment passt. Bei Nein oder Zeitmangel freundlich beenden.\n" +
-      "3. EINSTIEGSBEITRAG: Bei Zustimmung ordne die jährliche Entwicklung laut PKV-Verband mit etwa drei bis fünf Prozent ein und frage: 'Erinnern Sie sich noch, mit welchem Beitrag Sie damals angefangen haben?' Warte auf die Antwort.\n" +
-      "4. HEUTIGER BEITRAG: Frage separat und genau einmal: 'Und welchen Beitrag zahlen Sie heute?' Warte auf die Antwort. Wenn der Kunde keinen Betrag weiß oder nennen möchte, akzeptiere das ohne Nachhaken.\n" +
-      "5. HOCHRECHNUNG: Nutze für die persönliche Zehn-Jahres-Beispielrechnung den zuletzt genannten heutigen Beitrag, nie den Einstiegsbeitrag. Nenne die Annahme von rund vier Prozent kurz und frage: 'Haben Sie das schon einmal für sich hochgerechnet?' Erfinde keinen persönlichen Betrag.\n" +
-      "6. ÜBERLEITUNG: Greife die Reaktion auf, sage in höchstens zwei kurzen Sätzen, dass Herr Duic die individuelle Entwicklung bis zum Ruhestand und Möglichkeiten für einen besser planbaren, tragbaren Beitrag im Alter zeigt. Wecke Interesse, ohne den Ablauf zu erklären oder ein Ergebnis zu versprechen, und frage, ob der Kunde das mit Herrn Duic anschauen möchte.\n" +
-      "7. TERMIN: Erst bei klarem Interesse Zeitpräferenz und zwei echte freie Termine erfragen. Danach ausschließlich digital per Microsoft Teams oder bei der Kundin/dem Kunden vor Ort anbieten; niemals die Agentur nennen. Bei Fragen zum Ablauf freundlich sagen: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Dann knapp zur Terminfrage zurückkehren.\n" +
-      "8. ABSCHLUSS: Nach erfolgreicher Terminbestätigung die bestehende freiwillige Vorbereitung und Abschlussfragen kurz durchführen, E-Mail-Adresse erfragen und die Bestätigung über den bestehenden Prozess versenden.\n" +
+      "2. ANLASS UND EINSTIEGSBEITRAG: Bei Zustimmung zur Anlassfrage sage exakt den vorgegebenen Satz zur Beitragsentwicklung in der Gesundheitsversorgung einschließlich der Frage nach dem Einstiegsbeitrag. Stelle keine zusätzliche Moment-Frage und warte auf die Antwort.\n" +
+      "3. HEUTIGER BEITRAG: Frage separat und genau einmal: 'Und welchen Beitrag zahlen Sie heute?' Warte auf die Antwort. Wenn der Kunde keinen Betrag weiß oder nennen möchte, akzeptiere das ohne Nachhaken.\n" +
+      "4. HOCHRECHNUNG: Nutze für die persönliche Zehn-Jahres-Beispielrechnung den zuletzt genannten heutigen Beitrag, nie den Einstiegsbeitrag. Nenne die Annahme von rund vier Prozent kurz und frage: 'Haben Sie das schon einmal für sich hochgerechnet?' Erfinde keinen persönlichen Betrag.\n" +
+      "5. ÜBERLEITUNG: Greife die Reaktion auf, sage in höchstens zwei kurzen Sätzen, dass Herr Duic die individuelle Entwicklung bis zum Ruhestand und Möglichkeiten für einen besser planbaren, tragbaren Beitrag im Alter zeigt. Wecke Interesse, ohne den Ablauf zu erklären oder ein Ergebnis zu versprechen, und frage, ob der Kunde das mit Herrn Duic anschauen möchte.\n" +
+      "6. TERMIN: Erst bei klarem Interesse Zeitpräferenz und genau zwei echte freie Termine innerhalb des gewählten Fensters erfragen: vormittags 08:30–11:00 Uhr oder nachmittags 13:00–18:00 Uhr. Biete keinen ungefilterten Slot an. Danach ausschließlich digital per Microsoft Teams oder bei der Kundin/dem Kunden vor Ort anbieten; niemals die Agentur nennen. Eine klare Auswahl ist verbindlich und darf nicht erneut bestätigt werden.\n" +
+      "7. ABSCHLUSS: Nach erfolgreicher Terminbestätigung die bestehende freiwillige Vorbereitung mit allen PKV-Fragen einzeln durchführen, E-Mail-Adresse erfragen und die Bestätigung über den bestehenden Prozess versenden.\n" +
       "SPRACHE: Sprich 'Beitragsentwicklung in der Gesundheitsversorgung'; Duic wird 'Duitsch' ausgesprochen. Eine Frage pro Turn, keine Gesundheitsfragen vor dem Termin, keine langen Erklärungen. Transparenz, Freiwilligkeit und Kundenfragen haben Vorrang.",
     );
   }
@@ -442,7 +442,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let responseCreatedAt: number | null = null;
   let firstModelTokenAt: number | null = null;
   let firstTtsChunkAt: number | null = null;
-  let preparationState: PreparationState = createPreparationState();
+  let preparationState: PreparationState = createPreparationStateForCall("other");
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
   let userIsSpeaking = false;
@@ -778,7 +778,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
         // Customer asks a question or raises an objection → answer then return to current step
         if (event.type === "customer_question" || event.type === "objection") {
-          const returnInstruction = `Antworte kurz und konkret auf den Einwand oder die Frage. Kehre dann unmittelbar zum aktuellen Gesprächsschritt zurück und stelle genau eine passende Folgefrage: ${instructionForPkvStep(currentStep, extractCurrentContributionPhrase(currentContext.transcript))}`;
+          const returnInstruction = currentStep === 6 && currentContext.appointmentSlotsOffered
+            ? "Beantworte die Frage kurz. Bei Fragen zum Ablauf sage: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Wiederhole die angebotenen Termine nicht und verlange keine erneute Bestätigung. Kehre danach zur offenen Terminauswahl oder zur Frage nach digitalem Termin beziehungsweise Termin bei der Kundin/dem Kunden vor Ort zurück."
+            : `Antworte kurz und konkret auf den Einwand oder die Frage. Kehre dann unmittelbar zum aktuellen Gesprächsschritt zurück und stelle genau eine passende Folgefrage: ${instructionForPkvStep(currentStep, extractCurrentContributionPhrase(currentContext.transcript))}`;
           requestEventResponse(instructionForConversationEvent(event, returnInstruction));
           return;
         }
@@ -808,11 +810,44 @@ export async function handleOpenAiRealtimeTelnyxStream(
             requestEventResponse("Die zeitliche Präferenz ist noch unklar. Frage exakt und ohne Einleitung: 'Passt Ihnen eher ein Vormittag oder ein Nachmittag?' Biete in diesem Turn keinen Termin an.");
             return;
           }
-          const offer = appointmentOfferInstruction(
-            currentContext.freeSlotsPrompt,
-            detectAppointmentPreference(currentContext.transcript),
-          );
-          if (offer) { requestEventResponse(offer); return; }
+          const preference = detectAppointmentPreference(currentContext.transcript);
+          if (!currentContext.appointmentSlotsOffered) {
+            const slots = getAppointmentOfferSlots(currentContext.freeSlotsPrompt, preference);
+            const offer = appointmentOfferInstruction(currentContext.freeSlotsPrompt, preference);
+            if (offer && slots.length === 2) {
+              currentContext.appointmentOfferedSlots = slots;
+              currentContext.appointmentSlotsOffered = true;
+              requestEventResponse(offer);
+              return;
+            }
+            requestEventResponse("Im gewünschten Zeitfenster stehen aktuell nicht zwei passende freie Termine bereit. Erfinde und biete keine Uhrzeiten an. Sage das kurz und frage, ob das jeweils andere Zeitfenster grundsätzlich auch möglich wäre.");
+            return;
+          }
+
+          if (currentContext.selectedAppointmentSlot) {
+            const mode = detectAppointmentMode(currentContext.transcript);
+            if (mode) {
+              requestEventResponse(`Der Kunde hat verbindlich ${currentContext.selectedAppointmentSlot} gewählt und ${mode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${currentContext.selectedAppointmentSlot}" auf. Stelle keine Rückfrage zur Bestätigung und wiederhole den Termin nicht.`);
+              return;
+            }
+            requestEventResponse(`Der Termin ${currentContext.selectedAppointmentSlot} ist bereits verbindlich ausgewählt. Frage ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Frage nicht erneut, ob das Datum oder die Uhrzeit passt.`);
+            return;
+          }
+
+          const selectedSlot = matchOfferedAppointmentSelection(transcript, currentContext.appointmentOfferedSlots || []);
+          if (selectedSlot) {
+            currentContext.selectedAppointmentSlot = selectedSlot;
+            requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt. Sage kurz 'Das passt.' und frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Frage nicht erneut, ob der Termin passt.`);
+            return;
+          }
+
+          if (/\b(?:beide|keiner|keinen\s+von\s+beiden|weder\s+noch|passen\s+beide\s+nicht|beide\s+nicht)\b/i.test(transcript)) {
+            requestEventResponse("Die beiden angebotenen Termine passen nicht. Frage einmal nach einem passenden Wochentag im selben Zeitfenster. Biete keine Uhrzeit an, die nicht in der freien Kalenderliste steht.");
+            return;
+          }
+
+          requestEventResponse("Die zwei passenden Termine wurden bereits genannt. Wiederhole sie nicht. Wenn die Auswahl unklar ist, frage nur: 'Welcher der beiden Termine passt Ihnen besser?' Verlange keine zusätzliche Ja-Bestätigung.");
+          return;
         }
 
         const instruction = instructionForPkvStep(currentContext.dialogState.pkvStep, extractCurrentContributionPhrase(currentContext.transcript));
@@ -856,7 +891,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (tool.name === "confirm_appointment") {
-      const phrase = typeof args.slot_phrase === "string" ? args.slot_phrase.trim() : "";
+      const requestedPhrase = typeof args.slot_phrase === "string" ? args.slot_phrase.trim() : "";
+      const phrase = ctx.selectedAppointmentSlot || requestedPhrase;
       const appointmentMode = detectAppointmentMode(ctx.transcript);
       if (!appointmentMode) {
         handledToolCalls.delete(tool.callId);
@@ -1142,9 +1178,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
         const wasDecisionMakerIntroPending = decisionMakerIntroPending;
         if (decisionMakerIntroPending) decisionMakerIntroPending = false;
         decisionMakerIntroWasLastResponse = wasDecisionMakerIntroPending;
-        const transcript = wasDecisionMakerIntroPending
+        const rawTranscript = wasDecisionMakerIntroPending
           ? buildDecisionMakerIntro(ctx!)
           : assistantTranscript.replace(/\s+/g, " ").trim();
+        const transcript = ctx?.topicKind === "pkv" ? normalizePkvTerminology(rawTranscript) : rawTranscript;
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           if (ctx.lastUserFinalAt) {
@@ -1266,6 +1303,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         isCallback: state.isCallback === 1,
         isTestCall: state.isTestCall === true,
       });
+      preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", ctx.topic);
       contactRouting = createContactRoutingState(state.contactName);
       log.info("realtime.call_started", {
         callSid: ctx.callSid,
@@ -1280,7 +1318,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
-          preparationState = createPreparationState(policy);
+          preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic);
         }
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
       });
@@ -1370,13 +1408,16 @@ function convertNumbersForSpeech(text: string): string {
   };
 
   const amountToSpeech = (amount: string): string => {
-    const numericAmount = amount.replace(/\./g, "").split(",")[0];
-    const compact = formatAmountForSpeech(numericAmount);
-    return compact
+    const [wholePart = "0", fractionalPart] = amount.replace(/\./g, "").split(",");
+    const compact = wholePart === "1" ? "ein" : formatAmountForSpeech(wholePart);
+    const spokenWhole = compact
       .replace(/tausend/g, "tausend ")
       .replace(/hundert/g, "hundert ")
       .replace(/\s+/g, " ")
       .trim();
+    if (!fractionalPart || Number(fractionalPart) === 0) return spokenWhole;
+    const cents = formatAmountForSpeech(fractionalPart.padEnd(2, "0").slice(0, 2));
+    return `${spokenWhole} Euro und ${cents} Cent`;
   };
 
   // Convert times like "13:00" to "dreizehn Uhr", "15:30" to "fünfzehn Uhr dreißig"
@@ -1404,6 +1445,7 @@ function convertNumbersForSpeech(text: string): string {
 
   result = result.replace(/\b(\+?\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(Euro|EUR|€)(?:\s*\/\s*(?:Mo|Monat))?\b/gi, (_match, amount, unit) => {
     const spokenAmount = amountToSpeech(String(amount).replace(/^\+/, ""));
+    if (String(amount).includes(",") && Number(String(amount).split(",")[1]) > 0) return spokenAmount;
     const spokenUnit = unit === "€" ? "Euro" : unit;
     return `${spokenAmount} ${spokenUnit}`;
   });

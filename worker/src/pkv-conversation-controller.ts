@@ -81,7 +81,8 @@ export function advancePkvStep(
       if (/\b(?:nein|keine\s+zeit|gerade\s+schlecht|später|keinen\s+moment)\b/i.test(text)) {
         return { nextStep: 1, shouldEnd: true };
       }
-      const answered = /\b(?:ja|gerne|klar|natürlich|moment|zeit|beitrag\w*|steig\w*|gestieg\w*|erh[öo]h\w*|teuer\w*|hoch|belast\w*|sorge\w*|sp[üu]r\w*|merk\w*|ruhestand|rente|planung|problem\w*|betrifft|noch\s+nicht|bisher\s+nicht|wei[ßs]\s+ich\s+nicht|keine\s+ahnung|kann\s+mich\s+nicht\s+erinnern)\b/i.test(text);
+      const answered = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i.test(text)
+        || /\b(?:ja|gerne|klar|natürlich|moment|zeit|beitrag\w*|steig\w*|gestieg\w*|erh[öo]h\w*|teuer\w*|hoch|belast\w*|sorge\w*|sp[üu]r\w*|merk\w*|ruhestand|rente|planung|problem\w*|betrifft|noch\s+nicht|bisher\s+nicht|wei[ßs]\s+ich\s+nicht|keine\s+ahnung|kann\s+mich\s+nicht\s+erinnern)\b/i.test(text);
       return { nextStep: answered ? 2 : 1, shouldEnd: false };
     }
 
@@ -139,7 +140,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
     case 0:
       return "Der Kunde hat zugestimmt, den Anlass zu hören. Sage kurz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema, das uns alle betrifft. Haben Sie gerade einen kurzen Moment?' Keine weitere Erklärung und keine zusätzliche Frage. Bei Nein oder Zeitmangel respektvoll verabschieden; bei unklarer Reaktion kurz nachfragen.";
     case 1:
-      return "Der Kunde hat kurz Zeit eingeräumt. Ordne die Beitragsentwicklung in der Gesundheitsversorgung ein: Laut PKV-Verband steigen Beiträge statistisch oft um etwa drei bis fünf Prozent jährlich und summieren sich über die Jahre deutlich. Frage danach genau: 'Erinnern Sie sich noch, mit welchem Beitrag Sie damals angefangen haben?' Stelle keine zweite Frage und warte vollständig auf die Antwort.";
+      return "Sage exakt und ohne Vor- oder Nachsatz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema was uns alle betrifft. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?' Warte danach auf die Antwort.";
     case 2:
       return "Reagiere freundlich und knapp auf die Antwort. Frage dann genau: 'Und welchen Beitrag zahlen Sie heute?' Stelle keine weitere Frage und warte vollständig auf die Antwort. Wenn der Kunde den früheren Beitrag nicht mehr weiß, akzeptiere das ohne Nachhaken und frage nach dem heutigen Beitrag.";
     case 3:
