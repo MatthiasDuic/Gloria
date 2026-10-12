@@ -13,10 +13,11 @@ test("normalizes configured preparation questions", () => {
   assert.deepEqual(buildPreparationQuestions(policy), [
     "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
     "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-    "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
     "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-    "Gibt es aktuell laufende Behandlungen?",
-    "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
+    "Wie groß sind Sie?",
+    "Wie viel wiegen Sie derzeit?",
+    "Sind Sie derzeit in Behandlung?",
+    "Bestehen bekannte Diagnosen?",
   ]);
 });
 
@@ -32,25 +33,27 @@ test("asks for consent and skips facts already answered in the call", () => {
   assert.match(transition.instruction, /Sage keine Einleitung/);
 });
 
-test("does not confuse insurance status with the current insurer", () => {
-  const insurerPolicy = {
-    topic: "private Krankenversicherung",
-    requiredQuestions: "Bei welchem Krankenversicherer sind Sie aktuell versichert?",
-  };
-  const turns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
-  let transition = beginPreparation(createPreparationState(insurerPolicy), "Montag um 13 Uhr", turns);
-  transition = advancePreparation(transition.state, "Ja.", turns);
-  assert.match(transition.instruction, /Krankenversicherer/);
+test("asks for insurance status, insurer, and all required health details", () => {
+  assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
+    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
+    "Wie groß sind Sie?",
+    "Wie viel wiegen Sie derzeit?",
+    "Sind Sie derzeit in Behandlung?",
+    "Bestehen bekannte Diagnosen?",
+  ]);
 });
 
 test("uses the same compact health precheck regardless of insurance status", () => {
   assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
     "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
     "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-    "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
     "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-    "Gibt es aktuell laufende Behandlungen?",
-    "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
+    "Wie groß sind Sie?",
+    "Wie viel wiegen Sie derzeit?",
+    "Sind Sie derzeit in Behandlung?",
+    "Bestehen bekannte Diagnosen?",
   ]);
 });
 
@@ -78,26 +81,35 @@ test("repeats the current question when the answer does not fit", () => {
 });
 
 test("requires a complete birth date before continuing", () => {
-  let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", []);
-  transition = advancePreparation(transition.state, "Ja.", []);
-  transition = advancePreparation(transition.state, "gesetzlich.", []);
-  transition = advancePreparation(transition.state, "AOK.", []);
-  transition = advancePreparation(transition.state, "700 Euro.", []);
-  assert.match(transition.instruction, /Geburtsdatum/);
-
+  const knownInsurance: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert und bei der Debeka." }];
+  let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", knownInsurance);
+  transition = advancePreparation(transition.state, "Ja.", knownInsurance);
   transition = advancePreparation(transition.state, "Mai 1987.", []);
   assert.match(transition.instruction, /dieselbe Vorbereitungsfrage/);
 
   transition = advancePreparation(transition.state, "2. Mai 1987.", []);
-  assert.match(transition.instruction, /laufende Behandlungen/);
+  assert.match(transition.instruction, /Wie groß sind Sie/);
+  transition = advancePreparation(transition.state, "Ja.", knownInsurance);
+  assert.match(transition.instruction, /dieselbe Vorbereitungsfrage/);
+  transition = advancePreparation(transition.state, "1,75 Meter.", []);
+  assert.match(transition.instruction, /Wie viel wiegen Sie/);
+  transition = advancePreparation(transition.state, "75 Kilogramm.", []);
+  assert.match(transition.instruction, /Sind Sie derzeit in Behandlung/);
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.match(transition.instruction, /Bestehen bekannte Diagnosen/);
 });
 
-test("completes only the six required PKV questions before email", () => {
+test("completes all required PKV preparation questions before email", () => {
   let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", []);
   transition = advancePreparation(transition.state, "Ja.", []);
-  for (const answer of ["gesetzlich", "AOK", "700 Euro", "2. Mai 1987", "Nein", "Nein"]) {
+  for (const answer of ["privat", "Debeka", "2. Mai 1987", "175 cm", "75 kg", "Nein", "Nein"]) {
     transition = advancePreparation(transition.state, answer, []);
   }
   assert.equal(transition.state.stage, "awaiting_email");
   assert.match(transition.instruction, /E-Mail-Adresse/);
+
+  transition = advancePreparation(transition.state, "kunde@example.de", []);
+  assert.equal(transition.state.stage, "completed");
+  assert.match(transition.instruction, /Vielen Dank für das Gespräch\. Auf Wiederhören\./);
+  assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
 });

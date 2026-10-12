@@ -60,7 +60,7 @@ export type PreparationPolicy = {
   pkvHealthQuestions?: string;
 };
 
-export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "awaiting_email" | "awaiting_final_questions" | "completed" | "declined";
+export type PreparationStage = "inactive" | "awaiting_consent" | "asking" | "awaiting_email" | "completed" | "declined";
 
 export type PreparationState = {
   stage: PreparationStage;
@@ -78,10 +78,11 @@ export type PreparationTransition = {
 const PKV_FALLBACK_QUESTIONS = [
   "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
   "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-  "Wie hoch ist Ihr derzeitiger Monatsbeitrag in der Krankenversicherung?",
   "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-  "Gibt es aktuell laufende Behandlungen?",
-  "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
+  "Wie groß sind Sie?",
+  "Wie viel wiegen Sie derzeit?",
+  "Sind Sie derzeit in Behandlung?",
+  "Bestehen bekannte Diagnosen?",
 ].join("\n");
 
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
@@ -116,6 +117,7 @@ function preparationConsent(text: string): "granted" | "declined" | "unknown" {
 function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]): boolean {
   const userText = turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
   if (/privat\s+oder\s+gesetzlich|versicherungsstatus/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(userText);
+  if (/krankenversicherer/i.test(question)) return /\bbei\s+(?:(?:der|dem|den)\s+)?[a-zäöüß][a-zäöüß0-9&.-]{2,}\b/i.test(userText);
   if (/monatsbeitrag|beitrag.*krankenversicherung/i.test(question)) {
     return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(userText);
   }
@@ -141,6 +143,8 @@ function isAnswerPlausible(question: string, text: string): boolean {
   if (/krankenversicherer/i.test(question)) return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
   if (/monatsbeitrag/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(normalized);
   if (/geburtsdatum/i.test(question)) return /\b\d{1,2}[.\s]+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)[.\s,]+(?:19|20)\d{2}\b|\b\d{1,2}[./-]\d{1,2}[./-](?:19|20)\d{2}\b/i.test(normalized);
+  if (/groß|gross|groess/i.test(question)) return /\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter))\b/i.test(normalized);
+  if (/gewicht/i.test(question)) return /\b\d{2,3}(?:[.,]\d)?\s*(?:kg|kilo(?:gramm)?s?)?\b/i.test(normalized);
   if (/behandlung|diagnos/i.test(question)) return /\b(?:ja|nein|nö|keine?|nicht)\b/i.test(normalized);
   return normalized.length >= 3;
 }
@@ -268,33 +272,8 @@ export function advancePreparation(
       return { state, instruction: "Frage ausschließlich noch einmal nach der E-Mail-Adresse für die Terminbestätigung." };
     }
     return {
-      state: { ...state, stage: "awaiting_final_questions", currentQuestionIndex: undefined },
-      instruction: "Nimm die E-Mail-Adresse an und frage dann genau einmal: 'Haben Sie noch eine Frage zum Ablauf oder zum Termin?' Stelle sonst nichts.",
-    };
-  }
-
-  if (state.stage === "awaiting_final_questions") {
-    const normalized = userText.trim().toLowerCase();
-    const noMoreQuestions = /\b(?:nein\b|ne\b|n[öo]\b|keine\s+frage|keine\s+fragen|nichts\s+mehr|passt\s+so|alles\s+klar|das\s+war\s+alles|wir\s+k[öo]nnen\s+das\s+gespr[äa]ch\s+beenden|gespr[äa]ch\s+beenden|keine\s+zeit\s+mehr|ich\s+habe\s+keine\s+zeit\s+mehr)\b/i.test(normalized);
-    const hasQuestion = /\?|\b(?:wer|wie|was|warum|wieso|weshalb|wann|wo|welche[rmn]?)\b/i.test(normalized);
-
-    if (noMoreQuestions) {
-      return {
-        state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-        instruction: `Da der Kunde keine Zeit mehr hat, nehme ich die wichtigsten Gesundheitsfragen in die Terminbestätigung per Mail auf und schließe das Gespräch ab. Sage exakt: '${FINAL_FAREWELL_TEXT}' Danach rufe end_call auf. Keine weitere Rückfrage.`,
-      };
-    }
-
-    if (hasQuestion) {
-      return {
-        state,
-        instruction: "Beantworte die Frage kurz und konkret. Wenn Details besser in den Termin gehören, sage transparent, dass Herr Duic diesen Punkt in der Terminvorbereitung aufnimmt und im Termin beantwortet. Frage danach nur: 'Gibt es noch eine weitere Frage?'",
-      };
-    }
-
-    return {
-      state,
-      instruction: "Wenn unklar, frage kurz nach: 'Haben Sie noch eine Frage, oder sollen wir das Gespräch beenden?'",
+      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+      instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${FINAL_FAREWELL_TEXT}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
     };
   }
 

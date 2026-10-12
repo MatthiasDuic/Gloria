@@ -32,10 +32,10 @@ function roundToFive(n: number): number {
 }
 
 function buildTenYearProjectionSentence(contributionPhrase?: string): string {
-  if (!contributionPhrase) return "Bei einer Beispielrechnung mit rund vier Prozent Steigerung pro Jahr wären das in zehn Jahren rund hundert Euro mehr pro Monat.";
+  if (!contributionPhrase) return "Bei einer beispielhaften Steigerung von rund vier Prozent pro Jahr wäre ein Beitrag in zehn Jahren etwa eineinhalbmal so hoch wie heute.";
 
   const amount = parseGermanEuroAmount(contributionPhrase);
-  if (!amount) return "Bei einer Beispielrechnung mit rund vier Prozent Steigerung pro Jahr wären das in zehn Jahren rund hundert Euro mehr pro Monat.";
+  if (!amount) return "Bei einer beispielhaften Steigerung von rund vier Prozent pro Jahr wäre ein Beitrag in zehn Jahren etwa eineinhalbmal so hoch wie heute.";
 
   const futureAmount = roundToFive(Math.round(amount * (1.04 ** 10)));
   const increase = roundToFive(futureAmount - amount);
@@ -43,102 +43,21 @@ function buildTenYearProjectionSentence(contributionPhrase?: string): string {
 }
 
 export function extractContributionPhrase(userText: string): string | undefined {
-  return userText.match(CONTRIBUTION_PATTERN)?.[0];
+  const matches = Array.from(userText.matchAll(new RegExp(CONTRIBUTION_PATTERN.source, "gi")));
+  return matches.at(-1)?.[0]?.trim();
 }
 
-// ============================================================================
-// STEP-BASED STATE MACHINE
-// Step 0: awaiting permission after greeting
-// Step 1: RELEVANZ - explain rising costs, open question
-// Step 2: VERTIEFUNG - emotional follow-up to understand customer's pain
-// Step 3: BEITRAG - ask for current monthly contribution
-// Step 4: HOCHRECHNUNG - present 10-year + retirement projection
-// Step 5: KONZEPT - explain Herr Duic approach (emotionally), ask for interest
-// Step 6: TERMIN - schedule appointment
-// ============================================================================
-
-export function instructionForPkvStep(step: number, contributionPhrase?: string): string {
-  switch (step) {
-    case 0:
-      return (
-        "Der Kunde hat auf deine Begrüßung und die Frage 'Darf ich kurz sagen worum es geht?' reagiert. " +
-        "Bei Zustimmung (ja, klar, gerne, bitte): erkläre kurz das Thema und stelle eine offene Frage zu steigenden Beiträgen. " +
-        "Bei Ablehnung (nein, kein Interesse): verabschiede dich höflich. " +
-        "Bei unklarer Reaktion: frage kurz nach."
-      );
-
-    case 1:
-      return (
-        "Der Kunde hat zugestimmt. Erkläre in 1-2 eigenen, natürlichen Sätzen, dass die Beiträge in der " +
-        "Gesundheitsversorgung Jahr für Jahr steigen, im Durchschnitt etwa 3-5% jährlich, und das über die Jahre erheblich wird. " +
-        "Sprich konsistent von 'Beitragsentwicklung in der Gesundheitsversorgung'. " +
-        "Frage dann genau einmal: 'Wie erleben Sie das aktuell?' Warte vollständig auf die Antwort."
-      );
-
-    case 2:
-      // VERTIEFUNG: clarify whether customer already has a plan for contribution trend and retirement preparedness
-      return (
-        "Gehe kurz auf die Antwort des Kunden ein und zeige Verständnis in einem Satz. " +
-        "Kläre dann gezielt, ob bereits ein konkreter Plan für die Beitragsentwicklung und die Absicherung bis zum Ruhestand besteht. " +
-        "Stelle genau eine vertiefende Frage, zum Beispiel: " +
-        "'Haben Sie dafür bereits einen klaren Plan, wie Sie mit der Beitragsentwicklung umgehen und sich bis zum Ruhestand absichern?' " +
-        "Wenn nein oder unklar: frage kurz nach, warum das bisher keine Priorität hatte. " +
-        "Nur diese eine Frage pro Turn. Warte vollständig auf die Antwort."
-      );
-
-    case 3:
-      return (
-        "Greife die Antwort des Kunden kurz auf, ohne ihm einen fehlenden Beitrag zu unterstellen. " +
-        "Leite dann über: 'Damit Sie ein Gefühl dafür bekommen, worüber wir genau reden möchten und was in den nächsten Jahren auf Sie zukommen wird, nennen Sie mir kurz Ihren aktuellen Beitrag.' " +
-        "Nur diese eine Frage. Warte auf die Antwort."
-      );
-
-    case 4: {
-      const phrase = contributionPhrase || "den genannten Beitrag";
-      let hint = "";
-      if (contributionPhrase) {
-        const amount = parseGermanEuroAmount(contributionPhrase);
-        if (amount) {
-          const y10 = roundToFive(Math.round(amount * (1.04 ** 10)));
-          const d10 = roundToFive(y10 - amount);
-          hint = ` RECHENWERTE (exakt so verwenden): heute ${amount} Euro, in 10 Jahren circa ${y10} Euro, das sind etwa ${d10} Euro mehr pro Monat.`;
-        }
-      }
-      return (
-        `Rechne ${phrase} mit rund 4% Steigerung pro Jahr auf 10 Jahre hoch.${hint} ` +
-        `Formuliere das kurz und menschlich: '${buildTenYearProjectionSentence(contributionPhrase)}' ` +
-        "Stelle danach GENAU EINE Frage: 'Haben Sie das schon einmal so durchgerechnet?' Warte vollständig auf die Antwort. " +
-        "KEIN Ruhestand, KEINE 25-Jahres-Berechnung — nur 10 Jahre."
-      );
+export function extractCurrentContributionPhrase(turns: ConversationTurn[]): string | undefined {
+  let currentContributionQuestion = -1;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index].role === "assistant" && /welchen beitrag zahlen sie heute/i.test(turns[index].text)) {
+      currentContributionQuestion = index;
+      break;
     }
-
-    case 5:
-      // KONZEPT: emotionally warm, personal, professional
-      return (
-        "Greife die konkreten Sorgen und Aussagen des Kunden aus diesem Gespräch auf — nicht generisch, sondern persönlich. " +
-        "Validiere zuerst kurz: was der Kunde beschrieben hat, ist real und berechtigt. " +
-        "Erkläre dann mit echter Wärme: Genau das ist es, womit Herr Duic täglich arbeitet. " +
-        "Er schaut sich die Beitragsentwicklung gemeinsam mit dem Kunden an, rechnet den Beitrag konkret hoch " +
-        "und zeigt ihm dabei mögliche Handlungsoptionen, damit er langfristig mehr Kontrolle hat. " +
-        "Stelle dann eine offene, einladende Frage: 'Wäre es nicht sinnvoll, das einmal zusammen im Detail anzuschauen?' " +
-        "Kein Verkaufsdruck, kein Pitch. KEINE Erwähnung von Termindauer oder Anzahl Termine — nur wenn der Kunde fragt. Keine Terminfrage, bevor der Kunde klar Interesse bestätigt. " +
-        "Warte auf klares Ja oder Nein."
-      );
-
-    case 6:
-      return (
-        "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin bei ihm vor Ort. Geh professionell vor:\n" +
-        "1. Frage: 'Passt Ihnen generell eher ein Vormittag oder ein Nachmittag besser?' Warte auf Antwort.\n" +
-        "2. Biete zwei passende Termine an: 'Dann hätte ich [Termin 1] oder [Termin 2] — welcher passt Ihnen besser?' Warte.\n" +
-        "3. Falls keiner passt: 'Welchen Termin würden Sie denn vorschlagen?' und übernehme den Wunsch.\n" +
-        "4. Nach Bestätigung: Gesundheitsfragen einzeln stellen. Bei Ablehnung am Telefon: 'Kein Problem, ich schreibe die wichtigsten Punkte in die Bestätigungsmail. Diese können Sie dann in Ruhe beantworten'\n" +
-        "5. Frage ob der Kunde noch Wünsche für den Termin hat, dann professionell verabschieden.\n" +
-        "NUR WENN GEFRAGT: Ersttermin ca. 20 Minuten. NUR WENN GEFRAGT: Es gibt drei Termine insgesamt."
-      );
-
-    default:
-      return "Führe das Gespräch natürlich weiter und warte auf den Kunden.";
   }
+
+  const userTurns = turns.filter((turn, index) => turn.role === "user" && (currentContributionQuestion < 0 || index > currentContributionQuestion));
+  return extractContributionPhrase(userTurns.map((turn) => turn.text).join(" "));
 }
 
 export function advancePkvStep(
@@ -159,26 +78,30 @@ export function advancePkvStep(
     }
 
     case 1: {
-      const relevant = /\b(?:ja|nein|beitrag\w*|steig\w*|gestieg\w*|erh[öo]h\w*|teuer\w*|hoch|belast\w*|sorge\w*|sp[üu]r\w*|merk\w*|ruhestand|rente|planung|problem\w*|betrifft|noch\s+nicht|bisher\s+nicht)\b/i.test(text);
-      return { nextStep: relevant ? 2 : 1, shouldEnd: false };
+      if (/\b(?:nein|keine\s+zeit|gerade\s+schlecht|später|keinen\s+moment)\b/i.test(text)) {
+        return { nextStep: 1, shouldEnd: true };
+      }
+      const answered = /\b(?:ja|gerne|klar|natürlich|moment|zeit|beitrag\w*|steig\w*|gestieg\w*|erh[öo]h\w*|teuer\w*|hoch|belast\w*|sorge\w*|sp[üu]r\w*|merk\w*|ruhestand|rente|planung|problem\w*|betrifft|noch\s+nicht|bisher\s+nicht|wei[ßs]\s+ich\s+nicht|keine\s+ahnung|kann\s+mich\s+nicht\s+erinnern)\b/i.test(text);
+      return { nextStep: answered ? 2 : 1, shouldEnd: false };
     }
 
     case 2: {
-      const relevant = /\b(?:ja|nein|plan|vorsorge|abgesichert|absicherung|ruhestand|rente|gedanken|gek[üu]mmert|beraten|beratung|makler|noch\s+nicht|bisher\s+nicht|wei[ßs]\s+ich\s+nicht)\b/i.test(text);
-      return { nextStep: relevant ? 3 : 2, shouldEnd: false };
+      const hasAmount = /\b(?:\d{2,5}|hundert|tausend|euro|€)\b/i.test(text);
+      const declined = /\b(?:wei[ßs]\s+ich\s+nicht|keine\s+ahnung|möchte\s+ich\s+nicht\s+(?:sagen|nennen)|will\s+ich\s+nicht\s+sagen|möchte\s+ich\s+nicht\s+angeben)\b/i.test(text);
+      return { nextStep: hasAmount || declined ? 3 : 2, shouldEnd: false };
     }
 
     case 3: {
-      const hasAmount = /\b(?:\d{2,5}|hundert|tausend|euro|€)\b/i.test(text);
-      if (hasAmount) return { nextStep: 4, shouldEnd: false };
-      return { nextStep: 3, shouldEnd: false };
+      const answered = /\b(?:ja|nein|durchgerechnet|gerechnet|gewusst|bewusst|viel|hoch|heftig|überrasch|erschreck|interessant|belast|sorge|noch\s+nie|noch\s+nicht|bisher\s+nicht)\b/i.test(text);
+      return { nextStep: answered ? 4 : 3, shouldEnd: false };
     }
 
     case 4: {
-      const hasOnlyRepeatedAmount = /\b(?:\d{2,5}|hundert|tausend)\b.*\b(?:euro|€)\b/i.test(text)
-        && !/\b(?:ja|nein|durchgerechnet|gerechnet|gewusst|bewusst|viel|hoch|heftig|überrasch|erschreck|interessant|belast|sorge)\b/i.test(text);
-      const relevant = /\b(?:ja|nein|durchgerechnet|gerechnet|gewusst|bewusst|viel|hoch|heftig|überrasch|erschreck|interessant|belast|sorge|noch\s+nie|noch\s+nicht)\b/i.test(text);
-      return { nextStep: relevant && !hasOnlyRepeatedAmount ? 5 : 4, shouldEnd: false };
+      const interested = /\b(?:ja\b|gerne\b|interessant\b|klingt\s+gut|sicher\b|natürlich\b|m[oö]chte|sehr\s+gerne|würde\s+gerne|relevant\b|schon\b)\b/i.test(text);
+      const notInterested = /\b(?:nein\b|nicht\s+interessiert|kein\s+interesse|lieber\s+nicht|danke\s+nein|eher\s+nicht)\b/i.test(text);
+      if (interested) return { nextStep: 6, shouldEnd: false };
+      if (notInterested) return { nextStep: 4, shouldEnd: true };
+      return { nextStep: 4, shouldEnd: false };
     }
 
     case 5: {
@@ -194,6 +117,15 @@ export function advancePkvStep(
   }
 }
 
+// ============================================================================
+// STEP-BASED STATE MACHINE
+// Step 0: explain the reason and ask for a moment
+// Step 1: explain relevance and ask about the initial contribution
+// Step 2: ask about the current contribution
+// Step 3: present a 10-year projection
+// Step 4: discuss the projection and introduce Herr Duic
+// Step 5: confirm interest
+// Step 6: schedule the appointment
 export function isClearPkvInterest(text: string): boolean {
   const normalized = text.toLowerCase().trim();
   return /^(?:ja|gerne|sehr gerne|interessant|klingt gut|das klingt gut|das möchte ich|würde ich gerne|machen wir|passt|einverstanden|gute idee|guter gedanke)\b/i.test(normalized)
@@ -202,18 +134,40 @@ export function isClearPkvInterest(text: string): boolean {
 }
 
 // ============================================================================
-// LEGACY COMPATIBILITY
-// ============================================================================
+export function instructionForPkvStep(step: number, contributionPhrase?: string): string {
+  switch (step) {
+    case 0:
+      return "Der Kunde hat zugestimmt, den Anlass zu hören. Sage kurz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung, ein Thema, das uns alle betrifft. Haben Sie gerade einen kurzen Moment?' Keine weitere Erklärung und keine zusätzliche Frage. Bei Nein oder Zeitmangel respektvoll verabschieden; bei unklarer Reaktion kurz nachfragen.";
+    case 1:
+      return "Der Kunde hat kurz Zeit eingeräumt. Ordne die Beitragsentwicklung in der Gesundheitsversorgung ein: Laut PKV-Verband steigen Beiträge statistisch oft um etwa drei bis fünf Prozent jährlich und summieren sich über die Jahre deutlich. Frage danach genau: 'Erinnern Sie sich noch, mit welchem Beitrag Sie damals angefangen haben?' Stelle keine zweite Frage und warte vollständig auf die Antwort.";
+    case 2:
+      return "Reagiere freundlich und knapp auf die Antwort. Frage dann genau: 'Und welchen Beitrag zahlen Sie heute?' Stelle keine weitere Frage und warte vollständig auf die Antwort. Wenn der Kunde den früheren Beitrag nicht mehr weiß, akzeptiere das ohne Nachhaken und frage nach dem heutigen Beitrag.";
+    case 3:
+      return (
+        `Rechne ${contributionPhrase || "den genannten Beitrag"} mit rund vier Prozent pro Jahr auf zehn Jahre hoch. ` +
+        `${buildTenYearProjectionSentence(contributionPhrase)} ` +
+        "Frage danach genau: 'Haben Sie das schon einmal für sich hochgerechnet?' Warte vollständig auf die Antwort. Wenn kein heutiger Betrag genannt wurde, kennzeichne die Rechnung ausdrücklich als Beispiel."
+      );
+    case 4:
+      return "Greife die Reaktion des Kunden auf die Hochrechnung kurz und empathisch auf. Sage knapp: 'Genau damit beschäftigt sich Herr Duic jeden Tag. Er zeigt Ihnen anhand Ihrer Situation, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten es gibt, ihn im Alter besser planbar und tragbar zu halten.' Erkläre den Ablauf nicht weiter und verspreche kein Ergebnis. Frage genau einmal: 'Wäre es für Sie interessant, sich das mit Herrn Duic persönlich anzuschauen?' Warte auf klares Interesse.";
+    case 5:
+      return "Der Kunde hat noch nicht eindeutig auf die Einladung reagiert. Frage einmal kurz: 'Wäre es für Sie interessant, sich das mit Herrn Duic persönlich anzuschauen?' Warte auf ein klares Ja oder Nein.";
+    case 6:
+      return "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin und erkläre den Ablauf nicht weiter. Frage zuerst, ob eher Vormittag oder Nachmittag passt, biete danach zwei echte freie Termine an und frage nach Auswahl ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Bei Ablauf-Fragen sage freundlich, dass Herr Duic sie im Termin klärt. Nach Bestätigung führe die kurze freiwillige Vorbereitung und Abschlussfragen durch, frage nach der E-Mail-Adresse und lasse die Bestätigung über den vorgesehenen Prozess versenden.";
+    default:
+      return "Führe das Gespräch natürlich weiter und warte auf den Kunden.";
+  }
+}
 
 export function assessPkvConversation(turns: ConversationTurn[]): PkvConversationAssessment {
-  const userText = turns.filter(t => t.role === "user").map(t => t.text).join(" ");
-  const assistantText = turns.filter(t => t.role === "assistant").map(t => t.text).join(" ");
+  const userText = turns.filter((turn) => turn.role === "user").map((turn) => turn.text).join(" ");
+  const assistantText = turns.filter((turn) => turn.role === "assistant").map((turn) => turn.text).join(" ");
   if (!turns.length || !userText.trim()) {
     return { stage: "need_relevance", contributionPhrase: undefined, projectionDelivered: false, conceptDelivered: false, interestConfirmed: false };
   }
-  const contributionPhrase = userText.match(CONTRIBUTION_PATTERN)?.[0];
+  const contributionPhrase = extractCurrentContributionPhrase(turns);
   const projectionDelivered = /(?:zehn\s+jahren|10\s+jahren|hochrechn|mehrbetrag)/i.test(assistantText);
-  const conceptDelivered = /(?:herr\s+duic|altersrückstell|beitragsentlastung|bis\s+zum\s+ruhestand|f[üu]r\s+ihre\s+planung|wie\s+f[üu]hlt\s+sich\s+diese\s+entwicklung)/i.test(assistantText);
+  const conceptDelivered = /(?:herr\s+duic|altersrückstell|beitragsentlast|bis\s+zum\s+ruhestand|f[üu]r\s+ihre\s+planung)/i.test(assistantText);
 
   let interestConfirmed = false;
   for (let index = 1; index < turns.length; index += 1) {
@@ -228,20 +182,21 @@ export function assessPkvConversation(turns: ConversationTurn[]): PkvConversatio
     }
   }
 
-  const stage: PkvConversationStage = interestConfirmed ? "ready_to_schedule"
-    : conceptDelivered ? "need_interest"
+  const schedulingReady = interestConfirmed && projectionDelivered && conceptDelivered;
+  const stage: PkvConversationStage = schedulingReady ? "ready_to_schedule"
+    : projectionDelivered && conceptDelivered ? "need_interest"
     : projectionDelivered ? "need_concept"
     : contributionPhrase ? "need_projection"
     : /beitrag|entwicklung|versichert|gesundheitsversorgung/i.test(userText) ? "need_contribution" : "need_relevance";
-  return { stage, contributionPhrase, projectionDelivered, conceptDelivered, interestConfirmed };
+  return { stage, contributionPhrase, projectionDelivered, conceptDelivered, interestConfirmed: schedulingReady };
 }
 
 export function instructionForPkvStage(assessment: PkvConversationAssessment): string {
   return instructionForPkvStep(
     assessment.stage === "ready_to_schedule" ? 6
-      : assessment.stage === "need_interest" || assessment.stage === "need_concept" ? 5
-      : assessment.stage === "need_projection" ? 4
-      : assessment.stage === "need_contribution" ? 3
+      : assessment.stage === "need_interest" || assessment.stage === "need_concept" ? 4
+      : assessment.stage === "need_projection" ? 3
+      : assessment.stage === "need_contribution" ? 2
       : 1,
     assessment.contributionPhrase,
   );

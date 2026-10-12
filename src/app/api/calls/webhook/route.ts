@@ -20,6 +20,8 @@ const BASIS_FIELD_RULES: Array<{
     | "insuranceStatus"
     | "insurer"
     | "monthlyPremium"
+    | "height"
+    | "weight"
     | "treatments"
     | "diagnoses";
   question: string;
@@ -54,15 +56,27 @@ const BASIS_FIELD_RULES: Array<{
     answerPatterns: [/\b\d{2,5}\s*(euro|eur)\b|\b\d{2,5}\b/i],
   },
   {
+    key: "height",
+    question: "Größe",
+    promptPatterns: [/wie\s+gro[ßs]|gr[öo]ße|groesse/i],
+    answerPatterns: [/\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter))\b/i],
+  },
+  {
+    key: "weight",
+    question: "Gewicht",
+    promptPatterns: [/wie\s+viel\s+wiegen|gewicht/i],
+    answerPatterns: [/\b\d{2,3}(?:[.,]\d)?\s*(?:kg|kilo(?:gramm)?s?)?\b/i],
+  },
+  {
     key: "treatments",
     question: "Laufende Behandlungen",
-    promptPatterns: [/laufende\s+behandlungen?/i],
+    promptPatterns: [/laufende\s+behandlungen?|in\s+behandlung/i],
     answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
   },
   {
     key: "diagnoses",
     question: "Bekannte Diagnosen",
-    promptPatterns: [/bestehende\s+diagnosen|bekannte\s+diagnosen/i],
+    promptPatterns: [/bestehende\s+diagnosen|bekannte\s+diagnosen|diagnosen/i],
     answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
   },
 ];
@@ -92,7 +106,9 @@ function hasMeaningfulAnswer(rawText: string, answerPatterns?: RegExp[]): boolea
   return text.length >= 2;
 }
 
-function collectMissingBasisQuestions(events: TranscriptEvent[]): string[] {
+type TranscriptSpeakerEntry = Pick<TranscriptEvent, "speaker" | "text">;
+
+function collectMissingBasisQuestions(events: TranscriptSpeakerEntry[]): string[] {
   if (!events.length) {
     return BASIS_FIELD_RULES.map((rule) => rule.question);
   }
@@ -163,7 +179,7 @@ function normalizePotentialEmail(raw: string): string {
     .replace(/@+/g, "@");
 }
 
-function inferAttendeeEmailFromTranscript(events: TranscriptEvent[]): string | undefined {
+function inferAttendeeEmailFromTranscript(events: TranscriptSpeakerEntry[]): string | undefined {
   const emailRegex = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
 
   // 1) Bevorzugt: Antwort auf konkrete E-Mail-Frage von Gloria.
@@ -214,7 +230,7 @@ async function persistTranscriptArray(
   userId: string | undefined,
 ) {
   if (!Array.isArray(entries) || entries.length === 0 || !callSid) {
-    return { inputCount: Array.isArray(entries) ? entries.length : 0, normalizedCount: 0, persisted: true };
+    return { inputCount: Array.isArray(entries) ? entries.length : 0, normalizedCount: 0, persisted: true, events: [] as TranscriptEvent[] };
   }
   const transcriptEvents = entries.flatMap((entry) => {
     const text = (entry.text || "").trim();
@@ -246,6 +262,7 @@ async function persistTranscriptArray(
     normalizedCount: transcriptEvents.length,
     persisted,
     attempts,
+    events: transcriptEvents,
   };
 }
 
@@ -488,6 +505,8 @@ export async function POST(request: Request) {
       report,
       leadId: report.leadId,
       userId: report.userId,
+      attendeeEmail: inferAttendeeEmailFromTranscript(transcriptPersist.events),
+      missingBasisQuestions: collectMissingBasisQuestions(transcriptPersist.events),
     });
     inviteResult = {
       delivered: true,

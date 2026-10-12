@@ -26,9 +26,14 @@ async function processEmailJob(job: Job): Promise<void> {
 async function processInviteJob(job: Job): Promise<void> {
   const payload = job.payload as {
     report?: CallReport;
+    attendeeEmail?: string;
+    missingBasisQuestions?: string[];
   };
   if (!payload.report) {
     throw new Error("No report in invite job payload");
+  }
+  if (!payload.attendeeEmail) {
+    throw new Error("Kunden-E-Mail-Adresse fehlt; Terminbestätigung wurde nicht an den Kunden versendet.");
   }
 
   try {
@@ -43,9 +48,9 @@ async function processInviteJob(job: Job): Promise<void> {
     }
     const result = await sendAppointmentInvite({
       report,
-      attendeeEmail: undefined,
+      attendeeEmail: payload.attendeeEmail,
       organizerName: "Gloria Consultant",
-      missingBasisQuestions: [],
+      missingBasisQuestions: payload.missingBasisQuestions || [],
       appointmentPdf,
       appointmentPdfFilename: getAppointmentFormFilename(appointmentForm),
     });

@@ -55,7 +55,7 @@ test("does not use an earlier acknowledgement as PKV appointment consent", () =>
 
   const result = canConfirmRealtimeAppointment(ctx);
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /Beitragsentwicklung|Konzept/);
+  if (!result.ok) assert.match(result.reason, /Herr Duic|interessant/);
 });
 
 test("allows a PKV appointment after consent to the concept question", () => {
@@ -91,8 +91,8 @@ test("accepts a direct Monday selection as a confirmed slot without asking again
 
 test("instructs the model to confirm an unambiguous offered weekday immediately", () => {
   const instructions = buildRealtimeInstructions(buildPkvContext());
-  assert.match(instructions, /Eine eindeutige Auswahl[^.]+ist bereits die verbindliche Terminwahl/);
-  assert.match(instructions, /verlange kein zusätzliches 'Ja, das passt'/);
+  assert.match(instructions, /Eine eindeutige Auswahl[^.]+ist bereits verbindlich/);
+  assert.match(instructions, /verlange kein zusätzliches Ja/);
   assert.doesNotMatch(instructions, /Bei 'Der Donnerstag'.+frage zuerst kurz zurück/);
 });
 
@@ -142,7 +142,8 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
+  assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
+  assert.match(instructions, /Auch wenn Sie das vielleicht öfter hören.*anders als die anderen/);
   assert.match(instructions, /Darf ich Ihnen kurz sagen, worum es geht/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
@@ -194,9 +195,12 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /PKV-GESPRÄCHSZIEL/);
-  assert.match(instructions, /HOCHRECHNUNG: 10-Jahres-Projektion/);
-  assert.match(instructions, /KONZEPT: Persönlich und emotional/);
+  assert.match(instructions, /HOCHRECHNUNG:.*Zehn-Jahres-Beispielrechnung/);
+  assert.match(instructions, /ÜBERLEITUNG:.*Herr Duic/);
   assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instructions, /digital per Microsoft Teams oder bei der Kundin\/dem Kunden vor Ort/);
+  assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
+  assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
   assert.match(instructions, /Eine Frage pro Turn/);
 });
@@ -213,7 +217,7 @@ test("requires the exact final goodbye phrase in the realtime instructions", () 
   assert.doesNotMatch(instructions, /Danke Ihnen für das Gespräch.*auf Wiederhören/i);
 });
 
-test("uses the standard PKV flow in a strict order: relevance → appointment → preparation questions", () => {
+test("uses the requested PKV flow before appointment preparation", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-flow",
     streamSid: "test-stream",
@@ -222,26 +226,29 @@ test("uses the standard PKV flow in a strict order: relevance → appointment �
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const relevanceIndex = instructions.search(/2\. RELEVANZ/);
-  const appointmentIndex = instructions.search(/3\. TERMIN/);
-  const preparationIndex = instructions.search(/4\. VORBEREITUNG NACH DEM TERMIN/);
-  const contributionIndex = instructions.search(/5\. BEITRAG/);
-  const projectionIndex = instructions.search(/6\. HOCHRECHNUNG/);
-  const conceptIndex = instructions.search(/7\. KONZEPT/);
+  const reasonIndex = instructions.search(/2\. ANLASS/);
+  const initialContributionIndex = instructions.search(/3\. EINSTIEGSBEITRAG/);
+  const currentContributionIndex = instructions.search(/4\. HEUTIGER BEITRAG/);
+  const projectionIndex = instructions.search(/5\. HOCHRECHNUNG/);
+  const conceptIndex = instructions.search(/6\. ÜBERLEITUNG/);
+  const appointmentIndex = instructions.search(/7\. TERMIN/);
+  const preparationIndex = instructions.search(/8\. ABSCHLUSS/);
 
-  assert.notEqual(relevanceIndex, -1);
-  assert.notEqual(appointmentIndex, -1);
-  assert.notEqual(preparationIndex, -1);
-  assert.notEqual(contributionIndex, -1);
+  assert.notEqual(reasonIndex, -1);
+  assert.notEqual(initialContributionIndex, -1);
+  assert.notEqual(currentContributionIndex, -1);
   assert.notEqual(projectionIndex, -1);
   assert.notEqual(conceptIndex, -1);
-  assert.ok(relevanceIndex < appointmentIndex);
-  assert.ok(appointmentIndex < preparationIndex);
-  assert.ok(preparationIndex < contributionIndex);
-  assert.ok(contributionIndex < projectionIndex);
+  assert.notEqual(appointmentIndex, -1);
+  assert.notEqual(preparationIndex, -1);
+  assert.ok(reasonIndex < initialContributionIndex);
+  assert.ok(initialContributionIndex < currentContributionIndex);
+  assert.ok(currentContributionIndex < projectionIndex);
   assert.ok(projectionIndex < conceptIndex);
-  assert.match(instructions, /vor Ort|bei Ihnen vor Ort/i);
-  assert.match(instructions, /Gesundheitsfragen.*nach dem Termin|nach dem Termin.*Gesundheitsfragen|nach einem bestätigten Termin/i);
+  assert.ok(conceptIndex < appointmentIndex);
+  assert.ok(appointmentIndex < preparationIndex);
+  assert.match(instructions, /bei der Kundin\/dem Kunden vor Ort|bei Ihnen vor Ort/i);
+  assert.doesNotMatch(instructions, /bei Ihnen vor Ort, in unserer Agentur/);
 });
 
 test("keeps the prompt concise and avoids repeating customer wording", () => {
@@ -266,13 +273,13 @@ test("forces the ten-year projection before scheduling after a contribution", ()
   ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
 
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /10 Jahre|Beitragsentwicklung/);
-  assert.match(instruction, /KEIN Ruhestand|nur 10 Jahre/);
+  assert.match(instruction, /zehn Jahre|Beitragsentwicklung/);
+  assert.match(instruction, /hochgerechnet\?/);
 
   ctx.transcript.push(
     { role: "assistant", text: "Bei 1000 Euro wären es in zehn Jahren ungefähr 1480 Euro.", at: 2 },
   );
-  assert.match(buildRequiredPkvSequenceInstruction(ctx), /Wäre es nicht sinnvoll|Keine Terminfrage/);
+  assert.match(buildRequiredPkvSequenceInstruction(ctx), /Wäre es für Sie interessant/);
 });
 
 test("keeps customer-question responses separate from the PKV sequence", () => {
@@ -315,8 +322,8 @@ test("requires the sensibilization and relevance question after permission to ex
     { role: "user", text: "Ja, das dürfen Sie.", at: 2 },
   );
   const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /Beitragsentwicklung|wie nehmen Sie diese entwicklung wahr/i);
-  assert.match(instruction, /Jahr für Jahr.*steigen|3-5% jährlich/);
+  assert.match(instruction, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instruction, /drei bis fünf Prozent/);
   assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
 });
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePkvStep, assessPkvConversation, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { advancePkvStep, assessPkvConversation, extractContributionPhrase, extractCurrentContributionPhrase, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -28,10 +28,11 @@ test("derives one deterministic next step from the PKV transcript", () => {
   assert.equal(assessPkvConversation(turns).stage, "ready_to_schedule");
 });
 
-test("uses the requested relevance wording without the older 'Wie gehen Sie damit um' phrasing", () => {
+test("introduces the contribution trend before asking for the initial contribution", () => {
   const instruction = instructionForPkvStep(1);
-  assert.match(instruction, /Wie erleben Sie das aktuell\?/);
-  assert.doesNotMatch(instruction, /Wie gehen Sie damit um, oder wie erleben Sie das aktuell\?/i);
+  assert.match(instruction, /Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instruction, /drei bis fünf Prozent/);
+  assert.match(instruction, /mit welchem Beitrag Sie damals angefangen haben/);
 });
 
 test("does not treat an earlier yes as scheduling consent", () => {
@@ -48,6 +49,18 @@ test("does not treat an earlier yes as scheduling consent", () => {
   assert.equal(assessment.interestConfirmed, false);
 });
 
+test("does not unlock scheduling after a concept yes when the projection was skipped", () => {
+  const assessment = assessPkvConversation([
+    { role: "user", text: "Ich zahle 900 Euro." },
+    { role: "assistant", text: "Herr Duic zeigt Ihnen Möglichkeiten, den Beitrag im Alter planbar zu halten. Wäre ein Termin interessant?" },
+    { role: "user", text: "Ja, gerne." },
+  ]);
+
+  assert.equal(assessment.projectionDelivered, false);
+  assert.equal(assessment.interestConfirmed, false);
+  assert.notEqual(assessment.stage, "ready_to_schedule");
+});
+
 test("does not advance from step 0 on a plain greeting", () => {
   assert.deepEqual(advancePkvStep(0, "Guten Tag."), { nextStep: 0, shouldEnd: false });
   assert.deepEqual(advancePkvStep(0, "Ja, gerne."), { nextStep: 1, shouldEnd: false });
@@ -57,16 +70,47 @@ test("does not advance PKV stages on unrelated or repeated utterances", () => {
   assert.deepEqual(advancePkvStep(1, "Hallo, willkommen."), { nextStep: 1, shouldEnd: false });
   assert.deepEqual(advancePkvStep(1, "Die Beiträge sind schon stark gestiegen."), { nextStep: 2, shouldEnd: false });
   assert.deepEqual(advancePkvStep(2, "Dann lass mich das mal eben fertig machen."), { nextStep: 2, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(2, "Nein, dafür habe ich noch keinen Plan."), { nextStep: 3, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(4, "Ich zahle derzeit 850 Euro."), { nextStep: 4, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(4, "Nein, so habe ich das noch nie durchgerechnet."), { nextStep: 5, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(2, "Weiß ich nicht."), { nextStep: 3, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(3, "Nein, so habe ich das noch nie durchgerechnet."), { nextStep: 4, shouldEnd: false });
 });
 
 test("uses a deterministic 10-year projection instead of inventing a wrong value", () => {
-  const instruction = instructionForPkvStep(4, "1000 Euro");
-  assert.match(instruction, /1000 Euro.*1480 Euro.*480 Euro mehr pro Monat/i);
+  const instruction = instructionForPkvStep(3, "1000 Euro");
+  assert.match(instruction, /1000 Euro.*480 Euro mehr pro Monat.*1480 Euro/i);
   assert.match(instruction, /vier Prozent Steigerung pro Jahr/i);
   assert.doesNotMatch(instruction, /25 Euro mehr|rund 25|rund X Euro/i);
+});
+
+test("uses the latest contribution when the customer gives an initial and current amount", () => {
+  assert.equal(extractContributionPhrase("Damals waren es 450 Euro, heute zahle ich 980 Euro."), "980 Euro");
+  const turns: ConversationTurn[] = [
+    { role: "user", text: "Damals waren es 450 Euro." },
+    { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?" },
+    { role: "user", text: "Den möchte ich gerade nicht nennen." },
+  ];
+  assert.equal(extractCurrentContributionPhrase(turns), undefined);
+});
+
+test("follows the short PKV sequence and asks about each contribution separately", () => {
+  assert.match(instructionForPkvStep(0), /Beitragsentwicklung.*kurzen Moment/i);
+  assert.match(instructionForPkvStep(1), /drei bis fünf Prozent.*mit welchem Beitrag Sie damals angefangen haben/i);
+  assert.match(instructionForPkvStep(2), /welchen Beitrag zahlen Sie heute/i);
+  assert.match(instructionForPkvStep(3, "980 Euro"), /Haben Sie das schon einmal für sich hochgerechnet\?/i);
+  assert.match(instructionForPkvStep(4), /Herr Duic jeden Tag.*Wäre es für Sie interessant/i);
+  assert.deepEqual(advancePkvStep(1, "Ja, einen Moment."), { nextStep: 2, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(2, "Damals waren es 450 Euro."), { nextStep: 3, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(2, "Heute zahle ich 980 Euro."), { nextStep: 3, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(3, "Nein, das hatte ich noch nicht berechnet."), { nextStep: 4, shouldEnd: false });
+  assert.deepEqual(advancePkvStep(4, "Ja, das wäre interessant."), { nextStep: 6, shouldEnd: false });
+});
+
+test("does not invent a personal euro forecast or offer an agency appointment", () => {
+  const projection = instructionForPkvStep(3);
+  const scheduling = instructionForPkvStep(6);
+  assert.match(projection, /eineinhalbmal so hoch/i);
+  assert.doesNotMatch(projection, /rund hundert Euro mehr/i);
+  assert.match(scheduling, /digital per Microsoft Teams oder bei Ihnen vor Ort/i);
+  assert.doesNotMatch(scheduling, /bei Ihnen vor Ort, in (?:unserer )?Agentur|in (?:unserer )?Agentur oder/i);
 });
 
 test("requires an unambiguous interest statement before starting appointment scheduling", () => {
