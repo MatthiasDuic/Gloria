@@ -256,15 +256,58 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   // Computed Values
   const appointmentsByDay = useMemo(() => {
-    const map = new Map<string, DashboardData["reports"]>();
+    const map = new Map<string, Array<{
+      id: string;
+      leadId?: string;
+      company: string;
+      contactName?: string;
+      appointmentAt: string;
+      kind: "appointment" | "callback";
+    }>>();
     for (const report of data.reports || []) {
-      if (!report.appointmentAt) continue;
-      const key = toDateKey(new Date(report.appointmentAt));
+      const isAppointment = report.outcome === "Termin" && Boolean(report.appointmentAt);
+      const isCallback = report.outcome === "Wiedervorlage" && Boolean(report.nextCallAt);
+      if (!isAppointment && !isCallback) continue;
+
+      const appointmentAt = isAppointment ? report.appointmentAt! : report.nextCallAt!;
+      const key = toDateKey(new Date(appointmentAt));
       if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(report);
+      map.get(key)!.push({
+        id: report.id,
+        leadId: report.leadId,
+        company: report.company,
+        contactName: report.contactName,
+        appointmentAt,
+        kind: isCallback ? "callback" : "appointment",
+      });
+    }
+
+    for (const lead of data.leads || []) {
+      if (lead.status !== "wiedervorlage" || !lead.nextCallAt) continue;
+      const existing = [...map.values()].flat().some(
+        (entry) => entry.kind === "callback"
+          && entry.leadId === lead.id
+          && entry.appointmentAt === lead.nextCallAt,
+      );
+      if (existing) continue;
+
+      const key = toDateKey(new Date(lead.nextCallAt));
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push({
+        id: `callback-${lead.id}`,
+        leadId: lead.id,
+        company: lead.company,
+        contactName: lead.contactName,
+        appointmentAt: lead.nextCallAt,
+        kind: "callback",
+      });
+    }
+
+    for (const entries of map.values()) {
+      entries.sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt));
     }
     return map;
-  }, [data.reports]);
+  }, [data.leads, data.reports]);
 
   const leadAmpelById = useMemo(() => {
     const map = new Map<string, ReturnType<typeof getLeadStatus>>();
@@ -1614,7 +1657,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               {day.appointments.length > 0 && (
                 <div className="day-appointments">
                   {day.appointments.slice(0, 2).map((apt, i) => (
-                    <div key={i} className="apt-badge">{apt.company?.slice(0, 3)}</div>
+                    <div
+                      key={`${apt.id}-${i}`}
+                      className={`apt-badge ${apt.kind === "callback" ? "callback" : ""}`}
+                      title={`${apt.kind === "callback" ? "Wiedervorlage" : "Termin"}: ${apt.company}`}
+                    >
+                      {apt.kind === "callback" ? "WV" : "T"}
+                    </div>
                   ))}
                 </div>
               )}
@@ -1623,14 +1672,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         </div>
 
         <div className="calendar-detail">
-          <h4>Termine für {new Date(selectedDayKey).toLocaleDateString("de-DE")}</h4>
+          <h4>Termine und Wiedervorlagen für {new Date(selectedDayKey).toLocaleDateString("de-DE")}</h4>
+          <div className="calendar-legend">
+            <span><i className="appointment" />Termin</span>
+            <span><i className="callback" />Wiedervorlage</span>
+          </div>
           {(appointmentsByDay.get(selectedDayKey) || []).map((apt) => (
-            <div key={apt.id} className="appointment-item">
+            <div key={apt.id} className={`appointment-item ${apt.kind === "callback" ? "callback" : ""}`}>
+              <div className="calendar-entry-kind">{apt.kind === "callback" ? "Wiedervorlage" : "Termin"}</div>
               <div><strong>{apt.company}</strong></div>
-              <div>{apt.contactName}</div>
+              {apt.contactName ? <div>{apt.contactName}</div> : null}
               <div className="subtle">{formatDate(apt.appointmentAt)}</div>
             </div>
           ))}
+          {(appointmentsByDay.get(selectedDayKey) || []).length === 0 ? (
+            <p className="subtle">Keine Termine oder Wiedervorlagen an diesem Tag.</p>
+          ) : null}
         </div>
       </div>
     );
@@ -2632,6 +2689,35 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           border-radius: 3px;
         }
 
+        .apt-badge.callback {
+          background: #d97706;
+        }
+
+        .calendar-legend {
+          display: flex;
+          gap: 1rem;
+          margin: 0 0 1rem;
+          color: #4b5563;
+          font-size: 0.85rem;
+        }
+
+        .calendar-legend span {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+        }
+
+        .calendar-legend i {
+          width: 0.7rem;
+          height: 0.7rem;
+          border-radius: 2px;
+          background: #2563eb;
+        }
+
+        .calendar-legend i.callback {
+          background: #d97706;
+        }
+
         .calendar-detail {
           background: #f9fafb;
           padding: 1rem;
@@ -2648,6 +2734,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           border-radius: 6px;
           margin-bottom: 0.75rem;
           border-left: 3px solid #2563eb;
+        }
+
+        .appointment-item.callback {
+          border-left-color: #d97706;
+        }
+
+        .calendar-entry-kind {
+          color: #2563eb;
+          font-size: 0.75rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          margin-bottom: 0.35rem;
+        }
+
+        .appointment-item.callback .calendar-entry-kind {
+          color: #b45309;
         }
 
         .appointment-item div {

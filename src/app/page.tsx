@@ -1141,42 +1141,69 @@ export default function HomePage() {
       return (Date.parse(right.conversationDate) || 0) - (Date.parse(left.conversationDate) || 0);
     });
   }, [data.reports]);
-  const appointmentReports = useMemo(
-    () =>
-      data.reports.filter(
-        (report) =>
-          Boolean(report.appointmentAt) &&
-          // Kalender immer nur eigene Termine, auch fuer Master.
-          (!currentUser || !report.userId || report.userId === currentUser.id),
-      ),
-    [data.reports, currentUser],
-  );
   const appointmentsByDay = useMemo(() => {
-    const grouped = new Map<string, DashboardData["reports"]>();
-
-    for (const report of appointmentReports) {
-      if (!report.appointmentAt) {
-        continue;
-      }
-
-      const dayKey = toDateKey(new Date(report.appointmentAt));
+    type CalendarEntry = {
+      id: string;
+      startAt: string;
+      company: string;
+      contactName?: string;
+      topic: string;
+      kind: "appointment" | "callback";
+      report?: DashboardData["reports"][number];
+    };
+    const grouped = new Map<string, CalendarEntry[]>();
+    const callbackKeys = new Set<string>();
+    const addEntry = (entry: CalendarEntry) => {
+      const dayKey = toDateKey(new Date(entry.startAt));
       const existing = grouped.get(dayKey) || [];
-      grouped.set(dayKey, [...existing, report]);
+      grouped.set(dayKey, [...existing, entry]);
+    };
+
+    for (const report of data.reports) {
+      if (currentUser && report.userId && report.userId !== currentUser.id) continue;
+      if (report.outcome === "Termin" && report.appointmentAt) {
+        addEntry({
+          id: report.id,
+          startAt: report.appointmentAt,
+          company: report.company,
+          contactName: report.contactName,
+          topic: report.topic,
+          kind: "appointment",
+          report,
+        });
+      } else if (report.outcome === "Wiedervorlage" && report.nextCallAt) {
+        if (report.leadId) callbackKeys.add(`${report.leadId}:${report.nextCallAt}`);
+        addEntry({
+          id: report.id,
+          startAt: report.nextCallAt,
+          company: report.company,
+          contactName: report.contactName,
+          topic: report.topic,
+          kind: "callback",
+          report,
+        });
+      }
     }
 
-    for (const [key, reports] of grouped) {
-      grouped.set(
-        key,
-        [...reports].sort((a, b) => {
-          const aTime = a.appointmentAt ? Date.parse(a.appointmentAt) : 0;
-          const bTime = b.appointmentAt ? Date.parse(b.appointmentAt) : 0;
-          return aTime - bTime;
-        }),
-      );
+    for (const lead of data.leads) {
+      if (currentUser && lead.userId && lead.userId !== currentUser.id) continue;
+      if (lead.status !== "wiedervorlage" || !lead.nextCallAt) continue;
+      if (callbackKeys.has(`${lead.id}:${lead.nextCallAt}`)) continue;
+      addEntry({
+        id: `callback-${lead.id}`,
+        startAt: lead.nextCallAt,
+        company: lead.company,
+        contactName: lead.contactName,
+        topic: lead.topic,
+        kind: "callback",
+      });
     }
 
+    for (const entries of grouped.values()) {
+      entries.sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
+    }
     return grouped;
-  }, [appointmentReports]);
+  }, [data.leads, data.reports, currentUser]);
 
   const reportingInsights = useMemo(() => {
     const reports = data.reports;
@@ -2861,7 +2888,10 @@ export default function HomePage() {
                   onClick={() => setSelectedDayKey(day.key)}
                 >
                   <span>{day.date.getDate()}</span>
-                  <small>{day.items.length > 0 ? `${day.items.length} Termin(e)` : "-"}</small>
+                  <small>{day.items.filter((item) => item.kind === "appointment").length} Termin(e)</small>
+                  <small className="calendar-callback-count">
+                    {day.items.filter((item) => item.kind === "callback").length} Wiedervorlage(n)
+                  </small>
                 </button>
               );
             })}
@@ -2870,30 +2900,33 @@ export default function HomePage() {
           <div className="calendar-detail top-gap">
             <div className="mini-panel">
               <h3>
-                Termine am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
+                Termine und Wiedervorlagen am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
               </h3>
               {selectedDayAppointments.length > 0 ? (
                 <div className="calendar-list top-gap">
-                  {selectedDayAppointments.map((report) => (
+                  {selectedDayAppointments.map((entry) => (
                     <button
-                      key={report.id}
-                      className="calendar-item"
-                      onClick={() => setSelectedReport(report)}
+                      key={entry.id}
+                      className={`calendar-item ${entry.kind === "callback" ? "callback" : ""}`}
+                      onClick={() => {
+                        if (entry.report) setSelectedReport(entry.report);
+                      }}
+                      disabled={!entry.report}
                     >
-                      <strong>{formatDate(report.appointmentAt)}</strong>
-                      <span>{report.company}{report.contactName ? ` · ${report.contactName}` : ""}</span>
-                      <small>{report.topic}</small>
+                      <strong>{entry.kind === "callback" ? "Wiedervorlage" : "Termin"} · {formatDate(entry.startAt)}</strong>
+                      <span>{entry.company}{entry.contactName ? ` · ${entry.contactName}` : ""}</span>
+                      <small>{entry.topic}</small>
                     </button>
                   ))}
                 </div>
               ) : (
-                <p className="subtle top-gap">Für diesen Tag sind noch keine Termine eingetragen.</p>
+                <p className="subtle top-gap">Für diesen Tag sind noch keine Termine oder Wiedervorlagen eingetragen.</p>
               )}
             </div>
             <div className="mini-panel">
               <h3>Automatische Einträge</h3>
               <p className="subtle top-gap">
-                Gloria trägt Termine automatisch nach dem Telefonat ein. Der Gesprächsreport wird direkt mit dem Termin verknüpft und ist per Klick im Detaildialog einsehbar.
+                Gloria trägt Termine und vereinbarte Wiedervorlagen automatisch nach dem Telefonat ein. Die Farben unterscheiden Termine (blau) von Wiedervorlagen (orange).
               </p>
               <p className="subtle top-gap">
                 Quelle: Telefonie-Webhook und Abschlussreport.

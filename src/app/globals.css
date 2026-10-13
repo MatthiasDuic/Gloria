@@ -822,6 +822,10 @@ label {
   font-size: 0.76rem;
 }
 
+.calendar-day .calendar-callback-count {
+  color: #b45309;
+}
+
 .calendar-day.outside {
   opacity: 0.55;
 }
@@ -855,9 +859,19 @@ label {
   gap: 3px;
 }
 
+.calendar-item.callback {
+  border-color: #f2c27b;
+  border-left: 4px solid #d97706;
+  background: #fffbeb;
+}
+
 .calendar-item strong {
   color: #163866;
   font-size: 0.9rem;
+}
+
+.calendar-item.callback strong {
+  color: #b45309;
 }
 
 .calendar-item span {

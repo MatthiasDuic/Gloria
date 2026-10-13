@@ -47,44 +47,101 @@ export async function GET(
   });
 
   const now = new Date();
-  const calendarName = `Gloria Termine – ${user?.realName || user?.companyName || user?.username || "User"}`;
+  const calendarName = `Gloria Termine und Wiedervorlagen – ${user?.realName || user?.companyName || user?.username || "User"}`;
 
   const events: string[] = [];
+  const callbackKeys = new Set<string>();
 
-  for (const report of dashboard.reports) {
-    if (report.outcome !== "Termin" || !report.appointmentAt) continue;
-
-    const start = new Date(report.appointmentAt);
-    if (Number.isNaN(start.getTime())) continue;
-
-    const end = new Date(start.getTime() + 90 * 60 * 1000);
-    const uid = `${report.id || report.callSid || start.getTime()}@gloria-ki-assistent`;
-
-    const description = escapeIcs(
-      [
-        `Thema: ${report.topic}`,
-        `Firma: ${report.company}`,
-        `Ansprechpartner: ${report.contactName || "-"}`,
-        "",
-        "Gespraechsnotiz (Gloria):",
-        report.summary || "-",
-      ].join("\n"),
-    );
-
+  const addEvent = (event: {
+    id: string;
+    startAt: string;
+    durationMinutes: number;
+    title: string;
+    category: "Termin" | "Wiedervorlage";
+    color: string;
+    description: string;
+  }) => {
+    const start = new Date(event.startAt);
+    if (Number.isNaN(start.getTime())) return;
+    const end = new Date(start.getTime() + event.durationMinutes * 60 * 1000);
     events.push(
       [
         "BEGIN:VEVENT",
-        `UID:${uid}`,
+        `UID:${event.id}@gloria-ki-assistent`,
         `DTSTAMP:${formatIcsDate(now)}`,
         `DTSTART:${formatIcsDate(start)}`,
         `DTEND:${formatIcsDate(end)}`,
-        `SUMMARY:${escapeIcs(`Termin: ${report.company} (${report.topic})`)}`,
-        `DESCRIPTION:${description}`,
+        `SUMMARY:${escapeIcs(event.title)}`,
+        `DESCRIPTION:${escapeIcs(event.description)}`,
+        `CATEGORIES:${event.category}`,
+        `COLOR:${event.color}`,
         "STATUS:CONFIRMED",
         "SEQUENCE:0",
         "END:VEVENT",
       ].join("\r\n"),
     );
+  };
+
+  for (const report of dashboard.reports) {
+    if (report.outcome === "Termin" && report.appointmentAt) {
+      addEvent({
+        id: report.id || report.callSid || report.appointmentAt,
+        startAt: report.appointmentAt,
+        durationMinutes: 90,
+        title: `Termin: ${report.company} (${report.topic})`,
+        category: "Termin",
+        color: "#2563EB",
+        description: [
+          `Thema: ${report.topic}`,
+          `Firma: ${report.company}`,
+          `Ansprechpartner: ${report.contactName || "-"}`,
+          "",
+          "Gespraechsnotiz (Gloria):",
+          report.summary || "-",
+        ].join("\n"),
+      });
+    }
+
+    if (report.outcome === "Wiedervorlage" && report.nextCallAt) {
+      if (report.leadId) callbackKeys.add(`${report.leadId}:${report.nextCallAt}`);
+      addEvent({
+        id: report.id || report.callSid || report.nextCallAt,
+        startAt: report.nextCallAt,
+        durationMinutes: 15,
+        title: `Wiedervorlage: ${report.company}`,
+        category: "Wiedervorlage",
+        color: "#D97706",
+        description: [
+          `Thema: ${report.topic}`,
+          `Firma: ${report.company}`,
+          `Ansprechpartner: ${report.contactName || "-"}`,
+          "",
+          "Wiedervorlage / geplanter Rückruf",
+          report.summary || "-",
+        ].join("\n"),
+      });
+    }
+  }
+
+  for (const lead of dashboard.leads) {
+    if (lead.status !== "wiedervorlage" || !lead.nextCallAt) continue;
+    if (callbackKeys.has(`${lead.id}:${lead.nextCallAt}`)) continue;
+
+    addEvent({
+      id: `callback-${lead.id}`,
+      startAt: lead.nextCallAt,
+      durationMinutes: 15,
+      title: `Wiedervorlage: ${lead.company}`,
+      category: "Wiedervorlage",
+      color: "#D97706",
+      description: [
+        `Thema: ${lead.topic}`,
+        `Firma: ${lead.company}`,
+        `Ansprechpartner: ${lead.contactName || "-"}`,
+        "",
+        "Wiedervorlage / geplanter Rückruf",
+      ].join("\n"),
+    });
   }
 
   const ics = [
