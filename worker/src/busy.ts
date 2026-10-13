@@ -1,7 +1,7 @@
 import { fetch } from "undici";
 import { log } from "./log.js";
 
-type BusySlot = {
+export type BusySlot = {
   start: string; // ISO 8601 UTC
   end: string;   // ISO 8601 UTC
 };
@@ -34,7 +34,11 @@ export async function loadBusySlots(opts: {
       return null;
     }
     const json = (await res.json()) as { slots?: BusySlot[] };
-    const slots = Array.isArray(json.slots) ? json.slots : [];
+    if (!Array.isArray(json.slots) || json.slots.some((slot) => !slot || !Number.isFinite(Date.parse(slot.start)) || !Number.isFinite(Date.parse(slot.end)) || Date.parse(slot.end) <= Date.parse(slot.start))) {
+      log.warn("busy.invalid_response");
+      return null;
+    }
+    const slots = json.slots;
     log.info("busy.loaded", { count: slots.length });
     return slots;
   } catch (error) {
@@ -53,23 +57,19 @@ export async function loadBusySlots(opts: {
  *   - Mittwoch, 13. Mai 2026, 14:30–16:00 Uhr
  */
 /**
- * Berechnet bis zu `maxCount` 30-Minuten-Slots in den nächsten `daysAhead` Geschäftstagen
+ * Berechnet bis zu `maxCount` Vorschläge mit 90 Minuten Reservierungszeit.
  * (Mo–Fr, 08:30–11:00 und 13:00–18:00 Berlin-Zeit), die NICHT mit den Busy-Slots kollidieren und
- * mindestens `bufferMinutes` Puffer zu jedem belegten Slot wahren.
+ * Belegte Intervalle enthalten bereits die Reservierungszeit, ohne zusätzlichen Puffer.
  * Liefert ISO-Strings (UTC) plus eine Berlin-Zeit-Phrase ("Mittwoch, 13. Mai um 14:30 Uhr").
  */
 export function computeFreeSlots(
   busy: BusySlot[],
-  opts: { daysAhead?: number; maxCount?: number; bufferMinutes?: number; minLeadDays?: number } = {},
+  opts: { daysAhead?: number; maxCount?: number; reservationMinutes?: number; minLeadDays?: number } = {},
 ): Array<{ startUtc: string; phrase: string }> {
   const daysAhead = opts.daysAhead ?? 14;
   const maxCount = opts.maxCount ?? 8;
-  const bufferMs = (opts.bufferMinutes ?? 90) * 60 * 1000;
+  const reservationMs = (opts.reservationMinutes ?? 90) * 60 * 1000;
   const minLeadMs = (opts.minLeadDays ?? 7) * 24 * 60 * 60 * 1000;
-
-  const busyRanges = busy
-    .map((s) => ({ start: new Date(s.start).getTime(), end: new Date(s.end).getTime() }))
-    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end));
 
   const fmtBerlin = new Intl.DateTimeFormat("de-DE", {
     weekday: "long",
@@ -102,7 +102,7 @@ export function computeFreeSlots(
   // Starte standardmäßig frühestens in der nächsten Woche, um keine
   // kurzfristigen Folgetag-Termine als Erstvorschlag zu erzeugen.
   let cursor = now + minLeadMs;
-  cursor -= cursor % (30 * 60 * 1000);
+  cursor = Math.ceil(cursor / (30 * 60 * 1000)) * 30 * 60 * 1000;
 
   const endHorizon = now + daysAhead * 24 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000;
 
@@ -114,19 +114,16 @@ export function computeFreeSlots(
     const inAfternoonWindow = timeOfDay >= 13 * 60 && timeOfDay <= 18 * 60;
     // Nur Mo–Fr.
     if (weekday >= 1 && weekday <= 5 && (inMorningWindow || inAfternoonWindow)) {
-      const slotEnd = cursor + 30 * 60 * 1000;
-      const collides = busyRanges.some(
-        (r) => cursor < r.end + bufferMs && slotEnd > r.start - bufferMs,
-      );
+      const collides = !isAppointmentSlotFree(candidate.toISOString(), busy, reservationMs / 60_000);
       if (!collides) {
         candidates.push({
           startUtc: candidate.toISOString(),
           phrase: fmtBerlin.format(candidate) + " Uhr",
         });
-        // Nächstes Mal mindestens +90min weiter, damit wir nicht 4× denselben Tag haben.
-        cursor += 90 * 60 * 1000;
+        cursor += reservationMs;
         continue;
       }
+
     }
     cursor += 30 * 60 * 1000;
   }
@@ -140,16 +137,24 @@ export function computeFreeSlots(
   return distributed;
 }
 
+export function isAppointmentSlotFree(startAt: string, busy: BusySlot[], reservationMinutes = 90): boolean {
+  const start = Date.parse(startAt);
+  if (!Number.isFinite(start)) return false;
+  const end = start + reservationMinutes * 60_000;
+  return !busy.some((slot) => start < Date.parse(slot.end) && end > Date.parse(slot.start));
+}
+
 /**
  * Verdichtet die freien Slots in einen Prompt-Block, den Gloria nutzen kann,
  * wenn ihr eigener Vorschlag abgelehnt wird oder der Anrufende nach Alternativen fragt.
  */
 export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: string }>): string {
-  if (slots.length === 0) return "";
+  if (slots.length === 0) return "KEINE FREIEN TERMINVORSCHLÄGE im geprüften Zeitraum. Keine Zeiten erfinden oder bestätigen; Kundenwunschzeiten müssen vor der Bestätigung auf Verfügbarkeit geprüft werden.";
   const lines = slots.map((s) => `- ${s.phrase}`);
   return [
     "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab nächster Woche und über mehrere Wochen hinweg):",
     ...lines,
+    "Jeder Termin reserviert 90 Minuten inklusive An- und Abreise; dies ist nicht die eigentliche Gesprächsdauer. Es gibt kein Tageslimit: Maßgeblich sind ausschließlich freie Zeiten und Sperrzeiten. Die Liste ist eine Auswahl von Vorschlägen, keine Begrenzung der möglichen Termine.",
     "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei dieser Slots vor, die zur Praeferenz passen.",
     "Wenn der Anrufende einen anderen Zeitraum oder eine andere Woche wünscht, akzeptiere diesen Wunsch, frage bei Bedarf kurz nach der gewünschten Woche und wähle danach zwei passende Slots aus diesem späteren Zeitraum. Bestehe nicht auf der zuerst angebotenen Woche. Erfinde niemals freie Zeiten außerhalb dieser Liste.",
     "",

@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
 import { phoneMatches, normalizePhoneForMatch } from "./phone-utils";
@@ -26,10 +27,15 @@ import {
   writeReportDatabaseToPostgres,
   writeUserScriptToPostgres,
   writeScriptsToPostgres,
+  readCalendarEventsFromPostgres,
+  saveCalendarEventToPostgres,
+  deleteCalendarEventFromPostgres,
 } from "./report-db";
 import type { RecordingEntry, ReportDatabase } from "./report-db";
 import type {
   CallReport,
+  CalendarEvent,
+  CallSource,
   ConversationEvent,
   DashboardData,
   LeadActivity,
@@ -40,7 +46,7 @@ import type {
   Topic,
 } from "./types";
 import { TOPICS } from "./types";
-import { normalizeLeadProductDetails } from "./crm-helpers";
+import { getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails } from "./crm-helpers";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
@@ -50,6 +56,45 @@ const EVENTS_FILE = path.join(DATA_DIR, "conversation-events.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "topic-policies.json");
 const LEGACY_SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 const CAMPAIGN_STATE_FILE = path.join(DATA_DIR, "campaign-state.json");
+const CALENDAR_EVENTS_FILE = path.join(DATA_DIR, "calendar-events.json");
+
+async function readCalendarEventFile(): Promise<CalendarEvent[]> {
+  try {
+    return JSON.parse(await readFile(CALENDAR_EVENTS_FILE, "utf8")) as CalendarEvent[];
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export async function listCalendarEvents(userId: string): Promise<CalendarEvent[]> {
+  const database = await readCalendarEventsFromPostgres(userId);
+  return database ?? (await readCalendarEventFile()).filter((event) => event.userId === userId);
+}
+
+export async function saveCalendarEvent(userId: string, input: Omit<CalendarEvent, "id" | "userId" | "createdAt">, id?: string): Promise<CalendarEvent> {
+  const existing = id ? (await listCalendarEvents(userId)).find((event) => event.id === id) : undefined;
+  if (id && !existing) throw new Error("Kalendereintrag nicht gefunden.");
+  const event: CalendarEvent = { ...input, id: existing?.id || randomUUID(), userId, createdAt: existing?.createdAt || new Date().toISOString() };
+  if (!await saveCalendarEventToPostgres(event)) {
+    if (process.env.VERCEL) throw new Error("Kalendereinträge benötigen eine konfigurierte Datenbank.");
+    const events = await readCalendarEventFile();
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(CALENDAR_EVENTS_FILE, JSON.stringify([...events.filter((item) => item.id !== event.id), event], null, 2));
+  }
+  return event;
+}
+
+export async function deleteCalendarEvent(userId: string, id: string): Promise<boolean> {
+  const result = await deleteCalendarEventFromPostgres(id, userId);
+  if (result !== null) return result;
+  if (process.env.VERCEL) throw new Error("Kalendereinträge benötigen eine konfigurierte Datenbank.");
+  const events = await readCalendarEventFile();
+  const next = events.filter((event) => event.id !== id || event.userId !== userId);
+  if (next.length === events.length) return false;
+  await writeFile(CALENDAR_EVENTS_FILE, JSON.stringify(next, null, 2));
+  return true;
+}
 
 /** Retry configuration for transient PostgreSQL errors */
 const POSTGRES_RETRY_CONFIG = {
@@ -649,6 +694,7 @@ type LeadTaskInput = {
   title: string;
   topic?: string;
   dueAt?: string;
+  assignee?: "user" | "gloria";
 };
 
 function appendLeadActivity(lead: Lead, activity: LeadActivity): Lead {
@@ -733,6 +779,10 @@ export async function updateLeadDetails(
     if (lead.id !== leadId) return lead;
     const nextLead: Lead = {
       ...lead,
+      status: updates.status ?? lead.status,
+      nextCallAt: updates.nextCallAt !== undefined ? updates.nextCallAt || undefined : lead.nextCallAt,
+      lifecycle: updates.lifecycle ?? lead.lifecycle,
+      company: updates.company ?? lead.company,
       customerKind: updates.customerKind ?? lead.customerKind,
       customerOwner: updates.customerOwner ?? lead.customerOwner,
       contactName: updates.contactName ?? lead.contactName,
@@ -751,12 +801,17 @@ export async function updateLeadDetails(
       affiliations: normalizeLeadAffiliations(updates.affiliations ?? lead.affiliations),
       topic: updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
+      notes: updates.notes ?? lead.notes,
       emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
       tasks: normalizeLeadTasks(updates.tasks ?? lead.tasks),
       activities: normalizeLeadActivities(updates.activities ?? lead.activities),
       crmPipeline: normalizeLeadPipeline(updates.crmPipeline ?? lead.crmPipeline),
     };
     const before = {
+      status: lead.status,
+      nextCallAt: lead.nextCallAt,
+      lifecycle: lead.lifecycle,
+      company: lead.company,
       customerKind: lead.customerKind,
       customerOwner: lead.customerOwner,
       contactName: lead.contactName,
@@ -775,9 +830,14 @@ export async function updateLeadDetails(
       affiliations: lead.affiliations,
       topic: lead.topic,
       note: lead.note,
+      notes: lead.notes,
       crmPipeline: lead.crmPipeline,
     };
     const after = {
+      status: nextLead.status,
+      nextCallAt: nextLead.nextCallAt,
+      lifecycle: nextLead.lifecycle,
+      company: nextLead.company,
       customerKind: nextLead.customerKind,
       customerOwner: nextLead.customerOwner,
       contactName: nextLead.contactName,
@@ -796,6 +856,7 @@ export async function updateLeadDetails(
       affiliations: nextLead.affiliations,
       topic: nextLead.topic,
       note: nextLead.note,
+      notes: nextLead.notes,
       crmPipeline: nextLead.crmPipeline,
     };
     const changed = JSON.stringify(after) !== JSON.stringify(before);
@@ -885,14 +946,16 @@ export async function addLeadTask(
   const nextLeads = leads.map((lead) => {
     if (lead.id !== leadId) return lead;
     const now = new Date().toISOString();
-    const title = rawTitle.toLowerCase().includes(rawTopic.toLowerCase())
-      ? rawTitle
-      : `Gloria anrufen – Thema: ${rawTopic} – ${rawTitle}`;
+    const assignee = taskInput.assignee || "user";
+    const title = assignee === "gloria" && !rawTitle.toLowerCase().includes(rawTopic.toLowerCase())
+      ? `Gloria anrufen – Thema: ${rawTopic} – ${rawTitle}`
+      : rawTitle;
     const task = {
       id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       title,
       topic: rawTopic,
       dueAt: taskInput.dueAt || undefined,
+      assignee,
       status: "open" as const,
       createdAt: now,
     };
@@ -905,6 +968,39 @@ export async function addLeadTask(
       type: "task_created",
       message: `Aufgabe erstellt: ${task.title}`,
       createdAt: now,
+    });
+    return updatedLead;
+  });
+  if (!updatedLead) return undefined;
+  await writeLeads(nextLeads, userId);
+  return updatedLead;
+}
+
+export async function addLeadNote(
+  leadId: string,
+  text: string,
+  userId?: string,
+): Promise<Lead | undefined> {
+  const normalizedText = text.trim();
+  if (!leadId || !normalizedText) return undefined;
+  const leads = await readLeads(userId);
+  let updatedLead: Lead | undefined;
+  const nextLeads = leads.map((lead) => {
+    if (lead.id !== leadId) return lead;
+    const createdAt = new Date().toISOString();
+    const note = {
+      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: normalizedText,
+      createdAt,
+    };
+    updatedLead = appendLeadActivity({
+      ...lead,
+      notes: [note, ...(lead.notes || [])].slice(0, 200),
+    }, {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: "note_updated",
+      message: "Notiz hinzugefügt",
+      createdAt,
     });
     return updatedLead;
   });
@@ -1203,16 +1299,18 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
   // Reports/Leads/Events strikt auf diesen User gescoped.
   const scopeReportsToUser = Boolean(userId);
   const scopedUserId = scopeReportsToUser ? userId : undefined;
-  const [leads, reportState, scriptsState, events] = await Promise.all([
+  const [leads, reportState, scriptsState, events, calendarEvents] = await Promise.all([
     readLeads(scopedUserId),
     readReportDatabaseWithMode(scopedUserId),
     readScriptsWithMode(userId),
     readConversationEvents(scopedUserId),
+    userId ? listCalendarEvents(userId) : Promise.resolve([]),
   ]);
 
   const reports = deduplicateReports(reportState.data.reports);
 
   return {
+    calendarEvents,
     leads,
     reports,
     topicPolicies: scriptsState.data,
@@ -1224,7 +1322,7 @@ export async function getDashboardData(options?: { userId?: string; role?: "mast
 
 export async function importLeadsFromCsv(
   csvText: string,
-  options?: { listId?: string; listName?: string; userId?: string; overrideTopic?: string },
+  options?: { listId?: string; listName?: string; userId?: string; overrideTopic?: string; lifecycle?: Lead["lifecycle"] },
 ) {
   const existing = await readLeads(options?.userId);
   const listId = options?.listId || `list-${Date.now()}`;
@@ -1264,8 +1362,9 @@ export async function importLeadsFromCsv(
     return {
       id: createLeadId(index),
       userId: options?.userId,
-      listId,
-      listName,
+      listId: options?.lifecycle === "customer" ? undefined : listId,
+      listName: options?.lifecycle === "customer" ? undefined : listName,
+      lifecycle: options?.lifecycle || "prospect",
       customerKind: normalizeCustomerKind(lookup("customerKind")),
       customerOwner,
       company: company || `Firma ${index + 1}`,
@@ -1291,6 +1390,10 @@ export async function importLeadsFromCsv(
 
   const merged = [...newLeads, ...existing];
   await writeLeads(merged, options?.userId);
+
+  if (options?.lifecycle === "customer") {
+    return { listId, listName, imported: newLeads.length, total: merged.length };
+  }
 
   const campaignState = await readCampaignState(options?.userId);
   const alreadyKnown = campaignState.lists.some((list) => list.listId === listId);
@@ -1407,6 +1510,7 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
 }
 
 export async function storeCallReport(payload: {
+  callSource?: CallSource;
   userId?: string;
   phoneNumberId?: string;
   callSid?: string;
@@ -1453,6 +1557,28 @@ export async function storeCallReport(payload: {
   }
 
   const leads = await readLeads(resolvedUserId);
+  const callSource = existingReport?.callSource || payload.callSource || getCallSource({
+    ...existingReport,
+    leadId: payload.leadId || existingReport?.leadId,
+    summary: payload.summary || existingReport?.summary || "",
+  }, leads);
+  const manualLead = callSource === "manual"
+    ? leads.find((lead) => lead.callSource === "manual" && lead.id === (existingReport?.leadId || payload.leadId))
+    : undefined;
+  const createManualCallback = callSource === "manual" && !manualLead
+    && payload.outcome === "Wiedervorlage" && payload.nextCallAt;
+  const manualCallbackLead: Lead | undefined = createManualCallback ? {
+    id: `manual-callback-${callSid || existingReport?.id || Date.now()}`,
+    callSource: "manual", userId: resolvedUserId, company: payload.company,
+    contactName: payload.contactName || "", topic: payload.topic,
+    phone: payload.calledPhone || existingReport?.calledPhone || payload.directDial || existingReport?.directDial || "",
+    directDial: payload.directDial, status: "wiedervorlage",
+    nextCallAt: payload.nextCallAt, attempts: payload.attempts ?? 1,
+  } : undefined;
+  if (manualCallbackLead) leads.push(manualCallbackLead);
+  const resolvedLeadId = callSource === "manual"
+    ? manualLead?.id || manualCallbackLead?.id
+    : payload.leadId || existingReport?.leadId;
 
   const mergeSummary = (existing: string, incoming?: string, chunk?: string) => {
     let merged = (existing || "").trim();
@@ -1488,10 +1614,11 @@ export async function storeCallReport(payload: {
 
   const report: CallReport = {
     id: existingReport?.id || `report-${Date.now()}`,
+    callSource,
     userId: resolvedUserId || existingReport?.userId,
     phoneNumberId: payload.phoneNumberId || existingReport?.phoneNumberId,
     callSid: callSid || existingReport?.callSid,
-    leadId: payload.leadId || existingReport?.leadId,
+    leadId: resolvedLeadId,
     directDial: payload.directDial || existingReport?.directDial,
     calledPhone: payload.calledPhone || existingReport?.calledPhone,
     company: payload.company,
@@ -1541,11 +1668,12 @@ export async function storeCallReport(payload: {
     : reportDb.recordings;
 
   const updatedLeads: Lead[] = leads.map((lead) => {
-    const sameLead = payload.leadId
-      ? lead.id === payload.leadId
-      : lead.company.toLowerCase() === payload.company.toLowerCase();
+    const sameLead = (lead.callSource || "crm") === callSource && (
+      resolvedLeadId ? lead.id === resolvedLeadId
+        : callSource === "crm" && lead.company.toLowerCase() === payload.company.toLowerCase()
+    );
 
-    if (!sameLead) {
+    if (!sameLead || !payload.outcome) {
       return lead;
     }
 
@@ -1663,8 +1791,10 @@ export async function getLatestReportSummaryForLead(
 ): Promise<string | undefined> {
   if (!leadId) return undefined;
   const reportDb = await readReportDatabase(userId);
+  const lead = await getLeadById(leadId, userId);
   const candidates = reportDb.reports
     .filter((r) => r.leadId === leadId && (!userId || r.userId === userId))
+    .filter((r) => getCallSource(r, lead ? [lead] : []) === (lead?.callSource || "crm"))
     .filter((r) => r.summary && !/^Automatischer Wiedervorlage-Anruf gestartet/i.test(r.summary));
   if (candidates.length === 0) return undefined;
   candidates.sort(
@@ -1693,10 +1823,13 @@ export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
 
   return leads
     .filter((lead) => {
+      const dueGloriaTask = (lead.tasks || []).some((task) => isDueGloriaTask(task, now));
+      if (dueGloriaTask && (lead.directDial || lead.phone)) return true;
+
       const userKey = lead.userId || "__global__";
       const activeLists = activeListsByUser.get(userKey);
       const listId = lead.listId || "legacy";
-      if (!activeLists || !activeLists.has(listId)) {
+      if (lead.callSource !== "manual" && (!activeLists || !activeLists.has(listId))) {
         return false;
       }
 
@@ -1711,11 +1844,21 @@ export async function listDueCallbackLeads(limit = 25): Promise<Lead[]> {
 
       return Boolean(lead.directDial || lead.phone);
     })
-    .sort((a, b) => Date.parse(a.nextCallAt || "") - Date.parse(b.nextCallAt || ""))
+    .sort((a, b) => {
+      const scheduledAt = (lead: Lead) => {
+        const taskDue = (lead.tasks || [])
+          .filter((task) => task.assignee === "gloria" && task.status === "open" && !task.scheduledAt)
+          .map((task) => Date.parse(task.dueAt || ""))
+          .filter((value) => Number.isFinite(value) && value <= now)
+          .sort((left, right) => left - right)[0];
+        return taskDue ?? Date.parse(lead.nextCallAt || "");
+      };
+      return scheduledAt(a) - scheduledAt(b);
+    })
     .slice(0, limit);
 }
 
-export async function markLeadCallbackScheduled(leadId: string): Promise<void> {
+export async function markLeadCallbackScheduled(leadId: string, taskId?: string): Promise<void> {
   if (!leadId) {
     return;
   }
@@ -1727,6 +1870,11 @@ export async function markLeadCallbackScheduled(leadId: string): Promise<void> {
           ...lead,
           status: "angerufen" as const,
           nextCallAt: undefined,
+          tasks: taskId
+            ? (lead.tasks || []).map((task) => task.id === taskId
+              ? { ...task, scheduledAt: new Date().toISOString() }
+              : task)
+            : lead.tasks,
         }
       : lead,
   );
@@ -1748,10 +1896,11 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     rejections: number;
   }>
 > {
-  const [leads, campaignState, scopedEvents] = await Promise.all([
+  const [leads, campaignState, scopedEvents, reportDb] = await Promise.all([
     readLeads(userId),
     readCampaignState(userId),
     getRecentConversationEvents({ userId, minutes: 20, limit: 400 }),
+    readReportDatabase(userId),
   ]);
 
   const eventMap = new Map<string, ConversationEvent>();
@@ -1770,9 +1919,11 @@ export async function getCampaignListsSummary(userId?: string): Promise<
   ]);
 
   const orderedEvents = [...recentEvents].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const manualCallSids = new Set(reportDb.reports.filter((report) => getCallSource(report, leads) === "manual").map((report) => report.callSid).filter(Boolean));
   const activeSessions = new Map<string, { company: string; topic: string; lastEventType: string }>();
 
   for (const event of orderedEvents) {
+    if (event.callSid && manualCallSids.has(event.callSid)) continue;
     const key = event.callSid || `no-sid-${event.company}-${event.topic}`;
     activeSessions.set(key, {
       company: event.company,
@@ -1788,6 +1939,7 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     }
 
     for (const lead of leads) {
+      if (lead.callSource === "manual") continue;
       const sameCompany = lead.company.trim().toLowerCase() === session.company.trim().toLowerCase();
       const sameTopic = String(lead.topic || "").trim() === String(session.topic || "").trim();
       if (!sameCompany || !sameTopic) {
@@ -1813,6 +1965,8 @@ export async function getCampaignListsSummary(userId?: string): Promise<
   >();
 
   for (const lead of leads) {
+    if (lead.callSource === "manual") continue;
+    if (isLeadCustomer(lead) && (!lead.listId || (lead.listName || "").toLowerCase().includes("manuell hinzugefügt"))) continue;
     const listId = lead.listId || "legacy";
     const listName = lead.listName || "Standardliste";
     const existing = grouped.get(listId) || {
@@ -1827,7 +1981,7 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     };
 
     existing.total += 1;
-    if (lead.status === "neu") {
+    if (lead.status === "neu" && !isLeadCustomer(lead)) {
       existing.pending += 1;
     }
     if (lead.status === "angerufen") {
@@ -1891,12 +2045,15 @@ export async function deleteCampaignList(listId: string, userId?: string): Promi
   const campaignState = await readCampaignState(userId);
 
   const isInList = (lead: Lead) => {
+    if (lead.callSource === "manual") return false;
     const leadListId = lead.listId || "legacy";
     return leadListId === listId;
   };
 
-  const removedLeads = leads.filter(isInList).length;
-  const nextLeads = leads.filter((lead) => !isInList(lead));
+  const removedLeads = leads.filter((lead) => isInList(lead) && !isLeadCustomer(lead)).length;
+  const nextLeads = leads.filter((lead) => !isInList(lead) || isLeadCustomer(lead)).map((lead) =>
+    isInList(lead) ? { ...lead, lifecycle: "customer" as const, listId: undefined, listName: undefined } : lead,
+  );
   const nextState = {
     lists: campaignState.lists.filter((entry) => entry.listId !== listId),
   };
@@ -1917,7 +2074,7 @@ export async function isCampaignListActive(listId: string, userId?: string): Pro
 export async function pullNextLeadForCampaignList(listId: string, userId?: string): Promise<Lead | undefined> {
   const leads = await readLeads(userId);
   const index = leads.findIndex(
-    (lead) => (lead.listId || "legacy") === listId && lead.status === "neu" && Boolean(lead.phone?.trim()),
+    (lead) => lead.callSource !== "manual" && (lead.listId || "legacy") === listId && !isLeadCustomer(lead) && lead.status === "neu" && Boolean(lead.phone?.trim()),
   );
 
   if (index < 0) {
@@ -1963,8 +2120,19 @@ export async function deleteReport(reportId: string): Promise<void> {
 }
 
 export async function deleteAllReports(
-  options: { userId?: string } = {},
+  options: { userId?: string; callSource?: CallSource } = {},
 ): Promise<{ deletedReports: number; deletedRecordings: number }> {
+  if (options.callSource) {
+    const reportDb = await readReportDatabase(options.userId);
+    const leads = await readLeads(options.userId);
+    const targets = reportDb.reports.filter((report) =>
+      (!options.userId || report.userId === options.userId) && getCallSource(report, leads) === options.callSource,
+    );
+    const callSids = new Set(targets.map((report) => report.callSid || report.id));
+    const deletedRecordings = reportDb.recordings.filter((recording) => callSids.has(recording.callSid)).length;
+    for (const report of targets) await deleteReport(report.id);
+    return { deletedReports: targets.length, deletedRecordings };
+  }
   const pg = await deleteAllReportsFromPostgres(options);
   if (pg.ok) {
     return { deletedReports: pg.deletedReports, deletedRecordings: pg.deletedRecordings };

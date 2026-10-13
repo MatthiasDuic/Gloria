@@ -4,6 +4,7 @@ import { createTelnyxCall, isTelnyxConfigured, TelnyxApiError } from "@/lib/teln
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
+import { storeCallReport } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       company: payload.company,
       contactName: payload.contactName,
       topic: payload.topic,
-      leadId: payload.leadId,
+      callSource: "manual" as const,
       from: selectedFrom,
       userId: sessionUser.id,
       phoneNumberId: payload.phoneNumberId,
@@ -82,6 +83,12 @@ export async function POST(request: Request) {
     };
 
     const call = await createTelnyxCall(callPayload, request);
+    await storeCallReport({
+      callSid: call.sid, callSource: "manual", userId: sessionUser.id,
+      phoneNumberId: payload.phoneNumberId, company: payload.company,
+      contactName: payload.contactName, topic: payload.topic, calledPhone: payload.to,
+      summaryChunk: "Manueller Einzelanruf gestartet.",
+    });
 
     const runtimeSnapshot = getTelephonyRuntimeSnapshot();
 

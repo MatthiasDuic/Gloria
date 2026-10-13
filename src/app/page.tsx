@@ -1,5 +1,8 @@
 ﻿"use client";
 
+import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallWorkspaceData, type CrmCalendarEntry } from "@/lib/crm-helpers";
+import GloriaCalendar from "@/components/GloriaCalendar";
+
 import CRMDashboard from "./page-crm-new";
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -997,6 +1000,7 @@ export default function HomePage() {
   const [newTopicInput, setNewTopicInput] = useState("");
   const [showNewTopicForm, setShowNewTopicForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
+  const [manualCallbackDraft, setManualCallbackDraft] = useState<{ entry: CrmCalendarEntry; at: string } | null>(null);
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<DashboardData["leads"][number] | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<Array<{
     id: string;
@@ -1044,11 +1048,6 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   void settingsOpen; void setSettingsOpen;
   const [activeView, setActiveView] = useState<"overview" | "calls" | "crm" | "calendar" | "settings" | "compliance">("overview");
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  });
-  const [selectedDayKey, setSelectedDayKey] = useState(() => toDateKey(new Date()));
   const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
   const [runningListIds, setRunningListIds] = useState<string[]>([]);
   const blockedOutboundNumbers = useMemo(() => new Set(["+18446290030"]), []);
@@ -1127,6 +1126,14 @@ export default function HomePage() {
       setDetailTopic(visiblePlaybookTopics[0]);
     }
   }, [playbookCategoryFilter, visiblePlaybookTopics, detailTopic]);
+  const manualCallData = useMemo(() => getCallWorkspaceData(data, "manual"), [data]);
+  const sharedCalendarEntries = useMemo(() => currentUser ? buildUnifiedCalendarEntries(data, currentUser.id) : [], [data, currentUser]);
+  const manualCalendarEntries = useMemo(() => buildCrmCalendarEntries(manualCallData.leads, manualCallData.reports), [manualCallData]);
+  const manualCallbacks = manualCalendarEntries.filter((entry) => entry.kind === "callback");
+  const manualCallStats = {
+    appointments: manualCallData.reports.filter((report) => report.outcome === "Termin").length,
+    rejections: manualCallData.reports.filter((report) => report.outcome === "Absage").length,
+  };
   const reportRows = useMemo(() => {
     const priority: Record<string, number> = {
       Termin: 0,
@@ -1135,75 +1142,12 @@ export default function HomePage() {
       Absage: 3,
       "Nicht erreicht / kein Kontakt": 4,
     };
-    return [...data.reports].sort((left, right) => {
+    return [...manualCallData.reports].sort((left, right) => {
       const priorityDiff = (priority[left.outcome] ?? 5) - (priority[right.outcome] ?? 5);
       if (priorityDiff !== 0) return priorityDiff;
       return (Date.parse(right.conversationDate) || 0) - (Date.parse(left.conversationDate) || 0);
     });
-  }, [data.reports]);
-  const appointmentsByDay = useMemo(() => {
-    type CalendarEntry = {
-      id: string;
-      startAt: string;
-      company: string;
-      contactName?: string;
-      topic: string;
-      kind: "appointment" | "callback";
-      report?: DashboardData["reports"][number];
-    };
-    const grouped = new Map<string, CalendarEntry[]>();
-    const callbackKeys = new Set<string>();
-    const addEntry = (entry: CalendarEntry) => {
-      const dayKey = toDateKey(new Date(entry.startAt));
-      const existing = grouped.get(dayKey) || [];
-      grouped.set(dayKey, [...existing, entry]);
-    };
-
-    for (const report of data.reports) {
-      if (currentUser && report.userId && report.userId !== currentUser.id) continue;
-      if (report.outcome === "Termin" && report.appointmentAt) {
-        addEntry({
-          id: report.id,
-          startAt: report.appointmentAt,
-          company: report.company,
-          contactName: report.contactName,
-          topic: report.topic,
-          kind: "appointment",
-          report,
-        });
-      } else if (report.outcome === "Wiedervorlage" && report.nextCallAt) {
-        if (report.leadId) callbackKeys.add(`${report.leadId}:${report.nextCallAt}`);
-        addEntry({
-          id: report.id,
-          startAt: report.nextCallAt,
-          company: report.company,
-          contactName: report.contactName,
-          topic: report.topic,
-          kind: "callback",
-          report,
-        });
-      }
-    }
-
-    for (const lead of data.leads) {
-      if (currentUser && lead.userId && lead.userId !== currentUser.id) continue;
-      if (lead.status !== "wiedervorlage" || !lead.nextCallAt) continue;
-      if (callbackKeys.has(`${lead.id}:${lead.nextCallAt}`)) continue;
-      addEntry({
-        id: `callback-${lead.id}`,
-        startAt: lead.nextCallAt,
-        company: lead.company,
-        contactName: lead.contactName,
-        topic: lead.topic,
-        kind: "callback",
-      });
-    }
-
-    for (const entries of grouped.values()) {
-      entries.sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
-    }
-    return grouped;
-  }, [data.leads, data.reports, currentUser]);
+  }, [manualCallData.reports]);
 
   const reportingInsights = useMemo(() => {
     const reports = data.reports;
@@ -1313,28 +1257,6 @@ export default function HomePage() {
     };
   }, [data.reports]);
 
-  const calendarDays = useMemo(() => {
-    const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
-    const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
-    const start = new Date(firstOfMonth);
-    start.setDate(firstOfMonth.getDate() - firstWeekday);
-
-    return Array.from({ length: 42 }).map((_, index) => {
-      const day = new Date(start);
-      day.setDate(start.getDate() + index);
-      const key = toDateKey(day);
-      return {
-        key,
-        date: day,
-        inMonth: day.getMonth() === calendarMonth.getMonth(),
-        items: appointmentsByDay.get(key) || [],
-      };
-    });
-  }, [appointmentsByDay, calendarMonth]);
-  const selectedDayAppointments = useMemo(
-    () => appointmentsByDay.get(selectedDayKey) || [],
-    [appointmentsByDay, selectedDayKey],
-  );
   const runningListSet = useMemo(() => new Set(runningListIds), [runningListIds]);
   const selectedLeadReports = useMemo(() => {
     if (!selectedLeadForHistory) {
@@ -2142,7 +2064,7 @@ export default function HomePage() {
   async function deleteAllReports() {
     if (
       !confirm(
-        "Wirklich ALLE Gesprächsreports unwiderruflich löschen?",
+        "Wirklich alle manuellen Gesprächsreports unwiderruflich löschen? CRM-Anrufe bleiben erhalten.",
       )
     ) {
       return;
@@ -2158,7 +2080,7 @@ export default function HomePage() {
     setBusy(true);
 
     try {
-      const response = await fetch(`/api/reports?all=1`, { method: "DELETE" });
+      const response = await fetch(`/api/reports?all=1&source=manual`, { method: "DELETE" });
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         deletedReports?: number;
@@ -2169,10 +2091,31 @@ export default function HomePage() {
       }
 
       setSelectedReport(null);
-      setNotice(`Alle Gesprächsreports gelöscht (${payload.deletedReports ?? 0} Reports entfernt).`);
+      setNotice(`Manuelle Gesprächsreports gelöscht (${payload.deletedReports ?? 0} Reports entfernt). CRM-Anrufe bleiben erhalten.`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Löschen fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+
+  }
+
+  async function updateManualCallback(entry: CrmCalendarEntry, at?: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/reports", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: entry.leadId, nextCallAt: at ? new Date(at).toISOString() : "" }),
+      });
+      const payload = await response.json() as { error?: string; lead?: DashboardData["leads"][number] };
+      if (!response.ok || !payload.lead) throw new Error(payload.error || "Wiedervorlage konnte nicht gespeichert werden.");
+      const updatedLead = payload.lead;
+      setData((current) => ({ ...current, leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead) }));
+      setManualCallbackDraft(null);
+      setNotice(at ? "Manuelle Wiedervorlage verschoben." : "Manuelle Wiedervorlage erledigt.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Wiedervorlage konnte nicht gespeichert werden.");
     } finally {
       setBusy(false);
     }
@@ -2773,32 +2716,53 @@ export default function HomePage() {
           </div>
         </CollapsiblePanel>
 
-        <CollapsiblePanel title="Gesprächsreports" defaultOpen>
+        <CollapsiblePanel title="Manuelle Wiedervorlagen" defaultOpen>
+          <p className="subtle">Nur Rückrufe aus hier gestarteten Einzelanrufen. CRM-Wiedervorlagen finden Sie im CRM unter Kampagnen → Follow-ups.</p>
+          {manualCallbacks.length === 0 ? <p className="subtle">Keine offenen manuellen Wiedervorlagen.</p> : manualCallbacks.map((entry) => <div className="mini-panel bottom-gap" key={entry.id}>
+            <strong>{entry.company}</strong><p>{entry.contactName || ""} · {formatDate(entry.at)}</p>
+            {entry.leadId ? <div className="row">
+              <button className="btn ghost" disabled={busy} onClick={() => {
+                const date = new Date(entry.at);
+                setManualCallbackDraft({ entry, at: `${toDateKey(date)}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}` });
+              }}>Verschieben</button>
+              <button className="btn" disabled={busy} onClick={() => void updateManualCallback(entry)}>Erledigt</button>
+            </div> : <p className="subtle">Historische Wiedervorlage ohne automatisch geplanten Rückruf.</p>}
+          </div>)}
+          {manualCallbackDraft ? <form className="mini-panel" onSubmit={(event) => { event.preventDefault(); void updateManualCallback(manualCallbackDraft.entry, manualCallbackDraft.at); }}>
+            <label>Neuer Zeitpunkt<input type="datetime-local" required value={manualCallbackDraft.at} onChange={(event) => setManualCallbackDraft((current) => current ? { ...current, at: event.target.value } : current)} /></label>
+            <div className="row top-gap"><button className="btn" disabled={busy}>Speichern</button><button className="btn ghost" type="button" onClick={() => setManualCallbackDraft(null)}>Abbrechen</button></div>
+          </form> : null}
+        </CollapsiblePanel>
+
+        <CollapsiblePanel title="Manuelle Gesprächsreports" defaultOpen>
+          <p className="subtle">Hier erscheinen ausschließlich manuell gestartete Einzelanrufe und deren Rückrufe. Kampagnenanrufe und Gloria-Aufgaben werden im CRM dokumentiert.</p>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <span className="pill">{reportRows.length} Anrufe</span>
-              <span className="pill" style={{ background: "rgba(47,143,87,0.14)" }}>{reportingInsights.appointments} Termine</span>
-              <span className="pill" style={{ background: "rgba(192,135,38,0.14)" }}>{reportingInsights.callbacks} Wiedervorlagen</span>
-              <span className="pill" style={{ background: "rgba(194,77,77,0.12)" }}>{reportingInsights.rejections} Absagen</span>
+              <span className="pill" style={{ background: "rgba(47,143,87,0.14)" }}>{manualCallStats.appointments} Termine</span>
+              <span className="pill" style={{ background: "rgba(192,135,38,0.14)" }}>{manualCallbacks.length} Wiedervorlagen</span>
+              <span className="pill" style={{ background: "rgba(194,77,77,0.12)" }}>{manualCallStats.rejections} Absagen</span>
             </div>
             <button
               className="btn danger"
               onClick={() => void deleteAllReports()}
               disabled={busy || reportRows.length === 0}
-              title="Alle Gesprächsreports löschen"
+              title="Nur manuelle Gesprächsreports löschen"
             >
-              Alle Reports löschen
+              Manuelle Reports löschen
             </button>
           </div>
           {reportRows.length === 0 ? <p className="subtle">Noch keine Gesprächsreports vorhanden.</p> : <div style={{ overflowX: "auto" }}><table>
             <thead><tr><th>Kontakt</th><th>Ergebnis</th><th>Gespräch</th><th>Nächste Aktion</th><th>Zusammenfassung</th><th></th></tr></thead>
             <tbody>{reportRows.map((report) => {
-              const followUp = report.appointmentAt ? "Termin" : report.nextCallAt ? "Rückruf" : "Abgeschlossen";
+              const callback = manualCallbacks.find((entry) => report.leadId ? entry.leadId === report.leadId : entry.reportId === report.id);
+              const nextAt = report.appointmentAt || callback?.at;
+              const followUp = report.appointmentAt ? "Termin" : callback ? "Rückruf" : "Abgeschlossen";
               return <tr key={report.id}>
                 <td><strong>{report.company}</strong><div className="subtle">{report.contactName || "Kein Ansprechpartner"}</div><div className="subtle">{report.topic}</div></td>
                 <td><span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>{formatOutcomeLabel(report.outcome)}</span></td>
                 <td><strong>{formatDate(report.conversationDate)}</strong><div className="subtle">{report.attempts} Versuch{report.attempts === 1 ? "" : "e"}</div></td>
-                <td><strong>{followUp}</strong><div className="subtle">{report.appointmentAt || report.nextCallAt ? formatDate(report.appointmentAt || report.nextCallAt) : "Keine Aktion offen"}</div></td>
+                <td><strong>{followUp}</strong><div className="subtle">{nextAt ? formatDate(nextAt) : "Keine Aktion offen"}</div></td>
                 <td style={{ minWidth: 260, maxWidth: 380 }}><span className="subtle">{(report.summary || "Keine Zusammenfassung verfügbar.").replace(/---\s*GESPRAECHSPROTOKOLL[\s\S]*$/i, "").slice(0, 220)}{report.summary.length > 220 ? " ..." : ""}</span></td>
                 <td><div className="row" style={{ gap: 6, flexWrap: "nowrap" }}><button className="btn ghost" style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }} onClick={() => setSelectedReport(report)}>Details</button><button className="btn danger" style={{ fontSize: "0.82rem", padding: "5px 10px", whiteSpace: "nowrap" }} onClick={() => void deleteReport(report.id)} disabled={busy} title="Report löschen">🗑</button></div></td>
               </tr>;
@@ -2844,95 +2808,15 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          <div className="row spread">
-            <strong>
-              {new Intl.DateTimeFormat("de-DE", {
-                month: "long",
-                year: "numeric",
-              }).format(calendarMonth)}
-            </strong>
-            <div className="row">
-              <button
-                className="btn ghost"
-                onClick={() =>
-                  setCalendarMonth(
-                    (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
-                  )
-                }
-              >
-                ← Monat zurück
-              </button>
-              <button
-                className="btn ghost"
-                onClick={() =>
-                  setCalendarMonth(
-                    (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
-                  )
-                }
-              >
-                Monat vor →
-              </button>
-            </div>
-          </div>
-
-          <div className="calendar-grid top-gap">
-            {["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((weekday) => (
-              <div key={weekday} className="calendar-weekday">{weekday}</div>
-            ))}
-            {calendarDays.map((day) => {
-              const isSelected = day.key === selectedDayKey;
-              return (
-                <button
-                  key={day.key}
-                  className={`calendar-day ${day.inMonth ? "" : "outside"} ${isSelected ? "selected" : ""}`}
-                  onClick={() => setSelectedDayKey(day.key)}
-                >
-                  <span>{day.date.getDate()}</span>
-                  <small>{day.items.filter((item) => item.kind === "appointment").length} Termin(e)</small>
-                  <small className="calendar-callback-count">
-                    {day.items.filter((item) => item.kind === "callback").length} Wiedervorlage(n)
-                  </small>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="calendar-detail top-gap">
-            <div className="mini-panel">
-              <h3>
-                Termine und Wiedervorlagen am {new Intl.DateTimeFormat("de-DE", { dateStyle: "full" }).format(new Date(selectedDayKey))}
-              </h3>
-              {selectedDayAppointments.length > 0 ? (
-                <div className="calendar-list top-gap">
-                  {selectedDayAppointments.map((entry) => (
-                    <button
-                      key={entry.id}
-                      className={`calendar-item ${entry.kind === "callback" ? "callback" : ""}`}
-                      onClick={() => {
-                        if (entry.report) setSelectedReport(entry.report);
-                      }}
-                      disabled={!entry.report}
-                    >
-                      <strong>{entry.kind === "callback" ? "Wiedervorlage" : "Termin"} · {formatDate(entry.startAt)}</strong>
-                      <span>{entry.company}{entry.contactName ? ` · ${entry.contactName}` : ""}</span>
-                      <small>{entry.topic}</small>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="subtle top-gap">Für diesen Tag sind noch keine Termine oder Wiedervorlagen eingetragen.</p>
-              )}
-            </div>
-            <div className="mini-panel">
-              <h3>Automatische Einträge</h3>
-              <p className="subtle top-gap">
-                Gloria trägt Termine und vereinbarte Wiedervorlagen automatisch nach dem Telefonat ein. Die Farben unterscheiden Termine (blau) von Wiedervorlagen (orange).
-              </p>
-              <p className="subtle top-gap">
-                Quelle: Telefonie-Webhook und Abschlussreport.
-              </p>
-            </div>
-          </div>
+          <GloriaCalendar entries={sharedCalendarEntries} leads={data.leads} onOpenReport={(entry) => {
+            const report = data.reports.find((candidate) => candidate.id === entry.reportId);
+            if (report) setSelectedReport(report);
+            else setNotice("Der zugehörige Anrufreport ist nicht mehr verfügbar.");
+          }} onChanged={async () => {
+            const response = await fetch("/api/reports", { cache: "no-store" });
+            if (!response.ok) throw new Error(`Kalender konnte nicht aktualisiert werden (HTTP ${response.status}).`);
+            setData(await response.json() as DashboardData);
+          }} />
         </CollapsiblePanel>
       </section>
       ) : null}

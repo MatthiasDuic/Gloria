@@ -273,6 +273,7 @@ export async function POST(request: Request) {
     phoneNumberId?: string;
     callSid?: string;
     leadId?: string;
+    callSource?: "crm" | "manual";
     company?: string;
     contactName?: string;
     topic?: Topic;
@@ -307,6 +308,9 @@ export async function POST(request: Request) {
   }
 
   // Transcript always persisted regardless of recording consent (for report detail).
+  if (payload.callSource !== undefined && payload.callSource !== "crm" && payload.callSource !== "manual") {
+    return NextResponse.json({ error: "Ungültiger Anrufbereich." }, { status: 400 });
+  }
   const transcriptPersist = await persistTranscriptArray(payload.transcript, payload.callSid, payload.userId);
   if (!transcriptPersist.persisted && transcriptPersist.normalizedCount > 0) {
     console.warn("transcript.persist_failed", {
@@ -344,6 +348,7 @@ export async function POST(request: Request) {
           ? `${payload.summary}\n\n${transcriptFallback}`
           : payload.summary;
         const report = await storeCallReport({
+          callSource: payload.callSource,
           userId: finalUserId,
           phoneNumberId: payload.phoneNumberId || existingByCallSid?.phoneNumberId,
           callSid: payload.callSid,
@@ -374,6 +379,7 @@ export async function POST(request: Request) {
 
     if (payload.callSid && payload.company && payload.topic && payload.summaryChunk?.trim()) {
       const report = await storeCallReport({
+        callSource: payload.callSource,
         userId: payload.userId,
         phoneNumberId: payload.phoneNumberId,
         callSid: payload.callSid,
@@ -396,6 +402,7 @@ export async function POST(request: Request) {
 
     if (payload.callSid && payload.company && payload.topic && payload.recordingUrl) {
       const report = await storeCallReport({
+        callSource: payload.callSource,
         userId: payload.userId,
         phoneNumberId: payload.phoneNumberId,
         callSid: payload.callSid,
@@ -427,6 +434,7 @@ export async function POST(request: Request) {
 
       if (existing) {
         const report = await storeCallReport({
+          callSource: payload.callSource,
           userId: payload.userId || existing.userId,
           phoneNumberId: payload.phoneNumberId || existing.phoneNumberId,
           callSid: payload.callSid,
@@ -460,6 +468,7 @@ export async function POST(request: Request) {
     ? `${payload.summary}\n\n${transcriptFallback}`
     : payload.summary;
   const report = await storeCallReport({
+    callSource: payload.callSource,
     userId: payload.userId,
     phoneNumberId: payload.phoneNumberId,
     callSid: payload.callSid,

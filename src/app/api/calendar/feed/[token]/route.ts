@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { verifyCalendarFeedToken } from "@/lib/calendar-feed";
 import { getDashboardData } from "@/lib/storage";
 import { findUserById } from "@/lib/report-db";
+import { buildUnifiedCalendarEntries } from "@/lib/crm-helpers";
+import { getCalendarEntryColor } from "@/lib/calendar-view";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,20 +52,20 @@ export async function GET(
   const calendarName = `Gloria Termine und Wiedervorlagen – ${user?.realName || user?.companyName || user?.username || "User"}`;
 
   const events: string[] = [];
-  const callbackKeys = new Set<string>();
 
   const addEvent = (event: {
     id: string;
     startAt: string;
     durationMinutes: number;
+    endAt?: string;
     title: string;
-    category: "Termin" | "Wiedervorlage";
+    category: "Termin" | "Wiedervorlage" | "Sperrzeit";
     color: string;
     description: string;
   }) => {
     const start = new Date(event.startAt);
     if (Number.isNaN(start.getTime())) return;
-    const end = new Date(start.getTime() + event.durationMinutes * 60 * 1000);
+    const end = event.endAt ? new Date(event.endAt) : new Date(start.getTime() + event.durationMinutes * 60 * 1000);
     events.push(
       [
         "BEGIN:VEVENT",
@@ -82,64 +84,24 @@ export async function GET(
     );
   };
 
-  for (const report of dashboard.reports) {
-    if (report.outcome === "Termin" && report.appointmentAt) {
-      addEvent({
-        id: report.id || report.callSid || report.appointmentAt,
-        startAt: report.appointmentAt,
-        durationMinutes: 90,
-        title: `Termin: ${report.company} (${report.topic})`,
-        category: "Termin",
-        color: "#2563EB",
-        description: [
-          `Thema: ${report.topic}`,
-          `Firma: ${report.company}`,
-          `Ansprechpartner: ${report.contactName || "-"}`,
-          "",
-          "Gespraechsnotiz (Gloria):",
-          report.summary || "-",
-        ].join("\n"),
-      });
-    }
-
-    if (report.outcome === "Wiedervorlage" && report.nextCallAt) {
-      if (report.leadId) callbackKeys.add(`${report.leadId}:${report.nextCallAt}`);
-      addEvent({
-        id: report.id || report.callSid || report.nextCallAt,
-        startAt: report.nextCallAt,
-        durationMinutes: 15,
-        title: `Wiedervorlage: ${report.company}`,
-        category: "Wiedervorlage",
-        color: "#D97706",
-        description: [
-          `Thema: ${report.topic}`,
-          `Firma: ${report.company}`,
-          `Ansprechpartner: ${report.contactName || "-"}`,
-          "",
-          "Wiedervorlage / geplanter Rückruf",
-          report.summary || "-",
-        ].join("\n"),
-      });
-    }
-  }
-
-  for (const lead of dashboard.leads) {
-    if (lead.status !== "wiedervorlage" || !lead.nextCallAt) continue;
-    if (callbackKeys.has(`${lead.id}:${lead.nextCallAt}`)) continue;
-
+  for (const entry of buildUnifiedCalendarEntries(dashboard, userId)) {
+    const appointment = entry.kind === "appointment";
     addEvent({
-      id: `callback-${lead.id}`,
-      startAt: lead.nextCallAt,
-      durationMinutes: 15,
-      title: `Wiedervorlage: ${lead.company}`,
-      category: "Wiedervorlage",
-      color: "#D97706",
+      id: entry.id,
+      startAt: entry.at,
+      endAt: entry.endAt,
+      durationMinutes: appointment ? 90 : 15,
+      title: entry.kind === "block" ? `Sperrzeit: ${entry.company}` : appointment ? `Termin: ${entry.company} (${entry.topic})` : `Wiedervorlage: ${entry.company}`,
+      category: entry.kind === "block" ? "Sperrzeit" : appointment ? "Termin" : "Wiedervorlage",
+      color: getCalendarEntryColor(entry),
       description: [
-        `Thema: ${lead.topic}`,
-        `Firma: ${lead.company}`,
-        `Ansprechpartner: ${lead.contactName || "-"}`,
+        `Thema: ${entry.topic}`,
+        `Quelle: ${entry.kind === "block" ? "Eigene Sperrzeit" : entry.callSource === "manual" ? "Analoge Termine" : "CRM"}`,
+        `Kontakt: ${entry.company}`,
+        `Ansprechpartner: ${entry.contactName || "-"}`,
         "",
-        "Wiedervorlage / geplanter Rückruf",
+        entry.calendarEventId ? "Notiz:" : appointment ? "Gespraechsnotiz (Gloria):" : "Wiedervorlage / geplanter Rückruf",
+        entry.summary || "-",
       ].join("\n"),
     });
   }

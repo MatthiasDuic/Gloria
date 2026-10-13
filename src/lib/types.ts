@@ -8,6 +8,8 @@ export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
 export type LeadCustomerKind = "privat" | "firma";
 export type LeadCustomerOwner = "BarmeniaGothaer" | "Agentur-Duic";
+export type LeadLifecycle = "prospect" | "customer";
+export type CallSource = "crm" | "manual";
 export type ReportOutcome =
   | "Termin"
   | "Absage"
@@ -30,9 +32,17 @@ export interface LeadTask {
   title: string;
   topic?: string;
   dueAt?: string;
+  assignee?: "user" | "gloria";
+  scheduledAt?: string;
   status: "open" | "done";
   createdAt: string;
   completedAt?: string;
+}
+
+export interface LeadNote {
+  id: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface LeadActivity {
@@ -64,6 +74,8 @@ export interface CrmSavedView {
 }
 
 export interface CrmUiPreferences {
+  crmWorkspace?: "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline";
+  crmCampaignTab?: "lists" | "prospects" | "followups" | "calls";
   crmTab?: "customers" | "pipeline" | "callbacks";
   crmDetailTab?: "stammdaten" | "produkte" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
   crmSearch?: string;
@@ -93,6 +105,9 @@ export interface LeadProductDetail {
   energyType?: string;
   startDate?: string;
   endDate?: string;
+  applicationStatus?: "interested" | "application_submitted" | "active" | "rejected";
+  expectedUnits?: number;
+  expectedCommissionEUR?: number;
   notes?: string;
   documentName?: string;
   documentUrl?: string;
@@ -101,11 +116,13 @@ export interface LeadProductDetail {
 
 export interface Lead {
   id: string;
+  callSource?: CallSource;
   userId?: string;
   listId?: string;
   listName?: string;
   customerKind?: LeadCustomerKind;
   customerOwner?: LeadCustomerOwner;
+  lifecycle?: LeadLifecycle;
   company: string;
   contactName: string;
   phone: string;
@@ -123,6 +140,7 @@ export interface Lead {
   affiliations?: LeadAffiliation[];
   emailHistory?: LeadEmailActivity[];
   tasks?: LeadTask[];
+  notes?: LeadNote[];
   activities?: LeadActivity[];
   crmPipeline?: LeadPipeline;
   topic: Topic;
@@ -203,6 +221,7 @@ export type ScriptConfig = TopicPolicyConfig;
 
 export interface CallReport {
   id: string;
+  callSource?: CallSource;
   userId?: string;
   phoneNumberId?: string;
   callSid?: string;
@@ -265,10 +284,22 @@ export interface LearningResponse {
 }
 
 export interface DashboardData {
+  calendarEvents?: CalendarEvent[];
   leads: Lead[];
   reports: CallReport[];
   topicPolicies: TopicPolicyConfig[];
   metrics: MetricSummary;
   reportStorageMode: "postgres" | "file";
   topicPoliciesStorageMode: "postgres" | "file";
+}
+
+export interface CalendarEvent {
+  id: string;
+  userId: string;
+  type: "followup" | "block";
+  title: string;
+  startAt: string;
+  endAt: string;
+  note?: string;
+  createdAt: string;
 }

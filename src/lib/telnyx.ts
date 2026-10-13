@@ -1,4 +1,4 @@
-import type { Topic } from "./types";
+import type { CallSource, Topic } from "./types";
 import { prepareCall } from "./telephony-runtime";
 import { listPhoneNumbersByUser } from "./report-db";
 
@@ -21,6 +21,7 @@ export interface TelnyxCallRequest {
   ownerGesellschaft?: string;
   voiceId?: string;
   isTestCall?: boolean;
+  callSource?: CallSource;
   from?: string;
   previousSummary?: string;
   isCallback?: boolean;
@@ -155,6 +156,7 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     ownerGesellschaft: payload.ownerGesellschaft,
     voiceId: payload.voiceId,
     isTestCall: payload.isTestCall === true,
+    callSource: payload.callSource || (payload.isTestCall || !payload.leadId ? "manual" : "crm"),
     isCallback: payload.isCallback ? 1 : 0,
     previousSummary: (payload.previousSummary || "").slice(0, 320),
   };

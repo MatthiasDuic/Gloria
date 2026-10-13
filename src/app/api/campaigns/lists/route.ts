@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   addLeadTask,
+  addLeadNote,
   appendLeadEmailHistory,
   completeLeadTask,
   deleteCampaignList,
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "stop" | "run" | "delete" | "delete_lead" | "delete_leads" | "update_note" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
+      action?: "start" | "stop" | "run" | "delete" | "delete_lead" | "delete_leads" | "update_note" | "add_lead_note" | "convert_to_customer" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
       leadId?: string;
       leadIds?: string[];
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
         title?: string;
         topic?: string;
         dueAt?: string;
+        assignee?: "user" | "gloria";
       };
       updates?: Partial<Lead>;
       email?: {
@@ -97,11 +99,53 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, action, lead: updatedLead });
     }
 
+    if (action === "add_lead_note") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      const text = String(payload.note || "").trim();
+      if (!text) {
+        return NextResponse.json({ error: "Notiztext ist erforderlich." }, { status: 400 });
+      }
+      const updatedLead = await addLeadNote(leadId, text, sessionUser.id);
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
+    if (action === "convert_to_customer") {
+      if (!leadId) {
+        return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
+      }
+      if (payload.updates?.customerKind !== "privat" && payload.updates?.customerKind !== "firma") {
+        return NextResponse.json({ error: "Bitte Privat- oder Firmenkunde auswählen." }, { status: 400 });
+      }
+      const updates = {
+        ...payload.updates,
+        lifecycle: "customer" as const,
+      };
+      if (sessionUser.role !== "master") {
+        delete updates.customerOwner;
+      }
+      const updatedLead = await updateLeadDetails(leadId, updates, sessionUser.id);
+      if (!updatedLead) {
+        return NextResponse.json({ error: "Interessent nicht gefunden." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, action, lead: updatedLead });
+    }
+
     if (action === "update_lead_details") {
       if (!leadId) {
         return NextResponse.json({ error: "leadId ist erforderlich." }, { status: 400 });
       }
       const updates = { ...(payload.updates || {}) };
+      if (updates.status !== undefined && !["neu", "angerufen", "termin", "absage", "wiedervorlage"].includes(updates.status)) {
+        return NextResponse.json({ error: "Ungültiger Kontaktstatus." }, { status: 400 });
+      }
+      if (updates.nextCallAt && !Number.isFinite(Date.parse(updates.nextCallAt))) {
+        return NextResponse.json({ error: "Ungültiger Wiedervorlagezeitpunkt." }, { status: 400 });
+      }
       if (sessionUser.role !== "master") {
         // Normal users cannot change owner assignment or core pipeline metrics.
         delete updates.customerOwner;
@@ -145,18 +189,24 @@ export async function POST(request: Request) {
       }
       const title = String(payload.task?.title || "").trim();
       const topic = String(payload.task?.topic || "").trim();
+      const assignee = payload.task?.assignee === "gloria" ? "gloria" : "user";
+      const dueAt = String(payload.task?.dueAt || "").trim() || undefined;
       if (!title) {
         return NextResponse.json({ error: "Aufgabentitel ist erforderlich." }, { status: 400 });
       }
       if (!topic) {
         return NextResponse.json({ error: "Thema für Gloria ist erforderlich." }, { status: 400 });
       }
+      if (assignee === "gloria" && (!dueAt || !Number.isFinite(Date.parse(dueAt)))) {
+        return NextResponse.json({ error: "Für automatische Gloria-Anrufe ist ein gültiger Fälligkeitszeitpunkt erforderlich." }, { status: 400 });
+      }
       const updatedLead = await addLeadTask(
         leadId,
         {
           title,
           topic,
-          dueAt: String(payload.task?.dueAt || "").trim() || undefined,
+          dueAt,
+          assignee,
         },
         sessionUser.id,
       );

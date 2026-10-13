@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteAllReports, deleteReport, getDashboardData, storeCallReport } from "@/lib/storage";
+import { deleteAllReports, deleteReport, getDashboardData, getLeadById, storeCallReport, updateLeadDetails } from "@/lib/storage";
 import { TOPICS, type Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
 
   const report = await storeCallReport({
     userId: sessionUser.id,
+    callSource: "manual",
     callSid: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     company,
     contactName: payload.contactName?.trim() || undefined,
@@ -98,7 +99,11 @@ export async function DELETE(request: NextRequest) {
   // Bulk-Löschung ist immer auf den angemeldeten Benutzer begrenzt.
   // Dadurch bleiben Report-Daten strikt mandantensepariert.
   if (all === "1" && !reportId) {
-    const result = await deleteAllReports({ userId: sessionUser.id });
+    const callSource = request.nextUrl.searchParams.get("source");
+    if (callSource !== "manual" && callSource !== "crm") {
+      return NextResponse.json({ error: "Bitte den Anrufbereich auswählen." }, { status: 400 });
+    }
+    const result = await deleteAllReports({ userId: sessionUser.id, callSource });
     return NextResponse.json({
       ok: true,
       deletedReports: result.deletedReports,
@@ -119,4 +124,26 @@ export async function DELETE(request: NextRequest) {
 
   await deleteReport(reportId);
   return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(request: NextRequest) {
+  const sessionUser = getSessionUserFromRequest(request);
+  if (!sessionUser) return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  const payload = await request.json() as { leadId?: string; nextCallAt?: string };
+  if (!payload.leadId || typeof payload.nextCallAt !== "string"
+    || (payload.nextCallAt && !Number.isFinite(Date.parse(payload.nextCallAt)))) {
+    return NextResponse.json({ error: "Ungültige manuelle Wiedervorlage." }, { status: 400 });
+  }
+  const lead = await getLeadById(payload.leadId, sessionUser.id);
+  if (!lead || lead.callSource !== "manual") return NextResponse.json({ error: "Manuelle Wiedervorlage nicht gefunden." }, { status: 404 });
+  try {
+    const updated = await updateLeadDetails(lead.id, {
+      nextCallAt: payload.nextCallAt, status: payload.nextCallAt ? "wiedervorlage" : "angerufen",
+    }, sessionUser.id);
+    if (!updated) return NextResponse.json({ error: "Manuelle Wiedervorlage nicht gefunden." }, { status: 404 });
+    return NextResponse.json({ ok: true, lead: updated });
+  } catch (error) {
+    console.error("Manuelle Wiedervorlage konnte nicht gespeichert werden:", error);
+    return NextResponse.json({ error: "Wiedervorlage konnte nicht gespeichert werden." }, { status: 500 });
+  }
 }

@@ -111,6 +111,7 @@ export async function POST(request: Request) {
       csvText?: string;
       listName?: string;
       listId?: string;
+      lifecycle?: "prospect" | "customer";
     };
 
     if (!payload.csvText?.trim()) {
@@ -124,6 +125,7 @@ export async function POST(request: Request) {
       listId: payload.listId,
       listName: payload.listName,
       userId: sessionUser.id,
+      lifecycle: payload.lifecycle === "customer" ? "customer" : "prospect",
     });
     return NextResponse.json(result);
   } catch (error) {

@@ -818,7 +818,7 @@ label {
 }
 
 .calendar-day small {
-  color: #55719a;
+  color: #2563eb;
   font-size: 0.76rem;
 }
 
@@ -850,7 +850,8 @@ label {
 .calendar-item {
   width: 100%;
   border: 1px solid #cad6ea;
-  background: #ffffff;
+  border-left: 4px solid #2563eb;
+  background: #eff6ff;
   border-radius: 10px;
   padding: 10px;
   cursor: pointer;
@@ -882,6 +883,41 @@ label {
 .calendar-item small {
   color: #5a7397;
 }
+
+.calendar-view-controls {
+  flex-wrap: wrap;
+}
+
+.calendar-color-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-weight: 600;
+}
+
+.calendar-color-legend .appointment { color: #2563eb; }
+.calendar-color-legend .callback { color: #b45309; }
+
+.calendar-period {
+  display: grid;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.calendar-period-week { grid-template-columns: repeat(7, minmax(190px, 1fr)); }
+.calendar-period-workweek { grid-template-columns: repeat(5, minmax(190px, 1fr)); }
+
+.calendar-period > .calendar-period-day {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid #ced8ea;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.calendar-period-day h3 { font-size: 0.95rem; margin: 0; }
+.calendar-period-day .calendar-item { overflow-wrap: anywhere; }
 
 table {
   width: 100%;

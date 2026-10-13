@@ -12,6 +12,8 @@ function sanitizePreferences(input: unknown): CrmUiPreferences {
 
   const row = input as Record<string, unknown>;
   return {
+    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "pipeline" ? row.crmWorkspace : undefined,
+    crmCampaignTab: row.crmCampaignTab === "lists" || row.crmCampaignTab === "prospects" || row.crmCampaignTab === "followups" || row.crmCampaignTab === "calls" ? row.crmCampaignTab : undefined,
     crmTab: row.crmTab === "customers" || row.crmTab === "pipeline" || row.crmTab === "callbacks" ? row.crmTab : undefined,
     crmDetailTab:
       row.crmDetailTab === "stammdaten"

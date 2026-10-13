@@ -131,6 +131,9 @@ type DecodedClientState = {
   topic?: string;
   leadId?: string;
   userId?: string;
+  callSource?: "crm" | "manual";
+  isTestCall?: boolean;
+  calledPhone?: string;
 };
 
 function decodeClientState(raw?: string): DecodedClientState {
@@ -190,6 +193,8 @@ async function postRecordingToCallsWebhook(params: {
   const payload = {
     userId: params.state.userId,
     leadId: params.state.leadId,
+    callSource: params.state.callSource || (params.state.isTestCall || !params.state.leadId ? "manual" : "crm"),
+    calledPhone: params.state.calledPhone,
     callSid: params.callSid,
     company: params.state.company,
     contactName: params.state.contactName,

@@ -3,10 +3,10 @@ import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
 import { appointmentOfferInstruction, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, detectAppointmentPreference, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
-import { computeFreeSlots, freeSlotsToPrompt, loadBusySlots } from "./busy.js";
+import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
 import { advanceContactRouting, createContactRoutingState, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
-import { postReport } from "./finalize.js";
+import { parseSlotPhraseToIso, postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
@@ -1042,6 +1042,22 @@ export async function handleOpenAiRealtimeTelnyxStream(
         handledToolCalls.delete(tool.callId);
         sendToolResult(tool.callId, { ok: false, error: decision.error, instruction: decision.instruction });
       } else {
+        const startAt = parseSlotPhraseToIso(decision.slotPhrase);
+        const busySlots = await loadBusySlots({ userId: ctx.userId });
+        if (!startAt || Date.parse(startAt) <= Date.now() || !busySlots || !isAppointmentSlotFree(startAt, busySlots)) {
+          handledToolCalls.delete(tool.callId);
+          ctx.selectedAppointmentSlot = undefined;
+          ctx.appointmentSlotsOffered = false;
+          ctx.appointmentOfferedSlots = [];
+          const instruction = !busySlots
+            ? "Der Kalender ist momentan nicht verfügbar. Bestätige keinen Termin. Erkläre höflich, dass die Verfügbarkeit erst geprüft werden muss."
+            : "Der gewünschte Zeitpunkt ist nicht frei oder konnte nicht eindeutig bestimmt werden. Bestätige ihn nicht; biete einen anderen freien Zeitpunkt an.";
+          if (busySlots) ctx.freeSlotsPrompt = freeSlotsToPrompt(computeFreeSlots(busySlots, { daysAhead: 60, maxCount: 40, minLeadDays: 7 }));
+          sendToolResult(tool.callId, { ok: false, error: busySlots ? "slot_unavailable" : "calendar_unavailable", instruction });
+          updateSession();
+          requestResponse(instruction);
+          return;
+        }
         const speechSlotPhrase = convertSlotPhraseForSpeech(decision.slotPhrase);
         ctx.confirmedSlotPhrase = decision.slotPhrase;
         ctx.appointmentMode = appointmentMode;
@@ -1399,16 +1415,23 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       const calendarTask = loadBusySlots({ userId: ctx.userId }).then((slots) => {
         if (!ctx) return;
-        const busySlots = slots || [];
+        if (!slots) {
+          ctx.freeSlotsPrompt = "KALENDER NICHT VERFÜGBAR: Keine Termine anbieten oder bestätigen, bevor die Verfügbarkeit erfolgreich geprüft wurde.";
+          return;
+        }
+        const busySlots = slots;
         const free = computeFreeSlots(busySlots, {
           daysAhead: 60,
           maxCount: 40,
-          bufferMinutes: 90,
+          reservationMinutes: 90,
           minLeadDays: 7,
         });
         ctx.freeSlotsPrompt = freeSlotsToPrompt(free);
         log.info("realtime.calendar_applied", { callSid: ctx.callSid, busy: busySlots.length, free: free.length });
-      }).catch(() => undefined);
+      }).catch((error: unknown) => {
+        log.warn("realtime.calendar_failed", { error: error instanceof Error ? error.message : String(error) });
+        if (ctx) ctx.freeSlotsPrompt = "KALENDER NICHT VERFÜGBAR: Keine Termine bestätigen.";
+      });
 
       // Single session.update after both background tasks complete.
       void Promise.allSettled([policyTask, calendarTask]).then(() => { if (ctx) updateSession(); });

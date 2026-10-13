@@ -10,6 +10,7 @@ import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
 import { isWithinCampaignHours } from "@/lib/campaign-schedule";
 import { sendOperationalEmail } from "@/lib/mailer";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
+import { isDueGloriaTask } from "@/lib/crm-helpers";
 
 export const runtime = "nodejs";
 
@@ -67,12 +68,17 @@ async function handle(request: Request) {
 
   for (let idx = 0; idx < dueLeads.length; idx++) {
     const lead = dueLeads[idx];
+    const now = Date.now();
+    const dueGloriaTask = (lead.tasks || [])
+      .filter((task) => isDueGloriaTask(task, now))
+      .sort((a, b) => Date.parse(a.dueAt || "") - Date.parse(b.dueAt || ""))[0];
 
     // Hard stop guard: callbacks must pause immediately after list stop and
-    // continue only when list gets started again.
+    // continue only when list gets started again. Explicit Gloria tasks are
+    // independent CRM reminders and do not require an active campaign.
     const listId = lead.listId || "legacy";
     const stillActive = await isCampaignListActive(listId, lead.userId);
-    if (!stillActive) {
+    if (!stillActive && !dueGloriaTask && lead.callSource !== "manual") {
       const reason = "list_not_active";
       failed.push({ leadId: lead.id, company: lead.company, reason });
       logLine({ event: "skip_lead", leadId: lead.id, reason });
@@ -91,16 +97,19 @@ async function handle(request: Request) {
 
     try {
       const rawSummary = await getLatestReportSummaryForLead(lead.id, lead.userId);
-      const previousSummary = rawSummary
-        ? rawSummary.replace(/\s+/g, " ").trim().slice(0, 800)
-        : undefined;
+      const previousSummaryParts = [
+        rawSummary ? rawSummary.replace(/\s+/g, " ").trim() : "",
+        dueGloriaTask ? `Von Gloria zu erledigende Aufgabe: ${dueGloriaTask.title}` : "",
+      ].filter(Boolean);
+      const previousSummary = previousSummaryParts.join(" | ").slice(0, 800) || undefined;
       const call = await createTelnyxCall(
         {
           to,
           company: lead.company,
           contactName: lead.contactName,
-          topic: lead.topic,
+          topic: dueGloriaTask?.topic || lead.topic,
           leadId: lead.id,
+          callSource: lead.callSource || "crm",
           userId: lead.userId,
           previousSummary,
           isCallback: true,
@@ -108,14 +117,18 @@ async function handle(request: Request) {
         request,
       );
 
-      await markLeadCallbackScheduled(lead.id);
+      await markLeadCallbackScheduled(lead.id, dueGloriaTask?.id);
       await storeCallReport({
         callSid: call.sid,
         leadId: lead.id,
+        callSource: lead.callSource || "crm",
+        calledPhone: to,
         company: lead.company,
         contactName: lead.contactName,
-        topic: lead.topic,
-        summary: `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
+        topic: dueGloriaTask?.topic || lead.topic,
+        summary: dueGloriaTask
+          ? `Automatischer Gloria-Aufgabenanruf gestartet: ${dueGloriaTask.title} (${new Date().toISOString()}).`
+          : `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
         outcome: "Nicht erreicht / kein Kontakt",
         attempts: (lead.attempts || 0) + 1,
         userId: lead.userId,

@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { TOPICS } from "./types";
-import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lead, LeadActivity, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
-import type { LeadEmailActivity } from "./types";
+import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lead, LeadActivity, LeadNote, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
+import type { CalendarEvent, LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
 
@@ -244,6 +244,8 @@ function parseCrmUiPreferences(value: unknown): CrmUiPreferences {
   }
   const row = value as Record<string, unknown>;
   return {
+    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "pipeline" ? row.crmWorkspace : undefined,
+    crmCampaignTab: row.crmCampaignTab === "lists" || row.crmCampaignTab === "prospects" || row.crmCampaignTab === "followups" || row.crmCampaignTab === "calls" ? row.crmCampaignTab : undefined,
     crmTab: row.crmTab === "customers" || row.crmTab === "pipeline" || row.crmTab === "callbacks" ? row.crmTab : undefined,
     crmDetailTab:
       row.crmDetailTab === "stammdaten"
@@ -321,7 +323,10 @@ function parseLeadTasks(value: unknown): Lead["tasks"] {
       return {
         id,
         title,
+        topic: typeof row.topic === "string" ? row.topic : undefined,
         dueAt: typeof row.dueAt === "string" ? row.dueAt : undefined,
+        assignee: row.assignee === "gloria" ? ("gloria" as const) : ("user" as const),
+        scheduledAt: typeof row.scheduledAt === "string" ? row.scheduledAt : undefined,
         status,
         createdAt,
         completedAt: typeof row.completedAt === "string" ? row.completedAt : undefined,
@@ -329,6 +334,29 @@ function parseLeadTasks(value: unknown): Lead["tasks"] {
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   return entries.length ? entries : undefined;
+}
+
+function parseLeadNotes(value: unknown): LeadNote[] | undefined {
+  let source = value;
+  if (typeof value === "string") {
+    try {
+      source = JSON.parse(value);
+    } catch (error) {
+      console.warn("Invalid lead notes JSON:", error instanceof Error ? error.message : String(error));
+      return undefined;
+    }
+  }
+  if (!Array.isArray(source)) return undefined;
+  return source
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const id = typeof row.id === "string" ? row.id : "";
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
+      return id && text && createdAt ? { id, text, createdAt } : null;
+    })
+    .filter((entry): entry is LeadNote => Boolean(entry));
 }
 
 function parseLeadActivities(value: unknown): Lead["activities"] {
@@ -683,6 +711,7 @@ async function initializeSchema() {
     ALTER TABLE gloria_reports
     ADD COLUMN IF NOT EXISTS phone_number_id TEXT;
   `);
+  await db.query(`ALTER TABLE gloria_reports ADD COLUMN IF NOT EXISTS call_source TEXT;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_reports_call_sid_idx
@@ -824,6 +853,8 @@ async function initializeSchema() {
       next_call_at TIMESTAMPTZ,
       status TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
+      lifecycle TEXT,
+      notes JSONB,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -861,6 +892,9 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS tasks JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS activities JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS crm_pipeline JSONB;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS lifecycle TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS call_source TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS notes JSONB;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_leads_status_idx
@@ -885,6 +919,15 @@ async function initializeSchema() {
     ADD COLUMN IF NOT EXISTS user_id TEXT;
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS gloria_calendar_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      payload JSONB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS gloria_calendar_events_user_idx ON gloria_calendar_events (user_id);
+  `);
+
   schemaReady = true;
 }
 
@@ -896,6 +939,34 @@ async function ensureSchema(): Promise<void> {
     });
   }
   await schemaInitialization;
+}
+
+export async function readCalendarEventsFromPostgres(userId: string): Promise<CalendarEvent[] | null> {
+  if (!shouldUsePostgres()) return null;
+  await ensureSchema();
+  const result = await getPool().query<{ payload: CalendarEvent }>(
+    "SELECT payload FROM gloria_calendar_events WHERE user_id = $1", [userId],
+  );
+  return result.rows.map((row) => row.payload);
+}
+
+export async function saveCalendarEventToPostgres(event: CalendarEvent): Promise<boolean> {
+  if (!shouldUsePostgres()) return false;
+  await ensureSchema();
+  const result = await getPool().query(
+    `INSERT INTO gloria_calendar_events (id, user_id, payload) VALUES ($1,$2,$3::jsonb)
+     ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload WHERE gloria_calendar_events.user_id = EXCLUDED.user_id`,
+    [event.id, event.userId, JSON.stringify(event)],
+  );
+  if (!result.rowCount) throw new Error("Kalendereintrag konnte nicht aktualisiert werden.");
+  return true;
+}
+
+export async function deleteCalendarEventFromPostgres(id: string, userId: string): Promise<boolean | null> {
+  if (!shouldUsePostgres()) return null;
+  await ensureSchema();
+  const result = await getPool().query("DELETE FROM gloria_calendar_events WHERE id = $1 AND user_id = $2", [id, userId]);
+  return Boolean(result.rowCount);
 }
 
 function makeId(prefix: string): string {
@@ -1413,6 +1484,7 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
         id,
         user_id,
         phone_number_id,
+        call_source,
         call_sid,
         lead_id,
         company,
@@ -1453,6 +1525,7 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
       id: String(row.id),
       userId: row.user_id ? String(row.user_id) : undefined,
       phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
+      callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
       callSid: row.call_sid ? String(row.call_sid) : undefined,
       leadId: row.lead_id ? String(row.lead_id) : undefined,
       company: String(row.company),
@@ -1526,9 +1599,10 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             recording_consent,
             recording_url,
             emailed_to,
+            call_source,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW()
           )
           ON CONFLICT (call_sid) WHERE call_sid IS NOT NULL
           DO UPDATE SET
@@ -1551,6 +1625,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             recording_consent = EXCLUDED.recording_consent,
             recording_url = EXCLUDED.recording_url,
             emailed_to = EXCLUDED.emailed_to,
+            call_source = EXCLUDED.call_source,
             updated_at = NOW();
           `,
           [
@@ -1574,6 +1649,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             report.recordingConsent,
             report.recordingUrl || null,
             report.emailedTo,
+            report.callSource || null,
           ],
         );
       }
@@ -1935,7 +2011,10 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         note,
         next_call_at,
         status,
-        attempts
+        attempts,
+        lifecycle,
+        notes,
+        call_source
       FROM gloria_leads
       ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY updated_at DESC;
@@ -1948,6 +2027,8 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       listName: row.list_name ? String(row.list_name) : undefined,
       customerKind: row.customer_kind === "privat" || row.customer_kind === "firma" ? row.customer_kind : undefined,
       customerOwner: row.customer_owner === "BarmeniaGothaer" || row.customer_owner === "Agentur-Duic" ? row.customer_owner : undefined,
+      lifecycle: row.lifecycle === "customer" || row.lifecycle === "prospect" ? row.lifecycle : undefined,
+      callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
       company: String(row.company),
       contactName: String(row.contact_name || "Empfang"),
       phone: String(row.phone || ""),
@@ -1969,6 +2050,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       crmPipeline: parseLeadPipeline(row.crm_pipeline),
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
+      notes: parseLeadNotes(row.notes),
       nextCallAt: toIso(row.next_call_at),
       status:
         row.status === "neu" ||
@@ -2041,9 +2123,12 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             next_call_at,
             status,
             attempts,
+            lifecycle,
+            notes,
+            call_source,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -2076,6 +2161,9 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             next_call_at = EXCLUDED.next_call_at,
             status = EXCLUDED.status,
             attempts = EXCLUDED.attempts,
+            lifecycle = EXCLUDED.lifecycle,
+            notes = EXCLUDED.notes,
+            call_source = EXCLUDED.call_source,
             updated_at = NOW();
           `,
           [
@@ -2109,6 +2197,9 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.nextCallAt || null,
             lead.status,
             lead.attempts,
+            lead.lifecycle || null,
+            JSON.stringify(lead.notes || []),
+            lead.callSource || null,
           ],
         );
       }
@@ -2411,6 +2502,7 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
         id,
         user_id,
         phone_number_id,
+        call_source,
         call_sid,
         lead_id,
         company,
@@ -2444,6 +2536,7 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
       id: String(row.id),
       userId: row.user_id ? String(row.user_id) : undefined,
       phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
+      callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
       callSid: row.call_sid ? String(row.call_sid) : undefined,
       leadId: row.lead_id ? String(row.lead_id) : undefined,
       company: String(row.company),
