@@ -77,6 +77,13 @@ test("repeats only the consent request when the answer is unclear", () => {
   assert.match(transition.instruction, /noch einmal/);
 });
 
+test("accepts natural consent phrasing without asking for another confirmation", () => {
+  const started = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
+  const transition = advancePreparation(started.state, "Wie gesagt, es passt, wenn es schnell geht.", []);
+  assert.equal(transition.state.stage, "asking");
+  assert.match(transition.speechText || "", /privat oder gesetzlich/);
+});
+
 test("stops immediately when the customer declines during the questions", () => {
   let transition = beginPreparation(createPreparationState(policy), "Mittwoch um 11 Uhr", []);
   transition = advancePreparation(transition.state, "Ja.", []);
@@ -110,6 +117,32 @@ test("requires a complete birth date before continuing", () => {
   assert.match(transition.instruction, /Sind Sie derzeit in Behandlung/);
   transition = advancePreparation(transition.state, "Nein.", []);
   assert.match(transition.instruction, /Bestehen bekannte Diagnosen/);
+});
+
+test("accepts naturally spoken German birth dates", () => {
+  const knownInsurance: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert und bei der Debeka." }];
+  for (const birthDate of [
+    "Zwölfter Siebter neunzehnhundertvierundsiebzig.",
+    "Zwölfter Juli neunzehnhundertvierundsiebzig.",
+  ]) {
+    let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", knownInsurance);
+    transition = advancePreparation(transition.state, "Ja.", knownInsurance);
+    transition = advancePreparation(transition.state, birthDate, []);
+    assert.match(transition.speechText || "", /Wie groß sind Sie/);
+  }
+});
+
+test("skips an invalid preparation answer after three attempts", () => {
+  const knownInsurance: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert und bei der Debeka." }];
+  let transition = beginPreparation(createPreparationState(policy), "Donnerstag um 15 Uhr", knownInsurance);
+  transition = advancePreparation(transition.state, "Ja.", knownInsurance);
+  transition = advancePreparation(transition.state, "Zwölf.", []);
+  assert.equal(transition.state.questionRetryCount, 1);
+  transition = advancePreparation(transition.state, "Ja.", []);
+  assert.equal(transition.state.questionRetryCount, 2);
+  transition = advancePreparation(transition.state, "Nein.", []);
+  assert.equal(transition.state.questionRetryCount, 0);
+  assert.match(transition.speechText || "", /Das überspringen wir.*Wie groß sind Sie/);
 });
 
 test("accepts naturally spoken height and weight values", () => {

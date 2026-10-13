@@ -33,12 +33,14 @@ test("provides ready-to-speak text for deterministic PKV turns", () => {
   assert.equal(responseTextForPkvStep(2), "Und welchen Beitrag zahlen Sie heute?");
   assert.match(responseTextForPkvStep(3, "1280 Euro") || "", /615 Euro mehr.*1895 Euro monatlich.*hochgerechnet\?/);
   assert.match(responseTextForPkvStep(3, "knapp neunhundert Euro") || "", /430 Euro mehr.*1330 Euro monatlich.*hochgerechnet\?/);
+  assert.match(responseTextForPkvStep(3, "Tausend zweihundert Euro") || "", /575 Euro mehr.*1775 Euro monatlich.*hochgerechnet\?/);
   assert.equal(responseTextForPkvStep(4), undefined);
 });
 
 test("introduces the contribution trend before asking for the initial contribution", () => {
   const instruction = instructionForPkvStep(1);
-  assert.match(instruction, /Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
+  assert.match(instruction, /Herr Duic spricht aktuell mit vielen Unternehmern/);
+  assert.match(instruction, /Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Wie ist das bei Ihnen\? Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
   assert.doesNotMatch(instruction, /Es geht um die Beitragsentwicklung/);
   assert.deepEqual(advancePkvStep(1, "Damals waren es 420 Euro."), { nextStep: 2, shouldEnd: false });
 });
@@ -93,6 +95,7 @@ test("uses a deterministic 10-year projection instead of inventing a wrong value
 
 test("uses the latest contribution when the customer gives an initial and current amount", () => {
   assert.equal(extractContributionPhrase("Damals waren es 450 Euro, heute zahle ich 980 Euro."), "980 Euro");
+  assert.equal(extractContributionPhrase("Heute zahle ich Tausend zweihundert Euro."), "Tausend zweihundert Euro");
   const turns: ConversationTurn[] = [
     { role: "user", text: "Damals waren es 450 Euro." },
     { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?" },
@@ -154,7 +157,7 @@ test("does not invent a personal euro forecast or offer an agency appointment", 
   const scheduling = instructionForPkvStep(6);
   assert.match(projection, /eineinhalbmal so hoch/i);
   assert.doesNotMatch(projection, /rund hundert Euro mehr/i);
-  assert.match(scheduling, /digital per Microsoft Teams oder bei Ihnen vor Ort/i);
+  assert.match(scheduling, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/i);
   assert.doesNotMatch(scheduling, /bei Ihnen vor Ort, in (?:unserer )?Agentur|in (?:unserer )?Agentur oder/i);
 });
 

@@ -114,6 +114,7 @@ export function createPreparationStateForCall(topicKind: "pkv" | "other", topic?
 function preparationConsent(text: string): "granted" | "declined" | "unknown" {
   const normalized = text.trim().toLowerCase();
   if (/^(?:ja\b|gerne\b|klar\b|okay\b|ok\b|passt\b|in ordnung\b|machen wir\b)/i.test(normalized)) return "granted";
+  if (/\bpasst\b/i.test(normalized) && !/\b(?:passt\s+nicht|nicht\s+passt)\b/i.test(normalized)) return "granted";
   if (/^(?:nein\b|nö\b|lieber nicht|keine zeit|nicht jetzt|später|möchte ich nicht|das möchte ich nicht|will ich nicht)/i.test(normalized)) return "declined";
   return "unknown";
 }
@@ -153,7 +154,12 @@ function isAnswerPlausible(question: string, text: string): boolean {
   if (/privat\s+oder\s+gesetzlich/i.test(question)) return /\b(?:privat|gesetzlich|pkv|gkv)\b/i.test(normalized);
   if (/krankenversicherer/i.test(question)) return normalized.length >= 3 && !/^(?:ja|nein|nö|keine?|nicht)[.!?\s]*$/i.test(normalized);
   if (/monatsbeitrag/i.test(question)) return /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro)\b/i.test(normalized);
-  if (/geburtsdatum/i.test(question)) return /\b\d{1,2}[.\s]+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)[.\s,]+(?:19|20)\d{2}\b|\b\d{1,2}[./-]\d{1,2}[./-](?:19|20)\d{2}\b/i.test(normalized);
+  if (/geburtsdatum/i.test(question)) {
+    const day = "(?:\\d{1,2}\\.?|[a-zäöüß-]+(?:te|ter|ten|tes|ste|ster|sten|stes))";
+    const month = "(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|\\d{1,2}|[a-zäöüß-]+)";
+    const year = "(?:(?:19|20)?\\d{2}|(?:neunzehn|zwanzig)hundert[a-zäöüß-]*|zweitausend[a-zäöüß-]*)";
+    return new RegExp(`\\b${day}[.\\s/-]+${month}[.\\s,/-]+${year}\\b`, "i").test(normalized);
+  }
   if (/groß|gross|groess/i.test(question)) {
     return /\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter)|(?:ein|eins|eine)\s+meter(?:\s+[a-zäöüß-]+)?)\b/i.test(normalized);
   }
@@ -265,6 +271,21 @@ export function advancePreparation(
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
     if (currentQuestion && !isAnswerPlausible(currentQuestion, userText)) {
       const retries = (state.questionRetryCount || 0) + 1;
+      if (retries >= 3) {
+        const next = nextUnansweredQuestion(state, turns, (state.currentQuestionIndex ?? -1) + 1);
+        if (next) {
+          return {
+            state: { ...state, currentQuestionIndex: next.index, questionRetryCount: 0 },
+            instruction: `Die Angabe blieb unklar. Überspringe diese Frage ohne weiteres Nachhaken und stelle ausschließlich die nächste Frage: "${next.question}".`,
+            speechText: `Das überspringen wir. ${next.question}`,
+          };
+        }
+        return {
+          state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined, questionRetryCount: 0 },
+          instruction: "Die letzte Angabe blieb unklar. Frage jetzt nach der E-Mail-Adresse für die Terminbestätigung.",
+          speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+        };
+      }
       if (retries >= 2) {
         return {
           state: { ...state, questionRetryCount: retries },

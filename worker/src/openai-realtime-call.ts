@@ -62,7 +62,7 @@ const REALTIME_TOOLS = [
   {
     type: "function",
     name: "confirm_appointment",
-    description: "Speichert einen vom Kunden eindeutig ausgewählten Termin. Eine eindeutige Auswahl wie 'der Montag' genügt ohne zweite Ja-Bestätigung. Erst aufrufen, nachdem der Kunde zusätzlich gewählt hat, ob der Termin digital per Microsoft Teams oder bei ihm vor Ort stattfindet. Biete keinen Termin in der Agentur an. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
+    description: "Speichert einen vom Kunden eindeutig ausgewählten Termin. Eine eindeutige Auswahl wie 'der Montag' genügt ohne zweite Ja-Bestätigung. Erst aufrufen, nachdem der Kunde zusätzlich gewählt hat, ob der Termin digital oder bei ihm vor Ort stattfindet. Biete keinen Termin in der Agentur an. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
     parameters: {
       type: "object",
       properties: {
@@ -211,7 +211,7 @@ function buildDecisionMakerIntro(ctx: Pick<CallContext, "ownerRealName">): strin
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
   const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
   // "Gothar" gives ElevenLabs the intended pronunciation of Barmenia Gothaer.
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen. Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?`;
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Ja, ich bin eine KI, aber es geht um ein wichtiges Thema zur Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment? Ich verspreche Ihnen, es wird sich lohnen.`;
 }
 
 function buildGatekeeperIntro(ctx: Pick<CallContext, "ownerRealName" | "contactName">): string {
@@ -264,7 +264,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${APPOINTMENT_FAREWELL_TEXT}' Beende danach das Gespräch ohne weitere Frage.`
       : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -280,12 +280,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topicKind === "pkv") {
     parts.push(
       "PKV-GESPRÄCHSZIEL: Führe das Gespräch transparent, charmant, kurz und ohne Druck.\n" +
-      "1. ERÖFFNUNG: Begrüße die zuständige Person natürlich und stelle dich transparent als digitale Assistentin vor. Sprich 'Auch wenn Sie das vielleicht öfter hören: Ich verspreche Ihnen, ich bin anders als die anderen' mit einem hörbaren Lächeln: warm, charmant und selbstbewusst, nie ironisch oder aufgesetzt. Nenne danach direkt einmal den Anlass Beitragsentwicklung in der Gesundheitsversorgung und frage, ob die Person gerade einen kurzen Moment hat. Kein zusätzlicher Erlaubnisschritt.\n" +
+      "1. ERÖFFNUNG: Begrüße die zuständige Person natürlich und stelle dich transparent als KI vor. Nenne direkt den wichtigen Anlass Beitragsentwicklung in der Gesundheitsversorgung, frage, ob die Person gerade einen kurzen Moment hat, und sage danach: 'Ich verspreche Ihnen, es wird sich lohnen.' Kein zusätzlicher Erlaubnisschritt.\n" +
       "2. ANLASS UND EINSTIEGSBEITRAG: Bei Zustimmung zur Momentfrage wiederhole den Anlass nicht. Beginne direkt mit der Aussage des PKV Verbands zur jährlichen Beitragssteigerung und frage nach dem Einstiegsbeitrag. Warte auf die Antwort.\n" +
       "3. HEUTIGER BEITRAG: Frage separat und genau einmal: 'Und welchen Beitrag zahlen Sie heute?' Warte auf die Antwort. Wenn der Kunde keinen Betrag weiß oder nennen möchte, akzeptiere das ohne Nachhaken.\n" +
       "4. HOCHRECHNUNG: Nutze für die persönliche Zehn-Jahres-Beispielrechnung den zuletzt genannten heutigen Beitrag, nie den Einstiegsbeitrag. Nenne die Annahme von rund vier Prozent kurz und frage: 'Haben Sie das schon einmal für sich hochgerechnet?' Erfinde keinen persönlichen Betrag.\n" +
       "5. ÜBERLEITUNG: Greife die Reaktion auf, sage in höchstens zwei kurzen Sätzen, dass Herr Duic die individuelle Entwicklung bis zum Ruhestand und Möglichkeiten für einen besser planbaren, tragbaren Beitrag im Alter zeigt. Wecke Interesse, ohne den Ablauf zu erklären oder ein Ergebnis zu versprechen, und frage, ob der Kunde das mit Herrn Duic anschauen möchte.\n" +
-      "6. TERMIN: Erst bei klarem Interesse Zeitpräferenz und genau zwei echte freie Termine innerhalb des gewählten Fensters erfragen: vormittags 08:30–11:00 Uhr oder nachmittags 13:00–18:00 Uhr. Biete keinen ungefilterten Slot an. Danach ausschließlich digital per Microsoft Teams oder bei der Kundin/dem Kunden vor Ort anbieten; niemals die Agentur nennen. Eine klare Auswahl ist verbindlich und darf nicht erneut bestätigt werden.\n" +
+      "6. TERMIN: Erst bei klarem Interesse Zeitpräferenz und genau zwei echte freie Termine innerhalb des gewählten Fensters erfragen: vormittags 08:30–11:00 Uhr oder nachmittags 13:00–18:00 Uhr. Biete keinen ungefilterten Slot an. Frage danach ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Nenne niemals die Agentur. Eine klare Auswahl ist verbindlich und darf nicht erneut bestätigt werden.\n" +
       "7. ABSCHLUSS: Nach erfolgreicher Terminbestätigung die bestehende freiwillige Vorbereitung mit allen PKV-Fragen einzeln durchführen, E-Mail-Adresse erfragen und die Bestätigung über den bestehenden Prozess versenden.\n" +
       "SPRACHE: Sprich 'Beitragsentwicklung in der Gesundheitsversorgung'; Duic wird 'Duitsch' ausgesprochen. Eine Frage pro Turn, keine Gesundheitsfragen vor dem Termin, keine langen Erklärungen. Transparenz, Freiwilligkeit und Kundenfragen haben Vorrang.",
     );
@@ -886,7 +886,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               requestEventResponse(`Der Kunde hat verbindlich ${currentContext.selectedAppointmentSlot} gewählt und ${mode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${currentContext.selectedAppointmentSlot}" auf. Stelle keine Rückfrage zur Bestätigung und wiederhole den Termin nicht.`);
               return;
             }
-            requestDeterministicSpeech("Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?");
+            requestDeterministicSpeech("Soll der Termin digital oder bei Ihnen vor Ort stattfinden?");
             return;
           }
 
@@ -898,7 +898,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               requestEventResponse(`Der Kunde hat verbindlich ${selectedSlot} ausgewählt und ${selectedMode} als Durchführungsart genannt. Rufe jetzt confirm_appointment exakt einmal mit slot_phrase "${selectedSlot}" auf. Stelle keine Rückfrage, bestätige die Auswahl nicht zusätzlich und wiederhole den Termin nicht.`);
               return;
             }
-            requestDeterministicSpeech("Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?");
+            requestDeterministicSpeech("Soll der Termin digital oder bei Ihnen vor Ort stattfinden?");
             return;
           }
 
@@ -962,7 +962,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       const appointmentMode = detectAppointmentMode(ctx.transcript);
       if (!appointmentMode) {
         handledToolCalls.delete(tool.callId);
-        const instruction = "Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";
+        const instruction = "Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";
         sendToolResult(tool.callId, { ok: false, error: "missing_appointment_mode", instruction });
         requestResponse(instruction);
         return;

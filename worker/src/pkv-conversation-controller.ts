@@ -8,7 +8,7 @@ export type ConversationTurn = {
 export type PkvConversationStage = "need_relevance" | "need_contribution" | "need_projection" | "need_concept" | "need_interest" | "ready_to_schedule";
 export type PkvConversationAssessment = { stage: PkvConversationStage; contributionPhrase?: string; projectionDelivered: boolean; conceptDelivered: boolean; interestConfirmed: boolean };
 
-const CONTRIBUTION_PATTERN = /\b(?:ca\.?|circa|rund|etwa)?\s*(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend|eintausend|zweitausend)[a-zäöüß-]*\s+euro\b/i;
+const CONTRIBUTION_PATTERN = /\b(?:(?:ca\.?|circa|rund|etwa|knapp)\s*)?(?:(?:\d{1,3}(?:\.\d{3})+|\d{2,5})(?:,\d{1,2})?|(?:[a-zäöüß-]*tausend[a-zäöüß-]*(?:\s+[a-zäöüß-]*hundert[a-zäöüß-]*)?|[a-zäöüß-]*hundert[a-zäöüß-]*)(?:\s+[a-zäöüß-]+){0,2})\s*(?:euro|€)\b/i;
 
 function roundToFive(n: number): number {
   return Math.round(n / 5) * 5;
@@ -83,13 +83,13 @@ export function advancePkvStep(
       if (/\b(?:nein|keine\s+zeit|gerade\s+schlecht|später|keinen\s+moment)\b/i.test(text)) {
         return { nextStep: 1, shouldEnd: true };
       }
-      const answered = /\b(?:\d{2,5}(?:[.,]\d{1,2})?\s*(?:euro|€)|(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|hundert|tausend)[a-zäöüß-]*\s+euro)\b/i.test(text)
+      const answered = Boolean(extractContributionPhrase(userText))
         || /\b(?:wei[ßs]\s+ich\s+nicht|keine\s+ahnung|kann\s+mich\s+nicht\s+erinnern|nicht\s+mehr\s+erinnern|wei[ßs]\s+ich\s+nicht\s+mehr)\b/i.test(text);
       return { nextStep: answered ? 2 : 1, shouldEnd: false };
     }
 
     case 2: {
-      const hasAmount = /\b(?:\d{2,5}|hundert|tausend|euro|€)\b/i.test(text);
+      const hasAmount = Boolean(extractContributionPhrase(userText));
       const declined = /\b(?:wei[ßs]\s+ich\s+nicht|keine\s+ahnung|möchte\s+ich\s+nicht\s+(?:sagen|nennen)|will\s+ich\s+nicht\s+sagen|möchte\s+ich\s+nicht\s+angeben)\b/i.test(text);
       return { nextStep: hasAmount || declined ? 3 : 2, shouldEnd: false };
     }
@@ -133,7 +133,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
     case 0:
       return "Sage kurz: 'Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?' Keine weitere Erklärung und keine zusätzliche Frage. Bei Nein oder Zeitmangel respektvoll verabschieden; bei unklarer Reaktion kurz nachfragen.";
     case 1:
-      return "Der Anlass wurde bereits genannt; wiederhole ihn nicht. Sage exakt und ohne Vor- oder Nachsatz: 'Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?' Warte danach auf die Antwort.";
+      return "Der Anlass wurde bereits genannt; wiederhole ihn nicht. Sage exakt und ohne Vor- oder Nachsatz: 'Herr Duic spricht aktuell mit vielen Unternehmern über die Beitragsentwicklung in der Gesundheitsversorgung. Ein Thema, welches man nicht immer direkt auf dem Schirm hat, was uns aber alle gleichermaßen vor eine Herausforderung stellt. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Wie ist das bei Ihnen? Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?' Warte danach auf die Antwort.";
     case 2:
       return "Sage ohne Einleitung, Bestätigung oder Dankesfloskel genau: 'Und welchen Beitrag zahlen Sie heute?' Stelle keine weitere Frage und warte vollständig auf die Antwort.";
     case 3:
@@ -145,7 +145,7 @@ export function instructionForPkvStep(step: number, contributionPhrase?: string)
     case 4:
       return "Greife die Reaktion des Kunden auf die Hochrechnung kurz und empathisch auf. Sage knapp: 'Genau damit beschäftigt sich Herr Duic jeden Tag. Er zeigt Ihnen anhand Ihrer Situation, wie sich Ihr Beitrag bis zum Ruhestand entwickeln kann und welche Möglichkeiten es gibt, ihn im Alter besser planbar und tragbar zu halten.' Erkläre den Ablauf nicht weiter und verspreche kein Ergebnis. Frage genau einmal: 'Wäre es für Sie interessant, sich das mit Herrn Duic persönlich anzuschauen?' Warte auf klares Interesse.";
     case 6:
-      return "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin und erkläre den Ablauf nicht weiter. Frage zuerst, ob eher Vormittag oder Nachmittag passt, biete danach zwei echte freie Termine an und frage nach Auswahl ausschließlich: 'Soll der Termin digital per Microsoft Teams oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Bei Ablauf-Fragen sage freundlich, dass Herr Duic sie im Termin klärt. Nach Bestätigung führe die kurze freiwillige Vorbereitung und Abschlussfragen durch, frage nach der E-Mail-Adresse und lasse die Bestätigung über den vorgesehenen Prozess versenden.";
+      return "Der Kunde hat Interesse bestätigt. Vereinbare jetzt einen Termin und erkläre den Ablauf nicht weiter. Frage zuerst, ob eher Vormittag oder Nachmittag passt, biete danach zwei echte freie Termine an und frage nach Auswahl ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Bei Ablauf-Fragen sage freundlich, dass Herr Duic sie im Termin klärt. Nach Bestätigung führe die kurze freiwillige Vorbereitung und Abschlussfragen durch, frage nach der E-Mail-Adresse und lasse die Bestätigung über den vorgesehenen Prozess versenden.";
     default:
       return "Führe das Gespräch natürlich weiter und warte auf den Kunden.";
   }
@@ -156,7 +156,7 @@ export function responseTextForPkvStep(step: number, contributionPhrase?: string
     case 0:
       return "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?";
     case 1:
-      return "Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?";
+      return "Herr Duic spricht aktuell mit vielen Unternehmern über die Beitragsentwicklung in der Gesundheitsversorgung. Ein Thema, welches man nicht immer direkt auf dem Schirm hat, was uns aber alle gleichermaßen vor eine Herausforderung stellt. Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist. Wie ist das bei Ihnen? Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben?";
     case 2:
       return "Und welchen Beitrag zahlen Sie heute?";
     case 3:

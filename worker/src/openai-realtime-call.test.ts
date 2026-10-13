@@ -201,8 +201,8 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
-  assert.match(instructions, /Auch wenn Sie das vielleicht öfter hören.*anders als die anderen/);
-  assert.match(instructions, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung.*kurzen Moment/);
+  assert.match(instructions, /Ja, ich bin eine KI, aber es geht um ein wichtiges Thema zur Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instructions, /Haben Sie gerade einen kurzen Moment\? Ich verspreche Ihnen, es wird sich lohnen/);
   assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
@@ -258,7 +258,7 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.doesNotMatch(instructions, /Beitragsentwicklung in der privaten Krankenversicherung/i);
   assert.doesNotMatch(instructions, /PROSODIE:/);
-  assert.match(instructions, /digital per Microsoft Teams oder bei der Kundin\/dem Kunden vor Ort/);
+  assert.match(instructions, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);
   assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);

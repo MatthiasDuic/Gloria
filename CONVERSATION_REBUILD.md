@@ -38,6 +38,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Eine bloße Bestätigung, sich an den Einstiegsbeitrag zu erinnern, zählt nicht als Beitragsangabe; Gloria fragt den damaligen Betrag konkret nach und wechselt erst nach Betrag oder ausdrücklichem Nichtwissen zum heutigen Beitrag.
 - Eine persönliche Zehn-Jahres-Hochrechnung wird ausschließlich aus einer Beitragsangabe nach der expliziten Frage zum heutigen Beitrag erzeugt; der Einstiegsbeitrag wird technisch nie als Hochrechnungsbasis zurückgegeben.
 - Zusammengesetzte deutsche Beitragsangaben wie „neunhundert Euro“ werden vollständig als 900 ausgewertet und nicht anhand des Teilworts „hundert“ verkürzt.
+- Mehrteilige deutsche Beitragsangaben wie „tausend zweihundert Euro“ werden als vollständiger Betrag erkannt und bilden die korrekte Hochrechnungsbasis.
+- Ausgeschriebene Geburtsdaten wie „zwölfter Juli neunzehnhundertvierundsiebzig“ werden akzeptiert. Nach drei unplausiblen Antworten überspringt Gloria eine Vorbereitungsfrage, statt sie endlos zu wiederholen.
 - `worker/src/telnyx-playback.ts` übernimmt Audio-Restpuffer, 160-Byte-Frames, Codec-Padding und das zeitlich korrekte 20-ms-Playback.
 - Mehrere Frames aus einem OpenAI-Audio-Delta werden nicht mehr als ungebremster Burst an Telnyx gesendet.
 - `worker/src/realtime-response-controller.ts` steuert aktive Antworten, First-in-Queue, Playback-Sperre, Cooldown, Cancel und Shutdown.
