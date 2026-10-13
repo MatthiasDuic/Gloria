@@ -218,7 +218,19 @@ function buildGatekeeperIntro(ctx: Pick<CallContext, "ownerRealName" | "contactN
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
   const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
   const targetName = ctx.contactName?.trim() || "der zuständigen Person";
-  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Könnten Sie mich bitte mit ${targetName} verbinden?`;
+  const addressedTarget = /^herr\s+/i.test(targetName)
+    ? targetName.replace(/^herr\s+/i, "Herrn ")
+    : targetName;
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} aus dem Hause der Barmenia Gothar. Könnten Sie mich bitte mit ${addressedTarget} verbinden?`;
+}
+
+function buildDecisionMakerConfirmation(ctx: Pick<CallContext, "contactName">): string {
+  const targetName = ctx.contactName?.trim();
+  if (!targetName) return "Entschuldigung, habe ich die zuständige Ansprechperson am Apparat?";
+  const addressedTarget = /^herr\s+/i.test(targetName)
+    ? targetName.replace(/^herr\s+/i, "Herrn ")
+    : targetName;
+  return `Entschuldigung, habe ich ${addressedTarget} am Apparat?`;
 }
 
 export function canConfirmRealtimeAppointment(ctx: CallContext): { ok: true } | { ok: false; reason: string } {
@@ -241,6 +253,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
   const society = getSocietyName(ctx);
   const target = ctx.contactName?.trim();
+  const addressedTarget = target?.replace(/^herr\s+/i, "Herrn ");
   const today = new Date().toLocaleDateString("de-DE", {
     weekday: "long",
     year: "numeric",
@@ -254,6 +267,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: direkt mit dem nächsten Schritt fortfahren. Bei Interesse: direkt den nächsten Schritt anbieten. Vermeide Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder 'Danke'.",
+    "KEINE ZEIT / RÜCKRUF: Sagt die angerufene Person nach der Begrüßung oder später, dass sie gerade keine Zeit hat, beschäftigt ist oder es gerade nicht passt, führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort. Zeige kurz Verständnis und frage höflich, wann ein Rückruf besser passt. Frage bei einer vagen Angabe freundlich nach einem konkreten Zeitpunkt; akzeptiere auch relative Angaben wie 'in zehn Minuten'. Wiederhole den genannten Zeitpunkt und frage, ob das so passt. Warte auf eine Bestätigung oder Korrektur; erst nach der Bestätigung verabschiede dich höflich und rufe end_call auf. Behandle das nicht als Absage.",
     "Sprich ruhig, freundlich und konkret. Höchstens ein kurzer Satz und eine Frage. Kein Callcenter-Monolog, keine künstliche Vertrautheit, keine Wiederholung der Kundenaussage und keine leeren Bestätigungen. Sprich Standarddeutsch und keine englischen Füllwörter.",
     "Lass den Kunden ausreden. Ein Fragment, 'äh', 'mhm', 'aha' oder unklarer Ton ist keine Zustimmung, keine Terminwahl und keine Verabschiedung. Frage dann einmal kurz nach, statt etwas anzunehmen.",
     "Die Topic Policy steuert Anlass, Nutzen, Einwände und fachliche Grenzen. Die universellen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und Terminlogik haben Vorrang.",
@@ -272,7 +286,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   if (target) {
     parts.push(
-      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage exakt: "${buildDecisionMakerIntro(ctx)}". Wenn das nicht klar ist, behandle die Person als Empfang oder Gatekeeper und sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic aus dem Hause ${society}. Können Sie mich bitte mit ${target} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Danach bitte erneut freundlich um die Verbindung. Kein Pitch am Empfang. Achte dabei auf die korrekte Aussprache des Nachnamens: Duic = Duitsch.`,
+      `GESPRÄCHSLOGIK FÜR DEN ERSTEN SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, sage exakt: "${buildDecisionMakerIntro(ctx)}". Wenn die Namenszuordnung anhand der Antwort nicht sicher ist und kein klarer Gatekeeper-Hinweis vorliegt, frage genau einmal höflich: "Entschuldigung, habe ich ${addressedTarget} am Apparat?" Bei Zustimmung sage die reguläre Eröffnung; bei Nein oder unklarer Antwort bitte freundlich um Weiterleitung. Wenn die Person klar Empfang oder Gatekeeper ist, sage: "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Duic aus dem Hause ${society}. Könnten Sie mich bitte mit ${addressedTarget} verbinden?". Fragt der Gatekeeper nach dem Grund, antworte nur: "Es geht um eine kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung." Wiederhole eine bereits gestellte Weiterleitungsbitte nicht wortgleich. Kein Pitch am Empfang. Achte dabei auf die korrekte Aussprache des Nachnamens: Duic = Duitsch.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
@@ -366,7 +380,14 @@ function updateDialogPhase(ctx: CallContext): void {
 async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<void> {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN || "";
-  if (!baseUrl || !token) return;
+  if (!baseUrl || !token) {
+    log.error(`realtime.${action}_not_configured`, {
+      callSid: ctx.callSid,
+      hasBaseUrl: Boolean(baseUrl),
+      hasInternalToken: Boolean(token),
+    });
+    return;
+  }
 
   try {
     await fetch(`${baseUrl}/api/telnyx/${action}`, {
@@ -446,6 +467,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let unclearClarificationPending = false;
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
+  let transferTimeoutTimer: NodeJS.Timeout | null = null;
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
   let terminationInProgress = false;
   let hangupAfterPlayback = false;
@@ -542,7 +564,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
               prompt: process.env.OPENAI_TRANSCRIBE_PROMPT?.trim()
-                || "Deutsches Geschaeftstelefonat. Zahlen und Eigennamen exakt transkribieren.",
+                || "Deutsches Geschaeftstelefonat. Zahlen und Eigennamen exakt transkribieren. Ansagen von Warteschleifen, Weiterleitungen, Mailboxen und Anrufbeantwortern vollstaendig transkribieren.",
             },
             turn_detection: {
               type: "server_vad",
@@ -722,6 +744,21 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
   };
 
+  const hangupImmediately = (reason: "voicemail_detected" | "transfer_timeout") => {
+    if (!ctx || terminationInProgress) return;
+    terminationInProgress = true;
+    if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
+    transferTimeoutTimer = null;
+    transferWaitingStartedAt = null;
+    pendingDeterministicSpeech = null;
+    pendingUserTranscripts.splice(0);
+    responses.stop();
+    playback.stop();
+    sendTelnyx({ event: "clear" });
+    log.info(`realtime.${reason}`, { callSid: ctx.callSid });
+    void notifyCallAction(ctx, "hangup");
+  };
+
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
     sendOpenAi({
       type: "conversation.item.create",
@@ -760,6 +797,57 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
+    if (contactRouting && contactRouting.stage !== "decision_maker") {
+      contactRouting = advanceContactRouting(contactRouting, transcript);
+      currentContext.detectedVoicemail = contactRouting.stage === "voicemail";
+      currentContext.queueDetected = contactRouting.stage === "waiting_for_transfer";
+      currentContext.waitingForDecisionMaker = contactRouting.stage === "gatekeeper"
+        || contactRouting.stage === "waiting_for_transfer";
+      log.info("realtime.contact_routing", {
+        callSid: currentContext.callSid,
+        stage: contactRouting.stage,
+      });
+
+      if (contactRouting.stage !== "waiting_for_transfer") {
+        transferWaitingStartedAt = null;
+        if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
+        transferTimeoutTimer = null;
+      }
+      if (contactRouting.stage === "voicemail") {
+        hangupImmediately("voicemail_detected");
+        return;
+      }
+      if (contactRouting.stage === "waiting_for_transfer") {
+        if (!transferWaitingStartedAt) {
+          transferWaitingStartedAt = Date.now();
+          transferTimeoutTimer = setTimeout(() => {
+            if (contactRouting?.stage === "waiting_for_transfer") {
+              hangupImmediately("transfer_timeout");
+            }
+          }, 45000);
+        }
+        return;
+      }
+      if (contactRouting.stage === "confirming_decision_maker") {
+        speakDeterministicIntro(buildDecisionMakerConfirmation(currentContext), "gatekeeper");
+        return;
+      }
+      if (contactRouting.stage !== "decision_maker") {
+        if (contactRouting.gatekeeperRequestMade) {
+          requestDeterministicSpeech(
+            "Vielen Dank für die Auskunft. Dann versuche ich es zu einem anderen Zeitpunkt erneut. Auf Wiederhören.",
+            { hangupAfterPlayback: true },
+          );
+          return;
+        }
+        speakDeterministicIntro(buildGatekeeperIntro(currentContext), "gatekeeper");
+        contactRouting.gatekeeperRequestMade = true;
+        return;
+      }
+      speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+      return;
+    }
+
     const event = classifyConversationEvent(transcript);
     if (event.type === "unclear") {
       if (!unclearClarificationPending) {
@@ -772,33 +860,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (event.type === "clear_rejection") {
       requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
-      return;
-    }
-
-    if (contactRouting && contactRouting.stage !== "decision_maker") {
-      contactRouting = advanceContactRouting(contactRouting, transcript);
-      currentContext.detectedVoicemail = contactRouting.stage === "voicemail";
-      currentContext.queueDetected = contactRouting.stage === "waiting_for_transfer";
-      currentContext.waitingForDecisionMaker = contactRouting.stage === "gatekeeper"
-        || contactRouting.stage === "waiting_for_transfer";
-      log.info("realtime.contact_routing", {
-        callSid: currentContext.callSid,
-        stage: contactRouting.stage,
-      });
-
-      if (contactRouting.stage === "voicemail") {
-        void notifyCallAction(currentContext, "hangup");
-        return;
-      }
-      if (contactRouting.stage === "waiting_for_transfer") {
-        transferWaitingStartedAt = transferWaitingStartedAt || Date.now();
-        return;
-      }
-      if (contactRouting.stage !== "decision_maker") {
-        speakDeterministicIntro(buildGatekeeperIntro(currentContext), "gatekeeper");
-        return;
-      }
-      speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
       return;
     }
 
@@ -1063,8 +1124,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           const waitingMs = Date.now() - transferWaitingStartedAt;
           const TRANSFER_TIMEOUT_MS = 45000; // 45 seconds
           if (waitingMs > TRANSFER_TIMEOUT_MS) {
-            log.info("realtime.transfer_timeout", { callSid: ctx?.callSid, waitingMs });
-            void notifyCallAction(ctx!, "hangup");
+            hangupImmediately("transfer_timeout");
             return;
           }
         }
@@ -1383,6 +1443,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     playback.stop();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
     clearBargeInRecovery();
+    if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
     transferWaitingStartedAt = null;
     try {
       openaiSession?.close(1000, "telnyx_closed");

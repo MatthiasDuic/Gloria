@@ -15,6 +15,22 @@ test("keeps the fachgespraech behind the gatekeeper boundary", () => {
   assert.equal(state.stage, "decision_maker");
 });
 
+test("stays silent throughout queue announcements until a person answers", () => {
+  let state = createContactRoutingState("Herr Neumann");
+  state = advanceContactRouting(state, "Guten Tag, Zentrale der Beispiel GmbH.");
+  assert.equal(state.stage, "gatekeeper");
+
+  state = advanceContactRouting(state, "Einen Moment bitte, ich verbinde Sie.");
+  assert.equal(state.stage, "waiting_for_transfer");
+  assert.match(instructionForContactRouting(state), /Sprich nicht/);
+
+  state = advanceContactRouting(state, "Alle Mitarbeiter sind im Gespräch. Bitte warten Sie.");
+  assert.equal(state.stage, "waiting_for_transfer");
+
+  state = advanceContactRouting(state, "Neumann am Apparat, guten Tag.");
+  assert.equal(state.stage, "decision_maker");
+});
+
 test("recognizes a self-identified decision maker without repeating the pitch", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Frau Wagner"),
@@ -27,6 +43,47 @@ test("does not treat a bare target-name mention as self-identification", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Herr Neumann"),
     "Ich stelle Sie zu Herrn Neumann durch.",
+  );
+  assert.equal(state.stage, "gatekeeper");
+});
+
+test("confirms an unclear name match once and accepts a clear yes", () => {
+  const initial = advanceContactRouting(
+    createContactRoutingState("Herr Biletzki"),
+    "Biletzki, guten Tag.",
+  );
+  assert.equal(initial.stage, "confirming_decision_maker");
+  assert.match(instructionForContactRouting(initial), /genau einmal höflich/);
+
+  const confirmed = advanceContactRouting(initial, "Ja, genau, den haben Sie am Apparat.");
+  assert.equal(confirmed.stage, "decision_maker");
+});
+
+test("routes a denied identity check to the gatekeeper without repeating the name check", () => {
+  const initial = advanceContactRouting(
+    createContactRoutingState("Herr Biletzki"),
+    "Biletzki, guten Tag.",
+  );
+  const denied = advanceContactRouting(initial, "Nein, ich bin aus dem Empfang.");
+
+  assert.equal(denied.stage, "gatekeeper");
+  assert.match(instructionForContactRouting(denied), /freundlich um die Verbindung/);
+});
+
+test("does not repeat an already made transfer request", () => {
+  const state = {
+    ...createContactRoutingState("Herr Biletzki"),
+    stage: "gatekeeper" as const,
+    gatekeeperRequestMade: true,
+  };
+
+  assert.match(instructionForContactRouting(state), /Wiederhole die Bitte nicht wortgleich/);
+});
+
+test("does not identify a target who is mentioned as unavailable", () => {
+  const state = advanceContactRouting(
+    createContactRoutingState("Herr Neumann"),
+    "Herr Neumann ist gerade nicht da.",
   );
   assert.equal(state.stage, "gatekeeper");
 });

@@ -29,7 +29,7 @@
 - ✅ CSV/XLS import with auto-parsing (`/api/campaigns/import`)
 - ✅ Lead persistence in PostgreSQL
 - ✅ Campaign list state management (`/api/campaigns/lists`)
-- ✅ Manual + scheduled callback support (`/api/callbacks/run`)
+- ✅ Manual + scheduled callback support (`/api/callbacks/run`, due callbacks checked every minute)
 
 ### 4. **Admin Interface**
 - ✅ User management (`/api/admin/users`)

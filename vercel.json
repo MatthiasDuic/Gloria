@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/callbacks/run",
-      "schedule": "0 8 * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/reports/cleanup",

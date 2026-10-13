@@ -41,17 +41,17 @@ const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das 
   "appointmentAt": "ISO-8601 mit Zeitzone (z. B. 2026-04-30T15:00:00+02:00) oder null",
   "contactEmail": "vom Kunden bestätigte Mailadresse oder null",
   "nextCallAt": "ISO-8601 mit Zeitzone für den vereinbarten Rückruf-Zeitpunkt (NUR bei Wiedervorlage), sonst null",
-  "directDial": "vom Anrufenden für den Rückruf genannte Direkt-Durchwahl/Mobilnummer als reine E.164- oder Klar-Ziffern-Zeichenkette (NUR bei Wiedervorlage), sonst null",
+  "directDial": "vom Anrufenden ausdrücklich genannte alternative Direkt-Durchwahl/Mobilnummer als reine E.164- oder Klar-Ziffern-Zeichenkette, sonst null",
   "summary": "5–10 Sätze Deutsch, fasse Verlauf, Bedarf, vereinbarten Termin und ggf. erfasste Basisdaten zusammen"
 }
 Regeln:
 - "Termin" nur, wenn ein konkreter Termin (Datum + Uhrzeit) bestätigt wurde.
 - "Absage" wenn der Anrufende ablehnt.
-- "Wiedervorlage" wenn auf später verschoben wurde, ohne festen Termin – insbesondere wenn der Anrufende keinen Kalender-Zugriff hatte und einen Rückruf-Zeitpunkt + (idealerweise) Direktdurchwahl genannt hat.
+- "Wiedervorlage" wenn die Person gerade keine Zeit hat und einen späteren Rückruf vereinbart, auch bei relativen Angaben wie "in zehn Minuten". Die für diesen Anruf verwendete Telefonnummer genügt; eine alternative Direktdurchwahl ist nicht erforderlich.
 - "Nicht erreicht / kein Kontakt" wenn kein Kontakt zustande kam.
 - "Gespräch abgebrochen" wenn jemand kurz angerufen wurde, aber das Gespräch nach dem Einstieg abgebrochen wurde.
 - appointmentAt: nutze die LETZTE im Transkript bestätigte Termin-Aussage. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" sagt, nimm das Datum exakt so.
-- nextCallAt + directDial: NUR füllen, wenn outcome="Wiedervorlage" UND der Anrufende explizit Tag/Uhrzeit für den Rückruf bzw. eine Durchwahl/Nummer genannt UND bestätigt hat.
+- nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. directDial nur füllen, wenn ausdrücklich eine alternative Nummer genannt wurde.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
 
 export async function extractReport(ctx: CallContext): Promise<ExtractedReport | null> {
@@ -69,11 +69,13 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
     .join("\n");
 
   const today = new Date();
-  const todayStr = today.toLocaleDateString("de-DE", {
+  const todayStr = today.toLocaleString("de-DE", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
     timeZone: "Europe/Berlin",
   });
 
@@ -131,9 +133,14 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         ? parsed.contactEmail.trim()
         : undefined;
 
+    const relativeCallbackAt =
+      outcome === "Wiedervorlage" ? parseRelativeCallbackAt(ctx.transcript) : undefined;
     const nextCallAt =
-      outcome === "Wiedervorlage" && typeof parsed.nextCallAt === "string"
-        ? parsePossiblyZonelessDateTime(parsed.nextCallAt)
+      outcome === "Wiedervorlage"
+        ? relativeCallbackAt ||
+          (typeof parsed.nextCallAt === "string"
+            ? parsePossiblyZonelessDateTime(parsed.nextCallAt)
+            : undefined)
         : undefined;
 
     const directDial =
@@ -603,6 +610,78 @@ function parsePossiblyZonelessDateTime(value: string): string | undefined {
   }
 
   return berlinLocalDateTimeToIso(year, month, day, hour, minute, second);
+}
+
+export function parseRelativeCallbackAt(
+  transcript: Array<{ role: "user" | "assistant"; text: string; at: number }>,
+): string | undefined {
+  const numberWords: Record<string, number> = {
+    ein: 1,
+    eine: 1,
+    einer: 1,
+    einem: 1,
+    einen: 1,
+    zwei: 2,
+    drei: 3,
+    vier: 4,
+    fünf: 5,
+    sechs: 6,
+    sieben: 7,
+    acht: 8,
+    neun: 9,
+    zehn: 10,
+    elf: 11,
+    zwölf: 12,
+    dreizehn: 13,
+    vierzehn: 14,
+    fünfzehn: 15,
+    sechzehn: 16,
+    siebzehn: 17,
+    achtzehn: 18,
+    neunzehn: 19,
+    zwanzig: 20,
+    dreißig: 30,
+    vierzig: 40,
+    fünfzig: 50,
+  };
+  const timePattern =
+    /\bin\s+(?:(?:einer?\s+halben\s+stunde)|(?:einer?\s+viertelstunde)|(?<amount>\d{1,3}|[a-zäöüß]+)\s*(?<unit>min(?:ute)?(?:n)?|stunden?|std)\b)/i;
+  const callbackIntent = /\b(?:zurückrufen|wieder anrufen|noch einmal melden|nochmal melden|rückruf)\b/i;
+  const turns = transcript
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "user" && Number.isFinite(turn.at));
+
+  for (const { turn, index } of turns.reverse()) {
+    const match = timePattern.exec(turn.text);
+    if (!match) continue;
+
+    const precedingAssistant = transcript
+      .slice(0, index)
+      .reverse()
+      .find((entry) => entry.role === "assistant")?.text || "";
+    const askedForCallbackTime =
+      callbackIntent.test(turn.text) ||
+      callbackIntent.test(precedingAssistant) ||
+      /\b(?:wann|welche|welcher|was)\b[\s\S]{0,80}\b(?:passt|besser|zeit|uhr|wieder|rückruf|zurückruf)\b/i.test(precedingAssistant);
+    if (!askedForCallbackTime) continue;
+
+    let minutes: number;
+    if (/halben\s+stunde/i.test(match[0])) {
+      minutes = 30;
+    } else if (/viertelstunde/i.test(match[0])) {
+      minutes = 15;
+    } else {
+      const amountText = match.groups?.amount?.toLocaleLowerCase("de-DE") || "";
+      const amount = Number.parseInt(amountText, 10) || numberWords[amountText];
+      if (!amount || !match.groups?.unit) continue;
+      minutes = /^min/i.test(match.groups.unit) ? amount : amount * 60;
+    }
+
+    if (minutes > 30 * 24 * 60) continue;
+    return new Date(turn.at + minutes * 60_000).toISOString();
+  }
+
+  return undefined;
 }
 
 function berlinLocalDateTimeToIso(

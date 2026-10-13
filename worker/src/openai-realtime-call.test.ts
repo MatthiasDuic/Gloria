@@ -29,6 +29,20 @@ test("maps the configured bidirectional codec to Realtime audio", () => {
   assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
 });
 
+test("asks for a callback instead of continuing the pitch when the contact has no time", () => {
+  const ctx = newContext({
+    callSid: "test-realtime-no-time-callback",
+    streamSid: "test-stream",
+    topic: "private Krankenversicherung",
+  });
+
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /KEINE ZEIT \/ RÜCKRUF/);
+  assert.match(instructions, /führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort/);
+  assert.match(instructions, /akzeptiere auch relative Angaben wie 'in zehn Minuten'/);
+  assert.match(instructions, /rufe end_call auf/);
+});
+
 test("classifies unclear ASR fragments but keeps short German answers", () => {
   assert.equal(isLikelyNoiseTranscript("Good to"), true);
   assert.equal(isLikelyNoiseTranscript("Mhm."), true);
@@ -203,7 +217,7 @@ test("includes the required decision-maker and gatekeeper opening lines", () => 
   assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
   assert.match(instructions, /Ja, ich bin eine KI, aber es geht um ein wichtiges Thema zur Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instructions, /Haben Sie gerade einen kurzen Moment\? Ich verspreche Ihnen, es wird sich lohnen/);
-  assert.match(instructions, /Können Sie mich bitte mit Herr Neumann verbinden/);
+  assert.match(instructions, /Könnten Sie mich bitte mit Herrn Neumann verbinden/);
   assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
   assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
   assert.match(instructions, /beginne nicht mit der Versicherungsfrage/);
