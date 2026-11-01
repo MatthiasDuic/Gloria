@@ -1177,7 +1177,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }, [outlookBodyDraft, outlookSubjectDraft, outlookToDraft, selectedLead]);
 
   const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete") => {
-    if (action === "delete" && !window.confirm("Diese Liste und alle zugehörigen Kontakte wirklich löschen?")) {
+    if (action === "delete" && !window.confirm(
+      "Diese Kampagne wirklich löschen? Zugehörige Interessenten werden entfernt. Bestehende Kunden und Anrufreports bleiben erhalten.",
+    )) {
       return;
     }
     setBusy(true);
@@ -1189,10 +1191,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         body: JSON.stringify({ action, listId }),
       });
 
-      const result = (await res.json()) as { error?: string; lists?: CampaignListSummary[] };
+      const result = (await res.json()) as { error?: string; lists?: CampaignListSummary[]; removedLeads?: number };
       if (!res.ok) throw new Error(result.error || "Aktion fehlgeschlagen");
       if (result.lists) setCampaignLists(result.lists);
-      setNotice(`✓ Kampagne ${action === "start" ? "gestartet" : action === "stop" ? "gestoppt" : "gelöscht"}`);
+      setNotice(action === "delete"
+        ? `✓ Kampagne gelöscht. ${result.removedLeads ?? 0} Interessenten entfernt; Kunden und Reports bleiben erhalten.`
+        : `✓ Kampagne ${action === "start" ? "gestartet" : "gestoppt"}`);
       
       // Reload data
       await reloadLiveData();
@@ -2226,6 +2230,14 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <button className="btn-small ghost" disabled={busy || !isRunning} onClick={() => void controlCampaignList(list.listId, "stop")}>Stoppen</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Liste öffnen ({leads.length})</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); setCampaignTab("calls"); }}>Anrufdetails</button>
+            <button
+              className="btn-small danger"
+              disabled={busy || isRunning}
+              title={isRunning ? "Bitte erst stoppen, bevor die Kampagne gelöscht wird." : "Kampagne löschen"}
+              onClick={() => void controlCampaignList(list.listId, "delete")}
+            >
+              Kampagne löschen
+            </button>
           </div>
         </article>
       );

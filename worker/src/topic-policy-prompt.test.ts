@@ -34,6 +34,16 @@ test("includes complete topic guidance for a natural, objection-aware dialog", (
   assert.match(prompt, /steuert jedoch fachlichen Anlass, Nutzen, Einwände und Gesprächsführung/);
 });
 
+test("does not imply that Gloria has read a URL entered as a knowledge source", () => {
+  const prompt = topicPolicyToSystemPrompt({
+    topic: "Neue Kampagne",
+    knowledge: "https://example.org/fachwissen",
+  });
+
+  assert.match(prompt, /Reine URLs sind nicht automatisch abgerufene Inhalte/);
+  assert.match(prompt, /behaupte nicht, verlinkte Seiten gelesen zu haben/);
+});
+
 test("keeps long Topic Policy entries compact so worker rules remain dominant", () => {
   const prompt = topicPolicyToSystemPrompt({
     topic: "Energie",

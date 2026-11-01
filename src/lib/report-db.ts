@@ -2778,6 +2778,19 @@ export async function writeUserScriptToPostgres(
   }
 }
 
+export async function deleteUserScriptFromPostgres(userId: string, topic: string): Promise<boolean> {
+  if (!shouldUsePostgres()) {
+    return false;
+  }
+
+  await ensureSchema();
+  const result = await getPool().query(
+    "DELETE FROM user_playbooks WHERE user_id = $1 AND topic = $2",
+    [userId, topic],
+  );
+  return (result.rowCount || 0) > 0;
+}
+
 export async function bootstrapUserScriptsFromDefaults(
   userId: string,
   defaults: ScriptConfig[],

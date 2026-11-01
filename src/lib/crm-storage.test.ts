@@ -135,9 +135,11 @@ test("callback rescheduling and completion persist without changing another user
 test("deleting a campaign preserves explicit and legacy customers in the customer lifecycle", async () => {
   const customer: Lead = { ...sampleLead, id: "customer", lifecycle: "customer" };
   const legacy: Lead = { ...sampleLead, id: "legacy", lifecycle: undefined, listName: "Manuell hinzugefügt" };
-  await seed([sampleLead, customer, legacy]);
+  const otherUsersLead: Lead = { ...sampleLead, id: "other-user-lead", userId: "other-user" };
+  await seed([sampleLead, customer, legacy, otherUsersLead]);
   assert.equal((await storage.deleteCampaignList("campaign", "test-user")).removedLeads, 1);
   assert.equal(await storage.getLeadById(sampleLead.id, "test-user"), undefined);
+  assert.ok(await storage.getLeadById(otherUsersLead.id, "other-user"));
   for (const id of [customer.id, legacy.id]) {
     const preserved = await storage.getLeadById(id, "test-user");
     assert.ok(preserved);

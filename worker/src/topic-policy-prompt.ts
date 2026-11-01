@@ -141,7 +141,10 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     !behavior &&
     !conversationGuardrails &&
     !requiredQuestions &&
-    !preparationQuestions
+    !preparationQuestions &&
+    !knowledge &&
+    !proofPoints &&
+    !objectionResponses
   ) {
     return topic ? `THEMA DIESES CALLS: ${topic}` : "";
   }
@@ -181,8 +184,13 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     parts.push("", "EINWÄNDE:", "Nutze die passende Antwort nur als inhaltliche Orientierung. Beantworte den Einwand zuerst, ohne ihn zu widerlegen oder dieselbe Frage zu wiederholen:", objectionResponses);
   }
   if (knowledge || proofPoints) {
-    parts.push("", "FACHLICHE FAKTEN UND GRENZEN:");
-    if (knowledge) parts.push(knowledge);
+    parts.push("", "FACHLICHE WISSENSGRUNDLAGE UND GRENZEN:");
+    if (knowledge) {
+      parts.push(
+        "Nutze die folgenden eingefügten Informationen und Quellenhinweise. Reine URLs sind nicht automatisch abgerufene Inhalte; behaupte nicht, verlinkte Seiten gelesen zu haben.",
+        knowledge,
+      );
+    }
     if (proofPoints) parts.push(`Belegbare Anhaltspunkte nur vorsichtig und passend verwenden, niemals als Garantie: ${proofPoints}`);
   }
   if (transferHandling) {

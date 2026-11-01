@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDashboardData, saveScript } from "@/lib/storage";
+import { deleteUserCampaignTopic, getDashboardData, saveScript } from "@/lib/storage";
 import type { TopicPolicyConfig } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { TopicPolicyPayloadSchema } from "@/lib/topic-policy-schema";
@@ -78,5 +78,36 @@ export async function POST(request: Request) {
       },
       { status: 500 },
     );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const sessionUser = getSessionUserFromRequest(request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
+  }
+
+  const payload = (await request.json().catch(() => null)) as { topic?: unknown } | null;
+  const topic = typeof payload?.topic === "string" ? payload.topic.trim() : "";
+  if (!topic) {
+    return NextResponse.json({ error: "Kampagnenname ist erforderlich." }, { status: 400 });
+  }
+
+  try {
+    await deleteUserCampaignTopic(topic, sessionUser.id);
+    return NextResponse.json({ ok: true, topic });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Kampagne konnte nicht gelöscht werden.";
+    if (message.includes("Standardthemen")) {
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+    if (message.includes("nicht freigegeben")) {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (message.includes("nicht in der benutzerspezifischen")) {
+      return NextResponse.json({ error: message }, { status: 404 });
+    }
+    console.error("Campaign topic deletion failed", error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

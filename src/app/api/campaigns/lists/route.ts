@@ -14,7 +14,7 @@ import {
 } from "@/lib/storage";
 import type { Lead } from "@/lib/types";
 import { isTelnyxConfigured } from "@/lib/telnyx";
-import { forbiddenResponse, getSessionUserFromRequest } from "@/lib/request-auth";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 import { queueOutboundCall } from "@/lib/outbound-call-queue";
@@ -248,12 +248,20 @@ export async function POST(request: Request) {
     }
 
     if (action === "delete") {
-      if (sessionUser.role !== "master") {
-        return forbiddenResponse("Nur Master-User duerfen Listen loeschen.");
+      const lists = await getCampaignListsSummary(sessionUser.id);
+      const campaign = lists.find((entry) => entry.listId === listId);
+      if (!campaign) {
+        return NextResponse.json({ error: "Kampagne nicht gefunden." }, { status: 404 });
+      }
+      if (campaign.active || campaign.currentlyDialing) {
+        return NextResponse.json(
+          { error: "Bitte stoppen Sie die Kampagne und warten Sie, bis der laufende Anruf beendet ist." },
+          { status: 409 },
+        );
       }
       const result = await deleteCampaignList(listId, sessionUser.id);
-      const lists = await getCampaignListsSummary(sessionUser.id);
-      return NextResponse.json({ ok: true, action, listId, removedLeads: result.removedLeads, lists });
+      const remainingLists = await getCampaignListsSummary(sessionUser.id);
+      return NextResponse.json({ ok: true, action, listId, removedLeads: result.removedLeads, lists: remainingLists });
     }
 
     if (!isTelnyxConfigured()) {

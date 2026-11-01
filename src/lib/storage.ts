@@ -30,6 +30,7 @@ import {
   readCalendarEventsFromPostgres,
   saveCalendarEventToPostgres,
   deleteCalendarEventFromPostgres,
+  deleteUserScriptFromPostgres,
 } from "./report-db";
 import type { RecordingEntry, ReportDatabase } from "./report-db";
 import type {
@@ -45,6 +46,7 @@ import type {
   ScriptConfig,
   Topic,
 } from "./types";
+import { TOPICS } from "./types";
 import { getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails } from "./crm-helpers";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -1506,6 +1508,29 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
     script: updatedScript,
     storageMode: "file" as const,
   };
+}
+
+export async function deleteUserCampaignTopic(topic: Topic, userId: string): Promise<void> {
+  const normalizedTopic = topic.trim();
+  if (!normalizedTopic) {
+    throw new Error("Kampagnenname fehlt.");
+  }
+  if ((TOPICS as readonly string[]).some((defaultTopic) => defaultTopic === normalizedTopic)) {
+    throw new Error("Die Standardthemen können nicht gelöscht werden.");
+  }
+
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new Error("Benutzer nicht gefunden.");
+  }
+  if (user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(normalizedTopic)) {
+    throw new Error(`Die Kampagne "${normalizedTopic}" ist für diesen Benutzer nicht freigegeben.`);
+  }
+
+  const removed = await deleteUserScriptFromPostgres(userId, normalizedTopic);
+  if (!removed) {
+    throw new Error("Die Kampagne wurde nicht in der benutzerspezifischen PostgreSQL-Speicherung gefunden.");
+  }
 }
 
 export async function storeCallReport(payload: {

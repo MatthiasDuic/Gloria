@@ -731,6 +731,16 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
   };
 }
 
+function buildNewCampaignDraft(topic: Topic): TopicPolicyConfig {
+  return {
+    id: `topic-policy-${topic.toLowerCase().replace(/\s+/g, "-")}`,
+    topic,
+    callObjective: "",
+    preparationQuestions: "",
+    knowledge: "",
+  };
+}
+
 function buildRecommendedAccountDraft(topic: Topic, existing?: TopicPolicyConfig): TopicPolicyConfig {
   const baseline = buildDraftFromPreset(topic, existing);
   const preset = getRecommendedTopicPolicyPreset(topic);
@@ -1874,17 +1884,49 @@ export default function HomePage() {
     try {
       const payload = await persistPlaybookDraft(draft);
       setNotice(
-        `Topic Policy für ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
+        `Kampagne ${topic} gespeichert und für Gloria übernommen. Gespeichert in ${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}.`,
       );
       setSaveStatus({
         type: "success",
-        message: `Erfolgreich gespeichert (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
+        message: `Kampagne gespeichert (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}).`,
       });
       await loadDashboard();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Topic Policy speichern fehlgeschlagen.";
       setNotice(errorMessage);
       setSaveStatus({ type: "error", message: errorMessage });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCampaignTopic(topic: Topic) {
+    if ((TOPICS as readonly string[]).includes(topic)) return;
+    if (!window.confirm(`Kampagne "${topic}" wirklich löschen? Der Gesprächsleitfaden wird entfernt; Kontakte und Anrufreports bleiben erhalten.`)) {
+      return;
+    }
+
+    setBusy(true);
+    setSaveStatus(null);
+    try {
+      const response = await fetch("/api/topic-policies", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Kampagne konnte nicht gelöscht werden.");
+      }
+
+      const nextTopic = [...TOPICS, ...Object.keys(draftScripts).filter((entry) => entry !== topic)][0];
+      setDetailTopic(nextTopic);
+      await loadDashboard();
+      setNotice(`Kampagne "${topic}" gelöscht. Kontakte und Anrufreports wurden beibehalten.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Kampagne konnte nicht gelöscht werden.";
+      setNotice(message);
+      setSaveStatus({ type: "error", message });
     } finally {
       setBusy(false);
     }
@@ -1941,10 +1983,20 @@ export default function HomePage() {
   function handleAddNewTopic() {
     const topic = newTopicInput.trim();
     if (!topic) return;
+    const existingTopic = Object.keys(draftScripts).find(
+      (entry) => normalizeTopicKey(entry) === normalizeTopicKey(topic),
+    );
+    if (existingTopic) {
+      setDetailTopic(existingTopic as Topic);
+      setNewTopicInput("");
+      setShowNewTopicForm(false);
+      return;
+    }
     setDraftScripts((c) => ({
       ...c,
-      [topic]: buildDraftFromPreset(topic),
+      [topic]: buildNewCampaignDraft(topic),
     }));
+    setSaveStatus(null);
     setDetailTopic(topic);
     setNewTopicInput("");
     setShowNewTopicForm(false);
@@ -3014,6 +3066,15 @@ export default function HomePage() {
                       ))}
                     </select>
                     <button className="btn ghost" onClick={() => setShowNewTopicForm((v) => !v)} style={{ marginLeft: 8 }}>+ Neues Thema</button>
+                    <button
+                      className="btn danger"
+                      onClick={() => void deleteCampaignTopic(detailTopic)}
+                      disabled={busy || (TOPICS as readonly string[]).includes(detailTopic) || !data.topicPolicies.some((policy) => policy.topic === detailTopic)}
+                      title={(TOPICS as readonly string[]).includes(detailTopic) ? "Standardthemen können nicht gelöscht werden." : "Kampagne löschen"}
+                      style={{ marginLeft: 8 }}
+                    >
+                      Kampagne löschen
+                    </button>
                   </div>
                 </div>
                 <div className="playbook-category-tabs top-gap">
@@ -3058,7 +3119,8 @@ export default function HomePage() {
                   <div className="row top-gap">
                     <input
                       type="text"
-                      placeholder="Thema eingeben, z. B. Immobilienfinanzierung"
+                      aria-label="Kampagnenname"
+                      placeholder="Kampagnenname, z. B. Krankenversicherung"
                       value={newTopicInput}
                       onChange={(e) => setNewTopicInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") handleAddNewTopic(); }}
@@ -3071,6 +3133,76 @@ export default function HomePage() {
 
                 {activeDraft ? (
                   <>
+                    <div className="mini-panel playbook-card top-gap">
+                      <h3>Kampagne konfigurieren</h3>
+                      <p className="subtle">
+                        Für eine neue Kampagne reichen Name, Gesprächsziel, Vorbereitungsfragen und die fachliche Wissensgrundlage.
+                        Gloria formuliert daraus selbstständig und situationsbezogen.
+                      </p>
+                      <div className="playbook-grid">
+                        <label>
+                          Kampagnenname
+                          <input value={detailTopic} readOnly aria-readonly="true" />
+                        </label>
+                        <label>
+                          Ziel der Kampagne
+                          <textarea
+                            value={activeDraft.callObjective ?? ""}
+                            rows={3}
+                            onChange={(event) => setDraftScripts((current) => ({
+                              ...current,
+                              [detailTopic]: { ...current[detailTopic], callObjective: event.target.value },
+                            }))}
+                          />
+                        </label>
+                        <label className="full-row">
+                          Fragen nach bestätigtem Termin
+                          <span className="subtle">Eine Frage pro Zeile. Gloria fragt sie erst nach Terminbestätigung und Zustimmung ab.</span>
+                          <textarea
+                            value={activeDraft.preparationQuestions ?? activeDraft.pkvHealthQuestions ?? ""}
+                            rows={6}
+                            onChange={(event) => setDraftScripts((current) => ({
+                              ...current,
+                              [detailTopic]: { ...current[detailTopic], preparationQuestions: event.target.value },
+                            }))}
+                          />
+                        </label>
+                        <label className="full-row">
+                          Zusätzliches Wissen und Quellen
+                          <span className="subtle">
+                            Fügen Sie fachliche Informationen, Auszüge und Quellenhinweise ein. Reine Links werden nicht automatisch ausgelesen.
+                          </span>
+                          <textarea
+                            value={activeDraft.knowledge ?? ""}
+                            rows={6}
+                            onChange={(event) => setDraftScripts((current) => ({
+                              ...current,
+                              [detailTopic]: { ...current[detailTopic], knowledge: event.target.value },
+                            }))}
+                          />
+                        </label>
+                      </div>
+                      <div className="row top-gap">
+                        <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>
+                          Kampagne speichern
+                        </button>
+                        {saveStatus ? (
+                          <span
+                            className="subtle"
+                            role="status"
+                            style={{ color: saveStatus.type === "success" ? "#1f7a42" : "#b42318", fontWeight: 700 }}
+                          >
+                            {saveStatus.message}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <details className="mini-panel playbook-card playbook-details top-gap">
+                      <summary><strong>Erweiterte Gesprächsleitfaden-Felder (optional)</strong></summary>
+                      <p className="subtle">
+                        Die bisherigen Detailfelder bleiben für bestehende Kampagnen erhalten. Neue Kampagnen benötigen sie nicht.
+                      </p>
                     <div className="playbook-overview top-gap">
                       <div className="playbook-overview-card primary">
                         <span className="playbook-kicker">Topic-Policy-Cockpit</span>
@@ -3400,6 +3532,7 @@ export default function HomePage() {
                         {saveStatus.message}
                       </p>
                     ) : null}
+                    </details>
                   </>
                 ) : (
                   <p className="subtle">Für dieses Thema ist noch keine Topic Policy geladen.</p>
