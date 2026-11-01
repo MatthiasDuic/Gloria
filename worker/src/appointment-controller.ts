@@ -61,7 +61,7 @@ export function detectAppointmentMode(turns: ConversationTurn[]): AppointmentMod
     const text = turn.text;
     if (/\b(?:teams|video(?:termin|call)?|online|digital)\b/i.test(text)) return "Microsoft Teams";
     if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(text)) return "In der Agentur";
-    if (/\b(?:bei\s+mir|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
+    if (/\b(?:bei\s+mir(?=\s*(?:[.!?,]|$))|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
   }
   return undefined;
 }
@@ -156,6 +156,43 @@ export function appointmentOfferInstruction(freeSlotsPrompt: string | undefined,
   const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
   if (choices.length < 2) return undefined;
   return `Sage natürlich und ohne einschränkende Formulierungen: "Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?" Stelle in diesem Turn keine weitere Frage. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
+}
+
+export type AppointmentRoutingState = {
+  appointmentOfferedSlots?: string[];
+  selectedAppointmentSlot?: string;
+  appointmentMode?: AppointmentMode;
+};
+
+export function advanceAppointmentRouting(
+  state: AppointmentRoutingState,
+  turns: ConversationTurn[],
+  freeSlotsPrompt?: string,
+): { state: AppointmentRoutingState; speechText?: string; readyToBook?: boolean } {
+  const latestUser = [...turns].reverse().find((turn) => turn.role === "user")?.text || "";
+  const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant")?.text || "";
+  const mode = detectAppointmentMode(turns) || state.appointmentMode;
+  if (state.selectedAppointmentSlot) {
+    const nextState = { ...state, appointmentMode: mode };
+    if (mode) return { state: nextState, readyToBook: true };
+    return { state: nextState };
+  }
+  if (state.appointmentOfferedSlots?.length) {
+    const selected = matchOfferedAppointmentSelection(latestUser, state.appointmentOfferedSlots);
+    if (!selected) return { state };
+    const nextState = { ...state, selectedAppointmentSlot: selected, appointmentMode: mode };
+    return mode
+      ? { state: nextState, readyToBook: true }
+      : { state: nextState, speechText: "Soll der Termin digital oder bei Ihnen vor Ort stattfinden?" };
+  }
+  if (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant)) return { state };
+  const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);
+  const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
+  if (choices.length < 2) return { state };
+  return {
+    state: { ...state, appointmentOfferedSlots: choices, appointmentMode: mode },
+    speechText: `Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?`,
+  };
 }
 
 export function decideAppointment(params: {

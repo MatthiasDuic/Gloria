@@ -388,6 +388,8 @@ export async function POST(request: Request) {
         contactName: payload.contactName,
         topic: payload.topic,
         summaryChunk: payload.summaryChunk,
+        outcome: payload.outcome,
+        appointmentAt: payload.appointmentAt,
         appointmentMode: payload.appointmentMode,
         calledPhone: payload.calledPhone,
         attempts: payload.attempts,

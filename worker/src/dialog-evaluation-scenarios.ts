@@ -66,9 +66,9 @@ export const DIALOG_EVALUATION_SCENARIOS: DialogScenario[] = [
 
   { id: "appointment-too-early", category: "appointments", turns: [{ role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." }], appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 11:00 Uhr" }, expected: { appointmentAllowed: false } },
   { id: "appointment-invented", category: "appointments", turns: readyPkvTurns(), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 09:00 Uhr" }, expected: { appointmentAllowed: false } },
-  { id: "appointment-valid", category: "appointments", turns: readyPkvTurns(), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 11:00 Uhr" }, expected: { appointmentAllowed: true } },
-  { id: "appointment-morning", category: "appointments", turns: readyPkvTurns([{ role: "user", text: "Vormittags passt es besser." }]), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 11:00 Uhr" }, expected: { appointmentAllowed: true } },
-  { id: "appointment-afternoon", category: "appointments", turns: readyPkvTurns([{ role: "user", text: "Nachmittags wäre ideal." }]), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Donnerstag, 27. August um 15:30 Uhr" }, expected: { appointmentAllowed: true } },
+  { id: "appointment-valid", category: "appointments", turns: readyPkvTurns([{ role: "user", text: "Mittwoch, 26. August um 11:00 Uhr passt." }]), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 11:00 Uhr" }, expected: { appointmentAllowed: true } },
+  { id: "appointment-morning", category: "appointments", turns: readyPkvTurns([{ role: "user", text: "Vormittags passt es besser, ich nehme den Mittwoch." }]), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Mittwoch, 26. August um 11:00 Uhr" }, expected: { appointmentAllowed: true } },
+  { id: "appointment-afternoon", category: "appointments", turns: readyPkvTurns([{ role: "user", text: "Nachmittags wäre ideal, ich nehme den Donnerstag." }]), appointment: { freeSlotsPrompt: FREE_SLOTS, slotPhrase: "Donnerstag, 27. August um 15:30 Uhr" }, expected: { appointmentAllowed: true } },
 
   { id: "control-multiple-questions", category: "quality-controls", negativeControl: true, turns: [{ role: "assistant", text: "Sind Sie privat versichert? Wie hoch ist Ihr Beitrag?" }], expected: { violationCodes: ["multiple_questions"] } },
   { id: "control-repeated-question", category: "quality-controls", negativeControl: true, turns: [

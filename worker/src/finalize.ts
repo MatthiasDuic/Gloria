@@ -3,6 +3,35 @@ import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 
+export async function persistAppointmentBooking(ctx: CallContext, appointmentAt: string, appointmentMode: string): Promise<boolean> {
+  const baseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
+  const token = process.env.APP_INTERNAL_TOKEN?.trim();
+  if (!baseUrl || !token || !ctx.userId || !ctx.company || !ctx.topic) {
+    log.error("booking.missing_context", { callSid: ctx.callSid });
+    return false;
+  }
+  return postWithRetry(`${baseUrl}/api/calls/webhook`, {
+    "content-type": "application/json",
+    "x-gloria-internal-token": token,
+  }, {
+    userId: ctx.userId,
+    leadId: ctx.leadId,
+    callSid: ctx.callSid,
+    company: ctx.company,
+    contactName: ctx.contactName,
+    calledPhone: ctx.calledPhone,
+    topic: ctx.topic,
+    summaryChunk: `Termin verbindlich vereinbart: ${appointmentAt}. Durchführung: ${appointmentMode}. Vorbereitung läuft.`,
+    outcome: "Termin",
+    appointmentAt,
+    appointmentMode,
+  }, (text) => {
+    const response = JSON.parse(text) as { report?: { appointmentAt?: string; outcome?: string } };
+    return response.report?.outcome === "Termin"
+      && Date.parse(response.report.appointmentAt || "") === Date.parse(appointmentAt);
+  });
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -297,6 +326,7 @@ async function postWithRetry(
   url: string,
   headers: Record<string, string>,
   body: Record<string, unknown>,
+  validateResponse?: (text: string) => boolean,
 ): Promise<boolean> {
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -305,7 +335,7 @@ async function postWithRetry(
     try {
       const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
       const text = await res.text();
-      if (res.ok) return true;
+      if (res.ok && (!validateResponse || validateResponse(text))) return true;
       const retryable = res.status >= 500 || res.status === 429;
       log.error("finalize.post_failed", { status: res.status, body: text.slice(0, 400), attempt, retryable });
       if (!retryable || attempt >= maxAttempts) return false;
@@ -548,7 +578,8 @@ export function parseSlotPhraseToIso(phrase: string): string | undefined {
     }
   }
   // Uhrzeit: "um <hour> Uhr [<minute>]"
-  const numericTime = /\bum\s+(\d{1,2})(?::(\d{2}))?\s*uhr\b/.exec(lower);
+  const numericTime = /\b(?:um\s+)?(\d{1,2}):(\d{2})(?:\s*uhr)?\b/.exec(lower)
+    || /\bum\s+(\d{1,2})\s*uhr\b/.exec(lower);
   let hour = 0;
   let minute = 0;
   if (numericTime) {
@@ -560,7 +591,7 @@ export function parseSlotPhraseToIso(phrase: string): string | undefined {
     hour = NUMBER_WORD[hourMatch[1]] ?? 0;
     if (hourMatch[2]) minute = NUMBER_WORD[hourMatch[2]] ?? 0;
   }
-  if (!day || !month || hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
+  if ((!numericTime && !hourMatch) || !day || !month || hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
 
   const now = new Date();
   let year = now.getFullYear();

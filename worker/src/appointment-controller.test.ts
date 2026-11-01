@@ -1,10 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
+import { advanceAppointmentRouting, appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { computeFreeSlots } from "./busy.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
+
+test("locks the selected Tuesday, retains the location and proceeds to booking without model slot rewriting", () => {
+  const slots = "FREIE TERMIN-VORSCHLÄGE:\n- Montag, 9. November um 08:30 Uhr\n- Dienstag, 10. November um 08:30 Uhr";
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: "Passt Ihnen für einen Orientierungstermin eher vormittags oder nachmittags?" },
+    { role: "user", text: "Tatsächlich ist es vormittags bei mir besser." },
+  ];
+  let transition = advanceAppointmentRouting({}, turns, slots);
+  assert.equal(transition.state.appointmentOfferedSlots?.length, 2);
+  assert.match(transition.speechText || "", /Montag.*Dienstag/);
+  turns.push({ role: "assistant", text: transition.speechText || "" }, { role: "user", text: "Der Dienstag passt sehr gut." });
+  transition = advanceAppointmentRouting(transition.state, turns, slots);
+  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 08:30 Uhr");
+  assert.equal(transition.speechText, "Soll der Termin digital oder bei Ihnen vor Ort stattfinden?");
+  turns.push({ role: "assistant", text: transition.speechText }, { role: "user", text: "Gerne bei mir vor Ort." });
+  transition = advanceAppointmentRouting(transition.state, turns, slots);
+  assert.equal(transition.readyToBook, true);
+  assert.equal(transition.state.appointmentMode, "Beim Kunden vor Ort");
+  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 08:30 Uhr");
+  const decision = decideAppointment({ turns, topicKind: "pkv", freeSlotsPrompt: slots, slotPhrase: transition.state.selectedAppointmentSlot });
+  assert.equal(decision.ok, true);
+  turns.push({ role: "user", text: "Bei mir." });
+  assert.equal(advanceAppointmentRouting(transition.state, turns, slots).state.appointmentMode, "Beim Kunden vor Ort");
+});
 
 test("recognizes the offered digital appointment mode", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne digital." }]), "Microsoft Teams");
