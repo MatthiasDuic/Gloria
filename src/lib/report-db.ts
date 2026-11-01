@@ -2693,6 +2693,14 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
             : typeof data.requiredData === "string"
               ? data.requiredData
               : undefined,
+        preparationQuestions:
+          typeof data.preparationQuestions === "string" ? data.preparationQuestions : undefined,
+        knowledgeSources: Array.isArray(data.knowledgeSources)
+          ? data.knowledgeSources.filter((source): source is string => typeof source === "string")
+          : undefined,
+        knowledgeContent: typeof data.knowledgeContent === "string" ? data.knowledgeContent : undefined,
+        knowledgeFetchedAt: typeof data.knowledgeFetchedAt === "string" ? data.knowledgeFetchedAt : undefined,
+        knowledgeFetchError: typeof data.knowledgeFetchError === "string" ? data.knowledgeFetchError : undefined,
         exampleSentences: typeof data.exampleSentences === "string" ? data.exampleSentences : undefined,
         // Legacy-Felder bleiben für bestehende Datensätze verfügbar.
         requiredData: typeof data.requiredData === "string" ? data.requiredData : undefined,
