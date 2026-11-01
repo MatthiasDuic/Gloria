@@ -85,7 +85,7 @@ export async function loadTopicPolicy(opts: {
 
 export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topic = (policy.topic || "").trim();
-  const objective = compactPolicyText(policy.callObjective || "", 4, 600);
+  const objective = compactPolicyText(policy.callObjective || "", 24, 3_000);
   const preparationQuestions = compactPolicyText(
     policy.preparationQuestions || policy.pkvHealthQuestions || "",
     12,
@@ -98,10 +98,10 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
 
   const parts = [
     "KAMPAGNENKONTEXT FÜR DIESES GESPRÄCH:",
-    "Nutze Name, Ziel und Fachinformationen als Orientierung, nicht als Skript. OpenAI soll die letzte Äußerung, erkennbare Gesprächsabsicht, Stimmung, Unterbrechungen und verfügbares Zeitfenster verstehen und darauf natürlich reagieren. Beantworte zuerst das tatsächlich Gesagte; stelle höchstens eine passende Hauptfrage. Lies keine Textbausteine oder Fragenkataloge ab.",
+    "Führe den folgenden Auftrag für Gloria mit den Kampagneninformationen als fachlicher Grundlage aus. Nutze Name, Auftrag und Fachwissen als Orientierung, nicht als Skript. OpenAI soll die letzte Äußerung, erkennbare Gesprächsabsicht, Stimmung, Unterbrechungen und verfügbares Zeitfenster verstehen und darauf natürlich reagieren. Beantworte zuerst das tatsächlich Gesagte; stelle höchstens eine passende Hauptfrage. Lies keine Textbausteine oder Fragenkataloge ab. Der Auftrag setzt die allgemeinen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und respektvollem Umgang mit einem Nein nicht außer Kraft.",
   ];
   if (topic) parts.push(`KAMPAGNE: ${topic}`);
-  if (objective) parts.push("", "GESPRÄCHSZIEL:", objective);
+  if (objective) parts.push("", "AUFTRAG FÜR GLORIA:", objective);
   if (websiteKnowledge) {
     parts.push(
       "",

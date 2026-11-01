@@ -3142,8 +3142,7 @@ export default function HomePage() {
                     <div className="mini-panel playbook-card top-gap">
                       <h3>Kampagne konfigurieren</h3>
                       <p className="subtle">
-                        Für eine neue Kampagne reichen Name, Gesprächsziel, Vorbereitungsfragen und die fachliche Wissensgrundlage.
-                        Gloria formuliert daraus selbstständig und situationsbezogen.
+                        Gib Gloria einen konkreten Auftrag. Sie nutzt das Fachwissen als Grundlage und führt das Gespräch passend zur Reaktion des Gegenübers – nicht als abgelesenes Skript.
                       </p>
                       <div className="playbook-grid">
                         <label>
@@ -3151,15 +3150,20 @@ export default function HomePage() {
                           <input value={detailTopic} readOnly aria-readonly="true" />
                         </label>
                         <label>
-                          Ziel der Kampagne
+                          Auftrag für Gloria
                           <textarea
                             value={activeDraft.callObjective ?? ""}
-                            rows={3}
+                            rows={5}
+                            maxLength={3000}
+                            placeholder={"Beispiel: Finde heraus, ob ein Beratungstermin zum Thema sinnvoll ist. Erkläre den passenden Nutzen mit dem Kampagnenwissen und vereinbare bei echtem Interesse einen Termin. Bei Ablehnung respektvoll beenden."}
                             onChange={(event) => setDraftScripts((current) => ({
                               ...current,
                               [detailTopic]: { ...current[detailTopic], callObjective: event.target.value },
                             }))}
                           />
+                          <span className="subtle">
+                            Beschreibe das gewünschte Ergebnis und wichtige Schwerpunkte (maximal 3.000 Zeichen). Gloria verfolgt diesen Auftrag flexibel, beantwortet erst die Anliegen der Person und nutzt die Wissensquellen für passende, belegte Antworten.
+                          </span>
                         </label>
                         <label className="full-row">
                           Fragen nach bestätigtem Termin

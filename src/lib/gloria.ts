@@ -131,7 +131,7 @@ export function buildSystemPrompt(script: ScriptConfig): string {
     { label: "Verbindliche Grundregeln", value: GLORIA_CORE_INSTRUCTIONS },
     { label: "System", value: SYSTEM_PROMPT },
     { label: "Kampagne", value: script.topic },
-    { label: "Gesprächsziel", value: script.callObjective || "Das passende Kampagnenziel situationsgerecht erreichen." },
+    { label: "Auftrag für Gloria", value: script.callObjective || "Das passende Kampagnenziel situationsgerecht erreichen." },
     {
       label: "Kampagnenwissen",
       value: knowledge
