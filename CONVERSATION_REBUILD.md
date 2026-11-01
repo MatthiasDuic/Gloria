@@ -19,6 +19,10 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - `response.instructions` ersetzt bei OpenAI Realtime die Session-Anweisungen. Deshalb enthält jede Antwortanweisung den vollständigen aktuellen Systemkontext einschließlich Auftrag und Fachwissen, gefolgt von der Anweisung für den konkreten Turn. Ein Verweis auf den Auftrag allein reicht nicht.
 - Eine Zusage zu einem kurzen Gespräch ist keine Terminfreigabe. Anlass, Relevanz, Bedarfsfragen und der im Auftrag vorgesehene Ausblick/Lösungsansatz gehen der Terminfrage voraus. Interne Promptbegriffe dürfen nicht als Gesprächsanlass ausgesprochen werden.
 - Ohne hinterlegten Auftrag bleibt der bisherige kampagnenbezogene Einstieg erhalten. Die Änderung benötigt ein separates Worker-Deployment.
+- Die vom Backend geprüften freien Kalender-Slots stehen im Session- und Antwortkontext zur Verfügung. Eine nachträglich geladene Kalenderliste aktualisiert die Session; Kundenwunschzeiten werden vor jeder Bestätigung erneut gegen den Kalender geprüft.
+- Numerische und ausgeschriebene Terminparameter des Modells werden auf denselben kanonischen Kalendereintrag abgebildet; beispielsweise sind `8:30 Uhr`, `08:30 Uhr` und `acht Uhr dreißig` derselbe Zeitpunkt. Die Antwort „digital“ wird als Microsoft-Teams-Termin erkannt.
+- Bei einem Auftrag mit Zehn-Jahres-Ausblick erzeugt der Worker die Beispielrechnung unmittelbar aus der Antwort zum heutigen Monatsbeitrag: vier Prozent jährlich mit Zinseszins, auf fünf Euro gerundet. Einstiegsbeiträge werden nicht verwendet. Bei 480 Euro ergibt das rund 710 Euro monatlich in zehn Jahren, also rund 230 Euro mehr. Danach folgt der konkrete Konzeptnutzen aus dem Auftrag, ohne Ergebnisversprechen.
+- Der Standard-Transkriptionshinweis wird bei ASR-Leakage ignoriert und löst bei unterbrochener Ausgabe eine akustische Rückfrage aus. Eine menschliche Übergabe setzt einen tatsächlichen Kundenwunsch voraus; sie ersetzt keine Terminprüfung.
 
 ## Erster Migrationsschritt
 

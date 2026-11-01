@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
+import { appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { computeFreeSlots } from "./busy.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
+
+test("recognizes the offered digital appointment mode", () => {
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne digital." }]), "Microsoft Teams");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne bei mir vor Ort." }]), "Beim Kunden vor Ort");
+});
+
+test("matches numeric and spoken tool times to the canonical calendar slot", () => {
+  const slots = "FREIE TERMIN-VORSCHLÄGE:\n- Montag, 9. November um 08:30 Uhr\n- Dienstag, 10. November um 08:30 Uhr";
+  assert.equal(findSuppliedAppointmentSlot(slots, "Montag, 9. November um 8:30 Uhr"), "Montag, 9. November um 08:30 Uhr");
+  assert.equal(findSuppliedAppointmentSlot(slots, "Montag, den neunten November um acht Uhr dreißig"), "Montag, 9. November um 08:30 Uhr");
+  assert.equal(findSuppliedAppointmentSlot(slots, "Montag, 9. November um 09:00 Uhr"), undefined);
+  assert.equal(findSuppliedAppointmentSlot(slots, "Montag, 9. Dezember um 08:30 Uhr"), undefined);
+});
 
 function readyPkvTurns(): ConversationTurn[] {
   return [

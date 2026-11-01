@@ -17,6 +17,7 @@ export async function loadBusySlots(opts: {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN?.trim();
   if (!baseUrl || !token || !opts.userId) {
+    log.warn("busy.skipped_missing_context", { baseUrlConfigured: Boolean(baseUrl), tokenConfigured: Boolean(token), userIdProvided: Boolean(opts.userId) });
     return null;
   }
 

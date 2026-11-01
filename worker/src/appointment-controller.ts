@@ -1,3 +1,5 @@
+import { parseSlotPhraseToIso } from "./finalize.js";
+
 type ConversationTurn = { role: "user" | "assistant"; text: string };
 
 export function convertSlotPhraseForSpeech(slotPhrase: string): string {
@@ -57,7 +59,7 @@ export function detectAppointmentMode(turns: ConversationTurn[]): AppointmentMod
   const recentUserTurns = turns.filter((turn) => turn.role === "user").slice(-4).reverse();
   for (const turn of recentUserTurns) {
     const text = turn.text;
-    if (/\b(?:teams|video(?:termin|call)?|online)\b/i.test(text)) return "Microsoft Teams";
+    if (/\b(?:teams|video(?:termin|call)?|online|digital)\b/i.test(text)) return "Microsoft Teams";
     if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(text)) return "In der Agentur";
     if (/\b(?:bei\s+mir|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
   }
@@ -73,24 +75,28 @@ export function findSuppliedAppointmentSlot(freeSlotsPrompt: string | undefined,
   const offeredText = normalizeSlot(freeSlotsPrompt || "");
   if (normalizedPhrase.length > 10 && offeredText.includes(normalizedPhrase)) return phrase.trim();
 
+  const offeredLines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
+  const requestedStart = parseSlotPhraseToIso(phrase);
+  if (requestedStart) {
+    return offeredLines.find((line) => parseSlotPhraseToIso(line) === requestedStart);
+  }
+
   const weekdayMatch = normalizedPhrase.match(/\b(montag|dienstag|mittwoch|donnerstag|freitag)\b/i)?.[1];
   const time = normalizedPhrase.match(/\b(?:um\s*)?(\d{1,2})(?::|\s+uhr\s*)(\d{2})?\b/);
 
   if (weekdayMatch && !time) {
-    const offeredLines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
     const match = offeredLines.find((line) => normalizeSlot(line).includes(weekdayMatch.toLowerCase()));
     if (match) return match;
   }
 
   if (!time) return undefined;
   const day = normalizedPhrase.match(/\b(\d{1,2})\.?\b/)?.[1];
-  const offeredLines = (freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
   return offeredLines.find((line) => {
     const normalizedLine = normalizeSlot(line);
     const lineHour = normalizedLine.match(/\b(?:um\s*)?(\d{1,2}):?(\d{2})\s*uhr\b/)?.[1];
     return (!weekdayMatch || normalizedLine.includes(weekdayMatch.toLowerCase()))
       && (!day || new RegExp(`\\b${day}\\.?\\b`).test(normalizedLine))
-      && lineHour === time[1]
+      && Number(lineHour) === Number(time[1])
       && (!time[2] || normalizedLine.includes(`:${time[2]}`));
   });
 }

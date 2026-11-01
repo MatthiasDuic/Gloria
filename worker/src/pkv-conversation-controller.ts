@@ -14,7 +14,7 @@ function roundToFive(n: number): number {
   return Math.round(n / 5) * 5;
 }
 
-function buildTenYearProjectionSentence(contributionPhrase?: string): string {
+export function buildTenYearProjectionSentence(contributionPhrase?: string): string {
   if (!contributionPhrase) return "Bei einer beispielhaften Steigerung von rund vier Prozent pro Jahr wäre ein Beitrag in zehn Jahren etwa eineinhalbmal so hoch wie heute.";
 
   const amount = parseGermanEuroAmount(contributionPhrase);
@@ -35,7 +35,7 @@ export function extractCurrentContributionPhrase(turns: ConversationTurn[]): str
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     if (
       turns[index].role === "assistant"
-      && /welchen beitrag zahlen sie heute|aktuellen?\s+(?:monatlichen\s+)?beitrag|heutigen?\s+beitrag/i.test(turns[index].text)
+      && /welchen beitrag zahlen sie heute|aktuellen?\s+(?:monatlichen\s+)?(?:monats)?beitrag|heutigen?\s+beitrag|welchen\s+monatlichen\s+beitrag|wie\s+(?:viel|hoch).*(?:derzeit|aktuell|heute|im\s+monat).*(?:gesundheitsversorgung|beitrag)|wie\s+hoch.*monatsbeitrag/i.test(turns[index].text)
     ) {
       currentContributionQuestion = index;
       break;

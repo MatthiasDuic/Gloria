@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -66,6 +66,51 @@ test("classifies unclear ASR fragments but keeps short German answers", () => {
 test("ignores the configured ASR prompt when it leaks into a transcript", () => {
   assert.equal(isSyntheticTranscriptionPrompt("Deutsches Telefonat zur privaten Krankenversicherung. Achte besonders auf Eigennamen, Firmennamen, Neumann, Duic, Zahlen, Euro-Beträge sowie gesetzlich und privat."), true);
   assert.equal(isSyntheticTranscriptionPrompt("Ich zahle tausend Euro."), false);
+  const leaked = "Deutsches Geschäftstelefonat. Zahlen und Eigennamen exakt transkribieren. Ansagen von Warteschleifen, Weiterleitungen, Mailboxen und Anrufbeantwortern vollständig transkribieren.";
+  assert.equal(isSyntheticTranscriptionPrompt(leaked), true);
+  assert.equal(isSyntheticTranscriptionPrompt(leaked.replace("Geschäfts", "Geschaefts")), true);
+  assert.equal(shouldRecoverInterruptedBargeIn(true, leaked), true);
+});
+
+test("calculates the reported 480 Euro contribution before moving to the concept", () => {
+  const ctx = buildPkvContext();
+  ctx.callObjective = "Den heutigen Beitrag erfragen und den Zehn-Jahres-Ausblick als Gesprächsaufhänger nutzen.";
+  ctx.transcript = [
+    { role: "assistant", text: "Darf ich fragen, welchen monatlichen Beitrag Sie aktuell für Ihre Gesundheitsversorgung aufwenden?", at: 1 },
+    { role: "user", text: "480 Euro.", at: 2 },
+  ];
+  const projection = buildRequiredContributionProjection(ctx);
+  assert.match(projection || "", /vier Prozent/);
+  assert.match(projection || "", /zehn Jahren/);
+  assert.match(projection || "", /zweihundert dreißig Euro mehr/);
+  assert.match(projection || "", /siebenhundert zehn Euro monatlich/);
+  ctx.transcript.push({ role: "assistant", text: projection || "", at: 3 });
+  ctx.transcript.push({ role: "user", text: "Nein, bisher keine Planung.", at: 4 });
+  assert.equal(buildRequiredContributionProjection(ctx), undefined);
+  assert.match(buildRealtimeInstructions(ctx), /KONZEPT VOR TERMIN/);
+  assert.match(buildRealtimeInstructions(ctx), /konkreten Lösungsansatz aus dem Auftrag/);
+});
+
+test("does not project initial contributions, customer questions or unrelated campaigns", () => {
+  const ctx = buildPkvContext();
+  ctx.callObjective = "Zehn-Jahres-Ausblick";
+  ctx.transcript = [
+    { role: "assistant", text: "Mit welchem Beitrag haben Sie angefangen?", at: 1 },
+    { role: "user", text: "480 Euro.", at: 2 },
+  ];
+  assert.equal(buildRequiredContributionProjection(ctx), undefined);
+  ctx.topicKind = "generic";
+  ctx.transcript[0].text = "Welchen monatlichen Beitrag zahlen Sie aktuell?";
+  assert.equal(buildRequiredContributionProjection(ctx), undefined);
+});
+
+test("only transfers when a customer actually requests a person", () => {
+  assert.equal(hasRequestedHumanTransfer("Ja, das wäre lieb."), false);
+  assert.equal(hasRequestedHumanTransfer("Vormittags passt besser."), false);
+  assert.equal(hasRequestedHumanTransfer("Bitte mit Herrn Duic verbinden."), true);
+  assert.equal(hasRequestedHumanTransfer("Einen Menschen bitte."), true);
+  assert.equal(hasRequestedHumanTransfer("Einen Berater bitte."), true);
+  assert.equal(hasRequestedHumanTransfer("Ich möchte mit jemandem sprechen."), true);
 });
 
 test("recovers once when a barge-in produces only the configured transcription prompt", () => {
@@ -130,11 +175,18 @@ test("rejects invented slots and accepts exact supplied slots", () => {
   assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
-test("keeps the full calendar out of static model instructions", () => {
+test("passes real free calendar slots through both session and response instructions", () => {
   const ctx = buildPkvContext();
   ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
   const instructions = buildRealtimeInstructions(ctx);
-  assert.doesNotMatch(instructions, /Mittwoch, 26\. August|Donnerstag, 27\. August/);
+  assert.match(instructions, /Mittwoch, 26\. August|Donnerstag, 27\. August/);
+  assert.match(instructions, /Behaupte bei vorhandenen Slots nicht/);
+  const response = buildRealtimeResponseInstructions(ctx, "Biete zwei passende Termine an.");
+  assert.match(response, /Mittwoch, 26\. August|Donnerstag, 27\. August/);
+  ctx.freeSlotsPrompt = "KALENDER NICHT VERFÜGBAR: Keine Termine bestätigen.";
+  assert.match(buildRealtimeResponseInstructions(ctx), /KALENDER NICHT VERFÜGBAR/);
+  ctx.confirmedSlotPhrase = "Mittwoch, 26. August um 11:00 Uhr";
+  assert.doesNotMatch(buildRealtimeInstructions(ctx), /AKTUELLER KALENDERSTATUS UND TERMINAUSWAHL/);
 });
 
 test("uses the appointment-specific farewell after a slot is confirmed", () => {
@@ -330,7 +382,7 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|HOCHRECHNUNG|Laut PKV Verband|drei bis fünf Prozent/i);
+  assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
   assert.match(instructions, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);

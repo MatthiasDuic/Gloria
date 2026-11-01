@@ -1,12 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePreparation, beginPreparation, buildPreparationQuestions, createPreparationState, createPreparationStateForCall } from "./preparation-controller.js";
+import { APPOINTMENT_FAREWELL_TEXT, advancePreparation, beginPreparation, buildPreparationQuestions, createPreparationState, createPreparationStateForCall } from "./preparation-controller.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const policy = {
   topic: "private Krankenversicherung",
 };
 const knownStatusTurns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
+
+test("completes configured closing questions after booking without reasking the known 480 Euro contribution", () => {
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: "Welchen monatlichen Beitrag wenden Sie aktuell auf?" },
+    { role: "user", text: "480 Euro." },
+  ];
+  const state = createPreparationStateForCall("pkv", "private Krankenversicherung", {
+    preparationQuestions: [
+      "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+      "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+      "Wie hoch ist Ihr aktueller Monatsbeitrag?",
+      "Darf ich Ihr Geburtsdatum aufnehmen?",
+      "Gibt es aktuell laufende Behandlungen?",
+      "Gibt es bestehende Diagnosen, die wir berücksichtigen sollten?",
+    ].join("\n"),
+  });
+  let transition = beginPreparation(state, "Donnerstag um elf Uhr", turns);
+  assert.equal(transition.state.stage, "awaiting_consent");
+  assert.match(transition.speechText || "", /freiwillige|Gesundheitsangaben/);
+  const answers = ["Ja.", "Privat.", "Bei der Allianz versichert.", "12. Juli 1974", "Nein.", "Nein."];
+  const questions: string[] = [];
+  for (const answer of answers) {
+    turns.push({ role: "user", text: answer });
+    transition = advancePreparation(transition.state, answer, turns);
+    if (transition.speechText) questions.push(transition.speechText);
+  }
+  assert.equal(transition.state.stage, "awaiting_email");
+  assert.match(questions.join("\n"), /Geburtsdatum/);
+  assert.match(questions.join("\n"), /Behandlungen/);
+  assert.match(questions.join("\n"), /Diagnosen/);
+  assert.doesNotMatch(questions.join("\n"), /Monatsbeitrag/);
+  transition = advancePreparation(transition.state, "neumann@example.org", turns);
+  assert.equal(transition.state.stage, "completed");
+  assert.equal(transition.speechText, APPOINTMENT_FAREWELL_TEXT);
+});
 
 test("uses campaign-specific questions in their configured order", () => {
   assert.deepEqual(buildPreparationQuestions({
