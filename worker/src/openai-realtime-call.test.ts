@@ -236,10 +236,56 @@ for (const mode of ["normal", "test", "callback"] as const) {
 
     const nextTurn = buildRealtimeResponseInstructions(ctx, "Beantworte zuerst die Kundenfrage.");
     assert.match(nextTurn, /Beantworte zuerst die Kundenfrage/);
+    assert.ok(nextTurn.includes(buildRealtimeInstructions(ctx)));
+    assert.ok(nextTurn.includes(policy.callObjective));
     assert.match(nextTurn, /noch offenen Auftragsschritte/);
     assert.match(nextTurn, /klare Ablehnung haben Vorrang/);
   });
 }
+
+test("retains the complete session assignment in each response override throughout the reported dialogue", () => {
+  const policy = {
+    topic: "private Krankenversicherung",
+    callObjective: [
+      "Führe ein kurzes Erstgespräch mit Unternehmern zum Thema steigende Kosten in der Gesundheitsversorgung.",
+      "Gesprächseinstieg: Beitragsentwicklung in der Gesundheitsversorgung erläutern.",
+      "Bedarf ermitteln: Haben Sie bereits deutliche Beitragserhöhungen bemerkt?",
+      "Aktuellen Beitrag erfragen: Welchen monatlichen Beitrag wenden Sie auf?",
+      "Zukunftsbetrachtung: Zehn-Jahres-Ausblick anhand des heutigen Beitrags.",
+      "Lösungsansatz: Gesundheitskosten mit Blick auf den Ruhestand planbarer gestalten.",
+      "Erst danach einen Orientierungstermin vereinbaren.",
+    ].join("\n"),
+    knowledgeContent: "Die persönliche Situation muss individuell geprüft werden.",
+  };
+  const ctx = newContext({
+    callSid: "test-reported-context-loss",
+    streamSid: "test-stream",
+    topic: policy.topic,
+    callObjective: policy.callObjective,
+    topicPolicyPrompt: topicPolicyToSystemPrompt(policy),
+  });
+  for (const userText of [
+    "Musterbau GmbH, mein Name ist Neumann, guten Tag.",
+    "Ja, ich habe kurz Zeit.",
+    "Worum geht es überhaupt?",
+    "Ich möchte erstmal wissen, was Sie überhaupt klären möchten.",
+    "Nein, da habe ich kein Interesse dran.",
+  ]) {
+    ctx.transcript.push({ role: "user", text: userText, at: Date.now() });
+    const response = buildRealtimeResponseInstructions(ctx, "Antworte auf die letzte Kundenaussage.", false);
+    assert.ok(response.startsWith(buildRealtimeInstructions(ctx)));
+    assert.ok(response.includes(policy.callObjective));
+    assert.ok(response.includes(policy.knowledgeContent));
+    assert.match(response, /Eine Zusage wie 'Ja, ich habe kurz Zeit' erlaubt nur das Erstgespräch, nicht die Terminierung/);
+    assert.match(response, /Arbeite Bedarf, fachlichen Ausblick und Lösungsansatz vor der Terminfrage ab/);
+    assert.match(response, /keine erfundenen Themen oder Angebote/);
+    assert.match(response, /Wenn der Kunde klar ablehnt, respektierst du das/);
+  }
+  const intro = buildRealtimeResponseInstructions(ctx, buildDecisionMakerIntroInstructions(ctx));
+  assert.ok(intro.includes(policy.callObjective));
+  assert.match(intro, /Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass/);
+  assert.match(intro, /Interne Begriffe.*dürfen nicht gesprochen werden/);
+});
 
 test("uses the configured company in the opening and falls back when it is missing", () => {
   const allianzContext = newContext({

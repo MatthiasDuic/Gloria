@@ -16,6 +16,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Bei vorhandenem Auftrag ist der Kampagnenname nur eine interne Zuordnung. Der Entscheider-Einstieg wird mit transparenter KI-Identität und dem tatsächlichen Anlass aus dem Auftrag formuliert, statt den Kampagnennamen als Thema vorzulesen.
 - Das gilt für reguläre Anrufe, Testanrufe und Rückrufe. Der bisherige Gesprächsstand bleibt bei Rückrufen erhalten; offene Auftragsschritte werden situationsgerecht fortgesetzt.
 - Jede frei formulierte Antwort wird an die Auftragstreue erinnert. Kundenfragen, Rückrufwünsche, Datenschutz, Freiwilligkeit und klare Ablehnungen bleiben vorrangig.
+- `response.instructions` ersetzt bei OpenAI Realtime die Session-Anweisungen. Deshalb enthält jede Antwortanweisung den vollständigen aktuellen Systemkontext einschließlich Auftrag und Fachwissen, gefolgt von der Anweisung für den konkreten Turn. Ein Verweis auf den Auftrag allein reicht nicht.
+- Eine Zusage zu einem kurzen Gespräch ist keine Terminfreigabe. Anlass, Relevanz, Bedarfsfragen und der im Auftrag vorgesehene Ausblick/Lösungsansatz gehen der Terminfrage voraus. Interne Promptbegriffe dürfen nicht als Gesprächsanlass ausgesprochen werden.
 - Ohne hinterlegten Auftrag bleibt der bisherige kampagnenbezogene Einstieg erhalten. Die Änderung benötigt ein separates Worker-Deployment.
 
 ## Erster Migrationsschritt
