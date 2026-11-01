@@ -3,6 +3,10 @@ import { deleteUserCampaignTopic, getDashboardData, saveScript } from "@/lib/sto
 import type { TopicPolicyConfig } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { TopicPolicyPayloadSchema } from "@/lib/topic-policy-schema";
+import { CampaignKnowledgeError, fetchCampaignKnowledge, normalizeKnowledgeSources } from "@/lib/campaign-knowledge";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const sessionUser = getSessionUserFromRequest(request);
@@ -62,19 +66,39 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await saveScript(parsed.data.topic, parsed.data, { userId: resolvedUserId });
+    const existing = (await getDashboardData({ userId: resolvedUserId, role: "user" }))
+      .topicPolicies.find((policy) => policy.topic === parsed.data.topic);
+    const knowledgeSources = normalizeKnowledgeSources(
+      parsed.data.knowledgeSources ?? existing?.knowledgeSources ?? [],
+    );
+    const knowledgeContent = await fetchCampaignKnowledge(knowledgeSources);
+    const result = await saveScript(
+      parsed.data.topic,
+      {
+        ...parsed.data,
+        knowledgeSources,
+        knowledgeContent,
+        knowledgeFetchedAt: knowledgeSources.length ? new Date().toISOString() : undefined,
+        knowledgeFetchError: "",
+      },
+      { userId: resolvedUserId },
+    );
     return NextResponse.json({
       ok: true,
       topicPolicy: result.script,
       storageMode: result.storageMode,
     });
   } catch (error) {
+    if (error instanceof CampaignKnowledgeError) {
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    }
+    console.error("Campaign configuration save failed", error);
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Topic Policy konnte nicht gespeichert werden.",
+            : "Kampagne konnte nicht gespeichert werden.",
       },
       { status: 500 },
     );

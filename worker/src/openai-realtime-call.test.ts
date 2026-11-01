@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredPkvSequenceInstruction, canConfirmRealtimeAppointment, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, normalizePkvTerminology, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildRealtimeInstructions, buildRealtimeResponseInstructions, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 
@@ -36,19 +36,19 @@ test("asks for a callback instead of continuing the pitch when the contact has n
     topic: "private Krankenversicherung",
   });
 
-  test("applies the shared Gloria role, transparency, and campaign rules to live calls", () => {
-    const instructions = buildRealtimeInstructions(buildPkvContext());
-    assert.match(instructions, /individuellen Dialog statt ein Skript/);
-    assert.match(instructions, /Stelle dich .* transparent als digitale Assistentin\/KI vor/);
-    assert.match(instructions, /Neue Themen können eigene Playbooks haben/);
-    assert.match(instructions, /Erfinde keine Tarife, Zahlen, Quellen/);
-  });
-
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /KEINE ZEIT \/ RÜCKRUF/);
   assert.match(instructions, /führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort/);
   assert.match(instructions, /akzeptiere auch relative Angaben wie 'in zehn Minuten'/);
   assert.match(instructions, /rufe end_call auf/);
+});
+
+test("applies shared natural-dialogue and safety rules to live campaigns", () => {
+  const instructions = buildRealtimeInstructions(buildPkvContext());
+  assert.match(instructions, /individuellen Dialog statt ein Skript/);
+  assert.match(instructions, /transparent als digitale Assistentin\/KI vor/);
+  assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
+  assert.match(instructions, /Erfinde keine Tarife, Zahlen, Quellen/);
 });
 
 test("classifies unclear ASR fragments but keeps short German answers", () => {
@@ -103,33 +103,6 @@ test("does not recover a complete preparation introduction ending with a colon",
   assert.equal(isLikelyIncompleteAssistantTurn("Damit Sie ein Gefühl dafür bekommen, worüber wir genau sprechen"), true);
 });
 
-test("does not use an earlier acknowledgement as PKV appointment consent", () => {
-  const ctx = buildPkvContext();
-  ctx.transcript.push({ role: "user", text: "Vormittags wäre besser.", at: 7 });
-
-  const result = canConfirmRealtimeAppointment(ctx);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /Herr Duic|interessant/);
-});
-
-test("allows a PKV appointment after consent to the concept question", () => {
-  const ctx = buildPkvContext();
-  ctx.transcript.push({ role: "user", text: "Ja, das ist für mich sinnvoll.", at: 7 });
-
-  assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
-});
-
-test("allows a PKV appointment after selecting an offered slot", () => {
-  const ctx = buildPkvContext();
-  ctx.transcript.push(
-    { role: "user", text: "Ja, diese Klarheit ist für mich hilfreich.", at: 6.5 },
-    { role: "assistant", text: "Dann habe ich zwei Vorschläge: Montag, 24. August um 15:30 Uhr, oder Dienstag, 25. August um 13:30 Uhr. Welcher Termin passt Ihnen besser?", at: 7 },
-    { role: "user", text: "Der Dienstag ist gut.", at: 8 },
-  );
-
-  assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
-});
-
 test("accepts a direct Monday selection as a confirmed slot without asking again", () => {
   const ctx = buildPkvContext();
   ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Montag, 24. August um 15:30 Uhr\n- Dienstag, 25. August um 13:30 Uhr";
@@ -139,7 +112,6 @@ test("accepts a direct Monday selection as a confirmed slot without asking again
     { role: "user", text: "Montag passt gut.", at: 8 },
   );
 
-  assert.deepEqual(canConfirmRealtimeAppointment(ctx), { ok: true });
   assert.equal(isOfferedSlotPhrase(ctx, "Montag passt gut."), true);
 });
 
@@ -213,25 +185,23 @@ test("speaks euro cents and the singular euro amount correctly", () => {
   assert.doesNotMatch(response, /1\.250,50 Euro|eins Euro/);
 });
 
-test("includes the required decision-maker and gatekeeper opening lines", () => {
+test("uses a transparent, campaign-specific introduction for the decision maker", () => {
   const ctx = newContext({
     callSid: "test-realtime-opening",
     streamSid: "test-stream",
     contactName: "Herr Neumann",
-    topic: "private Krankenversicherung",
+    topic: "Individuelle Gesundheitsvorsorge",
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic aus dem Hause der Barmenia Gothar/);
-  assert.match(instructions, /Ja, ich bin eine KI, aber es geht um ein wichtiges Thema zur Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(instructions, /Haben Sie gerade einen kurzen Moment\? Ich verspreche Ihnen, es wird sich lohnen/);
-  assert.match(instructions, /Könnten Sie mich bitte mit Herrn Neumann verbinden/);
-  assert.match(instructions, /kurze Einordnung zur Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(instructions, /Neukundenakquise und der erste Kontakt/);
-  assert.match(instructions, /beginne nicht mit der Versicherungsfrage/);
+  assert.match(instructions, /stelle dich transparent und kurz vor/);
+  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic/);
+  assert.match(buildDecisionMakerIntro(ctx), /Ich rufe zum Thema Individuelle Gesundheitsvorsorge an/);
+  assert.match(instructions, /bitte freundlich um Weiterleitung an Herrn Neumann/);
+  assert.doesNotMatch(instructions, /Barmenia Gothar|Beitragsentwicklung in der Gesundheitsversorgung/);
 });
 
-test("uses the user society in the opening and falls back when it is missing", () => {
+test("uses the configured company in the opening and falls back when it is missing", () => {
   const allianzContext = newContext({
     callSid: "test-realtime-society-allianz",
     streamSid: "test-stream",
@@ -240,8 +210,8 @@ test("uses the user society in the opening and falls back when it is missing", (
     ownerGesellschaft: "Allianz",
   });
   const allianzInstructions = buildRealtimeInstructions(allianzContext);
-  assert.match(allianzInstructions, /aus dem Hause Allianz/);
-  assert.doesNotMatch(allianzInstructions, /aus dem Hause BarmeniaGothaer/);
+  assert.match(buildDecisionMakerIntro(allianzContext), /bei Allianz/);
+  assert.doesNotMatch(allianzInstructions, /Barmenia Gothar/);
 
   const fallbackContext = newContext({
     callSid: "test-realtime-society-fallback",
@@ -250,7 +220,7 @@ test("uses the user society in the opening and falls back when it is missing", (
     topic: "private Krankenversicherung",
     ownerGesellschaft: "   ",
   });
-  assert.match(buildRealtimeInstructions(fallbackContext), /aus dem Hause Agentur Duic Sprockhövel/);
+  assert.match(buildDecisionMakerIntro(fallbackContext), /bei Agentur Duic Sprockhövel/);
 });
 
 test("explicitly teaches the correct Duic pronunciation as Duitsch", () => {
@@ -266,7 +236,7 @@ test("explicitly teaches the correct Duic pronunciation as Duitsch", () => {
   assert.match(instructions, /Nachname.*Duic.*Duitsch/i);
 });
 
-test("requires the PKV ten-year and retirement bridge after a contribution", () => {
+test("does not inject an unrelated fixed PKV pitch into campaign instructions", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-projection",
     streamSid: "test-stream",
@@ -274,24 +244,11 @@ test("requires the PKV ten-year and retirement bridge after a contribution", () 
   });
 
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /PKV-GESPRÄCHSZIEL/);
-  assert.match(instructions, /HOCHRECHNUNG:.*Zehn-Jahres-Beispielrechnung/);
-  assert.match(instructions, /ÜBERLEITUNG:.*Herr Duic/);
-  assert.match(instructions, /Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.doesNotMatch(instructions, /Beitragsentwicklung in der privaten Krankenversicherung/i);
-  assert.doesNotMatch(instructions, /PROSODIE:/);
+  assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|HOCHRECHNUNG|Laut PKV Verband|drei bis fünf Prozent/i);
+  assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
   assert.match(instructions, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
-  assert.match(instructions, /Herr Duic klärt Ihre Fragen dazu im Termin/);
-  assert.doesNotMatch(instructions, /Wechsel in die PKV|Wechsel in die private Krankenversicherung/);
-  assert.match(instructions, /Eine Frage pro Turn/);
-});
-
-test("canonicalizes generated PKV wording before it is spoken", () => {
-  assert.equal(
-    normalizePkvTerminology("Die Beitragsentwicklung in der privaten Krankenversicherung betrifft uns alle."),
-    "Die Beitragsentwicklung in der Gesundheitsversorgung betrifft uns alle.",
-  );
+  assert.match(instructions, /höchstens eine klare Hauptfrage pro Antwort/);
 });
 
 test("requires the exact final goodbye phrase in the realtime instructions", () => {
@@ -306,7 +263,7 @@ test("requires the exact final goodbye phrase in the realtime instructions", () 
   assert.doesNotMatch(instructions, /Danke Ihnen für das Gespräch.*auf Wiederhören/i);
 });
 
-test("uses the requested PKV flow before appointment preparation", () => {
+test("uses only the campaign objective, not a fixed sequence, before preparation", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-flow",
     streamSid: "test-stream",
@@ -315,24 +272,10 @@ test("uses the requested PKV flow before appointment preparation", () => {
 
   const instructions = buildRealtimeInstructions(ctx);
 
-  const reasonIndex = instructions.search(/2\. ANLASS UND EINSTIEGSBEITRAG/);
-  const currentContributionIndex = instructions.search(/3\. HEUTIGER BEITRAG/);
-  const projectionIndex = instructions.search(/4\. HOCHRECHNUNG/);
-  const conceptIndex = instructions.search(/5\. ÜBERLEITUNG/);
-  const appointmentIndex = instructions.search(/6\. TERMIN/);
-  const preparationIndex = instructions.search(/7\. ABSCHLUSS/);
-
-  assert.notEqual(reasonIndex, -1);
-  assert.notEqual(currentContributionIndex, -1);
-  assert.notEqual(projectionIndex, -1);
-  assert.notEqual(conceptIndex, -1);
-  assert.notEqual(appointmentIndex, -1);
-  assert.notEqual(preparationIndex, -1);
-  assert.ok(reasonIndex < currentContributionIndex);
-  assert.ok(currentContributionIndex < projectionIndex);
-  assert.ok(projectionIndex < conceptIndex);
-  assert.ok(conceptIndex < appointmentIndex);
-  assert.ok(appointmentIndex < preparationIndex);
+  assert.doesNotMatch(instructions, /EINSTIEGSBEITRAG|HEUTIGER BEITRAG|HOCHRECHNUNG|PKV-GESPRÄCHSZIEL/);
+  assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
+  assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
+  assert.match(instructions, /Nach einem bestätigten Termin führt der Worker/);
   assert.match(instructions, /bei der Kundin\/dem Kunden vor Ort|bei Ihnen vor Ort/i);
   assert.doesNotMatch(instructions, /bei Ihnen vor Ort, in unserer Agentur/);
 });
@@ -349,7 +292,7 @@ test("keeps the prompt concise and avoids repeating customer wording", () => {
   assert.doesNotMatch(instructions, /Bedanke dich|danke dir|Danke dir/i);
 });
 
-test("forces the ten-year projection before scheduling after a contribution", () => {
+test("keeps live responses flexible instead of injecting a fixed topic sequence", () => {
   const ctx = newContext({
     callSid: "test-realtime-pkv-order",
     streamSid: "test-stream",
@@ -357,81 +300,27 @@ test("forces the ten-year projection before scheduling after a contribution", ()
   });
   ctx.transcript.push({ role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?", at: 0.5 });
   ctx.transcript.push({ role: "user", text: "Ich zahle tausend Euro.", at: 1 });
-  ctx.transcript.push({ role: "assistant", text: "Im Ersttermin lernen wir uns kennen und nehmen den Ist-Zustand auf. Im Zweittermin zeigen wir ein persönliches Konzept für Beitragsstabilität und Bezahlbarkeit im Alter.", at: 1.5 });
-
-  const instruction = buildRequiredPkvSequenceInstruction(ctx);
-  assert.match(instruction, /zehn Jahre|Beitragsentwicklung/);
-  assert.match(instruction, /hochgerechnet\?/);
-
-  ctx.transcript.push(
-    { role: "assistant", text: "Bei 1000 Euro wären es in zehn Jahren ungefähr 1480 Euro.", at: 2 },
-  );
-  assert.match(buildRequiredPkvSequenceInstruction(ctx), /Wäre es für Sie interessant/);
-});
-
-test("keeps customer-question responses separate from the PKV sequence", () => {
-  const ctx = newContext({
-    callSid: "test-realtime-question-priority",
-    streamSid: "test-stream",
-    topic: "private Krankenversicherung",
-  });
-  ctx.transcript.push({ role: "user", text: "Ich bin gesetzlich versichert.", at: 1 });
 
   const response = buildRealtimeResponseInstructions(
     ctx,
     "Beantworte zuerst ausschließlich die konkrete Kundenfrage: Kann ich Sie sehen?",
-    false,
+    true,
   );
 
   assert.match(response, /Beantworte zuerst ausschließlich/);
-  assert.doesNotMatch(response, /ZWINGENDER NÄCHSTER SCHRITT/);
+  assert.doesNotMatch(response, /ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/);
 });
 
-test("places the active PKV stage after optional response guidance", () => {
+test("passes imported campaign knowledge into the realtime session", () => {
   const ctx = newContext({
-    callSid: "test-realtime-sequence-priority",
+    callSid: "test-campaign-knowledge",
     streamSid: "test-stream",
-    topic: "private Krankenversicherung",
+    topic: "Betriebliche Krankenversicherung",
   });
-  ctx.transcript.push({ role: "user", text: "Ich zahle 1000 Euro im Monat.", at: 1 });
-  const response = buildRealtimeResponseInstructions(ctx, "Begründe die Antwort knapp.", true);
-  assert.ok(response.indexOf("Begründe die Antwort knapp.") < response.indexOf("ZWINGENDER NÄCHSTER SCHRITT"));
-});
+  ctx.topicPolicyPrompt = "KAMPAGNENKONTEXT: Inhalte aus den freigegebenen Webseiten sind Faktenquellen.";
+  const instructions = buildRealtimeInstructions(ctx);
 
-test("continues with the contribution trend after consent without repeating the topic", () => {
-  const ctx = newContext({
-    callSid: "test-realtime-concept-bridge",
-    streamSid: "test-stream",
-    topic: "private Krankenversicherung",
-  });
-  ctx.transcript.push(
-    { role: "assistant", text: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Haben Sie gerade einen kurzen Moment?", at: 1 },
-    { role: "user", text: "Ja, einen kurzen Moment habe ich.", at: 2 },
-  );
-  const rawInstruction = buildRequiredPkvSequenceInstruction(ctx);
-  const instruction = buildRealtimeResponseInstructions(ctx);
-  assert.doesNotMatch(rawInstruction, /Es geht um die Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(rawInstruction, /Laut PKV Verband/);
-  assert.match(instruction, /Beiträge in der Gesundheitsversorgung/);
-  assert.match(instruction, /drei bis fünf Prozent/);
-  assert.doesNotMatch(instruction, /Tarifoptimierung|Wahltarife|Bonusprogramme/);
-});
-
-test("does not label the initial contribution as the current contribution", () => {
-  const ctx = newContext({
-    callSid: "test-pkv-initial-vs-current-contribution",
-    streamSid: "test-stream",
-    topic: "private Krankenversicherung",
-  });
-  ctx.transcript.push({ role: "user", text: "Damals waren es 420 Euro.", at: 1 });
-  const beforeCurrentQuestion = buildRealtimeResponseInstructions(ctx, undefined, false);
-  assert.doesNotMatch(beforeCurrentQuestion, /Aktueller Monatsbeitrag/);
-
-  ctx.transcript.push(
-    { role: "assistant", text: "Und welchen Beitrag zahlen Sie heute?", at: 2 },
-    { role: "user", text: "Heute zahle ich 980 Euro.", at: 3 },
-  );
-  const afterCurrentAnswer = buildRealtimeResponseInstructions(ctx, undefined, false);
-  assert.match(afterCurrentAnswer, /Aktueller Monatsbeitrag: neunhundert achtzig Euro/);
-  assert.doesNotMatch(afterCurrentAnswer, /Aktueller Monatsbeitrag: vierhundert zwanzig Euro/);
+  assert.match(instructions, /KAMPAGNENKONTEXT: Inhalte aus den freigegebenen Webseiten/);
+  assert.match(instructions, /Gesprächsthema: Betriebliche Krankenversicherung/);
+  assert.doesNotMatch(instructions, /Laut PKV Verband|Einstiegsbeitrag|Zehn-Jahres-Beispielrechnung/);
 });

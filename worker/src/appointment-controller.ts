@@ -1,4 +1,4 @@
-import { assessPkvConversation, instructionForPkvStage, type ConversationTurn } from "./pkv-conversation-controller.js";
+type ConversationTurn = { role: "user" | "assistant"; text: string };
 
 export function convertSlotPhraseForSpeech(slotPhrase: string): string {
   const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
@@ -158,17 +158,6 @@ export function decideAppointment(params: {
   freeSlotsPrompt?: string;
   slotPhrase?: string;
 }): AppointmentDecision {
-  if (params.topicKind === "pkv") {
-    const assessment = assessPkvConversation(params.turns);
-    if (assessment.stage !== "ready_to_schedule") {
-      return {
-        ok: false,
-        error: "conversation_not_ready",
-        instruction: instructionForPkvStage(assessment),
-      };
-    }
-  }
-
   const slotPhrase = params.slotPhrase?.trim() || "";
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
   const recentUserTurns = [...params.turns].filter((turn) => turn.role === "user").slice(-4);
@@ -199,6 +188,13 @@ export function decideAppointment(params: {
       ok: false,
       error: "conversation_not_ready",
       instruction: "Die Terminrückfrage ist noch nicht eindeutig bestätigt. Frage nur kurz, ob der konkret genannte Termin so passt.",
+    };
+  }
+  if (!recentUserNamedConcreteSlot && !(confirmationWasAsked && explicitConfirmation)) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Bestätige keinen Termin, bevor die Kundin oder der Kunde einen konkreten vorgeschlagenen oder eigenen Zeitpunkt genannt hat.",
     };
   }
   if (/^(?:hallo|hallo\?|bitte\??|ja\?+|mhm|aha|okay\??|ok\??)[.!?]*$/i.test(latestUserText)) {

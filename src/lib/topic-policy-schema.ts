@@ -6,6 +6,7 @@ export const TopicPolicyPayloadSchema = z
     id: z.string().optional(),
     topic: z.string().trim().min(1).max(120).optional(),
     callObjective: z.string().optional(),
+    knowledgeSources: z.array(z.string().trim().min(1).max(2048)).max(6).optional(),
     topicSummary: z.string().optional(),
     behavior: z.string().optional(),
     conversationGuardrails: z.string().optional(),
@@ -62,6 +63,12 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
     callObjective: {
       type: "string",
       description: "Das gewünschte Ergebnis des Anrufs, zum Beispiel Terminvereinbarung, Rückruf oder Serviceklärung.",
+    },
+    knowledgeSources: {
+      type: "array",
+      description: "Öffentliche HTTPS-Startseiten; bis zu 100 verlinkte Unterseiten derselben Website werden als Kampagnenwissen abgerufen und täglich aktualisiert.",
+      maxItems: 6,
+      items: { type: "string", maxLength: 2048 },
     },
     topicSummary: {
       type: "string",

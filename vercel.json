@@ -21,6 +21,10 @@
       "schedule": "0 4 * * 1"
     },
     {
+      "path": "/api/campaign-knowledge/refresh",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/jobs/process",
       "schedule": "*/1 * * * *"
     }

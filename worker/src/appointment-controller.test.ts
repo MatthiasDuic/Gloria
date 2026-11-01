@@ -29,7 +29,7 @@ test("accepts only slots supplied by the calendar", () => {
   assert.equal(isSuppliedAppointmentSlot(freeSlots, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
-test("blocks appointment tools before the PKV flow is complete", () => {
+test("does not impose a fixed PKV qualifying sequence but requires a customer-selected slot", () => {
   const decision = decideAppointment({
     turns: [{ role: "user", text: "Ich bin privat versichert und zahle 1000 Euro." }],
     topicKind: "pkv",
@@ -37,13 +37,21 @@ test("blocks appointment tools before the PKV flow is complete", () => {
     slotPhrase: "Mittwoch, 26. August um 11:00 Uhr",
   });
   assert.equal(decision.ok, false);
-  if (!decision.ok) assert.equal(decision.error, "conversation_not_ready");
+  if (!decision.ok) {
+    assert.equal(decision.error, "conversation_not_ready");
+    assert.match(decision.instruction, /konkreten vorgeschlagenen oder eigenen Zeitpunkt/);
+    assert.doesNotMatch(decision.instruction, /PKV|Beitragsentwicklung|Hochrechnung/);
+  }
 });
 
 test("returns one successful decision for a supplied slot", () => {
   assert.deepEqual(
     decideAppointment({
-      turns: readyPkvTurns(),
+      turns: [
+        ...readyPkvTurns(),
+        { role: "assistant", text: "Ich kann Ihnen Donnerstag, 27. August um 15:30 Uhr anbieten. Passt das?" },
+        { role: "user", text: "Donnerstag, 27. August um 15:30 Uhr passt." },
+      ],
       topicKind: "pkv",
       freeSlotsPrompt: freeSlots,
       slotPhrase: "Donnerstag, 27. August um 15:30 Uhr",

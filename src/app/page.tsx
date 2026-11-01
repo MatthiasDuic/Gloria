@@ -691,6 +691,10 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
       existing?.preparationQuestions || existing?.pkvHealthQuestions,
       preset.preparationQuestions || preset.pkvHealthQuestions,
     ),
+    knowledgeSources: existing?.knowledgeSources || [],
+    knowledgeContent: existing?.knowledgeContent,
+    knowledgeFetchedAt: existing?.knowledgeFetchedAt,
+    knowledgeFetchError: existing?.knowledgeFetchError,
     exampleSentences: pickText(existing?.exampleSentences, ""),
     requiredData: pickText(existing?.requiredData, ""),
     knowledge: pickText(existing?.knowledge, ""),
@@ -738,6 +742,7 @@ function buildNewCampaignDraft(topic: Topic): TopicPolicyConfig {
     callObjective: "",
     preparationQuestions: "",
     knowledge: "",
+    knowledgeSources: [],
   };
 }
 
@@ -1751,7 +1756,7 @@ export default function HomePage() {
         throw new Error(payload.error || "Optimierung konnte nicht angewendet werden.");
       }
 
-      setNotice(`Gloria hat die Topic Policy für ${topic} anhand der Gesprächsreports optimiert.`);
+      setNotice(`Gloria hat die Kampagne ${topic} anhand der Gesprächsreports optimiert.`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Selbstoptimierung fehlgeschlagen.");
@@ -1789,7 +1794,7 @@ export default function HomePage() {
           `Thema & Nutzen: ${opt.topicSummary.slice(0, 180)}${opt.topicSummary.length > 180 ? "..." : ""}\n\n` +
           `Verhalten & Ton: ${opt.behavior.slice(0, 180)}${opt.behavior.length > 180 ? "..." : ""}` +
           rationale +
-          "\n\nIn die Topic Policy uebernehmen?",
+          "\n\nIn die Kampagne uebernehmen?",
       );
       if (!confirmed) {
         setNotice("Optimierung verworfen.");
@@ -1802,7 +1807,7 @@ export default function HomePage() {
       });
       const applied = (await applyRes.json()) as { error?: string };
       if (!applyRes.ok) throw new Error(applied.error || "Uebernahme fehlgeschlagen.");
-      setNotice(`KI-optimierte Topic Policy fuer ${topic} gespeichert (${opt.source}).`);
+      setNotice(`KI-Optimierung fuer die Kampagne ${topic} gespeichert (${opt.source}).`);
       await loadDashboard();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "KI-Optimierung fehlgeschlagen.");
@@ -1821,6 +1826,7 @@ export default function HomePage() {
       conversationGuardrails: draft.conversationGuardrails || "",
       requiredQuestions: draft.requiredQuestions || "",
       preparationQuestions: draft.preparationQuestions || draft.pkvHealthQuestions || "",
+      knowledgeSources: draft.knowledgeSources || [],
       exampleSentences: draft.exampleSentences || "",
       gatekeeperTask: draft.gatekeeperTask || "",
       gatekeeperBehavior: draft.gatekeeperBehavior || "",
@@ -1865,7 +1871,7 @@ export default function HomePage() {
     };
 
     if (!response.ok) {
-      throw new Error(payload.error || "Topic Policy konnte nicht gespeichert werden.");
+      throw new Error(payload.error || "Kampagne konnte nicht gespeichert werden.");
     }
 
     return payload;
@@ -1892,7 +1898,7 @@ export default function HomePage() {
       });
       await loadDashboard();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Topic Policy speichern fehlgeschlagen.";
+      const errorMessage = error instanceof Error ? error.message : "Kampagne speichern fehlgeschlagen.";
       setNotice(errorMessage);
       setSaveStatus({ type: "error", message: errorMessage });
     } finally {
@@ -2549,7 +2555,7 @@ export default function HomePage() {
             </span>
             <span className="status-pill">
               <span className={`status-dot ${data.topicPoliciesStorageMode === "postgres" ? "ok" : "warn"}`} />
-              Topic Policies: {data.topicPoliciesStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
+              Kampagnendaten: {data.topicPoliciesStorageMode === "postgres" ? "PostgreSQL" : "Datei"}
             </span>
             {currentUser ? (
               <span className="user-chip">
@@ -3168,18 +3174,34 @@ export default function HomePage() {
                           />
                         </label>
                         <label className="full-row">
-                          Zusätzliches Wissen und Quellen
+                          Webseiten als Wissensquellen
                           <span className="subtle">
-                            Fügen Sie fachliche Informationen, Auszüge und Quellenhinweise ein. Reine Links werden nicht automatisch ausgelesen.
+                            Bis zu 6 öffentliche HTTPS-Startseiten, eine URL pro Zeile. Gloria übernimmt auch verlinkte Unterseiten derselben Website (maximal 100 Seiten pro Kampagne). Inhalte werden beim Speichern geladen und danach täglich aktualisiert.
                           </span>
                           <textarea
-                            value={activeDraft.knowledge ?? ""}
-                            rows={6}
+                            value={(activeDraft.knowledgeSources || []).join("\n")}
+                            rows={4}
+                            placeholder={"https://example.de/leistungen\nhttps://example.de/faq"}
                             onChange={(event) => setDraftScripts((current) => ({
                               ...current,
-                              [detailTopic]: { ...current[detailTopic], knowledge: event.target.value },
+                              [detailTopic]: {
+                                ...current[detailTopic],
+                                knowledgeSources: event.target.value
+                                  .split(/\r?\n/)
+                                  .map((source) => source.trim())
+                                  .filter(Boolean),
+                              },
                             }))}
                           />
+                          {activeDraft.knowledgeSources?.length ? (
+                            <span className="subtle" role="status">
+                              {activeDraft.knowledgeFetchError
+                                ? `Letzter Abruf fehlgeschlagen: ${activeDraft.knowledgeFetchError}`
+                                : activeDraft.knowledgeFetchedAt
+                                  ? `Wissensseiten zuletzt aktualisiert: ${new Date(activeDraft.knowledgeFetchedAt).toLocaleString("de-DE")}`
+                                  : "Wissensseiten werden beim Speichern erstmals geladen."}
+                            </span>
+                          ) : null}
                         </label>
                       </div>
                       <div className="row top-gap">
@@ -3198,7 +3220,7 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    <details className="mini-panel playbook-card playbook-details top-gap">
+                    {false && (<details className="mini-panel playbook-card playbook-details top-gap">
                       <summary><strong>Erweiterte Gesprächsleitfaden-Felder (optional)</strong></summary>
                       <p className="subtle">
                         Die bisherigen Detailfelder bleiben für bestehende Kampagnen erhalten. Neue Kampagnen benötigen sie nicht.
@@ -3525,17 +3547,17 @@ export default function HomePage() {
                         role="status"
                         style={{
                           marginTop: 8,
-                          color: saveStatus.type === "success" ? "#1f7a42" : "#b42318",
+                          color: saveStatus?.type === "success" ? "#1f7a42" : "#b42318",
                           fontWeight: 700,
                         }}
                       >
-                        {saveStatus.message}
+                        {saveStatus?.message}
                       </p>
                     ) : null}
-                    </details>
+                    </details>)}
                   </>
                 ) : (
-                  <p className="subtle">Für dieses Thema ist noch keine Topic Policy geladen.</p>
+                  <p className="subtle">Für diese Kampagne sind noch keine Einstellungen geladen.</p>
                 )}
               </CollapsiblePanel>
 
@@ -3552,8 +3574,8 @@ export default function HomePage() {
                   <div className="mini-panel settings-callout">
                     <h3>Technische Hinweise</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
-                      <li>Topic Policies steuern den Gespraechsinhalt, nicht aber Telnyx-REST oder den Websocket-Lifecycle.</li>
-                      <li>Die Weiterleitung an Menschen wird technisch ueber den Worker und Telnyx umgesetzt; die Topic Policy steuert nur das Wann und Wie der Ansage.</li>
+                      <li>Kampagneneinstellungen steuern Ziel und Wissen, nicht aber Telnyx-REST oder den Websocket-Lifecycle.</li>
+                      <li>Die Weiterleitung an Menschen wird technisch über Worker und Telnyx umgesetzt; Kampagnendaten legen nur den Gesprächskontext fest.</li>
                       <li>Globale Compliance- und Ablaufregeln bleiben separat dokumentiert und sollten nicht in Themenfelder kopiert werden.</li>
                     </ul>
                     <p className="subtle top-gap">Fuer die vollstaendige Dokumentation siehe den Bereich „Compliance & Ablauf“ in der linken Navigation.</p>

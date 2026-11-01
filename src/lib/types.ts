@@ -178,6 +178,14 @@ export interface TopicPolicyConfig {
   exampleSentences?: string;
   /** Ziel des Anrufs; was Gloria mit dem Gespräch erreichen will. */
   callObjective?: string;
+  /** Öffentliche HTTPS-Seiten, deren Inhalte Gloria als Kampagnenwissen verwenden darf. */
+  knowledgeSources?: string[];
+  /** Beim Speichern bzw. durch den täglichen Aktualisierungsjob abgerufene Seiteninhalte. */
+  knowledgeContent?: string;
+  /** Zeitpunkt des letzten erfolgreichen Abrufs der Wissensquellen. */
+  knowledgeFetchedAt?: string;
+  /** Letzter Importfehler, falls Quellen nicht erreichbar waren. */
+  knowledgeFetchError?: string;
   /** Beispieltext für die Begrüßung, wenn die Zielperson selbst am Telefon ist. */
   greetingDecisionMaker?: string;
   /** Beispieltext für die Begrüßung am Empfang bzw. beim Gatekeeper. */
