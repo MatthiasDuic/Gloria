@@ -38,6 +38,20 @@ test("keeps a detailed campaign assignment in the model context", () => {
   assert.match(prompt, /Besonderen Schwerpunkt auf die Terminvorbereitung legen/);
 });
 
+test("preserves every assignment step beyond the former line and length limits", () => {
+  const task = Array.from({ length: 40 }, (_, index) =>
+    `Schritt ${index + 1}: ${"Diesen fachlichen Auftragsschritt vollständig im Dialog berücksichtigen. ".repeat(3)}`,
+  ).join("\n");
+  const prompt = topicPolicyToSystemPrompt({ topic: "private Krankenversicherung", callObjective: task });
+
+  assert.ok(task.length > 3_000);
+  assert.ok(prompt.includes(task.trim()));
+  assert.match(prompt, /Schritt 40:/);
+  assert.match(prompt, /Kampagnenname ist nur eine interne Zuordnung/);
+  assert.match(prompt, /ersetze oder verenge sie nicht/);
+  assert.match(prompt, /auch bei Testanrufen und Rückrufen/);
+});
+
 test("does not imply that Gloria has read a website that has not been imported", () => {
   const prompt = topicPolicyToSystemPrompt({
     topic: "Neue Kampagne",

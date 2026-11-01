@@ -85,7 +85,7 @@ export async function loadTopicPolicy(opts: {
 
 export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const topic = (policy.topic || "").trim();
-  const objective = compactPolicyText(policy.callObjective || "", 24, 3_000);
+  const objective = (policy.callObjective || "").trim();
   const preparationQuestions = compactPolicyText(
     policy.preparationQuestions || policy.pkvHealthQuestions || "",
     12,
@@ -101,7 +101,14 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     "Führe den folgenden Auftrag für Gloria mit den Kampagneninformationen als fachlicher Grundlage aus. Nutze Name, Auftrag und Fachwissen als Orientierung, nicht als Skript. OpenAI soll die letzte Äußerung, erkennbare Gesprächsabsicht, Stimmung, Unterbrechungen und verfügbares Zeitfenster verstehen und darauf natürlich reagieren. Beantworte zuerst das tatsächlich Gesagte; stelle höchstens eine passende Hauptfrage. Lies keine Textbausteine oder Fragenkataloge ab. Der Auftrag setzt die allgemeinen Regeln zu Transparenz, Freiwilligkeit, Datenschutz und respektvollem Umgang mit einem Nein nicht außer Kraft.",
   ];
   if (topic) parts.push(`KAMPAGNE: ${topic}`);
-  if (objective) parts.push("", "AUFTRAG FÜR GLORIA:", objective);
+  if (objective) {
+    parts.push(
+      "",
+      "AUFTRAG FÜR GLORIA:",
+      objective,
+      "AUFTRAGSTREUE: Dieser vollständige Auftrag bestimmt den tatsächlichen Gesprächsanlass, die fachlichen Schritte und das Ziel bei jedem Anruf, auch bei Testanrufen und Rückrufen. Der Kampagnenname ist nur eine interne Zuordnung, kein vorgegebener gesprochener Anlass. Verwende die im Auftrag gewählte Themenbezeichnung und ersetze oder verenge sie nicht durch den Kampagnennamen oder ein Versicherungsprodukt. Arbeite die vorgesehenen Schritte im Dialog ab, ohne bereits beantwortete Fragen zu wiederholen. Bei Rückrufen berücksichtige den bisherigen Stand. Kundenfragen und Einwände zuerst beantworten, danach bei passender Gelegenheit zum noch offenen Auftrag zurückkehren. Zustimmung, Datenschutz, Zeitmangel und klare Ablehnung bleiben vorrangig.",
+    );
+  }
   if (websiteKnowledge) {
     parts.push(
       "",

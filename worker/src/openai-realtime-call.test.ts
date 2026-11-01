@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDecisionMakerIntro, buildRealtimeInstructions, buildRealtimeResponseInstructions, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
+import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 
 function buildPkvContext() {
   const ctx = newContext({
@@ -200,6 +201,45 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
   assert.match(instructions, /bitte freundlich um Weiterleitung an Herrn Neumann/);
   assert.doesNotMatch(instructions, /Barmenia Gothar|Beitragsentwicklung in der Gesundheitsversorgung/);
 });
+
+for (const mode of ["normal", "test", "callback"] as const) {
+  test(`uses the assignment's healthcare contribution topic instead of the campaign label in a ${mode} call`, () => {
+    const policy = {
+      topic: "private Krankenversicherung",
+      callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den Einstiegsbeitrag und heutigen Beitrag erfragen, danach einen Beratungstermin vereinbaren.",
+    };
+    const ctx = newContext({
+      callSid: `test-assignment-${mode}`,
+      streamSid: "test-stream",
+      topic: policy.topic,
+      callObjective: policy.callObjective,
+      topicPolicyPrompt: topicPolicyToSystemPrompt(policy),
+      isTestCall: mode === "test",
+      isCallback: mode === "callback",
+      previousSummary: mode === "callback" ? "Einstiegsbeitrag bereits erfasst; heutiger Beitrag noch offen." : undefined,
+      ownerRealName: "Matthias Duic",
+      ownerCompanyName: "Agentur Duic Sprockhövel",
+    });
+
+    const instructions = buildRealtimeInstructions(ctx);
+    assert.match(instructions, /Interne Kampagnenzuordnung \(nicht als Gesprächsanlass vorlesen\)/);
+    assert.doesNotMatch(instructions, /Gesprächsthema: private Krankenversicherung/);
+    assert.ok(instructions.includes(policy.callObjective));
+    assert.match(instructions, /AUFTRAGSTREUE/);
+    if (mode === "callback") assert.match(instructions, /Einstiegsbeitrag bereits erfasst/);
+
+    const intro = buildDecisionMakerIntroInstructions(ctx);
+    assert.match(intro, /Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
+    assert.match(intro, /Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen/);
+    assert.doesNotMatch(intro, /Ich rufe zum Thema private Krankenversicherung/);
+    assert.match(intro, /Noch keinen Pitch, keine Fachfragen und keine Terminfrage/);
+
+    const nextTurn = buildRealtimeResponseInstructions(ctx, "Beantworte zuerst die Kundenfrage.");
+    assert.match(nextTurn, /Beantworte zuerst die Kundenfrage/);
+    assert.match(nextTurn, /noch offenen Auftragsschritte/);
+    assert.match(nextTurn, /klare Ablehnung haben Vorrang/);
+  });
+}
 
 test("uses the configured company in the opening and falls back when it is missing", () => {
   const allianzContext = newContext({

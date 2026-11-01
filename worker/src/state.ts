@@ -36,6 +36,7 @@ export type CallContext = {
   contactName?: string;
   leadNote?: string;
   topic?: string;
+  callObjective?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;

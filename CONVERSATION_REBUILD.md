@@ -10,6 +10,14 @@ Der Gesprächskern wird schrittweise in drei klar getrennte Bereiche aufgeteilt:
 
 Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprachmodell geprüft werden.
 
+## Auftragstreue im Live-Gespräch
+
+- Der gespeicherte „Auftrag für Gloria“ wird vollständig und ohne Kürzung der Zeilen oder Zeichen in den Gesprächskontext übernommen.
+- Bei vorhandenem Auftrag ist der Kampagnenname nur eine interne Zuordnung. Der Entscheider-Einstieg wird mit transparenter KI-Identität und dem tatsächlichen Anlass aus dem Auftrag formuliert, statt den Kampagnennamen als Thema vorzulesen.
+- Das gilt für reguläre Anrufe, Testanrufe und Rückrufe. Der bisherige Gesprächsstand bleibt bei Rückrufen erhalten; offene Auftragsschritte werden situationsgerecht fortgesetzt.
+- Jede frei formulierte Antwort wird an die Auftragstreue erinnert. Kundenfragen, Rückrufwünsche, Datenschutz, Freiwilligkeit und klare Ablehnungen bleiben vorrangig.
+- Ohne hinterlegten Auftrag bleibt der bisherige kampagnenbezogene Einstieg erhalten. Die Änderung benötigt ein separates Worker-Deployment.
+
 ## Erster Migrationsschritt
 
 - `worker/src/pkv-conversation-controller.ts` ist die zentrale Quelle für den PKV-Pflichtstatus.

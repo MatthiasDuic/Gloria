@@ -140,11 +140,14 @@ export function hasAffirmedAssistantEndQuestion(ctx: CallContext): boolean {
 }
 
 export function buildRealtimeResponseInstructions(
-  _ctx: CallContext,
+  ctx: CallContext,
   instructions?: string,
   _includeSequence = true,
 ): string {
-  return convertNumbersForSpeech(instructions || "");
+  const taskReminder = ctx.callObjective?.trim()
+    ? "Bleibe beim vollständigen AUFTRAG FÜR GLORIA im Kampagnenkontext: Verwende dessen Gesprächsanlass statt des internen Kampagnennamens und führe die noch offenen Auftragsschritte situationsgerecht weiter. Kundenfragen, Freiwilligkeit, Rückrufwünsche und klare Ablehnung haben Vorrang."
+    : "";
+  return convertNumbersForSpeech([instructions, taskReminder].filter(Boolean).join("\n\n"));
 }
 
 export function isLikelyIncompleteAssistantTurn(text: string): boolean {
@@ -157,14 +160,25 @@ function getSocietyName(ctx: Pick<CallContext, "ownerGesellschaft">): string {
   return ctx.ownerGesellschaft?.trim() || "Agentur Duic Sprockhövel";
 }
 
-export function buildDecisionMakerIntro(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "topic">,
+function buildDecisionMakerIdentity(
+  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft">,
 ): string {
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
   const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
   const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
+  return `Guten Tag, hier ist Gloria, die KI-Assistentin von ${addressedOwner} bei ${company}.`;
+}
+
+export function buildDecisionMakerIntro(
+  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "topic">,
+): string {
   const topic = ctx.topic?.trim() || "ein kurzes Anliegen";
-  return `Guten Tag, hier ist Gloria, die KI-Assistentin von ${addressedOwner} bei ${company}. Ich rufe zum Thema ${topic} an. Passt es gerade kurz?`;
+  return `${buildDecisionMakerIdentity(ctx)} Ich rufe zum Thema ${topic} an. Passt es gerade kurz?`;
+}
+
+export function buildDecisionMakerIntroInstructions(ctx: CallContext): string {
+  return `${buildDecisionMakerIdentity(ctx)}
+Formuliere daraus eine kurze gesprochene Begrüßung mit dieser transparenten Identität. Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen. Frage, ob es gerade kurz passt. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
 }
 
 function buildGatekeeperIntro(
@@ -235,7 +249,11 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
-  if (ctx.topic) parts.push(`Gesprächsthema: ${ctx.topic}.`);
+  if (ctx.topic) {
+    parts.push(ctx.callObjective?.trim()
+      ? `Interne Kampagnenzuordnung (nicht als Gesprächsanlass vorlesen): ${ctx.topic}. Der tatsächliche Anlass und die Themenbezeichnung stehen im AUFTRAG FÜR GLORIA.`
+      : `Gesprächsthema: ${ctx.topic}.`);
+  }
   if (ctx.leadNote?.trim()) parts.push(`Hilfreicher Lead-Kontext: ${ctx.leadNote.trim()}`);
   if (ctx.isCallback && ctx.previousSummary?.trim()) {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
@@ -745,7 +763,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         contactRouting.gatekeeperRequestMade = true;
         return;
       }
-      speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+      if (currentContext.callObjective?.trim()) {
+        requestEventResponse(buildDecisionMakerIntroInstructions(currentContext));
+      } else {
+        speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+      }
       return;
     }
 
@@ -1184,6 +1206,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
         if (!ctx || !policy) return;
+        ctx.callObjective = policy.callObjective?.trim();
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
           preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic, policy);
