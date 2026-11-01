@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
+import { completeOutboundCall, markOutboundCallActive, releaseCampaignCallLock } from "@/lib/report-db";
+import { processOutboundCallQueue } from "@/lib/outbound-call-queue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,6 +128,7 @@ function parseEvent(body: unknown): TelnyxEvent {
 }
 
 type DecodedClientState = {
+  queueId?: string;
   company?: string;
   contactName?: string;
   topic?: string;
@@ -242,6 +245,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     if (eventType === "call.initiated") {
+      if (clientState.queueId) {
+        await markOutboundCallActive(clientState.queueId, callControlId);
+      }
       await sendTelnyxCommand(callControlId, "answer", {
         ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
       });
@@ -312,6 +318,14 @@ export async function POST(request: Request): Promise<NextResponse> {
           recordingUrl: extractedRecordingUrl,
         });
       }
+      await completeOutboundCall(callControlId, clientState.queueId);
+      await releaseCampaignCallLock(callControlId);
+      await processOutboundCallQueue().catch((error) => {
+        log.error("outbound_call_queue.pump_after_hangup_failed", {
+          callControlId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       log.info("telnyx.events.hangup", {
         callControlId,
         callLegId: event.payload?.call_leg_id,

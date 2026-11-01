@@ -144,6 +144,17 @@ User speaks → Twilio transcribes
 
 **Fallback:** If user has no custom script, falls back to global scripts automatically.
 
+### Shared outbound-call queue
+
+- Gloria starts at most **three outbound calls at a time** across all users.
+- Further manual calls, campaign calls, and callbacks are stored in the shared
+  PostgreSQL queue and started in fair per-user rotation as active calls finish.
+- The CRM polls queue state and shows active calls, each user's waiting position,
+  and recent call-start failures.
+- `DATABASE_URL` and `CRON_SECRET` must be configured in Vercel. The
+  `/api/calls/queue/process` cron runs every minute as a recovery path; Telnyx
+  hangup events normally start the next queued calls immediately.
+
 ---
 
 ## Maintenance Checklist

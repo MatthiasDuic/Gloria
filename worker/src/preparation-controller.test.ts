@@ -5,20 +5,25 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const policy = {
   topic: "private Krankenversicherung",
-  pkvHealthQuestions: "1. Wie hoch ist Ihr Monatsbeitrag?\n2. Gibt es bekannte Diagnosen?\n- Nehmen Sie Medikamente?",
 };
 const knownStatusTurns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
 
-test("normalizes configured preparation questions", () => {
-  assert.deepEqual(buildPreparationQuestions(policy), [
-    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
-    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-    "Wie groß sind Sie?",
-    "Wie viel wiegen Sie derzeit?",
-    "Sind Sie derzeit in Behandlung?",
-    "Bestehen bekannte Diagnosen?",
+test("uses campaign-specific questions in their configured order", () => {
+  assert.deepEqual(buildPreparationQuestions({
+    topic: "private Krankenversicherung",
+    preparationQuestions: "1. Wie hoch ist Ihr Monatsbeitrag?\n2. Gibt es bekannte Diagnosen?\n- Nehmen Sie Medikamente?",
+  }), [
+    "Wie hoch ist Ihr Monatsbeitrag?",
+    "Gibt es bekannte Diagnosen?",
+    "Nehmen Sie Medikamente?",
   ]);
+});
+
+test("uses generic required questions as preparation questions when no override exists", () => {
+  assert.deepEqual(buildPreparationQuestions({
+    topic: "Betriebliche Krankenversicherung",
+    requiredQuestions: "Wie viele Mitarbeitende beschäftigen Sie?\nWelche E-Mail-Adresse sollen wir für die Terminbestätigung nutzen?",
+  }), ["Wie viele Mitarbeitende beschäftigen Sie?"]);
 });
 
 test("asks for consent and skips facts already answered in the call", () => {
@@ -130,6 +135,16 @@ test("accepts naturally spoken German birth dates", () => {
     transition = advancePreparation(transition.state, birthDate, []);
     assert.match(transition.speechText || "", /Wie groß sind Sie/);
   }
+});
+
+test("asks for explicit consent when configured preparation questions include health data", () => {
+  const transition = beginPreparation(createPreparationState({
+    topic: "Krankenversicherung",
+    preparationQuestions: "Gibt es bekannte Diagnosen?",
+  }), "Montag um 10 Uhr", []);
+
+  assert.match(transition.speechText || "", /Gesundheitsangaben/);
+  assert.match(transition.speechText || "", /freiwillig/);
 });
 
 test("skips an invalid preparation answer after three attempts", () => {

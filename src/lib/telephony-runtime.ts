@@ -115,6 +115,7 @@ function buildTopicProfileKey(script: ScriptConfig): string {
     script.conceptTransition || "",
     script.appointmentConfirmation || "",
     script.availableAppointmentSlots || "",
+    script.preparationQuestions || "",
     script.pkvHealthIntro || "",
     script.pkvHealthQuestions || "",
   ].join("|");
@@ -180,14 +181,12 @@ async function syncScripts(baseUrl: string, userId?: string) {
     byTopic[script.topic] = script;
   }
 
-  for (const topic of TOPICS) {
-    if (!byTopic[topic] && runtimeState.scriptProfiles[topic]) {
-      byTopic[topic] = runtimeState.scriptProfiles[topic] as ScriptConfig;
-    }
+  for (const [topic, profile] of Object.entries(runtimeState.scriptProfiles)) {
+    if (!userId && !byTopic[topic] && profile) byTopic[topic] = profile;
   }
 
   scriptProfilesByUser[cacheKey] = byTopic;
-  scriptsReadyByUser[cacheKey] = TOPICS.every((topic) => Boolean(byTopic[topic]));
+  scriptsReadyByUser[cacheKey] = Object.keys(byTopic).length > 0;
   runtimeState.scriptProfiles = byTopic;
   runtimeState.scriptsReady = scriptsReadyByUser[cacheKey];
   runtimeState.lastScriptSyncAt = new Date().toISOString();

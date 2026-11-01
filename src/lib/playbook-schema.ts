@@ -16,8 +16,9 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
     },
     topic: {
       type: "string",
-      enum: ["pkv", "gkv", "altersvorsorge", "vermögensaufbau", "immobilien"],
-      description: "Topic category (topic kind).",
+      minLength: 1,
+      maxLength: 120,
+      description: "Freie Themenbezeichnung für eine Kampagne oder Gesprächsart.",
     },
     topicSummary: {
       type: "string",
@@ -35,6 +36,10 @@ export const PLAYBOOK_JSON_SCHEMA_V1 = {
     requiredQuestions: {
       type: "string",
       description: "Pflichtfragen, die in der Terminierungs-/Vorbereitungsphase gestellt werden müssen. Eine Frage pro Zeile.",
+    },
+    preparationQuestions: {
+      type: "string",
+      description: "Optionale Vorbereitungsfragen nach Terminbestätigung, eine Frage pro Zeile.",
     },
     exampleSentences: {
       type: "string",

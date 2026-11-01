@@ -378,6 +378,7 @@ const TOPIC_POLICY_EDITABLE_FIELDS: Array<keyof TopicPolicyConfig> = [
   "behavior",
   "conversationGuardrails",
   "requiredQuestions",
+  "preparationQuestions",
   "exampleSentences",
   "gatekeeperTask",
   "gatekeeperBehavior",
@@ -686,6 +687,10 @@ function buildDraftFromPreset(topic: Topic, existing?: Partial<TopicPolicyConfig
     behavior: pickText(existing?.behavior, preset.behavior),
     conversationGuardrails: pickText(existing?.conversationGuardrails, preset.conversationGuardrails),
     requiredQuestions: pickText(existing?.requiredQuestions || existing?.requiredData, preset.requiredQuestions),
+    preparationQuestions: pickText(
+      existing?.preparationQuestions || existing?.pkvHealthQuestions,
+      preset.preparationQuestions || preset.pkvHealthQuestions,
+    ),
     exampleSentences: pickText(existing?.exampleSentences, ""),
     requiredData: pickText(existing?.requiredData, ""),
     knowledge: pickText(existing?.knowledge, ""),
@@ -1101,12 +1106,12 @@ export default function HomePage() {
       new Set(
         (currentUserAllowedTopics.length
           ? currentUserAllowedTopics
-          : [...TOPICS])
+          : playbookTopicOptions)
           .map((topic) => String(topic).trim())
           .filter(Boolean),
       ),
     ),
-    [currentUserAllowedTopics],
+    [currentUserAllowedTopics, playbookTopicOptions],
   );
   const voiceTopicGroups = useMemo(
     () => buildTopicGroups(voiceTopicOptions),
@@ -1805,6 +1810,7 @@ export default function HomePage() {
       behavior: draft.behavior || "",
       conversationGuardrails: draft.conversationGuardrails || "",
       requiredQuestions: draft.requiredQuestions || "",
+      preparationQuestions: draft.preparationQuestions || draft.pkvHealthQuestions || "",
       exampleSentences: draft.exampleSentences || "",
       gatekeeperTask: draft.gatekeeperTask || "",
       gatekeeperBehavior: draft.gatekeeperBehavior || "",
@@ -2705,7 +2711,7 @@ export default function HomePage() {
             <div>
               <label>Thema</label>
               <select value={anrufEinzelfirmaTopic} onChange={(event) => setAnrufEinzelfirmaTopic(event.target.value as Topic)}>
-                {TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+                {playbookTopicOptions.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
               </select>
             </div>
           </div>
@@ -2994,9 +3000,9 @@ export default function HomePage() {
                 </div>
               </CollapsiblePanel>
 
-              <CollapsiblePanel title="Themen-Topic-Policy" defaultOpen>
+              <CollapsiblePanel title="Kampagnenthemen & Gesprächsleitfäden" defaultOpen>
                 <div className="row spread">
-                  <h2>Themen-Topic-Policy</h2>
+                      <h2>Kampagnenthemen & Gesprächsleitfäden</h2>
                   <div className="row">
                     <select value={detailTopic} onChange={(event) => setDetailTopic(event.target.value as Topic)}>
                       {visiblePlaybookTopicGroups.map((group) => (
@@ -3359,26 +3365,27 @@ export default function HomePage() {
                       </div>
                     </details>
 
-                    {normalizeTopicKey(detailTopic).includes("private krankenversicherung") ? (
-                      <details className="mini-panel playbook-card playbook-details top-gap">
-                        <summary><strong>12. PKV-Terminvorbereitung</strong></summary>
-                        <p className="subtle">Optionale Vorbereitung nach bestätigtem Termin; vorhandene Werte werden unverändert angezeigt.</p>
-                        <div className="playbook-grid">
-                          <div>
-                            <h4 className="sub-heading">Einleitung der Basisfragen</h4>
-                            <textarea value={activeDraft.pkvHealthIntro ?? ""} rows={6} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthIntro: event.target.value } }))} />
-                          </div>
-                          <div>
-                            <h4 className="sub-heading">Basis- und Gesundheitsfragen</h4>
-                            <textarea value={activeDraft.pkvHealthQuestions ?? ""} rows={12} onChange={(event) => setDraftScripts((c) => ({ ...c, [detailTopic]: { ...c[detailTopic], pkvHealthQuestions: event.target.value } }))} />
-                          </div>
+                    <details className="mini-panel playbook-card playbook-details top-gap">
+                      <summary><strong>12. Vorbereitungsfragen nach Terminbestätigung</strong></summary>
+                      <p className="subtle">Optional und themenspezifisch. Der Worker fragt diese Punkte einzeln erst nach bestätigtem Termin und Zustimmung ab. Gesundheitsangaben dürfen übersprungen werden.</p>
+                      <div className="playbook-grid">
+                        <div className="full-row">
+                          <h4 className="sub-heading">Eine Frage pro Zeile</h4>
+                          <textarea
+                            value={activeDraft.preparationQuestions ?? activeDraft.pkvHealthQuestions ?? ""}
+                            rows={12}
+                            onChange={(event) => setDraftScripts((current) => ({
+                              ...current,
+                              [detailTopic]: { ...current[detailTopic], preparationQuestions: event.target.value },
+                            }))}
+                          />
                         </div>
-                      </details>
-                    ) : null}
+                      </div>
+                    </details>
 
                     <div className="row top-gap">
-                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Topic Policy speichern</button>
-                      <span className="subtle">Die Topic Policy wird gespeichert und sofort von Gloria für neue Gespräche verwendet.</span>
+                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Kampagnenleitfaden speichern</button>
+                      <span className="subtle">Der Leitfaden wird gespeichert und für neue Gespräche dieses Themas verwendet.</span>
                     </div>
                     {saveStatus ? (
                       <p
@@ -3602,7 +3609,7 @@ export default function HomePage() {
                                           </select>
                                         </div>
                                         <div className="full-row">
-                                          <label>Erlaubte Topic-Policy-Themen (Checkbox-Auswahl; keine Auswahl = alle)</label>
+                                          <label>Erlaubte Kampagnenthemen (keine Auswahl = alle)</label>
                                           <div
                                             className="top-gap"
                                             style={{
@@ -3611,7 +3618,7 @@ export default function HomePage() {
                                               gap: 8,
                                             }}
                                           >
-                                            {TOPICS.map((topic) => {
+                                            {playbookTopicOptions.map((topic) => {
                                               const checked = editDraft.allowedPlaybookTopics.includes(topic);
                                               return (
                                                 <label key={topic} style={{ display: "flex", alignItems: "center", gap: 8 }}>

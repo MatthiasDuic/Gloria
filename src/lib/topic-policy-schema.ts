@@ -1,17 +1,16 @@
 import { z } from "zod";
 import { TOPICS } from "@/lib/types";
 
-const TopicSchema = z.enum(TOPICS);
-
 export const TopicPolicyPayloadSchema = z
   .object({
     id: z.string().optional(),
-    topic: TopicSchema.optional(),
+    topic: z.string().trim().min(1).max(120).optional(),
     callObjective: z.string().optional(),
     topicSummary: z.string().optional(),
     behavior: z.string().optional(),
     conversationGuardrails: z.string().optional(),
     requiredQuestions: z.string().optional(),
+    preparationQuestions: z.string().optional(),
     exampleSentences: z.string().optional(),
     greetingDecisionMaker: z.string().optional(),
     greetingGatekeeper: z.string().optional(),
@@ -31,6 +30,18 @@ export const TopicPolicyPayloadSchema = z
     problemBuildup: z.string().optional(),
     conceptTransition: z.string().optional(),
     appointmentConfirmation: z.string().optional(),
+    opener: z.string().optional(),
+    discovery: z.string().optional(),
+    objectionHandling: z.string().optional(),
+    close: z.string().optional(),
+    aiKeyInfo: z.string().optional(),
+    consentPrompt: z.string().optional(),
+    pkvHealthIntro: z.string().optional(),
+    pkvHealthQuestions: z.string().optional(),
+    appointmentGoal: z.string().optional(),
+    decisionMakerTask: z.string().optional(),
+    decisionMakerBehavior: z.string().optional(),
+    availableAppointmentSlots: z.string().optional(),
   })
   .strict();
 
@@ -45,6 +56,8 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
       type: "string",
       description: "Thema, für das die Topic Policy gilt.",
       examples: [...TOPICS],
+      minLength: 1,
+      maxLength: 120,
     },
     callObjective: {
       type: "string",
@@ -65,6 +78,10 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
     requiredQuestions: {
       type: "string",
       description: "Pflichtfragen, die in der Terminierungs-/Vorbereitungsphase gestellt oder in die Terminbestätigungsmail übernommen werden sollen.",
+    },
+    preparationQuestions: {
+      type: "string",
+      description: "Optionale Vorbereitungsfragen nach bestätigtem Termin; Gesundheitsangaben erst nach ausdrücklicher Einwilligung erfragen.",
     },
     greetingGatekeeper: { type: "string" },
     greetingDecisionMaker: { type: "string" },

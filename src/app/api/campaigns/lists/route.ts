@@ -10,14 +10,14 @@ import {
   isCampaignListActive,
   pullNextLeadForCampaignList,
   setCampaignListActive,
-  storeCallReport,
   updateLeadDetails,
 } from "@/lib/storage";
 import type { Lead } from "@/lib/types";
-import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
+import { isTelnyxConfigured } from "@/lib/telnyx";
 import { forbiddenResponse, getSessionUserFromRequest } from "@/lib/request-auth";
-import { acquireCampaignCallLock, bindCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
+import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
+import { queueOutboundCall } from "@/lib/outbound-call-queue";
 
 export const runtime = "nodejs";
 
@@ -270,7 +270,12 @@ export async function POST(request: Request) {
     }
 
     const lockToken = `campaign-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const lockAcquired = await acquireCampaignCallLock({ userId: sessionUser.id, leadId: listId, lockToken });
+    const lockAcquired = await acquireCampaignCallLock({
+      userId: sessionUser.id,
+      leadId: listId,
+      lockToken,
+      ttlMs: 24 * 60 * 60 * 1000,
+    });
     if (!lockAcquired) {
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({ ok: true, action, listId, skipped: true, reason: "active_call", lists });
@@ -317,8 +322,8 @@ export async function POST(request: Request) {
     }
 
     try {
-      const call = await createTelnyxCall(
-        {
+      const queued = await queueOutboundCall({
+        payload: {
           to,
           company: lead.company,
           contactName: lead.contactName,
@@ -331,34 +336,36 @@ export async function POST(request: Request) {
           ownerGesellschaft: sessionUser.gesellschaft,
         },
         request,
-      );
-      await bindCampaignCallLock(lockToken, call.sid);
-
-      await storeCallReport({
-        callSid: call.sid,
-        leadId: lead.id,
-        company: lead.company,
-        contactName: lead.contactName,
-        topic: lead.topic,
-        summary: `Kampagnenanruf gestartet (${new Date().toISOString()}).`,
-        outcome: "Nicht erreicht / kein Kontakt",
-        attempts: lead.attempts,
-        userId: sessionUser.id,
+        campaignLockToken: lockToken,
+        report: {
+          leadId: lead.id,
+          company: lead.company,
+          contactName: lead.contactName,
+          topic: lead.topic,
+          summary: `Kampagnenanruf gestartet (${new Date().toISOString()}).`,
+          outcome: "Nicht erreicht / kein Kontakt",
+          attempts: lead.attempts,
+          userId: sessionUser.id,
+        },
       });
 
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({
-        ok: true,
+        ok: queued.status !== "failed",
         action,
         listId,
-        dialed: true,
+        queued: queued.status === "queued" || queued.status === "starting",
+        dialed: queued.status === "active" || queued.status === "completed",
+        queueStatus: queued.status,
+        queueId: queued.queueId,
+        position: queued.position,
+        ...(queued.error ? { error: queued.error } : {}),
         call: {
-          sid: call.sid,
           to,
           company: lead.company,
         },
         lists,
-      });
+      }, { status: queued.status === "failed" ? 502 : 200 });
     } catch (error) {
       await releaseCampaignCallLockByToken(lockToken);
       const lists = await getCampaignListsSummary(sessionUser.id);

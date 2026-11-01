@@ -3,7 +3,6 @@ import { getDashboardData } from "@/lib/storage";
 import { listUsers } from "@/lib/report-db";
 import { optimizeTopicPolicy } from "@/lib/topic-policy-optimizer";
 import { sendOperationalEmail } from "@/lib/mailer";
-import { TOPICS } from "@/lib/types";
 import type { Topic } from "@/lib/types";
 import type { OptimizerResult } from "@/lib/topic-policy-optimizer";
 
@@ -84,7 +83,8 @@ async function handle(request: Request) {
       continue;
     }
 
-    for (const topic of TOPICS as readonly Topic[]) {
+    const topics = Array.from(new Set(data.topicPolicies.map((policy) => policy.topic)));
+    for (const topic of topics as Topic[]) {
       const current = data.topicPolicies.find((p) => p.topic === topic);
       if (!current) continue;
 

@@ -3,13 +3,12 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { getDashboardData, saveScript } from "@/lib/storage";
 import { optimizeTopicPolicy } from "@/lib/topic-policy-optimizer";
 import type { Topic } from "@/lib/types";
-import { TOPICS } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function isTopic(value: unknown): value is Topic {
-  return typeof value === "string" && (TOPICS as readonly string[]).includes(value);
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 120;
 }
 
 export async function POST(request: Request) {

@@ -1,5 +1,6 @@
 import type { ScriptConfig } from "./types";
 import { buildPromptBlocks, firstFilled, joinFilled } from "./prompt-builder";
+import { GLORIA_CORE_INSTRUCTIONS } from "../../worker/src/gloria-core-instructions";
 
 export const REQUIRED_GLORIA_INTRO =
   "Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin der Agentur Duic Sprockhövel.";
@@ -141,12 +142,14 @@ export function buildSystemPrompt(script: ScriptConfig): string {
   );
 
   return buildPromptBlocks([
+    { label: "Verbindliche Grundregeln", value: GLORIA_CORE_INSTRUCTIONS },
     { label: "System", value: SYSTEM_PROMPT },
     { label: "Thema des Anrufs", value: script.topic },
     { label: "Gesprächsziel", value: goal },
     { label: "Verhalten", value: behavior },
     { label: "Kernthema", value: coreTopic },
     { label: "Hintergrundwissen", value: keyInfo },
+    { label: "Vorbereitungsfragen nach bestätigtem Termin", value: script.preparationQuestions || script.pkvHealthQuestions },
     {
       label: "Empfangsleitplanke",
       value: firstFilled(script.gatekeeperTask, "Freundlich durchstellen lassen und kurz bleiben."),
@@ -258,11 +261,13 @@ export function buildCallSystemPrompt(script: ScriptConfig): string {
     script.pkvHealthIntro,
     "Damit wir den Termin optimal vorbereiten können, müssen wir kurz ein paar Basisinformationen abklären.",
   );
-  const pkvHealthQuestions = script.pkvHealthQuestions?.trim();
+  const pkvHealthQuestions = (script.preparationQuestions || script.pkvHealthQuestions)?.trim();
   const dialogueExamples = buildTopicDialogueExamples(script.topic);
 
   return `Du bist Gloria, die digitale Vertriebsassistentin der ${agency}.
 Du führst einen geschäftlichen Telefonanruf im Namen von Herrn ${principal}.
+
+${GLORIA_CORE_INSTRUCTIONS}
 
 THEMA: ${script.topic}
 
@@ -331,7 +336,7 @@ Wenn der Termin fest ist, bestätige ihn einmal klar nach diesem Muster:
 "${appointmentConfirmation}"
 
 ━━━ PFLICHTBLOCK NACH TERMIN ━━━
-${script.topic === "private Krankenversicherung" ? `Nach fixer Terminbestaetigung folgt der PKV-Basisdatenblock mit Opt-In: Frage zuerst "passt das noch kurz?". Bei JA stellst du die Fragen einzeln. Bei NEIN verweist du auf die Terminbestaetigungs-Mail mit vollstaendiger Fragenliste.\nEinstieg: ${pkvHealthIntro}${pkvHealthQuestions ? `\nFragen einzeln abfragen (ohne staendiges "Danke", stattdessen direkt naechste Frage):\n${pkvHealthQuestions}` : ""}` : script.requiredData ? `Nach Terminbestätigung fragt Gloria diese Punkte einzeln ab (jede Frage separat, kurze Bestätigung vor der nächsten):\n${script.requiredData}` : `Wenn nach Terminbestätigung noch Kontaktdaten für den Termin fehlen, frage kurz nach direkter Durchwahl, Mobilnummer oder E-Mail.`}
+${pkvHealthQuestions ? `Nach bestätigtem Termin führt der Worker diese Vorbereitungsfragen einzeln und nur nach ausdrücklicher Zustimmung durch:\n${pkvHealthQuestions}` : script.requiredData ? `Nach Terminbestätigung fragt Gloria diese Punkte einzeln ab (jede Frage separat, kurze Bestätigung vor der nächsten):\n${script.requiredData}` : `Wenn nach Terminbestätigung noch Kontaktdaten für den Termin fehlen, frage kurz nach direkter Durchwahl, Mobilnummer oder E-Mail.`}
 
 ━━━ ROLLENERKENNUNG ━━━
 EMPFANG: meldet sich mit Firmennamen, fragt nach dem Grund, sagt "einen Moment" oder kündigt Weiterleitung an.

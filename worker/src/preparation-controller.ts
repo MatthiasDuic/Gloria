@@ -56,6 +56,7 @@ export function formatAmountForSpeech(amount: string | number): string {
 }
 export type PreparationPolicy = {
   topic?: string;
+  preparationQuestions?: string;
   requiredQuestions?: string;
   requiredData?: string;
   pkvHealthQuestions?: string;
@@ -89,13 +90,13 @@ const PKV_FALLBACK_QUESTIONS = [
 
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
   const isPkv = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "");
-  if (isPkv) return PKV_FALLBACK_QUESTIONS.split("\n");
-  const source = policy?.requiredQuestions || policy?.requiredData || "";
+  const source = policy?.preparationQuestions || policy?.pkvHealthQuestions
+    || (isPkv ? PKV_FALLBACK_QUESTIONS : policy?.requiredQuestions || policy?.requiredData || "");
   const questions = source
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
-    .filter((line) => line.length > 3);
-  return questions;
+    .filter((line) => line.length > 3 && !/\b(?:e-?mail|terminbestätigung)\b/i.test(line));
+  return questions.slice(0, 20);
 }
 
 export function createPreparationState(policy: PreparationPolicy | null = null): PreparationState {
@@ -107,8 +108,28 @@ export function createPreparationState(policy: PreparationPolicy | null = null):
   };
 }
 
-export function createPreparationStateForCall(topicKind: "pkv" | "other", topic?: string): PreparationState {
-  return createPreparationState({ topic: topicKind === "pkv" ? "private Krankenversicherung" : topic });
+export function createPreparationStateForCall(
+  topicKind: "pkv" | "other",
+  topic?: string,
+  policy?: PreparationPolicy | null,
+): PreparationState {
+  const hasConfiguredQuestions = Boolean(policy?.preparationQuestions?.trim() || policy?.pkvHealthQuestions?.trim());
+  return createPreparationState({
+    ...policy,
+    topic: topicKind === "pkv" && !hasConfiguredQuestions
+      ? "private Krankenversicherung"
+      : topic || (topicKind === "pkv" ? "private Krankenversicherung" : undefined),
+  });
+}
+
+function asksSensitiveInformation(questions: string[]): boolean {
+  return questions.some((question) => /\b(?:gesund\w*|diagnos\w*|behandl\w*|medikament\w*|krankenhaus\w*|psych\w*|zahn\w*|allerg\w*|geburtsdatum|gewicht\w*|körpergröße|koerpergroesse|versicherer\w*)/i.test(question));
+}
+
+function preparationConsentQuestion(state: PreparationState): string {
+  return asksSensitiveInformation(state.questions)
+    ? "Für die freiwillige Vorbereitung würde ich Ihnen auch einige persönliche Angaben stellen, darunter Gesundheitsangaben. Sie können jede Frage überspringen. Ist das für Sie in Ordnung?"
+    : "Für die freiwillige Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?";
 }
 
 function preparationConsent(text: string): "granted" | "declined" | "unknown" {
@@ -197,8 +218,8 @@ export function beginPreparation(
       consentRetryCount: 0,
       questionRetryCount: 0,
     },
-    instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?"`,
-    speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Für die Vorbereitung würde ich Ihnen noch einige kurze Fragen stellen. Ist das für Sie in Ordnung?`,
+    instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "${preparationConsentQuestion(state)}"`,
+    speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. ${preparationConsentQuestion(state)}`,
   };
 }
 

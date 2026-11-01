@@ -4,17 +4,16 @@ import {
   isCampaignListActive,
   listDueCallbackLeads,
   markLeadCallbackScheduled,
-  storeCallReport,
 } from "@/lib/storage";
-import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
+import { isTelnyxConfigured } from "@/lib/telnyx";
 import { isWithinCampaignHours } from "@/lib/campaign-schedule";
 import { sendOperationalEmail } from "@/lib/mailer";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 import { isDueGloriaTask } from "@/lib/crm-helpers";
+import { queueOutboundCall } from "@/lib/outbound-call-queue";
 
 export const runtime = "nodejs";
 
-const DIAL_SPACING_MS = 30_000;
 const MAX_PER_RUN = 20;
 
 function isAuthorized(request: Request): boolean {
@@ -26,10 +25,6 @@ function isAuthorized(request: Request): boolean {
 
 function logLine(parts: Record<string, unknown>) {
   console.info(JSON.stringify({ scope: "callbacks_run", ...parts }));
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 export async function GET(request: Request) {
@@ -63,11 +58,10 @@ async function handle(request: Request) {
   const dueLeads = await listDueCallbackLeads(MAX_PER_RUN);
   logLine({ event: "start", due: dueLeads.length });
 
-  const triggered: Array<{ leadId: string; sid: string; to: string; company: string }> = [];
+  const triggered: Array<{ leadId: string; queueId: string; to: string; company: string }> = [];
   const failed: Array<{ leadId: string; company: string; reason: string }> = [];
 
-  for (let idx = 0; idx < dueLeads.length; idx++) {
-    const lead = dueLeads[idx];
+  for (const lead of dueLeads) {
     const now = Date.now();
     const dueGloriaTask = (lead.tasks || [])
       .filter((task) => isDueGloriaTask(task, now))
@@ -102,8 +96,8 @@ async function handle(request: Request) {
         dueGloriaTask ? `Von Gloria zu erledigende Aufgabe: ${dueGloriaTask.title}` : "",
       ].filter(Boolean);
       const previousSummary = previousSummaryParts.join(" | ").slice(0, 800) || undefined;
-      const call = await createTelnyxCall(
-        {
+      const queued = await queueOutboundCall({
+        payload: {
           to,
           company: lead.company,
           contactName: lead.contactName,
@@ -115,31 +109,29 @@ async function handle(request: Request) {
           isCallback: true,
         },
         request,
-      );
+        report: {
+          leadId: lead.id,
+          callSource: lead.callSource || "crm",
+          calledPhone: to,
+          company: lead.company,
+          contactName: lead.contactName,
+          topic: dueGloriaTask?.topic || lead.topic,
+          summary: dueGloriaTask
+            ? `Automatischer Gloria-Aufgabenanruf gestartet: ${dueGloriaTask.title} (${new Date().toISOString()}).`
+            : `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
+          outcome: "Nicht erreicht / kein Kontakt",
+          attempts: (lead.attempts || 0) + 1,
+          userId: lead.userId,
+        },
+      });
+      if (queued.status === "failed") {
+        throw new Error(queued.error || "Anruf konnte nicht gestartet werden.");
+      }
 
       await markLeadCallbackScheduled(lead.id, dueGloriaTask?.id);
-      await storeCallReport({
-        callSid: call.sid,
-        leadId: lead.id,
-        callSource: lead.callSource || "crm",
-        calledPhone: to,
-        company: lead.company,
-        contactName: lead.contactName,
-        topic: dueGloriaTask?.topic || lead.topic,
-        summary: dueGloriaTask
-          ? `Automatischer Gloria-Aufgabenanruf gestartet: ${dueGloriaTask.title} (${new Date().toISOString()}).`
-          : `Automatischer Wiedervorlage-Anruf gestartet (${new Date().toISOString()}).`,
-        outcome: "Nicht erreicht / kein Kontakt",
-        attempts: (lead.attempts || 0) + 1,
-        userId: lead.userId,
-      });
 
-      triggered.push({ leadId: lead.id, sid: call.sid, to, company: lead.company });
-      logLine({ event: "dialed", leadId: lead.id, sid: call.sid, to, company: lead.company });
-
-      if (idx < dueLeads.length - 1) {
-        await sleep(DIAL_SPACING_MS);
-      }
+      triggered.push({ leadId: lead.id, queueId: queued.queueId, to, company: lead.company });
+      logLine({ event: "queued", leadId: lead.id, queueId: queued.queueId, position: queued.position, to, company: lead.company });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "call_start_failed";
       failed.push({ leadId: lead.id, company: lead.company, reason });
@@ -154,15 +146,15 @@ async function handle(request: Request) {
       `Wiedervorlage-Lauf ${new Date().toISOString()}`,
       `Dauer: ${(durationMs / 1000).toFixed(1)}s`,
       `Faellig: ${dueLeads.length}`,
-      `Gestartet: ${triggered.length}`,
+      `In Warteschlange: ${triggered.length}`,
       `Fehlgeschlagen: ${failed.length}`,
       "",
     ];
 
     if (triggered.length > 0) {
-      lines.push("Erfolgreich gestartete Anrufe:");
+      lines.push("Zur Anruf-Warteschlange hinzugefügt:");
       for (const t of triggered) {
-        lines.push(`  - ${t.company} (${t.to}) [sid=${t.sid}]`);
+        lines.push(`  - ${t.company} (${t.to}) [queue=${t.queueId}]`);
       }
       lines.push("");
     }
@@ -175,7 +167,7 @@ async function handle(request: Request) {
     }
 
     void sendOperationalEmail({
-      subject: `Gloria Wiedervorlage-Lauf: ${triggered.length} Anrufe, ${failed.length} Fehler`,
+      subject: `Gloria Wiedervorlagen: ${triggered.length} eingereiht, ${failed.length} Fehler`,
       body: lines.join("\n"),
     }).catch((err) => {
       logLine({ event: "summary_mail_failed", reason: err instanceof Error ? err.message : "unknown" });

@@ -23,3 +23,16 @@ test("preserves the call origin for campaigns, manual calls and automatic manual
   assert.equal(decode(encodeTelnyxClientState({ ...base, leadId: "crm", isTestCall: true })).callSource, "manual");
   assert.equal(decode(encodeTelnyxClientState({ ...base, leadId: "manual-callback", callSource: "manual", isCallback: true })).callSource, "manual");
 });
+
+test("includes the queue id so Telnyx events can release the reserved call slot", () => {
+  const encoded = encodeTelnyxClientState({
+    to: "+492339555100",
+    company: "Fixture",
+    topic: "bKV",
+    queueId: "queue-123",
+  });
+  const decoded = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as {
+    queueId?: string;
+  };
+  assert.equal(decoded.queueId, "queue-123");
+});

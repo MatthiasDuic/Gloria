@@ -25,6 +25,7 @@ export interface TelnyxCallRequest {
   from?: string;
   previousSummary?: string;
   isCallback?: boolean;
+  queueId?: string;
 }
 
 export class TelnyxApiError extends Error {
@@ -158,6 +159,7 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     isTestCall: payload.isTestCall === true,
     callSource: payload.callSource || (payload.isTestCall || !payload.leadId ? "manual" : "crm"),
     isCallback: payload.isCallback ? 1 : 0,
+    queueId: payload.queueId,
     previousSummary: (payload.previousSummary || "").slice(0, 320),
   };
 

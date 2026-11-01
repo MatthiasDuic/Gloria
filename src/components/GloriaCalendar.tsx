@@ -168,10 +168,10 @@ export default function GloriaCalendar({ entries, leads, onOpenReport, onOpenCon
         <button type="button" onClick={() => editEntry()}>Neuer Eintrag</button>
       </header>
       <div className={styles.legend}>
-        <span className={styles.crm}>CRM-Termine · Blau</span>
-        <span className={styles.manual}>Analoge Termine · Olivgrün</span>
-        <span className={styles.callback}>Wiedervorlagen · Orange</span>
-        <span className={styles.block}>Sperrzeiten · Magenta</span>
+        <span className={styles.crm}>CRM-Termine</span>
+        <span className={styles.manual}>Analoge Termine</span>
+        <span className={styles.callback}>Wiedervorlagen</span>
+        <span className={styles.block}>Sperrzeiten</span>
         <label>Anzeige <select aria-label="Kalender filtern" value={kind} onChange={(event) => setKind(event.target.value === "appointment" ? "appointment" : event.target.value === "callback" ? "callback" : event.target.value === "block" ? "block" : "all")}>
           <option value="all">Alle Einträge</option><option value="appointment">Nur Termine</option><option value="callback">Nur Wiedervorlagen</option><option value="block">Nur Sperrzeiten</option>
         </select></label>

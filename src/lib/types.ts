@@ -3,7 +3,7 @@ export const TOPICS = [
   "private Krankenversicherung",
 ] as const;
 
-// Topic Policies sind bewusst auf die beiden aktiven Vertriebsthemen begrenzt.
+// Default-Themen; zusätzliche Kampagnenthemen werden als Topic-Policies gespeichert.
 export type Topic = string;
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
 export type LeadCustomerKind = "privat" | "firma";
@@ -172,6 +172,8 @@ export interface TopicPolicyConfig {
    * Eine Frage pro Zeile.
    */
   requiredQuestions?: string;
+  /** Optional questions asked only after a confirmed appointment and explicit consent. */
+  preparationQuestions?: string;
   /** Beispielantworten und Formulierungen, die Gloria als Stilvorlage nutzen darf. */
   exampleSentences?: string;
   /** Ziel des Anrufs; was Gloria mit dem Gespräch erreichen will. */

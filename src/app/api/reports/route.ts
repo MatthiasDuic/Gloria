@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteAllReports, deleteReport, getDashboardData, getLeadById, storeCallReport, updateLeadDetails } from "@/lib/storage";
-import { TOPICS, type Topic } from "@/lib/types";
+import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 
 export async function GET(request: NextRequest) {
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Ungültiger Terminzeitpunkt." }, { status: 400 });
   }
 
-  if (!topic || !TOPICS.includes(topic as (typeof TOPICS)[number])) {
+  if (!topic || topic.length > 120) {
     return NextResponse.json({ error: "Ungültiges Thema." }, { status: 400 });
   }
 

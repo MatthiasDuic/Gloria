@@ -45,7 +45,6 @@ import type {
   ScriptConfig,
   Topic,
 } from "./types";
-import { TOPICS } from "./types";
 import { getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails } from "./crm-helpers";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -167,6 +166,7 @@ function normalizeTopicPolicies(scripts: ScriptConfig[]): ScriptConfig[] {
     behavior: script.behavior || "",
     conversationGuardrails: script.conversationGuardrails || "",
     requiredQuestions: script.requiredQuestions || script.requiredData || "",
+    preparationQuestions: script.preparationQuestions || script.pkvHealthQuestions || "",
   }));
 }
 
@@ -337,10 +337,9 @@ async function filterScriptsByUserAccess(
   scripts: ScriptConfig[],
   userId?: string,
 ): Promise<ScriptConfig[]> {
-  const supportedTopics = new Set<string>(TOPICS);
-  const supportedScripts = scripts.filter((script) => supportedTopics.has(script.topic));
+  const configuredScripts = scripts.filter((script) => script.topic.trim());
   if (!userId) {
-    return supportedScripts;
+    return configuredScripts;
   }
 
   const user = await findUserById(userId);
@@ -349,11 +348,11 @@ async function filterScriptsByUserAccess(
   }
 
   if (!user.allowedPlaybookTopics || user.allowedPlaybookTopics.length === 0) {
-    return supportedScripts;
+    return configuredScripts;
   }
 
   const allowed = new Set(user.allowedPlaybookTopics);
-  return supportedScripts.filter((script) => allowed.has(script.topic));
+  return configuredScripts.filter((script) => allowed.has(script.topic));
 }
 
 async function persistTranscriptChunkEvent(payload: {

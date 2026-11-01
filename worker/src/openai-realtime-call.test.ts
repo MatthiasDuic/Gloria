@@ -36,6 +36,14 @@ test("asks for a callback instead of continuing the pitch when the contact has n
     topic: "private Krankenversicherung",
   });
 
+  test("applies the shared Gloria role, transparency, and campaign rules to live calls", () => {
+    const instructions = buildRealtimeInstructions(buildPkvContext());
+    assert.match(instructions, /individuellen Dialog statt ein Skript/);
+    assert.match(instructions, /Stelle dich .* transparent als digitale Assistentin\/KI vor/);
+    assert.match(instructions, /Neue Themen können eigene Playbooks haben/);
+    assert.match(instructions, /Erfinde keine Tarife, Zahlen, Quellen/);
+  });
+
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /KEINE ZEIT \/ RÜCKRUF/);
   assert.match(instructions, /führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort/);

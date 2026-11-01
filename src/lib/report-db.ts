@@ -4,6 +4,7 @@ import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lea
 import type { CalendarEvent, LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
+import { MAX_CONCURRENT_OUTBOUND_CALLS } from "./outbound-call-queue-constants";
 
 export interface RecordingEntry {
   id: string;
@@ -53,6 +54,20 @@ export interface UserPhoneNumber {
   phoneNumber: string;
   label: string;
   active: boolean;
+}
+
+export interface OutboundCallQueueJob {
+  id: string;
+  userId?: string;
+  payload: Record<string, unknown>;
+  reportPayload: Record<string, unknown>;
+  requestUrl: string;
+  campaignLockToken?: string;
+  status: "queued" | "starting" | "active" | "completed" | "failed";
+  callSid?: string;
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
 }
 
 let pool: Pool | null = null;
@@ -630,6 +645,41 @@ async function initializeSchema() {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS outbound_call_queue (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      payload JSONB NOT NULL,
+      report_payload JSONB NOT NULL,
+      request_url TEXT NOT NULL,
+      campaign_lock_token TEXT,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'starting', 'active', 'completed', 'failed')),
+      call_sid TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ
+    );
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS outbound_call_queue_status_created_idx
+    ON outbound_call_queue (status, created_at);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS outbound_call_queue_call_sid_idx
+    ON outbound_call_queue (call_sid);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS outbound_call_queue_user_status_created_idx
+    ON outbound_call_queue (user_id, status, created_at);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS outbound_call_queue_user_started_idx
+    ON outbound_call_queue (user_id, started_at DESC);
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS call_transcript_events (
       id TEXT PRIMARY KEY,
       call_sid TEXT NOT NULL,
@@ -939,6 +989,279 @@ async function ensureSchema(): Promise<void> {
     });
   }
   await schemaInitialization;
+}
+
+export async function enqueueOutboundCall(params: {
+  id: string;
+  userId?: string;
+  payload: Record<string, unknown>;
+  reportPayload: Record<string, unknown>;
+  requestUrl: string;
+  campaignLockToken?: string;
+}): Promise<void> {
+  if (!shouldUsePostgres()) {
+    throw new Error("Die gemeinsame Telefon-Warteschlange benötigt eine konfigurierte PostgreSQL-Datenbank.");
+  }
+  await ensureSchema();
+  const db = getPool();
+  await db.query(
+    `INSERT INTO outbound_call_queue
+      (id, user_id, payload, report_payload, request_url, campaign_lock_token)
+     VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6)`,
+    [
+      params.id,
+      params.userId || null,
+      JSON.stringify(params.payload),
+      JSON.stringify(params.reportPayload),
+      params.requestUrl,
+      params.campaignLockToken || null,
+    ],
+  );
+}
+
+export async function getOutboundCallQueueStatus(id: string): Promise<{
+  status: OutboundCallQueueJob["status"];
+  callSid?: string;
+  error?: string;
+  position: number;
+} | null> {
+  if (!shouldUsePostgres()) {
+    throw new Error("Die gemeinsame Telefon-Warteschlange benötigt eine konfigurierte PostgreSQL-Datenbank.");
+  }
+  await ensureSchema();
+  const result = await getPool().query<{
+    status: OutboundCallQueueJob["status"];
+    call_sid: string | null;
+    error: string | null;
+    position: string;
+  }>(
+    `SELECT q.status, q.call_sid, q.error,
+            CASE WHEN q.status = 'queued' THEN (
+              SELECT COUNT(*)::text FROM outbound_call_queue p
+              WHERE p.status = 'queued'
+                AND (p.created_at, p.id) <= (q.created_at, q.id)
+            ) ELSE '0' END AS position
+     FROM outbound_call_queue q
+     WHERE q.id = $1`,
+    [id],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    status: row.status,
+    callSid: row.call_sid || undefined,
+    error: row.error || undefined,
+    position: Number(row.position),
+  };
+}
+
+export async function claimOutboundCall(): Promise<OutboundCallQueueJob | null> {
+  if (!shouldUsePostgres()) {
+    throw new Error("Die gemeinsame Telefon-Warteschlange benötigt eine konfigurierte PostgreSQL-Datenbank.");
+  }
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(73918422)");
+    await client.query(
+      `DELETE FROM outbound_call_queue
+       WHERE status IN ('completed', 'failed') AND updated_at < NOW() - INTERVAL '30 days'`,
+    );
+
+    await client.query(
+      `UPDATE outbound_call_queue
+       SET status = 'failed',
+           error = 'Der Startstatus konnte nicht sicher geklärt werden. Bitte Auftrag erneut starten.',
+           updated_at = NOW()
+       WHERE status = 'starting' AND updated_at < NOW() - INTERVAL '3 minutes'`,
+    );
+    await client.query(
+      `DELETE FROM campaign_call_locks
+       WHERE lock_token IN (
+         SELECT campaign_lock_token FROM outbound_call_queue
+         WHERE status = 'failed' AND error LIKE 'Der Startstatus konnte nicht sicher geklärt werden.%'
+       )`,
+    );
+
+    const active = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM outbound_call_queue
+       WHERE status IN ('starting', 'active')`,
+    );
+    if (Number(active.rows[0]?.count || 0) >= MAX_CONCURRENT_OUTBOUND_CALLS) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    const selected = await client.query<{
+      id: string;
+      user_id: string | null;
+      payload: Record<string, unknown>;
+      report_payload: Record<string, unknown>;
+      request_url: string;
+      campaign_lock_token: string | null;
+      status: OutboundCallQueueJob["status"];
+      call_sid: string | null;
+      error: string | null;
+      created_at: Date;
+      started_at: Date | null;
+    }>(
+      `SELECT id, user_id, payload, report_payload, request_url, campaign_lock_token,
+              status, call_sid, error, created_at, started_at
+       FROM outbound_call_queue
+       WHERE status = 'queued'
+       ORDER BY
+         (SELECT MAX(previous.started_at)
+          FROM outbound_call_queue previous
+          WHERE COALESCE(previous.user_id, '__global__') = COALESCE(outbound_call_queue.user_id, '__global__')) NULLS FIRST,
+         created_at, id
+       FOR UPDATE SKIP LOCKED
+       LIMIT 1`,
+    );
+    const row = selected.rows[0];
+    if (!row) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    await client.query(
+      `UPDATE outbound_call_queue
+       SET status = 'starting', updated_at = NOW(), started_at = NOW()
+       WHERE id = $1`,
+      [row.id],
+    );
+    await client.query("COMMIT");
+    return {
+      id: row.id,
+      userId: row.user_id || undefined,
+      payload: row.payload,
+      reportPayload: row.report_payload,
+      requestUrl: row.request_url,
+      campaignLockToken: row.campaign_lock_token || undefined,
+      status: "starting",
+      callSid: row.call_sid || undefined,
+      error: row.error || undefined,
+      createdAt: row.created_at.toISOString(),
+      startedAt: row.started_at?.toISOString(),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function markOutboundCallActive(id: string, callSid: string): Promise<void> {
+  if (!shouldUsePostgres()) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE outbound_call_queue
+     SET status = 'active', call_sid = $2, updated_at = NOW()
+     WHERE id = $1 AND status = 'starting'`,
+    [id, callSid],
+  );
+}
+
+export async function markOutboundCallFailed(id: string, error: string): Promise<void> {
+  if (!shouldUsePostgres()) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE outbound_call_queue
+     SET status = 'failed', error = $2, updated_at = NOW(), completed_at = NOW()
+     WHERE id = $1 AND status IN ('starting', 'queued')`,
+    [id, error.slice(0, 1000)],
+  );
+}
+
+export async function completeOutboundCall(callSid: string, queueId?: string): Promise<void> {
+  if (!shouldUsePostgres() || !callSid.trim()) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE outbound_call_queue
+     SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+     WHERE (call_sid = $1 OR id = $2) AND status IN ('starting', 'active')`,
+    [callSid.trim(), queueId || callSid.trim()],
+  );
+}
+
+export async function listOutboundCallsForUser(userId: string): Promise<{
+  active: number;
+  queued: Array<{ id: string; company: string; createdAt: string; position: number }>;
+  activeCalls: Array<{ id: string; company: string; startedAt?: string }>;
+  failed: Array<{ id: string; company: string; error: string; createdAt: string }>;
+}> {
+  if (!shouldUsePostgres()) {
+    throw new Error("Die gemeinsame Telefon-Warteschlange benötigt eine konfigurierte PostgreSQL-Datenbank.");
+  }
+  await ensureSchema();
+  const db = getPool();
+  const [activeResult, ownResult, waitingResult, failedResult] = await Promise.all([
+    db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM outbound_call_queue WHERE status IN ('starting', 'active')`,
+    ),
+    db.query<{
+      id: string;
+      payload: Record<string, unknown>;
+      status: "starting" | "active";
+      started_at: Date | null;
+    }>(
+      `SELECT id, payload, status, started_at
+       FROM outbound_call_queue
+       WHERE user_id = $1 AND status IN ('starting', 'active')
+       ORDER BY created_at, id`,
+      [userId],
+    ),
+    db.query<{
+      id: string;
+      payload: Record<string, unknown>;
+      created_at: Date;
+      position: string;
+    }>(
+      `SELECT q.id, q.payload, q.created_at,
+              (SELECT COUNT(*)::text FROM outbound_call_queue p
+               WHERE p.status = 'queued'
+                 AND (p.created_at, p.id) <= (q.created_at, q.id)) AS position
+       FROM outbound_call_queue q
+       WHERE q.user_id = $1 AND q.status = 'queued'
+       ORDER BY q.created_at, q.id`,
+      [userId],
+    ),
+    db.query<{
+      id: string;
+      payload: Record<string, unknown>;
+      error: string | null;
+      created_at: Date;
+    }>(
+      `SELECT id, payload, error, created_at
+       FROM outbound_call_queue
+       WHERE user_id = $1 AND status = 'failed'
+         AND updated_at > NOW() - INTERVAL '24 hours'
+       ORDER BY updated_at DESC
+       LIMIT 5`,
+      [userId],
+    ),
+  ]);
+  return {
+    active: Number(activeResult.rows[0]?.count || 0),
+    queued: waitingResult.rows.map((row) => ({
+      id: row.id,
+      company: String(row.payload.company || "Kontakt"),
+      createdAt: row.created_at.toISOString(),
+      position: Number(row.position),
+    })),
+    activeCalls: ownResult.rows.map((row) => ({
+      id: row.id,
+      company: String(row.payload.company || "Kontakt"),
+      startedAt: row.started_at?.toISOString(),
+    })),
+    failed: failedResult.rows.map((row) => ({
+      id: row.id,
+      company: String(row.payload.company || "Kontakt"),
+      error: row.error || "Unbekannter Fehler beim Starten.",
+      createdAt: row.created_at.toISOString(),
+    })),
+  };
 }
 
 export async function readCalendarEventsFromPostgres(userId: string): Promise<CalendarEvent[] | null> {

@@ -7,6 +7,7 @@ import topicPolicyDefaults from "../../data/topic-policies.json";
 import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallSource, getCallWorkspaceData, getCrmWorkspaceLeads, isLeadCustomer, type CrmCalendarEntry, type CrmCampaignTab, type CrmWorkspace } from "@/lib/crm-helpers";
 import { parseReportTranscriptFallback } from "@/lib/transcript-utils";
 import { saveCalendarCallback } from "@/lib/calendar-view";
+import { MAX_CONCURRENT_OUTBOUND_CALLS } from "@/lib/outbound-call-queue-constants";
 import GloriaCalendar from "@/components/GloriaCalendar";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -52,6 +53,13 @@ type SessionUser = {
   calendarFeedToken?: string;
   selectedVoiceId?: string;
   allowedPlaybookTopics?: string[];
+};
+
+type OutboundCallQueueState = {
+  active: number;
+  queued: Array<{ id: string; company: string; createdAt: string; position: number }>;
+  activeCalls: Array<{ id: string; company: string; startedAt?: string }>;
+  failed: Array<{ id: string; company: string; error: string; createdAt: string }>;
 };
 
 type AdminUser = {
@@ -197,11 +205,17 @@ function getLeadStatus(lead: DashboardData["leads"][number], leadReports: Dashbo
 export default function CRMDashboard({ embedded = false }: { embedded?: boolean }) {
   // State Management
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
+  const campaignTopics = Array.from(new Set([
+    ...TOPICS,
+    ...data.topicPolicies.map((policy) => policy.topic),
+  ]));
   const [calendarData, setCalendarData] = useState<DashboardData>(EMPTY_DATA);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
+  const [outboundQueue, setOutboundQueue] = useState<OutboundCallQueueState | null>(null);
+  const [outboundQueueError, setOutboundQueueError] = useState("");
 
   // View & Filter State
   const [activeView, setActiveView] = useState<CrmWorkspace>("dashboard");
@@ -1194,6 +1208,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     let cancelled = false;
     let pollInterval: NodeJS.Timeout;
 
+    const refreshOutboundQueue = async () => {
+      const response = await fetch("/api/calls/queue", { credentials: "include", cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error || `Telefon-Warteschlange konnte nicht geladen werden (HTTP ${response.status}).`);
+      }
+      const queue = await response.json() as OutboundCallQueueState;
+      if (!cancelled) {
+        setOutboundQueue(queue);
+        setOutboundQueueError("");
+      }
+    };
+
     const load = async () => {
       try {
         const [dataRes, userRes, listsRes] = await Promise.all([
@@ -1234,9 +1261,15 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     };
 
     load();
+    void refreshOutboundQueue().catch((error: unknown) => {
+      if (!cancelled) setOutboundQueueError(error instanceof Error ? error.message : "Telefon-Warteschlange konnte nicht geladen werden.");
+    });
 
     // Poll every 10 seconds for updates
     pollInterval = setInterval(() => {
+      void refreshOutboundQueue().catch((error: unknown) => {
+        if (!cancelled) setOutboundQueueError(error instanceof Error ? error.message : "Telefon-Warteschlange konnte nicht geladen werden.");
+      });
       if (!cancelled) {
         fetch("/api/reports", { credentials: "include", cache: "no-store" })
           .then(r => {
@@ -1511,7 +1544,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 <label>Telefon *<input className="input" type="tel" value={addCustomerDraft.phone} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
                 <label>E-Mail<input className="input" type="email" value={addCustomerDraft.email} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, email: event.target.value }))} /></label>
                 <label>Thema<select className="input" value={addCustomerDraft.topic} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, topic: event.target.value as Topic }))}>
-                  {TOPICS.map((topic) => (
+                  {campaignTopics.map((topic) => (
                     <option key={topic} value={topic}>{topic}</option>
                   ))}
                 </select></label>
@@ -1560,7 +1593,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               className="filter-select"
             >
               <option value="">Alle Themen</option>
-              {TOPICS.map((t) => <option key={t} value={t}>{t}</option>)}
+              {campaignTopics.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
             <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value as typeof filterOwner)} className="filter-select">
               <option value="">Alle Owner</option>
@@ -2263,7 +2296,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               className="input"
             />
             </label>
-            <label>Gesprächsthema<select className="input" value={importTopic} onChange={(event) => setImportTopic(event.target.value)}>{TOPICS.map((topic) => <option value={topic} key={topic}>{topic}</option>)}</select></label>
+            <label>Gesprächsthema<select className="input" value={importTopic} onChange={(event) => setImportTopic(event.target.value)}>{campaignTopics.map((topic) => <option value={topic} key={topic}>{topic}</option>)}</select></label>
             <label>Importdatei
             <input
               type="file"
@@ -2344,6 +2377,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         ))}
       </nav>
       {notice ? <div className={`crm-notice ${notice.startsWith("✗") ? "error" : ""}`} role="status" aria-live="polite"><span>{notice}</span><button aria-label="Meldung schließen" onClick={() => setNotice("")}>✕</button></div> : null}
+      {outboundQueueError ? <div className="crm-notice error" role="alert">{outboundQueueError}</div> : null}
+      {outboundQueue ? <aside className="outbound-queue-status" role="status" aria-live="polite">
+        <strong>Gloria arbeitet: {outboundQueue.active}/{MAX_CONCURRENT_OUTBOUND_CALLS} Anrufe laufen</strong>
+        {outboundQueue.activeCalls.map((call) => <span key={call.id}> · {call.company}</span>)}
+        {outboundQueue.queued.map((call) => <span key={call.id}> · {call.company} wartet auf Position {call.position}</span>)}
+        {outboundQueue.failed.map((call) => <span className="queue-failure" key={call.id}> · {call.company}: Anrufstart fehlgeschlagen – {call.error}</span>)}
+      </aside> : null}
 
       <main className={`app-main ${embedded ? "embedded" : ""}`}>
         {activeView === "dashboard" && renderDashboard()}
@@ -2367,6 +2407,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           height: 100vh;
           background: #f5f7fa;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        .gloria-crm .outbound-queue-status {
+          padding: 10px 18px;
+          background: #edf7f1;
+          color: #155e3b;
+          border-bottom: 1px solid #cce8d7;
+          font-size: 13px;
+        }
+        .gloria-crm .outbound-queue-status .queue-failure {
+          display: block;
+          color: #a12622;
+          margin-top: 4px;
         }
 
         .gloria-crm .pipeline-toast {

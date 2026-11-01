@@ -8,6 +8,8 @@ export type TopicPolicyFields = {
   behavior?: string;
   conversationGuardrails?: string;
   requiredQuestions?: string;
+  preparationQuestions?: string;
+  pkvHealthQuestions?: string;
   exampleSentences?: string;
   knowledge?: string;
   proofPoints?: string;
@@ -27,6 +29,16 @@ export type TopicPolicyFields = {
   contributionQuestion?: string;
   projectionText?: string;
 };
+
+export function findTopicPolicy(
+  policies: TopicPolicyFields[],
+  topic?: string,
+): TopicPolicyFields | null {
+  const requestedTopic = topic?.trim().toLocaleLowerCase();
+  if (!requestedTopic) return null;
+
+  return policies.find((policy) => (policy.topic || "").trim().toLocaleLowerCase() === requestedTopic) || null;
+}
 
 function compactPolicyText(value: string, maxLines = 5, maxLength = 700): string {
   const lines = value
@@ -72,12 +84,9 @@ export async function loadTopicPolicy(opts: {
     }
     const json = (await res.json()) as { topicPolicies?: TopicPolicyFields[] };
     const list = Array.isArray(json.topicPolicies) ? json.topicPolicies : [];
-    const match =
-      list.find((p) => (p.topic || "").toLowerCase() === opts.topic!.toLowerCase()) ||
-      list[0] ||
-      null;
+    const match = findTopicPolicy(list, opts.topic);
     if (!match) {
-      log.warn("topic_policy.no_match", { topic: opts.topic });
+      log.warn("topic_policy.no_match", { topic: opts.topic, availablePolicies: list.length });
       return null;
     }
     log.info("topic_policy.loaded", { topic: match.topic, fields: Object.keys(match).length });
@@ -99,6 +108,11 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
   const behavior = compactPolicyText(policy.behavior || "", 4, 420);
   const conversationGuardrails = compactPolicyText(policy.conversationGuardrails || "", 5, 520);
   const requiredQuestions = compactPolicyText(policy.requiredQuestions || "", 8, 700);
+  const preparationQuestions = compactPolicyText(
+    policy.preparationQuestions || policy.pkvHealthQuestions || "",
+    12,
+    1000,
+  );
   const exampleSentences = compactPolicyText(policy.exampleSentences || "", 4, 420);
   const objectionResponses = compactPolicyText(policy.objectionResponses || "", 5, 600);
   const decisionMakerContext = compactPolicyText(policy.decisionMakerContext || "", 2, 300);
@@ -126,7 +140,8 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     !callObjective &&
     !behavior &&
     !conversationGuardrails &&
-    !requiredQuestions
+    !requiredQuestions &&
+    !preparationQuestions
   ) {
     return topic ? `THEMA DIESES CALLS: ${topic}` : "";
   }
@@ -177,8 +192,16 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
     parts.push(
       "",
       "FRAGEN NACH TERMINBESTÄTIGUNG:",
-      "Nach bestätigtem Termin fragst du einmal kurz, ob die freiwillige Vorbereitung in Ordnung ist. Bei Zustimmung führst du diese Fragen zuverlässig durch: eine Frage pro Turn, in der vorgegebenen Reihenfolge und ohne bereits beantwortete Fragen zu wiederholen. Ein Nein als Antwort auf eine einzelne Ja/Nein-Frage ist eine gültige Antwort und beendet die Vorbereitung nicht. Nur wenn der Kunde die gesamte Vorbereitung ablehnt, keine Zeit hat oder ausdrücklich keine weiteren Angaben machen möchte, beendest du die Fragerunde. Danach fragst du immer nach der E-Mail-Adresse für die Terminbestätigung:",
+      "Diese Angaben sind Leitplanken für die vom Worker gesteuerte Vorbereitung nach bestätigtem Termin. Stelle sie nicht eigenständig während des Gesprächs und wiederhole keine bereits beantwortete Frage:",
       requiredQuestions,
+    );
+  }
+  if (preparationQuestions) {
+    parts.push(
+      "",
+      "OPTIONALE VORBEREITUNGSFRAGEN NACH TERMINBESTÄTIGUNG:",
+      "Diese Fragen stellt der Worker einzeln und nur nach ausdrücklicher Zustimmung zur Vorbereitung. Frage nichts davon vor dem Termin. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen:",
+      preparationQuestions,
     );
   }
   if (exampleSentences) {

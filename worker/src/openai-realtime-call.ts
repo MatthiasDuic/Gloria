@@ -16,6 +16,7 @@ import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
 import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { GLORIA_CORE_INSTRUCTIONS } from "./gloria-core-instructions.js";
 
 type TelnyxFrame =
   | { event: "connected" }
@@ -263,6 +264,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   });
 
   const parts = [
+    GLORIA_CORE_INSTRUCTIONS,
     `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
@@ -280,7 +282,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
-    "Nach einem bestätigten Termin führst du die in der Topic Policy hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Frage zuerst kurz, ob zwei Minuten für die Vorbereitung passen. Bei Zustimmung stellst du die erste noch offene Frage. Ein Nein auf eine einzelne Gesundheitsfrage beendet die Fragerunde nicht: Akzeptiere es kurz, frage diese Frage nicht erneut und stelle die nächste Frage. Nur ein Nein zur gesamten Fragerunde oder ausdrücklicher Zeitdruck beendet die Fragerunde.",
+    "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
@@ -442,6 +444,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   _req: IncomingMessage,
 ): Promise<void> {
   let ctx: CallContext | null = null;
+  let topicPolicyReady = false;
   let openaiSession: OpenAiRealtimeSession | null = null;
   let streamId = "";
   let inputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
@@ -537,7 +540,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   });
 
   const updateSession = () => {
-    if (!ctx || !openaiSession?.isReady()) return;
+    if (!ctx || !topicPolicyReady || !openaiSession?.isReady()) return;
     const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.7");
     const silenceDurationMs = Number.parseInt(
       process.env.OPENAI_REALTIME_SILENCE_MS?.trim()
@@ -1408,9 +1411,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (!ctx || !policy) return;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
-          preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic);
+          preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic, policy);
         }
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
+      }).finally(() => {
+        topicPolicyReady = true;
+        if (ctx) updateSession();
       });
 
       const calendarTask = loadBusySlots({ userId: ctx.userId }).then((slots) => {
@@ -1433,8 +1439,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (ctx) ctx.freeSlotsPrompt = "KALENDER NICHT VERFÜGBAR: Keine Termine bestätigen.";
       });
 
-      // Single session.update after both background tasks complete.
-      void Promise.allSettled([policyTask, calendarTask]).then(() => { if (ctx) updateSession(); });
+      // The first response needs the campaign policy, but not calendar availability.
+      void Promise.allSettled([policyTask, calendarTask]);
 
       return;
     }

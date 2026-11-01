@@ -4,15 +4,15 @@ import {
   listActiveCampaignLists,
   pullNextLeadForCampaignList,
   setCampaignListActive,
-  storeCallReport,
 } from "@/lib/storage";
-import { createTelnyxCall, isTelnyxConfigured } from "@/lib/telnyx";
+import { isTelnyxConfigured } from "@/lib/telnyx";
 import {
   describeCampaignSchedule,
   isWithinCampaignHours,
 } from "@/lib/campaign-schedule";
-import { acquireCampaignCallLock, bindCampaignCallLock, findUserById, releaseCampaignCallLockByToken } from "@/lib/report-db";
+import { acquireCampaignCallLock, findUserById, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
+import { queueOutboundCall } from "@/lib/outbound-call-queue";
 
 export const runtime = "nodejs";
 
@@ -28,8 +28,8 @@ function isAuthorized(request: Request): boolean {
 }
 
 type DialResult =
-  | { userId: string; listId: string; dialed: true; sid: string; to: string }
-  | { userId: string; listId: string; dialed: false; reason: string };
+  | { userId: string; listId: string; queued: true; queueId: string; to: string }
+  | { userId: string; listId: string; queued: false; reason: string };
 
 export async function GET(request: Request) {
   return handle(request);
@@ -90,7 +90,7 @@ async function handle(request: Request) {
       results.push({
         userId: userKey,
         listId: lists[0].listId,
-        dialed: false,
+        queued: false,
         reason: "cooldown",
       });
       continue;
@@ -105,9 +105,14 @@ async function handle(request: Request) {
 
     for (const list of lists) {
       if (userId) {
-        const acquired = await acquireCampaignCallLock({ userId, leadId: list.listId, lockToken });
+        const acquired = await acquireCampaignCallLock({
+          userId,
+          leadId: list.listId,
+          lockToken,
+          ttlMs: 24 * 60 * 60 * 1000,
+        });
         if (!acquired) {
-          results.push({ userId: userKey, listId: list.listId, dialed: false, reason: "active_call" });
+          results.push({ userId: userKey, listId: list.listId, queued: false, reason: "active_call" });
           break;
         }
       }
@@ -127,7 +132,7 @@ async function handle(request: Request) {
         results.push({
           userId: userKey,
           listId: list.listId,
-          dialed: false,
+          queued: false,
           reason: rawTo ? "invalid_phone_format" : "missing_phone",
         });
         continue;
@@ -141,15 +146,15 @@ async function handle(request: Request) {
         results.push({
           userId: userKey,
           listId: list.listId,
-          dialed: false,
+          queued: false,
           reason: "list_not_active",
         });
         continue;
       }
 
       try {
-        const call = await createTelnyxCall(
-          {
+        const queued = await queueOutboundCall({
+          payload: {
             to,
             company: lead.company,
             contactName: lead.contactName,
@@ -162,26 +167,27 @@ async function handle(request: Request) {
             ownerGesellschaft: user?.gesellschaft,
           },
           request,
-        );
-        if (userId) await bindCampaignCallLock(lockToken, call.sid);
-
-        await storeCallReport({
-          callSid: call.sid,
-          leadId: lead.id,
-          company: lead.company,
-          contactName: lead.contactName,
-          topic: lead.topic,
-          summary: `Automatischer Kampagnenanruf gestartet (${new Date().toISOString()}).`,
-          outcome: "Nicht erreicht / kein Kontakt",
-          attempts: lead.attempts,
-          userId,
+          campaignLockToken: userId ? lockToken : undefined,
+          report: {
+            leadId: lead.id,
+            company: lead.company,
+            contactName: lead.contactName,
+            topic: lead.topic,
+            summary: `Automatischer Kampagnenanruf gestartet (${new Date().toISOString()}).`,
+            outcome: "Nicht erreicht / kein Kontakt",
+            attempts: lead.attempts,
+            userId,
+          },
         });
+        if (queued.status === "failed") {
+          throw new Error(queued.error || "Anruf konnte nicht gestartet werden.");
+        }
 
         const result: DialResult = {
           userId: userKey,
           listId: list.listId,
-          dialed: true,
-          sid: call.sid,
+          queued: true,
+          queueId: queued.queueId,
           to,
         };
         results.push(result);
@@ -193,7 +199,7 @@ async function handle(request: Request) {
         results.push({
           userId: userKey,
           listId: list.listId,
-          dialed: false,
+          queued: false,
           reason: error instanceof Error ? error.message : "call_start_failed",
         });
         // Nicht sofort break – probier die naechste Liste dieses Users.
@@ -206,7 +212,7 @@ async function handle(request: Request) {
     }
   }
 
-  const triggered = results.filter((r) => r.dialed === true).length;
+  const triggered = results.filter((r) => r.queued === true).length;
 
   return NextResponse.json({
     ok: true,

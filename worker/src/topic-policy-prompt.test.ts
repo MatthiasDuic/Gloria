@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { findTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+
+test("selects only the requested dynamic topic policy", () => {
+  const policies = [
+    { topic: "Betriebliche Krankenversicherung" },
+    { topic: "Jahresgespräch" },
+  ];
+
+  assert.equal(findTopicPolicy(policies, " jahresgespräch ")?.topic, "Jahresgespräch");
+  assert.equal(findTopicPolicy(policies, "Unbekannte Kampagne"), null);
+  assert.equal(findTopicPolicy(policies, undefined), null);
+});
 
 test("includes complete topic guidance for a natural, objection-aware dialog", () => {
   const prompt = topicPolicyToSystemPrompt({

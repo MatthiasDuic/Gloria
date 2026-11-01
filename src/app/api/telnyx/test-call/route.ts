@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { createTelnyxCall, isTelnyxConfigured, TelnyxApiError } from "@/lib/telnyx";
+import { isTelnyxConfigured, TelnyxApiError } from "@/lib/telnyx";
 import type { Topic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { canUserAccessTopic, findPhoneNumberById, findUserById } from "@/lib/report-db";
 import { describePreflightFailure, runPreflight } from "@/lib/preflight";
 import { log } from "@/lib/log";
-import { storeCallReport } from "@/lib/storage";
+import { queueOutboundCall } from "@/lib/outbound-call-queue";
 
 export const runtime = "nodejs";
 
@@ -112,23 +112,39 @@ export async function POST(request: Request) {
       isTestCall: true,
     };
 
-    const call = await createTelnyxCall(callPayload, request);
-    await storeCallReport({
-      callSid: call.sid, callSource: "manual", userId: sessionUser.id,
-      phoneNumberId: payload.phoneNumberId, company: payload.company,
-      contactName: payload.contactName, topic: payload.topic, calledPhone: payload.to,
-      summaryChunk: "Manueller Testanruf gestartet.",
+    const queued = await queueOutboundCall({
+      payload: callPayload,
+      request,
+      report: {
+        callSource: "manual",
+        userId: sessionUser.id,
+        phoneNumberId: payload.phoneNumberId,
+        company: payload.company,
+        contactName: payload.contactName,
+        topic: payload.topic,
+        calledPhone: payload.to,
+        summaryChunk: "Manueller Testanruf gestartet.",
+      },
     });
 
     return NextResponse.json({
-      ok: true,
-      sid: call.sid,
-      status: "status" in call ? call.status : "queued",
-      to: "to" in call ? call.to : callPayload.to,
-      from: "from" in call ? call.from : callPayload.from,
+      ok: queued.status !== "failed",
+      queueId: queued.queueId,
+      sid: queued.callSid,
+      status: queued.status,
+      position: queued.position,
+      to: callPayload.to,
+      from: callPayload.from,
       provider: "telnyx",
-      message: "Telnyx-Testanruf wurde gestartet.",
-    });
+      message: queued.status === "active" || queued.status === "completed"
+        ? "Telnyx-Testanruf wurde gestartet."
+        : queued.status === "failed"
+          ? "Telnyx-Testanruf konnte nicht gestartet werden."
+          : queued.status === "starting"
+            ? "Telnyx-Testanruf wird gerade aufgebaut."
+            : `Telnyx-Testanruf wartet auf einen freien Platz (Position ${queued.position}).`,
+      ...(queued.error ? { error: queued.error } : {}),
+    }, { status: queued.status === "failed" ? 502 : 200 });
   } catch (error) {
     const message =
       error instanceof Error

@@ -16,7 +16,7 @@ services:
       - key: LOG_LEVEL
         value: info
       - key: STREAM_SHARED_SECRET
-        value: 8a2d5f3b1c9e7d4a6f2b8e1d5c3a9f7e1b4d8c2a5f9e3d7c1a6b8f2e4d9c3
+        sync: false
       - key: OPENAI_API_KEY
         sync: true
       - key: OPENAI_MODEL
@@ -46,6 +46,6 @@ services:
       - key: APP_BASE_URL
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN
-        value: b1430199e0c004272791ddb04c35fe2327dab2e663f4c273a9fdadd190e961ae
+        sync: false
       - key: TRANSFER_PHONE
         value: "+491715358989"

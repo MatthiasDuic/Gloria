@@ -140,5 +140,12 @@ ElevenLabs-Secrets werden nur für diesen Rückfallpfad benötigt.
 
 - **Logs**: Render-Dashboard → Service → Logs (JSON-Lines).
 - **Restart**: `Manual Deploy → Clear cache and deploy` reicht für Hotfixes.
-- **Skalierung**: Starter-Plan (~$7/Monat) hält ~10 parallele Anrufe. Bei mehr
-  parallelen Calls auf Standard hochstufen oder Horizontal-Scaling aktivieren.
+- **Parallelität**: Gloria startet maximal drei ausgehende Telefonate gleichzeitig.
+  Weitere Aufträge bleiben persistent in PostgreSQL in der Warteschlange und
+  werden nach Gesprächsende fair nach Benutzer rotiert. Die Auslastung und
+  eigene wartende Aufträge erscheinen im CRM. Dafür müssen `DATABASE_URL` und
+  `CRON_SECRET` in Vercel konfiguriert sein; der Queue-Cron dient als Fallback,
+  falls ein Telnyx-Endereignis den nächsten Auftrag nicht unmittelbar anstößt.
+- **Skalierung**: Das Limit von drei schützt den gemeinsamen Worker und die
+  KI-Dienste. Eine Erhöhung sollte erst nach einem Lasttest und Anpassung des
+  Limits erfolgen; der Render-Plan allein garantiert keine Gesprächsqualität.

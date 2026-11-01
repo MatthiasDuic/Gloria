@@ -11,9 +11,23 @@ export interface OptimizerResult {
 }
 
 function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig) {
+  const signalPatterns: Array<[string, RegExp]> = [
+    ["Zeitmangel oder Rückrufwunsch", /keine zeit|zu beschäftigt|rückruf|wiedervorlage|später/i],
+    ["Ablehnung oder kein aktueller Bedarf", /kein interesse|kein bedarf|nicht interessiert/i],
+    ["Bestehende Lösung oder anderer Anbieter", /bereits versorgt|haben wir schon|anderer anbieter|bestehender vertrag/i],
+    ["Bitte um schriftliche Informationen", /per mail|per e-mail|schriftlich/i],
+    ["Preis- oder Budgetbedenken", /zu teuer|kein budget|kosten|beitrag/i],
+    ["Zuständigkeit oder Gatekeeper", /nicht zuständig|richtige ansprechperson|empfang|sekretariat/i],
+  ];
   const condensed = reports
     .slice(0, 25)
-    .map((r, i) => `#${i + 1} [${r.outcome}] ${r.company}: ${(r.summary || "").slice(0, 800)}`)
+    .map((report, index) => {
+      const summary = report.summary || "";
+      const signals = signalPatterns
+        .filter(([, pattern]) => pattern.test(summary))
+        .map(([label]) => label);
+      return `#${index + 1} Ergebnis: ${report.outcome}; erkannte Gesprächssignale: ${signals.join(", ") || "keine eindeutigen Signale"}`;
+    })
     .join("\n---\n");
   const stats = {
     total: reports.length,
@@ -28,6 +42,8 @@ function buildPrompt(topic: Topic, reports: CallReport[], current: ScriptConfig)
     "Du optimierst die Topic Policy von Gloria, einer digitalen Vertriebsassistentin.",
     "Antworten immer in deutscher Sprache, hoeflich, DSGVO-konform.",
     "Keine erfundenen Fakten, keine Preise, keine Tarifempfehlungen.",
+    "Nutze ausschließlich anonymisierte Ergebnis- und Signalkategorien; verlange oder rekonstruiere keine Namen, Kontaktdaten oder Gesundheitsangaben.",
+    "Optimiere Gesprächsqualität und passende nächste Schritte, niemals durch Druck oder das Überreden nach einem Nein.",
     "Du gibst ausschliesslich JSON zurueck nach dem vorgegebenen Schema.",
   ].join(" ");
 

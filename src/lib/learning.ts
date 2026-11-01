@@ -1,4 +1,3 @@
-import { TOPICS } from "./types";
 import { getDashboardData, saveScript } from "./storage";
 import type {
   CallReport,
@@ -132,7 +131,12 @@ export async function getLearningResponse(options?: {
     role: options?.role,
   });
 
-  const insights: LearningInsight[] = TOPICS.map((topic) => {
+  const topics = Array.from(new Set([
+    ...data.topicPolicies.map((policy) => policy.topic),
+    ...data.reports.map((report) => report.topic),
+  ])).filter(Boolean).sort((left, right) => left.localeCompare(right, "de"));
+
+  const insights: LearningInsight[] = topics.map((topic) => {
     const script = data.topicPolicies.find((entry) => entry.topic === topic);
     const reports = data.reports.filter((report) => report.topic === topic);
     const appointments = reports.filter((report) => report.outcome === "Termin").length;
@@ -142,13 +146,9 @@ export async function getLearningResponse(options?: {
     const appointmentRate = percentage(appointments, totalConversations);
 
     const fallbackScript: ScriptConfig =
-      script || data.topicPolicies[0] || {
+      script || {
         id: `fallback-${topic}`,
         topic,
-        opener: "",
-        discovery: "",
-        objectionHandling: "",
-        close: "",
       };
 
     return {
@@ -176,7 +176,7 @@ export async function getLearningResponse(options?: {
       callbackTopic && callbackTopic.callbacks > 0
         ? `Die meisten Wiedervorlagen liegen bei ${callbackTopic.topic}; dort hilft ein noch kürzerer und direkterer Abschluss.`
         : "Der aktuelle Fokus liegt darauf, erfolgreiche Gesprächsmuster weiter auszubauen.",
-      "Gloria kann die empfohlenen Verbesserungen pro Thema direkt in die Topic Policy übernehmen.",
+      "Verbesserungsvorschläge werden geprüft und erst nach Freigabe in den Kampagnenleitfaden übernommen.",
     ],
   };
 }
