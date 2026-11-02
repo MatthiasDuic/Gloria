@@ -2,28 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { advanceAppointmentRouting, appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { computeFreeSlots } from "./busy.js";
+import { parseSlotPhraseToIso } from "./finalize.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
 
 test("locks the selected Tuesday, retains the location and proceeds to booking without model slot rewriting", () => {
-  const slots = "FREIE TERMIN-VORSCHLÄGE:\n- Montag, 9. November um 08:30 Uhr\n- Dienstag, 10. November um 08:30 Uhr";
+  const slots = "FREIE TERMIN-VORSCHLÄGE:\n- Freitag, 6. November um 08:30 Uhr\n- Dienstag, 10. November um 10:00 Uhr";
   const turns: ConversationTurn[] = [
     { role: "assistant", text: "Passt Ihnen für einen Orientierungstermin eher vormittags oder nachmittags?" },
     { role: "user", text: "Tatsächlich ist es vormittags bei mir besser." },
   ];
   let transition = advanceAppointmentRouting({}, turns, slots);
   assert.equal(transition.state.appointmentOfferedSlots?.length, 2);
-  assert.match(transition.speechText || "", /Montag.*Dienstag/);
+  assert.match(transition.speechText || "", /Freitag.*Dienstag/);
   turns.push({ role: "assistant", text: transition.speechText || "" }, { role: "user", text: "Der Dienstag passt sehr gut." });
   transition = advanceAppointmentRouting(transition.state, turns, slots);
-  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 08:30 Uhr");
+  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 10:00 Uhr");
   assert.equal(transition.speechText, "Soll der Termin digital oder bei Ihnen vor Ort stattfinden?");
   turns.push({ role: "assistant", text: transition.speechText }, { role: "user", text: "Gerne bei mir vor Ort." });
   transition = advanceAppointmentRouting(transition.state, turns, slots);
   assert.equal(transition.readyToBook, true);
   assert.equal(transition.state.appointmentMode, "Beim Kunden vor Ort");
-  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 08:30 Uhr");
+  assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 10:00 Uhr");
   const decision = decideAppointment({ turns, topicKind: "pkv", freeSlotsPrompt: slots, slotPhrase: transition.state.selectedAppointmentSlot });
   assert.equal(decision.ok, true);
   turns.push({ role: "user", text: "Bei mir." });
@@ -177,12 +178,14 @@ test("detects the selected appointment mode from the customer answer", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." }]), undefined);
 });
 
-test("offers only two different-day calendar slots within the requested time window", () => {
+test("offers nonconsecutive days and different times within the requested time window", () => {
   const slots = [
     "- Montag, 19. Oktober um 08:30 Uhr",
     "- Montag, 19. Oktober um 10:00 Uhr",
     "- Dienstag, 20. Oktober um 11:00 Uhr",
     "- Dienstag, 20. Oktober um 12:30 Uhr",
+    "- Mittwoch, 21. Oktober um 08:30 Uhr",
+    "- Mittwoch, 21. Oktober um 10:00 Uhr",
     "- Mittwoch, 21. Oktober um 13:00 Uhr",
     "- Donnerstag, 22. Oktober um 17:30 Uhr",
     "- Freitag, 23. Oktober um 18:00 Uhr",
@@ -191,18 +194,49 @@ test("offers only two different-day calendar slots within the requested time win
 
   assert.deepEqual(getAppointmentOfferSlots(slots, "morning"), [
     "Montag, 19. Oktober um 08:30 Uhr",
-    "Dienstag, 20. Oktober um 11:00 Uhr",
+    "Mittwoch, 21. Oktober um 10:00 Uhr",
   ]);
   assert.deepEqual(getAppointmentOfferSlots(slots, "afternoon"), [
     "Mittwoch, 21. Oktober um 13:00 Uhr",
-    "Donnerstag, 22. Oktober um 17:30 Uhr",
+    "Freitag, 23. Oktober um 18:00 Uhr",
   ]);
   const offer = appointmentOfferInstruction(slots, "morning");
-  assert.match(offer || "", /Ich kann Ihnen Montag, 19\. Oktober um 08:30 Uhr oder Dienstag, 20\. Oktober um 11:00 Uhr anbieten/);
+  assert.match(offer || "", /Ich kann Ihnen Montag, 19\. Oktober um 08:30 Uhr oder Mittwoch, 21\. Oktober um 10:00 Uhr anbieten/);
   assert.doesNotMatch(offer || "", /ausschließlich|nur diese/i);
   assert.match(offer || "", /Stelle in diesem Turn keine weitere Frage/);
   assert.equal(appointmentOfferInstruction("- Montag, 19. Oktober um 09:00 Uhr", "morning"), undefined);
   assert.deepEqual(getAppointmentOfferSlots(slots, "unknown"), []);
+});
+
+test("does not fall back to adjacent days or identical times when no suitable pair exists", () => {
+  for (const slots of [
+    "- Montag, 9. November um 08:30 Uhr\n- Dienstag, 10. November um 10:00 Uhr",
+    "- Montag, 9. November um 08:30 Uhr\n- Mittwoch, 11. November um 08:30 Uhr",
+  ]) {
+    assert.deepEqual(getAppointmentOfferSlots(slots, "morning"), []);
+    const transition = advanceAppointmentRouting({}, [
+      { role: "assistant", text: "Für einen Termin eher vormittags oder nachmittags?" },
+      { role: "user", text: "Vormittags." },
+    ], slots);
+    assert.match(transition.speechText || "", /anderer Zeitraum/);
+    assert.equal(transition.state.appointmentOfferedSlots, undefined);
+  }
+});
+
+test("production-sized slot sampling retains varied times and valid offers for both preferences", (context) => {
+  context.mock.method(Date, "now", () => Date.parse("2026-11-02T09:00:00Z"));
+  const slots = computeFreeSlots([], { daysAhead: 60, maxCount: 40, minLeadDays: 7 });
+  const prompt = slots.map((slot) => `- ${slot.phrase}`).join("\n");
+  assert.equal(slots.length, 40);
+  assert.ok(new Set(slots.map((slot) => slot.phrase.match(/\d{2}:\d{2}/)?.[0])).size >= 4);
+  for (const preference of ["morning", "afternoon"] as const) {
+    const choices = getAppointmentOfferSlots(prompt, preference);
+    assert.equal(choices.length, 2);
+    const starts = choices.map((choice) => Date.parse(parseSlotPhraseToIso(choice) || ""));
+    assert.ok(Math.floor(starts[1] / 86_400_000) - Math.floor(starts[0] / 86_400_000) >= 2);
+    assert.notEqual(choices[0].match(/\d{2}:\d{2}/)?.[0], choices[1].match(/\d{2}:\d{2}/)?.[0]);
+    assert.ok(choices.every((choice) => slots.some((slot) => slot.phrase === choice)));
+  }
 });
 
 test("resolves a clear slot choice once without requiring another confirmation", () => {

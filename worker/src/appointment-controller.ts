@@ -107,6 +107,12 @@ function slotTimeMinutes(line: string): number | undefined {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+function berlinCalendarDay(start: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(start));
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return Date.UTC(value("year"), value("month") - 1, value("day"));
+}
+
 export function getAppointmentOfferSlots(freeSlotsPrompt: string | undefined, preference: AppointmentPreference): string[] {
   if (preference === "unknown") return [];
   const minMinutes = preference === "morning" ? 8 * 60 + 30 : 13 * 60;
@@ -120,16 +126,19 @@ export function getAppointmentOfferSlots(freeSlotsPrompt: string | undefined, pr
       return time !== undefined && time >= minMinutes && time <= maxMinutes;
     });
 
-  const choices: string[] = [];
-  const selectedDates = new Set<string>();
-  for (const line of matching) {
-    const date = line.replace(/\s+(?:um\s+)?\d{1,2}:\d{2}.*$/i, "").trim().toLowerCase();
-    if (selectedDates.has(date)) continue;
-    choices.push(line);
-    selectedDates.add(date);
-    if (choices.length === 2) break;
+  for (let first = 0; first < matching.length; first += 1) {
+    const firstStart = parseSlotPhraseToIso(matching[first]);
+    if (!firstStart) continue;
+    for (let second = first + 1; second < matching.length; second += 1) {
+      const secondStart = parseSlotPhraseToIso(matching[second]);
+      if (!secondStart) continue;
+      if (Math.abs(berlinCalendarDay(secondStart) - berlinCalendarDay(firstStart)) < 2 * 86_400_000) continue;
+      if (slotTimeMinutes(matching[first]) === slotTimeMinutes(matching[second])) continue;
+      if (matching[first].split(",")[0] === matching[second].split(",")[0]) continue;
+      return [matching[first], matching[second]];
+    }
   }
-  return choices;
+  return [];
 }
 
 export function matchOfferedAppointmentSelection(text: string, offeredSlots: string[]): string | undefined {
@@ -188,7 +197,11 @@ export function advanceAppointmentRouting(
   if (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant)) return { state };
   const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);
   const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
-  if (choices.length < 2) return { state };
+  if (preference === "unknown") return { state };
+  if (choices.length < 2) return {
+    state,
+    speechText: "Für diesen Zeitraum finde ich gerade keine zwei freien Termine mit ausreichend Abstand und unterschiedlichen Uhrzeiten. Käme für Sie auch ein anderer Zeitraum infrage?",
+  };
   return {
     state: { ...state, appointmentOfferedSlots: choices, appointmentMode: mode },
     speechText: `Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?`,

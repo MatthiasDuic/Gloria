@@ -132,8 +132,14 @@ export function computeFreeSlots(
   if (candidates.length <= maxCount) return candidates;
   const distributed: Array<{ startUtc: string; phrase: string }> = [];
   const step = candidates.length / maxCount;
+  const selectedTimes = new Set<string>();
   for (let index = 0; index < maxCount; index += 1) {
-    distributed.push(candidates[Math.min(candidates.length - 1, Math.floor(index * step))]);
+    const bucket = candidates.slice(Math.floor(index * step), Math.floor((index + 1) * step));
+    const selected = bucket.find((slot) => !selectedTimes.has(slot.phrase.match(/\d{2}:\d{2}/)?.[0] || ""))
+      || bucket[index % bucket.length];
+    distributed.push(selected);
+    selectedTimes.add(selected.phrase.match(/\d{2}:\d{2}/)?.[0] || "");
+    if (selectedTimes.size >= 6) selectedTimes.clear();
   }
   return distributed;
 }
@@ -156,7 +162,7 @@ export function freeSlotsToPrompt(slots: Array<{ startUtc: string; phrase: strin
     "FREIE TERMIN-VORSCHLÄGE (ohne Doppelbelegung, ab nächster Woche und über mehrere Wochen hinweg):",
     ...lines,
     "Jeder Termin reserviert 90 Minuten inklusive An- und Abreise; dies ist nicht die eigentliche Gesprächsdauer. Es gibt kein Tageslimit: Maßgeblich sind ausschließlich freie Zeiten und Sperrzeiten. Die Liste ist eine Auswahl von Vorschlägen, keine Begrenzung der möglichen Termine.",
-    "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei dieser Slots vor, die zur Praeferenz passen.",
+    "Frage immer ZUERST nach Vormittag/Nachmittag-Praeferenz. Schlage dann genau zwei passende Slots mit unterschiedlichen Uhrzeiten und mindestens zwei Kalendertagen Abstand vor, niemals zwei aufeinanderfolgende Tage. Nutze unterschiedliche Wochentage, damit die Auswahl eindeutig bleibt. Wenn kein solches Paar verfügbar ist, sage das offen und frage nach einem anderen Zeitraum, statt ungeeignete Zeiten zu erfinden.",
     "Wenn der Anrufende einen anderen Zeitraum oder eine andere Woche wünscht, akzeptiere diesen Wunsch, frage bei Bedarf kurz nach der gewünschten Woche und wähle danach zwei passende Slots aus diesem späteren Zeitraum. Bestehe nicht auf der zuerst angebotenen Woche. Erfinde niemals freie Zeiten außerhalb dieser Liste.",
     "",
   ].join("\n");
