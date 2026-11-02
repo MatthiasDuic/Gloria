@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getMissingCrmFields, type CrmEnrichmentField } from "@/lib/crm-enrichment";
+import { CRM_ENRICHMENT_FIELDS, getMissingCrmFields, type CrmEnrichmentField } from "@/lib/crm-enrichment";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { buildLeadCallContext, getLeadById, updateLeadDetails } from "@/lib/storage";
@@ -213,14 +213,27 @@ export async function POST(request: Request) {
   if (!isRecord(payload) || typeof payload.leadId !== "string" || payload.leadId.length > 200) {
     return NextResponse.json({ error: "Firmenkennung ist ungültig." }, { status: 400 });
   }
+  if (
+    payload.fields !== undefined
+    && (!Array.isArray(payload.fields)
+      || payload.fields.length === 0
+      || payload.fields.some((field) => typeof field !== "string"
+        || !CRM_ENRICHMENT_FIELDS.some((definition) => definition.key === field)))
+  ) {
+    return NextResponse.json({ error: "Die ausgewählten Recherchefelder sind ungültig." }, { status: 400 });
+  }
 
   const lead = await getLeadById(payload.leadId, sessionUser.id);
   if (!lead || lead.callSource !== "crm" || !lead.listId?.startsWith("crm-search-") || !Number.isSafeInteger(lead.crmCompanyId)) {
     return NextResponse.json({ error: "Die Firma gehört nicht zu einer CRM-Firmenliste dieses Benutzers." }, { status: 404 });
   }
-  const missingFields = getMissingCrmFields(lead).map(({ key }) => key);
+  const currentlyMissingFields = getMissingCrmFields(lead).map(({ key }) => key);
+  const requestedFields = payload.fields as CrmEnrichmentField[] | undefined;
+  const missingFields = requestedFields
+    ? currentlyMissingFields.filter((field) => requestedFields.includes(field))
+    : currentlyMissingFields;
   if (missingFields.length === 0) {
-    return NextResponse.json({ ok: true, company: lead.company, fields: [], sources: [], message: "Keine Firmenfelder fehlen." });
+    return NextResponse.json({ ok: true, company: lead.company, fields: [], sources: [], message: "Für die ausgewählte Recherche fehlen keine Firmenfelder." });
   }
   if (!process.env.OPENAI_API_KEY?.trim()) {
     return NextResponse.json({ error: "OPENAI_API_KEY ist nicht konfiguriert; die Webrecherche kann nicht gestartet werden." }, { status: 503 });

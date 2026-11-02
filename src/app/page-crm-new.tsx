@@ -8,7 +8,7 @@ import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallSource, ge
 import { parseReportTranscriptFallback } from "@/lib/transcript-utils";
 import { saveCalendarCallback } from "@/lib/calendar-view";
 import { MAX_CONCURRENT_OUTBOUND_CALLS } from "@/lib/outbound-call-queue-constants";
-import { getMissingCrmFields } from "@/lib/crm-enrichment";
+import { getMissingCrmFields, type CrmEnrichmentField } from "@/lib/crm-enrichment";
 import GloriaCalendar from "@/components/GloriaCalendar";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -53,7 +53,7 @@ type FirmListSummary = {
   total: number;
   withPhone: number;
   withEmail: number;
-  missingFields: Array<{ key: string; label: string; count: number }>;
+  missingFields: Array<{ key: CrmEnrichmentField; label: string; count: number }>;
 };
 
 type EnrichmentProgress = {
@@ -427,6 +427,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [enrichmentDialogList, setEnrichmentDialogList] = useState<FirmListSummary | null>(null);
   const [enrichmentProgress, setEnrichmentProgress] = useState<EnrichmentProgress | null>(null);
   const [enrichmentAnalysisLoading, setEnrichmentAnalysisLoading] = useState("");
+  const [selectedEnrichmentFields, setSelectedEnrichmentFields] = useState<CrmEnrichmentField[]>([]);
 
   // Calendar State
   const [reschedulingEntry, setReschedulingEntry] = useState<CrmCalendarEntry | null>(null);
@@ -1434,12 +1435,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [campaignLists, enrichmentDialogList, filterCampaignListId, reloadLiveData]);
 
-  const startMissingDataResearch = useCallback(async (list: FirmListSummary) => {
+  const startMissingDataResearch = useCallback(async (list: FirmListSummary, fieldsToResearch: CrmEnrichmentField[]) => {
     if (enrichmentProgress?.status === "running") return;
+    const selectedFields = new Set(fieldsToResearch);
+    if (selectedFields.size === 0) {
+      setNotice("✗ Bitte wählen Sie mindestens ein Feld für die Recherche aus.");
+      return;
+    }
     const candidates = data.leads.filter((lead) =>
       lead.callSource === "crm"
       && lead.listId === list.listId
-      && getMissingCrmFields(lead).length > 0,
+      && getMissingCrmFields(lead).some((field) => selectedFields.has(field.key)),
     );
     if (candidates.length === 0) {
       setEnrichmentProgress({
@@ -1476,7 +1482,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ leadId: lead.id }),
+          body: JSON.stringify({ leadId: lead.id, fields: fieldsToResearch }),
         });
         const payload = await readResearchResponse(response);
         const fields = Array.isArray(payload.fields) ? payload.fields : [];
@@ -1527,6 +1533,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   const analyzeFirmList = useCallback(async (list: FirmListSummary) => {
     setEnrichmentDialogList(list);
+    setSelectedEnrichmentFields(list.missingFields.map((field) => field.key));
     setEnrichmentAnalysisLoading(list.listId);
     try {
       const response = await fetch("/api/campaigns/lists", {
@@ -1543,7 +1550,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       if (payload.firmLists) {
         setFirmLists(payload.firmLists);
         const freshList = payload.firmLists.find((entry) => entry.listId === list.listId);
-        if (freshList) setEnrichmentDialogList(freshList);
+        if (freshList) {
+          setEnrichmentDialogList(freshList);
+          setSelectedEnrichmentFields(freshList.missingFields.map((field) => field.key));
+        }
       }
     } catch (error) {
       setNotice(`✗ Fehlende Felder konnten nicht ermittelt werden: ${error instanceof Error ? error.message : "Unbekannt"}`);
@@ -2955,14 +2965,31 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <span>Gloria prüft die aktuellen Stammdaten dieser Firmenliste.</span>
                 </div>
               ) : enrichmentDialogList.missingFields.length ? (
-                <div className="enrichment-field-grid">
-                  {enrichmentDialogList.missingFields.map((field) => (
-                    <div className="enrichment-field-card" key={field.key}>
-                      <span>{field.label}</span>
-                      <strong>{field.count} <small>{field.count === 1 ? "Firma" : "Firmen"}</small></strong>
+                <>
+                  <div className="enrichment-selection-heading">
+                    <strong>Welche Felder sollen recherchiert werden?</strong>
+                    <div>
+                      <button type="button" className="btn-small ghost" disabled={Boolean(progress?.status === "running")} onClick={() => setSelectedEnrichmentFields(enrichmentDialogList.missingFields.map((field) => field.key))}>Alle auswählen</button>
+                      <button type="button" className="btn-small ghost" disabled={Boolean(progress?.status === "running")} onClick={() => setSelectedEnrichmentFields([])}>Auswahl aufheben</button>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                  <div className="enrichment-field-grid">
+                    {enrichmentDialogList.missingFields.map((field) => (
+                      <label className={`enrichment-field-card ${selectedEnrichmentFields.includes(field.key) ? "selected" : ""}`} key={field.key}>
+                        <input
+                          type="checkbox"
+                          checked={selectedEnrichmentFields.includes(field.key)}
+                          disabled={isAnalyzing || progress?.status === "running"}
+                          onChange={(event) => setSelectedEnrichmentFields((current) => event.target.checked
+                            ? [...current, field.key]
+                            : current.filter((key) => key !== field.key))}
+                        />
+                        <span>{field.label}</span>
+                        <strong>{field.count} <small>{field.count === 1 ? "Firma" : "Firmen"}</small></strong>
+                      </label>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <div className="enrichment-empty">
                   <strong>Keine fehlenden Stammdaten gefunden</strong>
@@ -3016,10 +3043,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 {isAnalyzing || progress?.status === "running" ? null : (
                   <button
                     className="btn"
-                    disabled={missingCount === 0 || !enrichmentDialogList.missingFields.length}
-                    onClick={() => void startMissingDataResearch(enrichmentDialogList)}
+                    disabled={missingCount === 0 || selectedEnrichmentFields.length === 0 || !enrichmentDialogList.missingFields.length}
+                    onClick={() => void startMissingDataResearch(enrichmentDialogList, selectedEnrichmentFields)}
                   >
-                    {progress?.status === "completed" ? "Offene Felder erneut recherchieren" : "Recherche starten"}
+                    {progress?.status === "completed" ? "Ausgewählte Felder erneut recherchieren" : "Ausgewählte Felder recherchieren"}
                   </button>
                 )}
               </footer>
@@ -4188,9 +4215,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .gloria-crm .enrichment-dialog-header p { margin: 0; color: #718198; font-size: 0.85rem; }
         .gloria-crm .enrichment-close { flex: 0 0 auto; border: 1px solid #dbe4ed; border-radius: 10px; color: #536981; background: #fff; padding: 0.55rem 0.7rem; cursor: pointer; }
         .gloria-crm .enrichment-field-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: 0.65rem; max-height: 230px; overflow-y: auto; padding: 1px; }
-        .gloria-crm .enrichment-field-card { display: flex; flex-direction: column; gap: 0.45rem; border: 1px solid #e3eaf2; border-radius: 12px; background: #f8fafd; padding: 0.75rem; }
+        .gloria-crm .enrichment-selection-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0.9rem 0 0.6rem; color: #304b68; font-size: 0.85rem; }
+        .gloria-crm .enrichment-selection-heading > div { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .gloria-crm .enrichment-field-card { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 0.45rem 0.6rem; border: 1px solid #e3eaf2; border-radius: 12px; background: #f8fafd; padding: 0.75rem; cursor: pointer; }
+        .gloria-crm .enrichment-field-card.selected { border-color: #9db8d3; background: #f1f6fb; }
+        .gloria-crm .enrichment-field-card input { grid-row: span 2; accent-color: #2867a2; }
         .gloria-crm .enrichment-field-card span { color: #60758d; font-size: 0.75rem; }
-        .gloria-crm .enrichment-field-card strong { color: #244c74; font-size: 1.25rem; }
+        .gloria-crm .enrichment-field-card strong { color: #244c74; font-size: 1.05rem; }
         .gloria-crm .enrichment-field-card small { color: #75879b; font-size: 0.7rem; font-weight: 500; }
         .gloria-crm .enrichment-empty { display: flex; flex-direction: column; gap: 0.3rem; padding: 1.1rem; border: 1px solid #cfe7dc; border-radius: 12px; color: #216448; background: #f1faf5; }
         .gloria-crm .enrichment-empty span { color: #56796a; font-size: 0.83rem; }

@@ -617,7 +617,7 @@ test("company research fills only still-empty fields and returns web sources", a
     address: null,
     street: null,
     postal_code: null,
-    city: null,
+    city: "Mülheim an der Ruhr",
     country: null,
     registry_number: null,
     registry_court: null,
@@ -642,10 +642,16 @@ test("company research fills only still-empty fields and returns web sources", a
       companyName: "",
       gesellschaft: "",
     })}`;
+    const invalidSelection = await POST(new Request("http://localhost/api/campaigns/research", {
+      method: "POST",
+      headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: sampleLead.id, fields: ["not-a-company-field"] }),
+    }));
+    assert.equal(invalidSelection.status, 400);
     const response = await POST(new Request("http://localhost/api/campaigns/research", {
       method: "POST",
       headers: { cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: sampleLead.id }),
+      body: JSON.stringify({ leadId: sampleLead.id, fields: ["phone", "website", "industry"] }),
     }));
     const payload = await response.json() as {
       fields: Array<{ key: string; value: string }>;
@@ -661,6 +667,7 @@ test("company research fills only still-empty fields and returns web sources", a
     assert.equal(updatedLead.email, "info@recherche.example");
     assert.equal(updatedLead.website, "https://recherche.example");
     assert.equal(updatedLead.industry, "Maschinenbau");
+    assert.equal(updatedLead.addressCity, undefined);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
