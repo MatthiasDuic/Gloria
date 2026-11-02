@@ -48,6 +48,7 @@ import type {
 } from "./types";
 import { TOPICS } from "./types";
 import { getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails } from "./crm-helpers";
+import { getMissingCrmFields } from "./crm-enrichment";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
@@ -803,16 +804,26 @@ export async function updateLeadDetails(
       customerKind,
       customerOwner: updates.customerOwner ?? lead.customerOwner,
       contactName: updates.contactName ?? lead.contactName,
+      contactNames: updates.contactNames ?? lead.contactNames,
+      contactGroupNames: updates.contactGroupNames ?? lead.contactGroupNames,
       phone: updates.phone ?? lead.phone,
       directDial: updates.directDial ?? lead.directDial,
       additionalPhones: updates.additionalPhones ?? lead.additionalPhones,
       email: updates.email ?? lead.email,
       birthDate: updates.birthDate ?? lead.birthDate,
+      website: updates.website ?? lead.website,
+      industry: updates.industry ?? lead.industry,
       location: updates.location ?? lead.location,
+      address: updates.address ?? lead.address,
       addressStreet: updates.addressStreet ?? lead.addressStreet,
       addressPostalCode: updates.addressPostalCode ?? lead.addressPostalCode,
       addressCity: updates.addressCity ?? lead.addressCity,
       addressCountry: updates.addressCountry ?? lead.addressCountry,
+      registryNumber: updates.registryNumber ?? lead.registryNumber,
+      registryCourt: updates.registryCourt ?? lead.registryCourt,
+      foundedYear: updates.foundedYear ?? lead.foundedYear,
+      employeeCount: updates.employeeCount ?? lead.employeeCount,
+      vatId: updates.vatId ?? lead.vatId,
       products: updates.products ?? lead.products,
       productDetails: normalizeLeadProductDetails(updates.productDetails ?? lead.productDetails ?? lead.products),
       affiliations: normalizeLeadAffiliations(updates.affiliations ?? lead.affiliations),
@@ -833,16 +844,26 @@ export async function updateLeadDetails(
       customerKind: lead.customerKind,
       customerOwner: lead.customerOwner,
       contactName: lead.contactName,
+      contactNames: lead.contactNames,
+      contactGroupNames: lead.contactGroupNames,
       phone: lead.phone,
       directDial: lead.directDial,
       additionalPhones: lead.additionalPhones,
       email: lead.email,
       birthDate: lead.birthDate,
+      website: lead.website,
+      industry: lead.industry,
       location: lead.location,
+      address: lead.address,
       addressStreet: lead.addressStreet,
       addressPostalCode: lead.addressPostalCode,
       addressCity: lead.addressCity,
       addressCountry: lead.addressCountry,
+      registryNumber: lead.registryNumber,
+      registryCourt: lead.registryCourt,
+      foundedYear: lead.foundedYear,
+      employeeCount: lead.employeeCount,
+      vatId: lead.vatId,
       products: lead.products,
       productDetails: lead.productDetails,
       affiliations: lead.affiliations,
@@ -860,16 +881,26 @@ export async function updateLeadDetails(
       customerKind: nextLead.customerKind,
       customerOwner: nextLead.customerOwner,
       contactName: nextLead.contactName,
+      contactNames: nextLead.contactNames,
+      contactGroupNames: nextLead.contactGroupNames,
       phone: nextLead.phone,
       directDial: nextLead.directDial,
       additionalPhones: nextLead.additionalPhones,
       email: nextLead.email,
       birthDate: nextLead.birthDate,
+      website: nextLead.website,
+      industry: nextLead.industry,
       location: nextLead.location,
+      address: nextLead.address,
       addressStreet: nextLead.addressStreet,
       addressPostalCode: nextLead.addressPostalCode,
       addressCity: nextLead.addressCity,
       addressCountry: nextLead.addressCountry,
+      registryNumber: nextLead.registryNumber,
+      registryCourt: nextLead.registryCourt,
+      foundedYear: nextLead.foundedYear,
+      employeeCount: nextLead.employeeCount,
+      vatId: nextLead.vatId,
       products: nextLead.products,
       productDetails: nextLead.productDetails,
       affiliations: nextLead.affiliations,
@@ -1512,8 +1543,8 @@ export function buildLeadCallContext(lead: Lead): string {
   const lines = [
     `CRM-Firmen-ID: ${lead.crmCompanyId ?? "unbekannt"}`,
     `Firma: ${lead.company}`,
-    `Ansprechpartner im aktuellen Anruf: ${lead.contactName}`,
   ];
+  if (lead.contactName?.trim()) lines.push(`Ansprechpartner im aktuellen Anruf: ${lead.contactName}`);
   const otherContactNames = (lead.contactNames || []).filter((name) => name !== lead.contactName);
   if (otherContactNames.length) {
     appendContextValue(lines, "Weitere Ansprechpartner der Firma", otherContactNames);
@@ -1601,26 +1632,28 @@ export async function importLeadsFromCrm(
       listName,
       lifecycle: "prospect",
       company: record.company,
-      contactName: contactGroupNames || record.contactName?.trim() || "Empfang",
+      contactName: contactGroupNames || record.contactName?.trim() || "",
       contactNames,
       contactGroupNames: contactNames.length > 1 ? contactGroupNames : undefined,
-      birthDate: typeof record.crmCompanyData.contact_birthdate === "string" ? record.crmCompanyData.contact_birthdate : prior?.birthDate,
-      phone: record.phone?.trim() || "",
-      email: record.email?.trim() || undefined,
-      directDial: typeof record.crmCompanyData.phone === "string" ? record.crmCompanyData.phone : prior?.directDial,
-      website: typeof record.crmCompanyData.website === "string" ? record.crmCompanyData.website : prior?.website,
-      industry: typeof record.crmCompanyData.industry === "string" ? record.crmCompanyData.industry : prior?.industry,
-      location: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.location,
-      address: typeof record.crmCompanyData.address === "string" ? record.crmCompanyData.address : prior?.address,
-      addressStreet: typeof record.crmCompanyData.street === "string" ? record.crmCompanyData.street : prior?.addressStreet,
-      addressPostalCode: typeof record.crmCompanyData.postal_code === "string" ? record.crmCompanyData.postal_code : prior?.addressPostalCode,
-      addressCity: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.addressCity,
-      addressCountry: typeof record.crmCompanyData.country === "string" ? record.crmCompanyData.country : prior?.addressCountry,
-      registryNumber: typeof record.crmCompanyData.registry_number === "string" ? record.crmCompanyData.registry_number : prior?.registryNumber,
-      registryCourt: typeof record.crmCompanyData.registry_court === "string" ? record.crmCompanyData.registry_court : prior?.registryCourt,
-      foundedYear: typeof record.crmCompanyData.founded_year === "number" ? record.crmCompanyData.founded_year : prior?.foundedYear,
-      employeeCount: typeof record.crmCompanyData.employee_count === "number" ? record.crmCompanyData.employee_count : prior?.employeeCount,
-      vatId: typeof record.crmCompanyData.vat_id === "string" ? record.crmCompanyData.vat_id : prior?.vatId,
+      birthDate: typeof record.crmCompanyData.contact_birthdate === "string" ? record.crmCompanyData.contact_birthdate : undefined,
+      phone: record.phone?.trim()
+        || (typeof record.crmCompanyData.phone === "string" ? record.crmCompanyData.phone.trim() : ""),
+      email: record.email?.trim()
+        || (typeof record.crmCompanyData.email === "string" ? record.crmCompanyData.email.trim() : undefined),
+      directDial: typeof record.crmCompanyData.phone === "string" ? record.crmCompanyData.phone : undefined,
+      website: typeof record.crmCompanyData.website === "string" ? record.crmCompanyData.website : undefined,
+      industry: typeof record.crmCompanyData.industry === "string" ? record.crmCompanyData.industry : undefined,
+      location: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : undefined,
+      address: typeof record.crmCompanyData.address === "string" ? record.crmCompanyData.address : undefined,
+      addressStreet: typeof record.crmCompanyData.street === "string" ? record.crmCompanyData.street : undefined,
+      addressPostalCode: typeof record.crmCompanyData.postal_code === "string" ? record.crmCompanyData.postal_code : undefined,
+      addressCity: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : undefined,
+      addressCountry: typeof record.crmCompanyData.country === "string" ? record.crmCompanyData.country : undefined,
+      registryNumber: typeof record.crmCompanyData.registry_number === "string" ? record.crmCompanyData.registry_number : undefined,
+      registryCourt: typeof record.crmCompanyData.registry_court === "string" ? record.crmCompanyData.registry_court : undefined,
+      foundedYear: typeof record.crmCompanyData.founded_year === "number" ? record.crmCompanyData.founded_year : undefined,
+      employeeCount: typeof record.crmCompanyData.employee_count === "number" ? record.crmCompanyData.employee_count : undefined,
+      vatId: typeof record.crmCompanyData.vat_id === "string" ? record.crmCompanyData.vat_id : undefined,
       topic: "",
       note: "",
       status: prior?.status || "neu",
@@ -2166,7 +2199,14 @@ export async function markLeadCallbackScheduled(leadId: string, taskId?: string)
 }
 
 export async function getFirmListsSummary(userId?: string): Promise<
-  Array<{ listId: string; listName: string; total: number; withPhone: number; withEmail: number }>
+  Array<{
+    listId: string;
+    listName: string;
+    total: number;
+    withPhone: number;
+    withEmail: number;
+    missingFields: Array<{ key: string; label: string; count: number }>;
+  }>
 > {
   const leads = await readLeads(userId);
   let needsCleanup = false;
@@ -2178,7 +2218,14 @@ export async function getFirmListsSummary(userId?: string): Promise<
     return { ...lead, listName, topic: "" };
   });
   if (needsCleanup) await writeLeads(normalizedLeads, userId);
-  const grouped = new Map<string, { listId: string; listName: string; total: number; withPhone: number; withEmail: number }>();
+  const grouped = new Map<string, {
+    listId: string;
+    listName: string;
+    total: number;
+    withPhone: number;
+    withEmail: number;
+    missingFields: Map<string, { label: string; count: number }>;
+  }>();
 
   for (const lead of normalizedLeads) {
     if (!isCrmFirmListLead(lead) || !lead.listId) continue;
@@ -2188,14 +2235,27 @@ export async function getFirmListsSummary(userId?: string): Promise<
       total: 0,
       withPhone: 0,
       withEmail: 0,
+      missingFields: new Map(),
     };
     list.total += 1;
     if ((lead.phone || lead.directDial || "").trim()) list.withPhone += 1;
     if ((lead.email || "").trim()) list.withEmail += 1;
+    for (const field of getMissingCrmFields(lead)) {
+      const current = list.missingFields.get(field.key) || { label: field.label, count: 0 };
+      current.count += 1;
+      list.missingFields.set(field.key, current);
+    }
     grouped.set(lead.listId, list);
   }
 
-  return [...grouped.values()].sort((a, b) => a.listName.localeCompare(b.listName, "de"));
+  return [...grouped.values()]
+    .map(({ missingFields, ...list }) => ({
+      ...list,
+      missingFields: [...missingFields.entries()]
+        .map(([key, field]) => ({ key, ...field }))
+        .sort((a, b) => a.label.localeCompare(b.label, "de")),
+    }))
+    .sort((a, b) => a.listName.localeCompare(b.listName, "de"));
 }
 
 export async function getCampaignListsSummary(userId?: string): Promise<
@@ -2361,7 +2421,7 @@ export async function createCampaignRunFromFirmList(
         .map((name) => name.trim())
         .filter(Boolean),
     )];
-    const callTargets = names.length > 0 ? names : [lead.contactName || "Empfang"];
+    const callTargets = names.length > 0 ? names : [lead.contactName || ""];
     const contactGroupNames = names.length > 1 ? names.join(" / ") : undefined;
     return callTargets.map((contactName, personIndex): Lead => ({
       ...lead,

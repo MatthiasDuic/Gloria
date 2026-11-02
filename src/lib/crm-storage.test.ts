@@ -277,6 +277,7 @@ test("imports full CRM snapshots into an inactive campaign and safely refreshes 
     contactName: "Max Beispiel",
     topic: "Energie",
     crmCompanyData: {
+      email: "info@example.invalid",
       industry: "Maschinenbau",
       street: "Hauptstraße 1",
       city: "Sprockhövel",
@@ -292,6 +293,7 @@ test("imports full CRM snapshots into an inactive campaign and safely refreshes 
   let dashboard = await storage.getDashboardData({ userId: "crm-user", role: "user" });
   assert.equal(dashboard.leads.length, 1);
   assert.equal(dashboard.leads[0].crmCompanyId, 812);
+  assert.equal(dashboard.leads[0].email, "info@example.invalid");
   assert.deepEqual(dashboard.leads[0].crmCompanyData, company.crmCompanyData);
   assert.match(dashboard.leads[0].note || "", /Maschinenbau/);
 
@@ -419,6 +421,180 @@ test("CRM contact names and complete master data are available in the call conte
   assert.match(context, /Wünscht Rückruf am Nachmittag/);
   assert.match(context, /Firmenprofil\.pdf/);
   assert.doesNotMatch(context, /JVBERi0xLjQ=/);
+});
+
+test("firm-list summaries count missing CRM fields and treat receptionist fallbacks as missing", async () => {
+  await seed([
+    {
+      ...sampleLead,
+      id: "missing-company-one",
+      callSource: "crm",
+      crmCompanyId: 920,
+      listId: "crm-search-missing",
+      contactName: "",
+      phone: "",
+      crmCompanyData: {},
+    },
+    {
+      ...sampleLead,
+      id: "missing-company-two",
+      callSource: "crm",
+      crmCompanyId: 921,
+      listId: "crm-search-missing",
+      contactName: "",
+      phone: "+49233112345",
+      crmCompanyData: { phone: "+49233112345" },
+    },
+  ]);
+  const [list] = await storage.getFirmListsSummary(sampleLead.userId);
+  assert.equal(list.total, 2);
+  assert.equal(list.missingFields.find((field) => field.key === "phone")?.count, 1);
+  assert.equal(list.missingFields.find((field) => field.key === "contact_person")?.count, 2);
+  assert.equal(list.missingFields.find((field) => field.key === "website")?.count, 2);
+});
+
+test("refreshing a CRM firm list leaves fields absent from the latest transfer empty", async () => {
+  await seed([]);
+  const options = { listId: "crm-search-refresh", listName: "CRM: Aktualisierung", userId: "crm-user" };
+  await storage.importLeadsFromCrm([{
+    crmCompanyId: 922,
+    company: "Aktualisierung GmbH",
+    phone: "+49233112345",
+    email: "info@aktualisierung.example",
+    crmCompanyData: {
+      website: "https://aktualisierung.example",
+      industry: "Maschinenbau",
+      city: "Sprockhövel",
+      employee_count: 21,
+    },
+  }], options);
+  await storage.importLeadsFromCrm([{
+    crmCompanyId: 922,
+    company: "Aktualisierung GmbH",
+    phone: "",
+    crmCompanyData: {},
+  }], options);
+  const [lead] = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads;
+  assert.equal(lead.phone, "");
+  assert.equal(lead.email, undefined);
+  assert.equal(lead.website, undefined);
+  assert.equal(lead.industry, undefined);
+  assert.equal(lead.employeeCount, undefined);
+  assert.equal(lead.contactName, "");
+});
+
+test("researched CRM details are persisted to the Gloria lead model", async () => {
+  await seed([{
+    ...sampleLead,
+    callSource: "crm",
+    crmCompanyId: 923,
+    crmCompanyData: {},
+  }]);
+  const updated = await storage.updateLeadDetails(sampleLead.id, {
+    phone: "+49233112345",
+    directDial: "+49233112345",
+    email: "info@beispiel.example",
+    website: "https://beispiel.example",
+    industry: "Maschinenbau",
+    contactName: "Alex Beispiel",
+    contactNames: ["Alex Beispiel"],
+    addressStreet: "Hauptstraße 1",
+    addressPostalCode: "45549",
+    addressCity: "Sprockhövel",
+    registryNumber: "HRB 12345",
+    foundedYear: 1998,
+    employeeCount: 42,
+    vatId: "DE123456789",
+    crmCompanyData: { phone: "+49233112345", website: "https://beispiel.example" },
+  }, sampleLead.userId);
+
+  assert.equal(updated?.phone, "+49233112345");
+  assert.equal(updated?.directDial, "+49233112345");
+  assert.equal(updated?.email, "info@beispiel.example");
+  assert.equal(updated?.website, "https://beispiel.example");
+  assert.equal(updated?.industry, "Maschinenbau");
+  assert.deepEqual(updated?.contactNames, ["Alex Beispiel"]);
+  assert.equal(updated?.addressStreet, "Hauptstraße 1");
+  assert.equal(updated?.registryNumber, "HRB 12345");
+  assert.equal(updated?.foundedYear, 1998);
+  assert.equal(updated?.employeeCount, 42);
+  assert.equal(updated?.vatId, "DE123456789");
+});
+
+test("company research fills only still-empty fields and returns web sources", async () => {
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  await seed([{
+    ...sampleLead,
+    callSource: "crm",
+    crmCompanyId: 924,
+    listId: "crm-search-research",
+    company: "Recherche GmbH",
+    phone: "",
+    email: "info@recherche.example",
+    crmCompanyData: { email: "info@recherche.example" },
+  }]);
+
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = "test-openai-key";
+  const resultData = {
+    phone: "+49233112345",
+    email: "angereichert@recherche.example",
+    website: "https://recherche.example",
+    industry: "Maschinenbau",
+    contact_person: null,
+    address: null,
+    street: null,
+    postal_code: null,
+    city: null,
+    country: null,
+    registry_number: null,
+    registry_court: null,
+    founded_year: null,
+    employee_count: null,
+    vat_id: null,
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    output: [
+      { type: "web_search_call", action: { type: "search", sources: [{ type: "url", url: "https://recherche.example/impressum" }] } },
+      { type: "message", content: [{ type: "output_text", text: JSON.stringify(resultData) }] },
+    ],
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+
+  try {
+    const { POST } = await import("../app/api/campaigns/research/route");
+    const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({
+      id: sampleLead.userId!,
+      username: sampleLead.userId!,
+      role: "user",
+      realName: "",
+      companyName: "",
+      gesellschaft: "",
+    })}`;
+    const response = await POST(new Request("http://localhost/api/campaigns/research", {
+      method: "POST",
+      headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: sampleLead.id }),
+    }));
+    const payload = await response.json() as {
+      fields: Array<{ key: string; value: string }>;
+      sources: Array<{ url: string }>;
+      crmSyncError?: string;
+    };
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.fields.map((field) => field.key).sort(), ["industry", "phone", "website"]);
+    assert.deepEqual(payload.sources.map((source) => source.url), ["https://recherche.example/impressum"]);
+    assert.match(payload.crmSyncError || "", /kein CRM-Benutzerkonto gekoppelt/);
+    const [updatedLead] = (await storage.getDashboardData({ userId: sampleLead.userId, role: "user" })).leads;
+    assert.equal(updatedLead.phone, "+49233112345");
+    assert.equal(updatedLead.email, "info@recherche.example");
+    assert.equal(updatedLead.website, "https://recherche.example");
+    assert.equal(updatedLead.industry, "Maschinenbau");
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
 });
 
 test("firm list reads migrate legacy CRM theme defaults to an empty topic", async () => {
