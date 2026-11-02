@@ -20,9 +20,9 @@ export function getCallWorkspaceData(data: DashboardData, source: CallSource): D
 }
 
 export function getCrmWorkspaceLeads(leads: Lead[], workspace: CrmWorkspace): Lead[] {
-  leads = leads.filter((lead) => lead.callSource !== "manual");
+  leads = leads.filter((lead) => lead.callSource !== "manual" && lead.customerKind !== "privat");
   if (workspace === "companies") return leads.filter((lead) => isLeadCustomer(lead) && lead.customerKind === "firma");
-  if (workspace === "private") return leads.filter((lead) => isLeadCustomer(lead) && lead.customerKind === "privat");
+  if (workspace === "private") return [];
   if (workspace === "campaigns") return leads.filter((lead) => !isLeadCustomer(lead));
   return leads;
 }
@@ -46,6 +46,11 @@ export interface CrmCalendarEntry {
 }
 
 export function buildCrmCalendarEntries(leads: Lead[], reports: CallReport[]): CrmCalendarEntry[] {
+  const hiddenPrivateLeadIds = new Set(leads
+    .filter((lead) => lead.customerKind === "privat" && isLeadCustomer(lead))
+    .map((lead) => lead.id));
+  reports = reports.filter((report) => !report.leadId || !hiddenPrivateLeadIds.has(report.leadId));
+  leads = leads.filter((lead) => !(lead.customerKind === "privat" && isLeadCustomer(lead)));
   const entries = new Map<string, CrmCalendarEntry>();
   const byId = new Map(leads.map((lead) => [lead.id, lead]));
   const contactDisplayName = (lead: Lead) => lead.customerKind === "privat" ? lead.contactName || lead.company : lead.company;

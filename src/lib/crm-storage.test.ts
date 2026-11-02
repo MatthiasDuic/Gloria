@@ -308,6 +308,24 @@ test("imports full CRM snapshots into an inactive campaign and safely refreshes 
   assert.equal(campaignState.lists.find((list: { listId: string }) => list.listId === options.listId)?.active, false);
 });
 
+test("CRM company imports start without a topic and use the selected campaign when started", async () => {
+  await seed([]);
+  const options = { listId: "crm-search-19-user-crm-user", listName: "CRM: Testfirma", userId: "crm-user" };
+  await storage.importLeadsFromCrm([{
+    crmCompanyId: 911,
+    company: "Testfirma GmbH",
+    phone: "+49233112345",
+    crmCompanyData: {},
+  }], options);
+
+  const importedLead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
+  assert.equal(importedLead.topic, "");
+
+  await storage.setCampaignListActive(options.listId, true, options.userId, "betriebliche Krankenversicherung");
+  const startedLead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
+  assert.equal(startedLead.topic, "betriebliche Krankenversicherung");
+});
+
 test("stable saved-search imports absorb partial legacy transfers without duplicate leads", async () => {
   await seed([
     {

@@ -332,7 +332,7 @@ function normalizeTopic(input: string): Topic {
   if (value.includes("privat") && value.includes("krankenversicherung")) {
     return "private Krankenversicherung";
   }
-  return input.trim() || "Energie";
+  return input.trim();
 }
 
 async function filterScriptsByUserAccess(
@@ -1393,7 +1393,7 @@ export async function importLeadsFromCsv(
       addressCity: lookup("addressCity") || location || undefined,
       addressCountry: lookup("addressCountry") || undefined,
       products: products.length ? products : undefined,
-      topic: normalizeTopic(topic || "Energie"),
+      topic: normalizeTopic(topic || (options?.lifecycle === "customer" ? "" : "Energie")),
       note: lookup("note") || undefined,
       nextCallAt: nextCallAt || undefined,
       status: nextCallAt ? "wiedervorlage" : "neu",
@@ -1525,7 +1525,7 @@ export async function importLeadsFromCrm(
       contactName: record.contactName?.trim() || "Empfang",
       phone: record.phone?.trim() || "",
       email: record.email?.trim() || undefined,
-      topic: normalizeTopic(record.topic || "Energie"),
+      topic: normalizeTopic(record.topic || ""),
       note: buildCrmCallContext(record),
       status: prior?.status || "neu",
       attempts: prior?.attempts || 0,
@@ -2195,10 +2195,20 @@ export async function setCampaignListActive(
   listId: string,
   active: boolean,
   userId?: string,
+  topic?: Topic,
 ): Promise<void> {
   const leads = await readLeads(userId);
-  const listLead = leads.find((lead) => (lead.listId || "legacy") === listId);
+  const listLeads = leads.filter((lead) => (lead.listId || "legacy") === listId);
+  const listLead = listLeads[0];
   const listName = listLead?.listName || (listId === "legacy" ? "Standardliste" : listId);
+
+  if (topic !== undefined) {
+    if (!topic.trim()) throw new Error("Bitte eine Kampagne auswählen.");
+    const updatedLeads = leads.map((lead) =>
+      (lead.listId || "legacy") === listId ? { ...lead, topic } : lead,
+    );
+    await writeLeads(updatedLeads, userId);
+  }
 
   const campaignState = await readCampaignState(userId);
   const existingIndex = campaignState.lists.findIndex((entry) => entry.listId === listId);

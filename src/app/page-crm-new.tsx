@@ -82,9 +82,7 @@ type ManualCustomerDraft = {
   contactName: string;
   phone: string;
   email: string;
-  topic: Topic;
   owner: "BarmeniaGothaer" | "Agentur-Duic";
-  customerKind: "privat" | "firma";
   note: string;
 };
 
@@ -218,6 +216,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [activeView, setActiveView] = useState<CrmWorkspace>("dashboard");
   const [campaignTab, setCampaignTab] = useState<CrmCampaignTab>("lists");
   const [showImportForm, setShowImportForm] = useState(false);
+  const [campaignStartListId, setCampaignStartListId] = useState<string | null>(null);
+  const [campaignStartTopic, setCampaignStartTopic] = useState("");
   const [detailTab, setDetailTab] = useState<"overview" | "products" | "tasks" | "history" | "communication">("overview");
   const [selectedLead, setSelectedLead] = useState<DashboardData["leads"][number] | null>(null);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
@@ -242,7 +242,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [productDrafts, setProductDrafts] = useState<LeadProductDetail[]>([]);
   const [newProductDraft, setNewProductDraft] = useState({ category: "", label: "", applicationStatus: "interested" as LeadProductDetail["applicationStatus"], expectedUnits: "", expectedCommissionEUR: "", notes: "" });
   const [leadTaskAssignee, setLeadTaskAssignee] = useState<"user" | "gloria">("user");
-  const [conversionKinds, setConversionKinds] = useState<Record<string, "privat" | "firma">>({});
   const [leadTaskTitleDraft, setLeadTaskTitleDraft] = useState("");
   const [leadTaskDueAtDraft, setLeadTaskDueAtDraft] = useState("");
   const [outlookSubjectDraft, setOutlookSubjectDraft] = useState("");
@@ -255,9 +254,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     contactName: "",
     phone: "",
     email: "",
-    topic: TOPICS[0],
     owner: "Agentur-Duic",
-    customerKind: "firma",
     note: "",
   });
 
@@ -341,7 +338,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const calendarEntries = useMemo(() => buildCrmCalendarEntries(data.leads, data.reports), [data.leads, data.reports]);
   const callbacks = useMemo(() => calendarEntries.filter((entry) => entry.kind === "callback"), [calendarEntries]);
   const companyCustomers = useMemo(() => getCrmWorkspaceLeads(data.leads, "companies"), [data.leads]);
-  const privateCustomers = useMemo(() => getCrmWorkspaceLeads(data.leads, "private"), [data.leads]);
   const importedLists = useMemo(() => campaignLists.filter((list) =>
     !list.listName.toLowerCase().includes("manuell hinzugefügt"),
   ), [campaignLists]);
@@ -439,12 +435,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setShowAddCustomerForm(false);
     setSelectedLead(null);
     setSelectedReport(null);
-    if (workspace === "companies" || workspace === "private") {
+    if (workspace === "companies") {
       setAddCustomerDraft((current) => ({
         ...current,
         company: "", contactName: "",
-        customerKind: workspace === "companies" ? "firma" : "privat",
-        topic: workspace === "private" ? TOPICS[1] : TOPICS[0],
       }));
     }
   }
@@ -468,7 +462,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         if (prefs.crmTypeFilter !== undefined) setFilterOwner(prefs.crmTypeFilter || "");
         if (prefs.crmCustomerKindFilter !== undefined) setFilterCustomerKind(prefs.crmCustomerKindFilter || "");
         if (prefs.crmContactFilter !== undefined) setFilterContact(prefs.crmContactFilter || "");
-        if (prefs.crmWorkspace) setActiveView(prefs.crmWorkspace);
+        if (prefs.crmWorkspace) setActiveView(prefs.crmWorkspace === "private" ? "companies" : prefs.crmWorkspace);
         if (prefs.crmCampaignTab) setCampaignTab(prefs.crmCampaignTab);
         crmPrefsLastSavedKeyRef.current = JSON.stringify({
           crmTab: prefs.crmTab || "customers",
@@ -671,21 +665,20 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   async function handleAddCustomerManually() {
     const draft = addCustomerDraft;
-    if ((draft.customerKind === "firma" ? !draft.company.trim() : !draft.contactName.trim()) || !draft.phone.trim()) {
-      setNotice(draft.customerKind === "firma" ? "Firma und Telefonnummer sind Pflichtfelder." : "Name und Telefonnummer sind Pflichtfelder.");
+    if (!draft.company.trim() || !draft.phone.trim()) {
+      setNotice("Firma und Telefonnummer sind Pflichtfelder.");
       return;
     }
 
     const listName = `${draft.owner} | Manuell hinzugefügt`;
-    const header = "customerOwner,customerKind,company,contactName,phone,email,topic,note";
+    const header = "customerOwner,customerKind,company,contactName,phone,email,note";
     const row = [
       escapeCsvCell(draft.owner),
-      escapeCsvCell(draft.customerKind),
-      escapeCsvCell(draft.customerKind === "privat" ? draft.contactName : draft.company),
+      escapeCsvCell("firma"),
+      escapeCsvCell(draft.company),
       escapeCsvCell(draft.contactName),
       escapeCsvCell(draft.phone),
       escapeCsvCell(draft.email),
-      escapeCsvCell(draft.topic),
       escapeCsvCell(draft.note),
     ].join(",");
 
@@ -708,9 +701,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         contactName: "",
         phone: "",
         email: "",
-        topic: activeView === "private" ? TOPICS[1] : TOPICS[0],
         owner: "Agentur-Duic",
-        customerKind: activeView === "private" ? "privat" : "firma",
         note: "",
       });
       setNotice(`✓ Kunde angelegt (${payload.imported ?? 1} Datensatz)`);
@@ -987,7 +978,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         body: JSON.stringify({
           action: "convert_to_customer",
           leadId: lead.id,
-          updates: { customerKind: conversionKinds[lead.id] || lead.customerKind || "firma" },
+          updates: { customerKind: "firma" },
         }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: Lead };
@@ -1000,7 +991,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     } finally {
       setBusy(false);
     }
-  }, [conversionKinds, selectedLead]);
+  }, [selectedLead]);
 
   const handleAddLeadTask = useCallback(async () => {
     if (!selectedLead || !leadTaskTitleDraft.trim()) return;
@@ -1109,7 +1100,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [outlookBodyDraft, outlookSubjectDraft, outlookToDraft, selectedLead]);
 
-  const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete") => {
+  const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete", topic?: string) => {
     if (action === "delete" && !window.confirm(
       "Diese Kampagne wirklich löschen? Zugehörige Interessenten werden entfernt. Bestehende Kunden und Anrufreports bleiben erhalten.",
     )) {
@@ -1121,7 +1112,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, listId }),
+        body: JSON.stringify({ action, listId, ...(topic ? { topic } : {}) }),
       });
 
       const result = (await res.json()) as { error?: string; lists?: CampaignListSummary[]; removedLeads?: number };
@@ -1139,6 +1130,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setBusy(false);
     }
   }, [reloadLiveData]);
+
+  function startCampaignList(list: CampaignListSummary) {
+    if (list.listId.startsWith("crm-search-")) {
+      setCampaignStartListId(list.listId);
+      setCampaignStartTopic("");
+      return;
+    }
+    void controlCampaignList(list.listId, "start");
+  }
+
+  function confirmCampaignStart(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!campaignStartListId || !campaignStartTopic) return;
+    void controlCampaignList(campaignStartListId, "start", campaignStartTopic);
+    setCampaignStartListId(null);
+  }
 
   // Initialization & Polling
   useEffect(() => {
@@ -1446,12 +1453,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const upcoming = calendarEntries.filter((entry) => Date.parse(entry.at) >= Date.now()).slice(0, 5);
     const overdue = callbacks.filter((entry) => Date.parse(entry.at) < Date.now()).length;
     const openTasks = data.leads.flatMap((lead) => lead.tasks || []).filter((task) => task.status === "open").length;
-    const customerCount = data.leads.filter(isLeadCustomer).length;
+    const customerCount = companyCustomers.length;
     const shortcuts: Array<{ title: string; text: string; count: number; workspace: CrmWorkspace; tab?: CrmCampaignTab; icon: string }> = [
       { title: "Kampagnen", text: "Anruflisten importieren und Gloria steuern", count: importedLists.length, workspace: "campaigns", icon: "↗" },
       { title: "Termin-Interessenten", text: "Termine prüfen und Kunden übernehmen", count: appointmentProspects.length, workspace: "campaigns", tab: "prospects", icon: "✓" },
       { title: "Firmenkunden", text: "Unternehmen, Ansprechpartner und Produkte", count: companyCustomers.length, workspace: "companies", icon: "▦" },
-      { title: "Privatkunden", text: "Persönliche Daten, Verträge und Betreuung", count: privateCustomers.length, workspace: "private", icon: "◎" },
       { title: "Kalender", text: "Termine und Wiedervorlagen auf einen Blick", count: todaysEntries.length, workspace: "calendar", icon: "▤" },
       { title: "Follow-ups", text: "Offene Rückrufe und Gloria-Aufgaben", count: callbacks.length, workspace: "campaigns", tab: "followups", icon: "↻" },
     ];
@@ -1470,7 +1476,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           <article className="kpi-card">
             <div className="kpi-label">Kundenbestand</div>
             <div className="kpi-value">{customerCount}</div>
-            <div className="kpi-sub">{companyCustomers.length} Firmen · {privateCustomers.length} Privat</div>
+            <div className="kpi-sub">Firmenkunden</div>
           </article>
           <article className="kpi-card">
             <div className="kpi-label">Zur Übernahme</div>
@@ -1528,7 +1534,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         ) : (
           <div className="contacts-list">
             <table className="contacts-table">
-              <thead><tr><th>Firma / Interessent</th><th>Ansprechpartner</th><th>Telefon</th><th>Termin</th><th>Kundentyp</th><th>Aktion</th></tr></thead>
+              <thead><tr><th>Firma / Interessent</th><th>Ansprechpartner</th><th>Telefon</th><th>Termin</th><th>Aktion</th></tr></thead>
               <tbody>
                 {appointmentProspects.map(({ lead, appointmentAt }) => (
                   <tr key={lead.id}>
@@ -1536,16 +1542,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                     <td>{lead.contactName || "-"}</td>
                     <td>{lead.phone || lead.directDial || "-"}</td>
                     <td>{formatDate(appointmentAt)}</td>
-                    <td>
-                      <select
-                        className="input"
-                        value={conversionKinds[lead.id] || lead.customerKind || "firma"}
-                        onChange={(event) => setConversionKinds((current) => ({ ...current, [lead.id]: event.target.value as "privat" | "firma" }))}
-                      >
-                        <option value="firma">Firmenkunde</option>
-                        <option value="privat">Privatkunde</option>
-                      </select>
-                    </td>
                     <td>
                       <button className="btn-small" disabled={busy} onClick={() => void handleConvertProspect(lead)}>
                         Als Kunden übernehmen
@@ -1562,25 +1558,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   function renderContacts() {
-    const isPrivate = activeView === "private";
-    const isCustomerWorkspace = activeView === "companies" || isPrivate;
+    const isCustomerWorkspace = activeView === "companies";
     const forecast = filteredLeads.flatMap((lead) => lead.productDetails || []);
     return (
       <div className="contacts-view">
         <div className="view-header">
           {isCustomerWorkspace ? (
             <div className="workspace-heading">
-              <div><div className="eyebrow">Kundenbestand</div><h2>{isPrivate ? "Privatkunden" : "Firmenkunden"}</h2><p>{isPrivate ? "Persönliche Betreuung, Kontaktdaten und private Verträge." : "Unternehmen, Ansprechpartner und betriebliche Produkte verwalten."}</p></div>
+              <div><div className="eyebrow">Kundenbestand</div><h2>Firmenkunden</h2><p>Unternehmen, Ansprechpartner und betriebliche Produkte verwalten.</p></div>
               <div className="customer-totals"><strong>{filteredLeads.length} Kunden</strong><span>{forecast.length} Produkte</span><span>{forecast.reduce((sum, product) => sum + (product.expectedCommissionEUR || 0), 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} erwartete Provision</span></div>
             </div>
           ) : null}
           <div className="contacts-toolbar">
             <div className="subtle">{isCustomerWorkspace ? "Nur bestätigte Kunden. Kampagnenimporte erscheinen hier nicht automatisch." : "Interessenten dieser Anrufliste"}</div>
             <div className="bulk-actions-row">
-              {isCustomerWorkspace ? <button className="btn-small" onClick={() => {
-                setAddCustomerDraft((current) => ({ ...current, customerKind: isPrivate ? "privat" : "firma", topic: isPrivate ? TOPICS[1] : TOPICS[0] }));
-                setShowAddCustomerForm((value) => !value);
-              }}>{showAddCustomerForm ? "Formular schließen" : isPrivate ? "+ Privatkunde" : "+ Firmenkunde"}</button> : null}
+              {isCustomerWorkspace ? <button className="btn-small" onClick={() => setShowAddCustomerForm((value) => !value)}>{showAddCustomerForm ? "Formular schließen" : "+ Firmenkunde"}</button> : null}
               <button className="btn-small ghost" disabled={selectedLeadIds.length === 0} onClick={handleExportSelectedCustomers}>
                 Export ({selectedLeadIds.length})
               </button>
@@ -1592,15 +1584,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           {showAddCustomerForm ? (
             <div className="add-customer-panel top-gap">
               <div className="add-customer-grid">
-                {!isPrivate ? <label>Firma *<input className="input" aria-label="Firmenname" value={addCustomerDraft.company} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, company: event.target.value }))} /></label> : null}
-                <label>{isPrivate ? "Vor- und Nachname *" : "Ansprechpartner"}<input className="input" value={addCustomerDraft.contactName} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
+                <label>Firma *<input className="input" aria-label="Firmenname" value={addCustomerDraft.company} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, company: event.target.value }))} /></label>
+                <label>Ansprechpartner<input className="input" value={addCustomerDraft.contactName} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
                 <label>Telefon *<input className="input" type="tel" value={addCustomerDraft.phone} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
                 <label>E-Mail<input className="input" type="email" value={addCustomerDraft.email} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, email: event.target.value }))} /></label>
-                <label>Thema<select className="input" value={addCustomerDraft.topic} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, topic: event.target.value as Topic }))}>
-                  {campaignTopics.map((topic) => (
-                    <option key={topic} value={topic}>{topic}</option>
-                  ))}
-                </select></label>
                 <label>Vertriebseinheit<select className="input" value={addCustomerDraft.owner} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, owner: event.target.value as ManualCustomerDraft["owner"] }))}>
                   <option value="Agentur-Duic">Agentur-Duic</option>
                   <option value="BarmeniaGothaer">BarmeniaGothaer</option>
@@ -1622,7 +1609,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           <div className="search-filters">
             <input
               type="text"
-              placeholder={isPrivate ? "Name, Telefon oder E-Mail suchen …" : "Firma, Ansprechpartner, Telefon oder E-Mail suchen …"}
+              placeholder="Firma, Ansprechpartner, Telefon oder E-Mail suchen …"
               aria-label="Kunden und Interessenten durchsuchen"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -1653,11 +1640,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               <option value="BarmeniaGothaer">BarmeniaGothaer</option>
               <option value="Agentur-Duic">Agentur-Duic</option>
             </select>
-            {!isCustomerWorkspace ? <select value={filterCustomerKind} onChange={(e) => setFilterCustomerKind(e.target.value as typeof filterCustomerKind)} className="filter-select">
-              <option value="">Alle Kundentypen</option>
-              <option value="privat">Privat</option>
-              <option value="firma">Firma</option>
-            </select> : null}
             <select
               value={filterContact}
               onChange={(e) => setFilterContact(e.target.value as typeof filterContact)}
@@ -1708,8 +1690,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       aria-label="Alle gefilterten Kontakte auswählen"
                     />
                   </th>
-                  <th>{isPrivate ? "Name" : "Firma"}</th>
-                  <th>{isPrivate ? "Wohnort" : "Ansprechpartner"}</th>
+                  <th>Firma</th>
+                  <th>Ansprechpartner</th>
                   <th>Telefon</th>
                   <th>Email</th>
                   <th>Thema</th>
@@ -1731,8 +1713,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                           aria-label={`Kontakt ${lead.company} auswählen`}
                         />
                       </td>
-                      <td><strong>{isPrivate ? lead.contactName || lead.company : lead.company}</strong></td>
-                      <td>{isPrivate ? lead.addressCity || lead.location || "-" : lead.contactName || "-"}</td>
+                      <td><strong>{lead.company}</strong></td>
+                      <td>{lead.contactName || "-"}</td>
                       <td>{lead.phone || lead.directDial || "-"}</td>
                       <td>{lead.email || "-"}</td>
                       <td>{lead.topic}</td>
@@ -1775,6 +1757,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   function renderLeadDetail() {
+    if (selectedLead && isLeadCustomer(selectedLead) && selectedLead.customerKind === "privat") return null;
     return (
       <div className="detail-overlay" hidden={!selectedLead} onClick={(event) => {
         if (event.target === event.currentTarget) setSelectedLead(null);
@@ -1782,7 +1765,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         {selectedLead && (
           <div ref={contactPanelRef} className="contact-detail-panel" role="dialog" aria-modal="true" tabIndex={-1} aria-label={`Kontaktakte ${selectedLead.contactName || selectedLead.company}`}>
             <div className="detail-header">
-              <div><div className="eyebrow">{isLeadCustomer(selectedLead) ? selectedLead.customerKind === "privat" ? "Privatkundenakte" : "Firmenkundenakte" : "Interessentenakte"}</div><h3>{selectedLead.customerKind === "privat" ? selectedLead.contactName || selectedLead.company : selectedLead.company}</h3></div>
+              <div><div className="eyebrow">{isLeadCustomer(selectedLead) ? "Firmenkundenakte" : "Interessentenakte"}</div><h3>{selectedLead.company}</h3></div>
               <button aria-label="Kontaktakte schließen" onClick={() => setSelectedLead(null)}>✕</button>
             </div>
             <div className="subnav" aria-label="Kontaktakte">
@@ -1797,25 +1780,21 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 {leadDetailsDraft ? (
                   <>
                     <div className="add-customer-grid">
-                      {leadDetailsDraft.customerKind !== "privat" ? <label>Firma<input className="input" placeholder="Firmenname" value={leadDetailsDraft.company} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, company: event.target.value } : current)} /></label> : null}
-                      <label>{leadDetailsDraft.customerKind === "privat" ? "Vor- und Nachname" : "Ansprechpartner"}<input className="input" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
+                      <label>Firma<input className="input" placeholder="Firmenname" value={leadDetailsDraft.company} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, company: event.target.value } : current)} /></label>
+                      <label>Ansprechpartner<input className="input" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
                       <label>Telefon<input className="input" type="tel" value={leadDetailsDraft.phone} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, phone: event.target.value } : current)} /></label>
                       <label>Direktwahl / Mobil<input className="input" type="tel" value={leadDetailsDraft.directDial || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, directDial: event.target.value } : current)} /></label>
                       <label>E-Mail<input className="input" type="email" value={leadDetailsDraft.email || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, email: event.target.value } : current)} /></label>
-                      {leadDetailsDraft.customerKind === "privat" ? <label>Geburtsdatum<input className="input" type="date" value={leadDetailsDraft.birthDate || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, birthDate: event.target.value } : current)} /></label> : null}
                       <label>Straße und Hausnummer<input className="input" value={leadDetailsDraft.addressStreet || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressStreet: event.target.value } : current)} /></label>
                       <label>PLZ<input className="input" value={leadDetailsDraft.addressPostalCode || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressPostalCode: event.target.value } : current)} /></label>
                       <label>Ort<input className="input" value={leadDetailsDraft.addressCity || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCity: event.target.value } : current)} /></label>
                       <label>Land<input className="input" value={leadDetailsDraft.addressCountry || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCountry: event.target.value } : current)} /></label>
-                      <label>Kundentyp<select className="input" value={leadDetailsDraft.customerKind || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, customerKind: (event.target.value || undefined) as Lead["customerKind"] } : current)}>
-                        <option value="">Kundentyp auswählen</option><option value="firma">Firmenkunde</option><option value="privat">Privatkunde</option>
-                      </select></label>
                       <label>Vertriebseinheit<select className="input" value={leadDetailsDraft.customerOwner || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, customerOwner: (event.target.value || undefined) as Lead["customerOwner"] } : current)}>
                         <option value="">Vertriebseinheit</option><option value="Agentur-Duic">Agentur-Duic</option><option value="BarmeniaGothaer">BarmeniaGothaer</option>
                       </select></label>
                     </div>
                     <div className="detail-actions-row">
-                      <button className="btn" disabled={busy} onClick={() => void updateSelectedLead({ ...leadDetailsDraft, company: leadDetailsDraft.customerKind === "privat" ? leadDetailsDraft.contactName : leadDetailsDraft.company, location: leadDetailsDraft.addressCity || "" }, "Kontaktdaten gespeichert")}>Kontaktdaten speichern</button>
+                      <button className="btn" disabled={busy} onClick={() => void updateSelectedLead({ ...leadDetailsDraft, location: leadDetailsDraft.addressCity || "" }, "Kontaktdaten gespeichert")}>Kontaktdaten speichern</button>
                       {selectedLead.callSource === "crm" && Number.isSafeInteger(selectedLead.crmCompanyId) ? (
                         <button className="btn ghost" disabled={busy || crmSyncing} onClick={() => void syncSelectedCompanyToCrm()}>
                           {crmSyncing ? "Abgleich läuft..." : "Firmendaten in CRM abgleichen"}
@@ -2015,8 +1994,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         <div className="agenda-time">{new Date(entry.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}<small>{new Date(entry.at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}</small></div>
         <div className="agenda-body">
           <span className={`event-label ${entry.kind}`}>{entry.kind === "appointment" ? "Termin" : entry.taskId ? "Gloria-Aufgabe" : "Wiedervorlage"}{overdue ? " · Überfällig" : ""}</span>
-          <strong>{lead?.customerKind === "privat" ? entry.contactName || entry.company : entry.company}</strong>
-          {entry.contactName && lead?.customerKind !== "privat" ? <span>{entry.contactName}</span> : null}
+          <strong>{entry.company}</strong>
+          {entry.contactName ? <span>{entry.contactName}</span> : null}
           <span className="subtle">{entry.topic}{entry.mode ? ` · ${entry.mode}` : ""}</span>
           {entry.taskId ? <span className="subtle">{entry.summary}</span> : null}
           {entry.phone ? <a href={`tel:${entry.phone}`}>{entry.phone}</a> : null}
@@ -2160,7 +2139,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           </div>
           <div className="campaign-progress" aria-label={`${progress}% bearbeitet`}><span style={{ width: `${progress}%` }} /></div>
           <div className="campaign-controls">
-            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => void controlCampaignList(list.listId, "start")}>Starten</button>
+            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => startCampaignList(list)}>Starten</button>
             <button className="btn-small ghost" disabled={busy || !isRunning} onClick={() => void controlCampaignList(list.listId, "stop")}>Stoppen</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Liste öffnen ({leads.length})</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); setCampaignTab("calls"); }}>Anrufdetails</button>
@@ -2287,7 +2266,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             </p>
           </div>
           <div className="embedded-meta">
-            <span className="embedded-chip">{companyCustomers.length + privateCustomers.length} Kunden</span>
+            <span className="embedded-chip">{companyCustomers.length} Firmenkunden</span>
             <span className="embedded-chip">{importedLists.length} Anruflisten</span>
           </div>
         </div>
@@ -2305,7 +2284,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       <nav className={`app-nav ${embedded ? "embedded" : ""}`} aria-label="CRM-Arbeitsbereiche">
         {([
           ["dashboard", "Dashboard"], ["campaigns", "Kampagnen"], ["companies", "Firmenkunden"],
-          ["private", "Privatkunden"], ["calendar", "Kalender"], ["profile", "Profil / CRM-Verbindung"],
+          ["calendar", "Kalender"], ["profile", "Profil / CRM-Verbindung"],
         ] as const).map(([workspace, label]) => (
           <button key={workspace} className={`nav-btn ${activeView === workspace ? "active" : ""}`} aria-current={activeView === workspace ? "page" : undefined} onClick={() => navigateWorkspace(workspace)}>{label}</button>
         ))}
@@ -2322,7 +2301,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       <main className={`app-main ${embedded ? "embedded" : ""}`}>
         {activeView === "dashboard" && renderDashboard()}
         {activeView === "campaigns" && renderCampaigns()}
-        {(activeView === "companies" || activeView === "private") && renderContacts()}
+        {activeView === "companies" && renderContacts()}
         {activeView === "calendar" && renderCalendar()}
         {activeView === "profile" && renderProfile()}
       </main>
@@ -2333,6 +2312,36 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         <label>Neuer Zeitpunkt<input className="input" type="datetime-local" required value={rescheduleAt} onChange={(event) => setRescheduleAt(event.target.value)} /></label>
         <div className="detail-actions-row"><button type="button" className="btn-small ghost" onClick={() => setReschedulingEntry(null)}>Abbrechen</button><button className="btn" disabled={busy || !rescheduleAt}>Speichern</button></div>
       </form></div> : null}
+      {campaignStartListId ? (
+        <div className="reschedule-overlay">
+          <form
+            className="surface reschedule-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-start-title"
+            onSubmit={confirmCampaignStart}
+          >
+            <h3 id="campaign-start-title">Kampagne für diese Firmenliste wählen</h3>
+            <p>{campaignLists.find((list) => list.listId === campaignStartListId)?.listName || "CRM-Firmenliste"}</p>
+            <label>
+              Vorhandene Kampagne
+              <select
+                className="input"
+                required
+                value={campaignStartTopic}
+                onChange={(event) => setCampaignStartTopic(event.target.value)}
+              >
+                <option value="">Bitte auswählen</option>
+                {campaignTopics.map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+              </select>
+            </label>
+            <div className="detail-actions-row">
+              <button type="button" className="btn-small ghost" onClick={() => setCampaignStartListId(null)}>Abbrechen</button>
+              <button className="btn" disabled={busy || !campaignStartTopic}>Kampagne starten</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       <style jsx global>{`
         .gloria-crm.app-container {

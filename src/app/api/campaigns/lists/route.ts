@@ -6,6 +6,7 @@ import {
   completeLeadTask,
   deleteCampaignList,
   deleteLeads,
+  getDashboardData,
   getCampaignListsSummary,
   isCampaignListActive,
   pullNextLeadForCampaignList,
@@ -13,6 +14,7 @@ import {
   updateLeadDetails,
 } from "@/lib/storage";
 import type { Lead } from "@/lib/types";
+import { TOPICS } from "@/lib/types";
 import { isTelnyxConfigured } from "@/lib/telnyx";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
@@ -51,6 +53,7 @@ export async function POST(request: Request) {
     const payload = (await request.json().catch(() => ({}))) as {
       action?: "start" | "stop" | "run" | "delete" | "delete_lead" | "delete_leads" | "update_note" | "add_lead_note" | "convert_to_customer" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
+      topic?: string;
       leadId?: string;
       leadIds?: string[];
       note?: string;
@@ -261,7 +264,21 @@ export async function POST(request: Request) {
     }
 
     if (action === "start") {
-      await setCampaignListActive(listId, true, sessionUser.id);
+      const selectedTopic = String(payload.topic || "").trim();
+      if (listId.startsWith("crm-search-") && !selectedTopic) {
+        return NextResponse.json({ error: "Bitte vor dem Start eine vorhandene Kampagne auswählen." }, { status: 400 });
+      }
+      if (selectedTopic) {
+        const dashboard = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
+        const allowedTopics = new Set([
+          ...TOPICS,
+          ...dashboard.topicPolicies.map((policy) => policy.topic),
+        ]);
+        if (!allowedTopics.has(selectedTopic)) {
+          return NextResponse.json({ error: "Die ausgewählte Kampagne ist nicht verfügbar." }, { status: 400 });
+        }
+      }
+      await setCampaignListActive(listId, true, sessionUser.id, selectedTopic || undefined);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({ ok: true, action, listId, lists });
     }

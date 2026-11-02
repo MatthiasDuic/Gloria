@@ -228,16 +228,17 @@ test("product normalization preserves application, unit forecast and commission 
   assert.equal(normalized?.expectedCommissionEUR, 345.67);
 });
 
-test("company and private workspaces contain only confirmed customers of that kind", () => {
+test("CRM workspaces hide private contacts while retaining company customers and prospects", () => {
     const leads: Lead[] = [
       sampleLead,
       { ...sampleLead, id: "company-1", lifecycle: "customer" },
       { ...sampleLead, id: "private-1", lifecycle: "customer", customerKind: "privat" },
+      { ...sampleLead, id: "private-prospect", customerKind: "privat" },
     ];
     assert.deepEqual(getCrmWorkspaceLeads(leads, "campaigns").map((lead) => lead.id), ["prospect-1"]);
     assert.deepEqual(getCrmWorkspaceLeads(leads, "companies").map((lead) => lead.id), ["company-1"]);
-    assert.deepEqual(getCrmWorkspaceLeads(leads, "private").map((lead) => lead.id), ["private-1"]);
-    assert.equal(getCrmWorkspaceLeads(leads, "dashboard").length, 3);
+    assert.deepEqual(getCrmWorkspaceLeads(leads, "private"), []);
+    assert.deepEqual(getCrmWorkspaceLeads(leads, "dashboard").map((lead) => lead.id), ["prospect-1", "company-1"]);
   });
 
 test("legacy callbacks follow matched lead state and legacy appointments deduplicate with identified reports", () => {
@@ -264,11 +265,10 @@ test("ambiguous legacy contacts are not assigned to the wrong lead", () => {
   assert.equal(entries[0].leadId, undefined);
 });
 
-test("private customer calendar entries display the person's name instead of the original company", () => {
+test("private customer calendar entries are hidden", () => {
   const lead: Lead = { ...sampleLead, lifecycle: "customer", customerKind: "privat", status: "wiedervorlage", nextCallAt: sampleReport.appointmentAt };
   const entries = buildCrmCalendarEntries([lead], [sampleReport]);
-  assert.equal(entries.length, 2);
-  assert.ok(entries.every((entry) => entry.company === lead.contactName));
+  assert.deepEqual(entries, []);
 });
 
 test("call origins prefer explicit metadata and retain legacy CRM and manual markers", () => {
