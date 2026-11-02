@@ -308,6 +308,63 @@ test("imports full CRM snapshots into an inactive campaign and safely refreshes 
   assert.equal(campaignState.lists.find((list: { listId: string }) => list.listId === options.listId)?.active, false);
 });
 
+test("stable saved-search imports absorb partial legacy transfers without duplicate leads", async () => {
+  await seed([
+    {
+      ...sampleLead,
+      id: "partial-import-1",
+      userId: "crm-user",
+      callSource: "crm",
+      crmCompanyId: 812,
+      listId: "crm-search-7-20261102130937655876",
+      status: "angerufen",
+      attempts: 2,
+    },
+    {
+      ...sampleLead,
+      id: "partial-import-2",
+      userId: "crm-user",
+      callSource: "crm",
+      crmCompanyId: 812,
+      listId: "crm-search-7-20261102130234136165",
+      status: "neu",
+      attempts: 0,
+    },
+  ]);
+  const campaignStatePath = path.join(fixtureDirectory, "data", "campaign-state.json");
+  const campaignState = JSON.parse(await readFile(campaignStatePath, "utf8"));
+  campaignState.lists.push(
+    { listId: "crm-search-7-20261102130937655876", listName: "Old transfer 1", userId: "crm-user" },
+    { listId: "crm-search-7-20261102130234136165", listName: "Old transfer 2", userId: "crm-user" },
+  );
+  await writeFile(campaignStatePath, JSON.stringify(campaignState));
+
+  const result = await storage.importLeadsFromCrm([{
+    crmCompanyId: 812,
+    company: "Maschinenbau GmbH",
+    phone: "+49233112345",
+    crmCompanyData: { industry: "Maschinenbau" },
+  }], {
+    listId: "crm-search-7-user-15",
+    listName: "CRM: Maschinenbau",
+    userId: "crm-user",
+  });
+
+  const dashboard = await storage.getDashboardData({ userId: "crm-user", role: "user" });
+  const importedLeads = dashboard.leads.filter((lead) => lead.crmCompanyId === 812);
+  assert.equal(result.imported, 1);
+  assert.equal(importedLeads.length, 1);
+  assert.equal(importedLeads[0].id, "partial-import-1");
+  assert.equal(importedLeads[0].listId, "crm-search-7-user-15");
+  assert.equal(importedLeads[0].status, "angerufen");
+  assert.equal(importedLeads[0].attempts, 2);
+  const refreshedCampaignState = JSON.parse(await readFile(campaignStatePath, "utf8"));
+  assert.equal(refreshedCampaignState.lists.some((list: { listId: string }) =>
+    list.listId === "crm-search-7-20261102130937655876" ||
+    list.listId === "crm-search-7-20261102130234136165"
+  ), false);
+});
+
 test("CRM import API requires its shared token and rejects an unpaired CRM user", async () => {
   await seed([]);
   const previousToken = process.env.GLORIA_CRM_INTEGRATION_TOKEN;

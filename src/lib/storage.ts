@@ -1497,12 +1497,20 @@ export async function importLeadsFromCrm(
   const existing = await readLeads(options.userId);
   const imported = companies.length;
   const nextLeads = [...existing];
+  const legacyListIdPrefix = options.listId.match(/^(crm-search-\d+-)/)?.[1];
 
   for (const record of companies) {
-    const existingIndex = nextLeads.findIndex(
-      (lead) => lead.listId === options.listId && lead.crmCompanyId === record.crmCompanyId,
-    );
-    const prior = existingIndex >= 0 ? nextLeads[existingIndex] : undefined;
+    const matchesImport = (lead: Lead) =>
+      lead.callSource === "crm" &&
+      lead.crmCompanyId === record.crmCompanyId &&
+      (lead.listId === options.listId ||
+        Boolean(legacyListIdPrefix && lead.listId?.startsWith(legacyListIdPrefix)));
+    const matchingLeads = nextLeads.filter(matchesImport);
+    const prior = matchingLeads.find((lead) => lead.listId === options.listId) || matchingLeads[0];
+    for (let index = nextLeads.length - 1; index >= 0; index -= 1) {
+      if (matchesImport(nextLeads[index])) nextLeads.splice(index, 1);
+    }
+
     const lead: Lead = {
       ...prior,
       id: prior?.id || createLeadId(),
@@ -1523,15 +1531,13 @@ export async function importLeadsFromCrm(
       attempts: prior?.attempts || 0,
     };
 
-    if (existingIndex >= 0) nextLeads[existingIndex] = lead;
-    else {
-      nextLeads.unshift(lead);
-    }
+    nextLeads.unshift(lead);
   }
 
   await writeLeads(ensureUniqueLeadIds(nextLeads), options.userId);
 
   const campaignState = await readCampaignState(options.userId);
+  let campaignStateChanged = false;
   if (!campaignState.lists.some((list) => list.listId === options.listId)) {
     campaignState.lists.unshift({
       listId: options.listId,
@@ -1540,6 +1546,22 @@ export async function importLeadsFromCrm(
       stoppedAt: new Date().toISOString(),
       userId: options.userId,
     } as CampaignListState);
+    campaignStateChanged = true;
+  }
+  if (legacyListIdPrefix) {
+    const remainingListIds = new Set(nextLeads.map((lead) => lead.listId));
+    const retainedLists = campaignState.lists.filter(
+      (list) =>
+        !list.listId.startsWith(legacyListIdPrefix) ||
+        list.listId === options.listId ||
+        remainingListIds.has(list.listId),
+    );
+    if (retainedLists.length !== campaignState.lists.length) {
+      campaignState.lists = retainedLists;
+      campaignStateChanged = true;
+    }
+  }
+  if (campaignStateChanged) {
     await writeCampaignState(campaignState, options.userId);
   }
 
