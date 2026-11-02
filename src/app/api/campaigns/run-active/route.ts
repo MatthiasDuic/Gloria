@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   isCampaignListActive,
   listActiveCampaignLists,
+  buildLeadCallContext,
   pullNextLeadForCampaignList,
   setCampaignListActive,
 } from "@/lib/storage";
@@ -158,7 +159,7 @@ async function handle(request: Request) {
             to,
             company: lead.company,
             contactName: lead.contactName,
-            leadNote: lead.note,
+            leadNote: buildLeadCallContext(lead),
             topic: lead.topic,
             leadId: lead.id,
             userId: lead.userId || userId,

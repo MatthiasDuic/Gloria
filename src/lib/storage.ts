@@ -1477,55 +1477,79 @@ function isCrmFirmListLead(lead: Lead): boolean {
   return lead.callSource === "crm" && Boolean(lead.listId?.startsWith("crm-search-"));
 }
 
-function buildCrmCallContext(record: CrmCompanyImport): string {
-  const data = record.crmCompanyData;
-  const address = [data.street, data.postal_code, data.city, data.country]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .join(", ");
-  const contactPersons = Array.isArray(data.contactPersons)
-    ? data.contactPersons
-        .map((person) => {
-          if (!person || typeof person !== "object") return "";
-          const entry = person as Record<string, unknown>;
-          return [entry.name, entry.title]
-            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-            .join(" – ");
-        })
-        .filter(Boolean)
-        .join(" / ")
-    : "";
-  const notes = Array.isArray(data.notes)
-    ? data.notes
-        .map((note) => note && typeof note === "object" ? (note as Record<string, unknown>).text : "")
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .slice(0, 5)
-        .join("\n")
-    : "";
-  const calls = Array.isArray(data.calls)
-    ? data.calls
-        .map((call) => {
-          if (!call || typeof call !== "object") return "";
-          const entry = call as Record<string, unknown>;
-          return [entry.called_at, entry.outcome, entry.notes]
-            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-            .join(": ");
-        })
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .slice(0, 5)
-        .join("\n")
-    : "";
-  const context = [
-    `CRM-Firmen-ID: ${record.crmCompanyId}`,
-    typeof data.industry === "string" && data.industry ? `Branche: ${data.industry}` : "",
-    address ? `Adresse: ${address}` : "",
-    record.email ? `E-Mail: ${record.email}` : "",
-    typeof data.website === "string" && data.website ? `Website: ${data.website}` : "",
-    typeof data.employee_count === "number" ? `Mitarbeiter: ${data.employee_count}` : "",
-    contactPersons ? `Weitere Ansprechpartner: ${contactPersons}` : "",
-    notes ? `CRM-Notizen:\n${notes}` : "",
-    calls ? `Bisherige Anrufe:\n${calls}` : "",
-  ].filter(Boolean).join("\n");
-  return context.slice(0, 2_000);
+function isBinaryDocumentContent(key: string, value: string): boolean {
+  if (/(?:base64|binary|file_data|document_data|download_url)/i.test(key)) return true;
+  if (/^data:[^,]+;base64,/i.test(value)) return true;
+  return /(?:document|attachment|file)/i.test(key)
+    && value.length > 512
+    && /^[A-Za-z0-9+/=\s]+$/.test(value);
+}
+
+function appendContextValue(lines: string[], label: string, value: unknown, depth = 0): void {
+  if (value === null || value === undefined || depth > 8) return;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    lines.push(`${label}: ${isBinaryDocumentContent(label, trimmed) ? "[Dateiinhalt ausgelassen]" : trimmed}`);
+    return;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    lines.push(`${label}: ${value}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => appendContextValue(lines, `${label} [${index + 1}]`, entry, depth + 1));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      appendContextValue(lines, `${label} / ${key}`, entry, depth + 1);
+    }
+  }
+}
+
+export function buildLeadCallContext(lead: Lead): string {
+  const lines = [
+    `CRM-Firmen-ID: ${lead.crmCompanyId ?? "unbekannt"}`,
+    `Firma: ${lead.company}`,
+    `Ansprechpartner im aktuellen Anruf: ${lead.contactName}`,
+  ];
+  const otherContactNames = (lead.contactNames || []).filter((name) => name !== lead.contactName);
+  if (otherContactNames.length) {
+    appendContextValue(lines, "Weitere Ansprechpartner der Firma", otherContactNames);
+  }
+  const leadFields: Array<[string, unknown]> = [
+    ["Telefon", lead.phone],
+    ["Direktwahl", lead.directDial],
+    ["Weitere Telefonnummern", lead.additionalPhones],
+    ["E-Mail", lead.email],
+    ["Geburtsdatum Ansprechpartner", lead.birthDate],
+    ["Website", lead.website],
+    ["Branche", lead.industry],
+    ["Ort", lead.location],
+    ["Adresse", lead.address],
+    ["Straße", lead.addressStreet],
+    ["Postleitzahl", lead.addressPostalCode],
+    ["Stadt", lead.addressCity],
+    ["Land", lead.addressCountry],
+    ["Handelsregisternummer", lead.registryNumber],
+    ["Registergericht", lead.registryCourt],
+    ["Gründungsjahr", lead.foundedYear],
+    ["Mitarbeiterzahl", lead.employeeCount],
+    ["Umsatzsteuer-ID", lead.vatId],
+    ["Produkte", lead.products],
+    ["Produktdetails", lead.productDetails],
+    ["Zugehörigkeiten", lead.affiliations],
+    ["E-Mail-Verlauf", lead.emailHistory],
+    ["Gespeicherte Notizen", lead.notes],
+    ["Aktivitäten", lead.activities],
+  ];
+  for (const [label, value] of leadFields) appendContextValue(lines, label, value);
+  appendContextValue(lines, "CRM-Stammdaten und Aktivitäten", lead.crmCompanyData);
+  if (lead.note?.trim() && !lead.note.startsWith("CRM-Firmen-ID:")) {
+    appendContextValue(lines, "Zusätzliche Gloria-Notiz", lead.note);
+  }
+  return lines.join("\n");
 }
 
 export async function importLeadsFromCrm(
@@ -1550,8 +1574,18 @@ export async function importLeadsFromCrm(
       if (matchesImport(nextLeads[index])) nextLeads.splice(index, 1);
     }
 
+    const snapshotContactNames = Array.isArray(record.crmCompanyData.contactPersons)
+      ? record.crmCompanyData.contactPersons
+          .map((person) => person && typeof person === "object"
+            ? (person as Record<string, unknown>).name
+            : undefined)
+          .filter((name): name is string => typeof name === "string")
+      : [];
+    const importedContactNames = record.contactNames?.length
+      ? record.contactNames
+      : splitContactNames(record.contactName || "");
     const contactNames = [...new Set(
-      (record.contactNames?.length ? record.contactNames : splitContactNames(record.contactName || ""))
+      (importedContactNames.length ? importedContactNames : snapshotContactNames)
         .map((name) => name.trim())
         .filter(Boolean),
     )];
@@ -1588,10 +1622,11 @@ export async function importLeadsFromCrm(
       employeeCount: typeof record.crmCompanyData.employee_count === "number" ? record.crmCompanyData.employee_count : prior?.employeeCount,
       vatId: typeof record.crmCompanyData.vat_id === "string" ? record.crmCompanyData.vat_id : prior?.vatId,
       topic: "",
-      note: buildCrmCallContext(record),
+      note: "",
       status: prior?.status || "neu",
       attempts: prior?.attempts || 0,
     };
+    lead.note = buildLeadCallContext(lead);
 
     nextLeads.unshift(lead);
   }

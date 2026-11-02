@@ -354,6 +354,9 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
   assert.equal(importedLead.addressCity, "Sprockhövel");
   assert.equal(importedLead.addressCountry, "Deutschland");
   assert.equal(importedLead.crmCompanyData?.industry, "Maschinenbau");
+  assert.match(importedLead.note || "", /Handelsregisternummer: HRB 12345/);
+  assert.match(importedLead.note || "", /CRM-Stammdaten und Aktivitäten \/ vat_id: DE123456789/);
+  assert.match(importedLead.note || "", /Website: https:\/\/testfirma\.example/);
   assert.equal((await storage.getCampaignListsSummary(options.userId)).length, 0);
   assert.equal((await storage.getFirmListsSummary(options.userId))[0].total, 1);
 
@@ -372,6 +375,10 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
   assert.equal(dialedLead?.status, "angerufen");
   assert.equal(dialedLead?.contactName, "Max Beispiel");
   assert.equal(dialedLead?.contactGroupNames, "Max Beispiel / Erika Muster");
+  assert.ok(dialedLead);
+  const dialedContext = storage.buildLeadCallContext(dialedLead);
+  assert.match(dialedContext, /Ansprechpartner im aktuellen Anruf: Max Beispiel/);
+  assert.match(dialedContext, /Weitere Ansprechpartner der Firma \[1\]: Erika Muster/);
   const secondDialedLead = await storage.pullNextLeadForCampaignList(firstRun.listId, options.userId);
   assert.equal(secondDialedLead?.contactName, "Erika Muster");
   assert.equal(secondDialedLead?.contactGroupNames, "Max Beispiel / Erika Muster");
@@ -386,6 +393,32 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
   assert.equal(allLeads.find((lead) => lead.listId === secondRun.listId)?.topic, "private Krankenversicherung");
   assert.equal(allLeads.find((lead) => lead.listId === firstRun.listId)?.status, "angerufen");
   assert.equal((await storage.getCampaignListsSummary(options.userId)).length, 2);
+});
+
+test("CRM contact names and complete master data are available in the call context", async () => {
+  await seed([]);
+  const options = { listId: "crm-search-20-user-crm-user", listName: "CRM: Kontext", userId: "crm-user" };
+  await storage.importLeadsFromCrm([{
+    crmCompanyId: 912,
+    company: "Kontext GmbH",
+    phone: "+49233112345",
+    crmCompanyData: {
+      contactPersons: [{ name: "Alex Beispiel", title: "Geschäftsführer" }],
+      customFields: [{ name: "Fuhrpark", value: "12 Fahrzeuge" }],
+      notes: [{ text: "Wünscht Rückruf am Nachmittag." }],
+      documents: [{ name: "Firmenprofil.pdf", mime_type: "application/pdf", content_base64: "JVBERi0xLjQ=" }],
+    },
+  }], options);
+
+  const lead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
+  const context = storage.buildLeadCallContext(lead);
+  assert.deepEqual(lead.contactNames, ["Alex Beispiel"]);
+  assert.match(context, /Ansprechpartner im aktuellen Anruf: Alex Beispiel/);
+  assert.match(context, /customFields \[1\] \/ name: Fuhrpark/);
+  assert.match(context, /customFields \[1\] \/ value: 12 Fahrzeuge/);
+  assert.match(context, /Wünscht Rückruf am Nachmittag/);
+  assert.match(context, /Firmenprofil\.pdf/);
+  assert.doesNotMatch(context, /JVBERi0xLjQ=/);
 });
 
 test("firm list reads migrate legacy CRM theme defaults to an empty topic", async () => {

@@ -4,6 +4,7 @@ import {
   isCampaignListActive,
   listDueCallbackLeads,
   markLeadCallbackScheduled,
+  buildLeadCallContext,
 } from "@/lib/storage";
 import { isTelnyxConfigured } from "@/lib/telnyx";
 import { isWithinCampaignHours } from "@/lib/campaign-schedule";
@@ -105,6 +106,7 @@ async function handle(request: Request) {
           leadId: lead.id,
           callSource: lead.callSource || "crm",
           userId: lead.userId,
+          leadNote: buildLeadCallContext(lead),
           previousSummary,
           isCallback: true,
         },
