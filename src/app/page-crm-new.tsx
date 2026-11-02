@@ -1360,6 +1360,44 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [reloadLiveData]);
 
+  const deleteTransferredFirmList = useCallback(async (list: FirmListSummary) => {
+    const linkedCampaigns = campaignLists.filter((campaign) => campaign.sourceListId === list.listId);
+    if (linkedCampaigns.some((campaign) => campaign.active || campaign.currentlyDialing)) {
+      setNotice("✗ Bitte stoppen Sie zuerst die laufenden Kampagnen dieser Firmenliste.");
+      return;
+    }
+    if (!window.confirm(
+      `Die Firmenliste „${list.listName}“ und ihre ${list.total} Kontakte wirklich löschen? Zugehörige Kampagnenläufe und Interessenten werden ebenfalls entfernt. Bestehende Kunden und Anrufreports bleiben erhalten.`,
+    )) return;
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/campaigns/lists", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_firm_list", listId: list.listId }),
+      });
+      const result = await response.json() as {
+        error?: string;
+        lists?: CampaignListSummary[];
+        firmLists?: FirmListSummary[];
+        removedLeads?: number;
+      };
+      if (!response.ok) throw new Error(result.error || "Firmenliste konnte nicht gelöscht werden.");
+      if (result.lists) setCampaignLists(result.lists);
+      if (result.firmLists) setFirmLists(result.firmLists);
+      if (filterCampaignListId === list.listId) setFilterCampaignListId("");
+      if (enrichmentDialogList?.listId === list.listId) setEnrichmentDialogList(null);
+      setNotice(`✓ Firmenliste gelöscht. ${result.removedLeads ?? 0} Interessenten entfernt; Kunden und Anrufreports bleiben erhalten.`);
+      await reloadLiveData();
+    } catch (error) {
+      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [campaignLists, enrichmentDialogList, filterCampaignListId, reloadLiveData]);
+
   const startMissingDataResearch = useCallback(async (list: FirmListSummary) => {
     if (enrichmentProgress?.status === "running") return;
     const candidates = data.leads.filter((lead) =>
@@ -2688,6 +2726,16 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 : progress?.status === "running" ? "Fortschritt ansehen" : "Fehlende Daten prüfen"}
             </button>
             <button className="btn-small" disabled={busy} onClick={() => startCampaignList(list)}>Kampagne starten</button>
+            <button
+              className="btn-small danger"
+              disabled={busy || campaignLists.some((campaign) => campaign.sourceListId === list.listId && (campaign.active || campaign.currentlyDialing))}
+              title={campaignLists.some((campaign) => campaign.sourceListId === list.listId && (campaign.active || campaign.currentlyDialing))
+                ? "Bitte erst alle zugehörigen Kampagnen stoppen."
+                : "Übertragene Firmenliste löschen"}
+              onClick={() => void deleteTransferredFirmList(list)}
+            >
+              Firmenliste löschen
+            </button>
           </div>
         </article>
       );

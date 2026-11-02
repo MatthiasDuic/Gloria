@@ -7,6 +7,7 @@ import {
   completeLeadTask,
   createCampaignRunFromFirmList,
   deleteCampaignList,
+  deleteFirmList,
   deleteLeads,
   getDashboardData,
   getCampaignListsSummary,
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json().catch(() => ({}))) as {
-      action?: "start" | "stop" | "run" | "delete" | "delete_lead" | "delete_leads" | "update_note" | "add_lead_note" | "convert_to_customer" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
+      action?: "start" | "stop" | "run" | "delete" | "delete_firm_list" | "delete_lead" | "delete_leads" | "update_note" | "add_lead_note" | "convert_to_customer" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
       topic?: string;
       leadId?: string;
@@ -267,6 +268,26 @@ export async function POST(request: Request) {
 
     if (!action || !listId) {
       return NextResponse.json({ error: "action und listId sind erforderlich." }, { status: 400 });
+    }
+
+    if (action === "delete_firm_list") {
+      const firmLists = await getFirmListsSummary(sessionUser.id);
+      if (!firmLists.some((entry) => entry.listId === listId)) {
+        return NextResponse.json({ error: "Firmenliste nicht gefunden." }, { status: 404 });
+      }
+      const linkedCampaigns = await getCampaignListsSummary(sessionUser.id);
+      if (linkedCampaigns.some((entry) => entry.sourceListId === listId && (entry.active || entry.currentlyDialing))) {
+        return NextResponse.json(
+          { error: "Bitte stoppen Sie zuerst alle Kampagnenläufe dieser Firmenliste und warten Sie, bis laufende Anrufe beendet sind." },
+          { status: 409 },
+        );
+      }
+      const result = await deleteFirmList(listId, sessionUser.id);
+      const [lists, nextFirmLists] = await Promise.all([
+        getCampaignListsSummary(sessionUser.id),
+        getFirmListsSummary(sessionUser.id),
+      ]);
+      return NextResponse.json({ ok: true, action, listId, removedLeads: result.removedLeads, lists, firmLists: nextFirmLists });
     }
 
     if (action === "start") {

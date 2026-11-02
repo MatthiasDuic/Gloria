@@ -2514,6 +2514,43 @@ export async function deleteCampaignList(listId: string, userId?: string): Promi
   return { removedLeads };
 }
 
+export async function deleteFirmList(listId: string, userId: string): Promise<{ removedLeads: number }> {
+  if (!listId.startsWith("crm-search-")) {
+    throw new Error("Die ausgewählte Firmenliste ist ungültig.");
+  }
+  const [leads, campaignState] = await Promise.all([
+    readLeads(userId),
+    readCampaignState(userId),
+  ]);
+  if (!leads.some((lead) => isCrmFirmListLead(lead) && lead.listId === listId)) {
+    throw new Error("Firmenliste nicht gefunden.");
+  }
+
+  const relatedRunIds = new Set(
+    campaignState.lists
+      .filter((entry) => entry.sourceListId === listId)
+      .map((entry) => entry.listId),
+  );
+  const targetListIds = new Set([listId, ...relatedRunIds]);
+  const isInList = (lead: Lead) => lead.callSource !== "manual" && targetListIds.has(lead.listId || "legacy");
+  const removedLeads = leads.filter((lead) => isInList(lead) && !isLeadCustomer(lead)).length;
+  const nextLeads = leads
+    .filter((lead) => !isInList(lead) || isLeadCustomer(lead))
+    .map((lead) => isInList(lead)
+      ? { ...lead, lifecycle: "customer" as const, listId: undefined, listName: undefined }
+      : lead);
+  const nextState = {
+    lists: campaignState.lists.filter((entry) => !relatedRunIds.has(entry.listId)),
+  };
+
+  await Promise.all([
+    writeLeads(nextLeads, userId),
+    writeCampaignState(nextState, userId),
+  ]);
+
+  return { removedLeads };
+}
+
 export async function isCampaignListActive(listId: string, userId?: string): Promise<boolean> {
   if (listId.startsWith("crm-search-")) return false;
   const campaignState = await readCampaignState(userId);

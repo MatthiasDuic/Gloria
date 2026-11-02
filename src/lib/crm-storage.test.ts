@@ -149,6 +149,77 @@ test("deleting a campaign preserves explicit and legacy customers in the custome
   assert.equal((await storage.getCampaignListsSummary("test-user")).length, 0);
 });
 
+test("deleting a CRM firm list removes its campaign runs while preserving customers and blocking active calls", async () => {
+  const sourceListId = "crm-search-delete-test";
+  const sourceLead: Lead = {
+    ...sampleLead,
+    id: "firm-list-prospect",
+    callSource: "crm",
+    crmCompanyId: 812,
+    listId: sourceListId,
+    listName: "Firmenliste: Löschtest",
+  };
+  const campaignLead: Lead = {
+    ...sourceLead,
+    id: "firm-list-campaign-prospect",
+    listId: "crm-run-delete-test",
+    listName: "Firmenliste: Löschtest · bKV",
+    topic: "bKV",
+  };
+  const customer: Lead = {
+    ...campaignLead,
+    id: "firm-list-customer",
+    lifecycle: "customer",
+  };
+  const otherUserLead: Lead = { ...sourceLead, id: "other-user-firm", userId: "other-user" };
+  await seed([sourceLead, campaignLead, customer, otherUserLead]);
+  const campaignStatePath = path.join(fixtureDirectory, "data", "campaign-state.json");
+  await writeFile(campaignStatePath, JSON.stringify({
+    lists: [{
+      listId: campaignLead.listId,
+      listName: campaignLead.listName,
+      sourceListId,
+      campaignTopic: "bKV",
+      active: true,
+      userId: "test-user",
+    }],
+  }));
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({
+    id: "test-user", username: "test-user", role: "user", realName: "", companyName: "", gesellschaft: "",
+  })}`;
+  const { POST } = await import("../app/api/campaigns/lists/route");
+  const request = () => POST(new Request("http://localhost/api/campaigns/lists", {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete_firm_list", listId: sourceListId }),
+  }));
+  const blocked = await request();
+  assert.equal(blocked.status, 409);
+  assert.ok(await storage.getLeadById(sourceLead.id, "test-user"));
+
+  await writeFile(campaignStatePath, JSON.stringify({
+    lists: [{
+      listId: campaignLead.listId,
+      listName: campaignLead.listName,
+      sourceListId,
+      campaignTopic: "bKV",
+      active: false,
+      userId: "test-user",
+    }],
+  }));
+  const response = await request();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).removedLeads, 2);
+  assert.equal(await storage.getLeadById(sourceLead.id, "test-user"), undefined);
+  assert.equal(await storage.getLeadById(campaignLead.id, "test-user"), undefined);
+  const preservedCustomer = await storage.getLeadById(customer.id, "test-user");
+  assert.ok(preservedCustomer);
+  assert.equal(preservedCustomer.listId, undefined);
+  assert.ok(await storage.getLeadById(otherUserLead.id, "other-user"));
+  assert.deepEqual((await storage.getCampaignListsSummary("test-user")), []);
+});
+
 test("manual customers have no campaign while normal imports remain callable prospects", async () => {
   await seed([]);
   const csv = "company,contactName,phone,topic,customerKind\nFixture GmbH,Alex Beispiel,+492339555100,bKV,firma";
