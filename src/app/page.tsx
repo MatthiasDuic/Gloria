@@ -1915,19 +1915,31 @@ export default function HomePage() {
     setBusy(true);
     setSaveStatus(null);
     try {
-      const response = await fetch("/api/topic-policies", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error || "Kampagne konnte nicht gelöscht werden.");
+      const isPersisted = data.topicPolicies.some((policy) => policy.topic === topic);
+      if (isPersisted) {
+        const response = await fetch("/api/topic-policies", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic }),
+        });
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error || "Kampagne konnte nicht gelöscht werden.");
+        }
       }
 
-      const nextTopic = [...TOPICS, ...Object.keys(draftScripts).filter((entry) => entry !== topic)][0];
+      setDraftScripts((current) => Object.fromEntries(
+        Object.entries(current).filter(([entry]) => entry !== topic),
+      ));
+      if (isPersisted) {
+        setData((current) => ({
+          ...current,
+          topicPolicies: current.topicPolicies.filter((policy) => policy.topic !== topic),
+        }));
+      }
+      const nextTopic = visiblePlaybookTopics.find((entry) => entry !== topic)
+        || TOPICS[0];
       setDetailTopic(nextTopic);
-      await loadDashboard();
       setNotice(`Kampagne "${topic}" gelöscht. Kontakte und Anrufreports wurden beibehalten.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Kampagne konnte nicht gelöscht werden.";
@@ -3075,7 +3087,7 @@ export default function HomePage() {
                     <button
                       className="btn danger"
                       onClick={() => void deleteCampaignTopic(detailTopic)}
-                      disabled={busy || (TOPICS as readonly string[]).includes(detailTopic) || !data.topicPolicies.some((policy) => policy.topic === detailTopic)}
+                      disabled={busy || (TOPICS as readonly string[]).includes(detailTopic) || !activeDraft}
                       title={(TOPICS as readonly string[]).includes(detailTopic) ? "Standardthemen können nicht gelöscht werden." : "Kampagne löschen"}
                       style={{ marginLeft: 8 }}
                     >

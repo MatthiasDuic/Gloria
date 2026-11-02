@@ -12,6 +12,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 
 ## Auftragstreue im Live-Gespräch
 
+- Eigene Kampagnen lassen sich auch als noch nicht gespeicherte Entwürfe löschen. Entwürfe werden lokal entfernt, gespeicherte Kampagnen erst nach erfolgreicher API-Bestätigung. Andere offene Entwürfe, Kontakte und Anrufreports bleiben erhalten; Standardthemen sind weiterhin vor dem Löschen geschützt.
+
 - Nach Vorstellung und Gesprächszusage verbindet eine kurze, zugewandte Überleitung den konkreten Anlass mit dem Alltag der Person, bevor eine offene Themenfrage folgt. Kein direkter Sprung zu Beitrag, Versicherung oder Termin; keine wiederholte Vorstellung oder Erlaubnisfrage. Dafür sind höchstens zwei kurze Sätze und eine Hauptfrage vorgesehen. Kundenfragen, Zeitmangel, Ablehnung und der bekannte Rückrufstand bleiben vorrangig.
 - Der gespeicherte „Auftrag für Gloria“ wird vollständig und ohne Kürzung der Zeilen oder Zeichen in den Gesprächskontext übernommen.
 - Bei vorhandenem Auftrag ist der Kampagnenname nur eine interne Zuordnung. Der Entscheider-Einstieg wird mit transparenter KI-Identität und dem tatsächlichen Anlass aus dem Auftrag formuliert, statt den Kampagnennamen als Thema vorzulesen.
