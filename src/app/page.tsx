@@ -441,7 +441,7 @@ function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfi
 
   const commonTransfer = [
     "Nur dann an einen Menschen weiterleiten, wenn der Interessent das ausdrücklich wünscht oder die KI klar ablehnt.",
-    "Dann sagen: Gerne, ich verbinde Sie jetzt direkt mit Jutta Brost, unserer Vertriebsassistentin. Falls die Verbindung nicht sofort klappt, meldet sie sich kurzfristig bei Ihnen.",
+    "Dann kurz die Weiterleitung an den Auftraggeber ankündigen. Ziel ist die im Benutzerkonto hinterlegte reale Rufnummer. Bei fehlgeschlagener Verbindung einen Rückruf anbieten, aber nicht ungefragt versprechen.",
     "Eine Weiterleitung nie ungefragt als Standardschritt anbieten.",
   ].join("\n");
 
@@ -3002,7 +3002,7 @@ export default function HomePage() {
                       <li>Global gilt: maximal zwei kurze Sätze und dann eine klare Frage statt Monologe oder Skriptblöcke.</li>
                       <li>Gloria soll führen wie eine starke Vertriebsassistentin: warm, präzise, reaktiv und ohne Callcenter-Ton.</li>
                       <li>Keine erfundenen Zahlen, keine leeren Metaphern, keine unklaren Versprechen. Relevanz zuerst, danach der nächste Schritt.</li>
-                      <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung, dann mit sauberer Rückfallzusage zu Jutta Brost.</li>
+                      <li>Menschliche Weiterleitung nur bei echtem Wunsch oder klarer KI-Ablehnung an die reale Rufnummer des Benutzers. Bei Fehlern einen Rückruf anbieten.</li>
                       <li>Die Batch-Übernahme schreibt diese Standards direkt in die persistenten Topic Policies Ihres Kontos.</li>
                     </ul>
                     <p className="subtle top-gap">
@@ -3583,7 +3583,7 @@ export default function HomePage() {
                     <h3>Fest im System verdrahtet</h3>
                     <ul className="subtle playbook-fixed-list top-gap">
                       <li>Technische Audio- und Pausenmeldungen waehrend Streaming oder Fehlerfaellen.</li>
-                      <li>Das eigentliche Telnyx-Transferziel und die technische Weiterleitung an Jutta Brost.</li>
+                      <li>Das Telnyx-Transferziel ist die im jeweiligen Benutzerkonto hinterlegte reale Rufnummer.</li>
                       <li>Globale Phasenlogik wie Terminbestaetigung, Websocket-Handling und feste Sicherheitsregeln.</li>
                     </ul>
                   </div>

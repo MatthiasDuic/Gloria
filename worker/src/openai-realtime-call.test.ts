@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -168,6 +169,42 @@ test("only transfers when a customer actually requests a person", () => {
   assert.equal(hasRequestedHumanTransfer("Einen Menschen bitte."), true);
   assert.equal(hasRequestedHumanTransfer("Einen Berater bitte."), true);
   assert.equal(hasRequestedHumanTransfer("Ich möchte mit jemandem sprechen."), true);
+  assert.equal(hasRequestedHumanTransfer("Ich möchte nicht mit Gloria sprechen."), true);
+  assert.equal(hasRequestedHumanTransfer("Ich will nicht mit einer KI telefonieren."), true);
+  assert.equal(hasRequestedHumanTransfer("Ich möchte nicht mit Ihnen sprechen."), true);
+  assert.equal(hasRequestedHumanTransfer("Kein Interesse. Ich will nicht mit einer KI sprechen."), false);
+  assert.equal(hasRequestedHumanTransfer("Sind Sie eine KI?"), false);
+});
+
+test("sends the call owner for transfers and does not report failed API calls as successful", async () => {
+  const previousBase = process.env.APP_BASE_URL;
+  const previousToken = process.env.APP_INTERNAL_TOKEN;
+  process.env.APP_BASE_URL = "https://transfer.test";
+  process.env.APP_INTERNAL_TOKEN = "test-only";
+  const ctx = buildPkvContext();
+  ctx.userId = "owner-user";
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  setGlobalDispatcher(agent);
+  const pool = agent.get("https://transfer.test");
+  const body = JSON.stringify({ callControlId: ctx.callSid, userId: "owner-user" });
+  pool.intercept({ path: "/api/telnyx/transfer", method: "POST", body }).reply(200, {});
+  pool.intercept({ path: "/api/telnyx/transfer", method: "POST", body }).reply(422, {});
+  try {
+    assert.equal(await notifyCallAction(ctx, "transfer"), true);
+    assert.equal(await notifyCallAction(ctx, "transfer"), false);
+    delete process.env.APP_BASE_URL;
+    assert.equal(await notifyCallAction(ctx, "transfer"), false);
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    await agent.close();
+    if (previousBase === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = previousBase;
+    if (previousToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = previousToken;
+  }
 });
 
 test("recovers once when a barge-in produces only the configured transcription prompt", () => {

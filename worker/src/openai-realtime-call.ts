@@ -142,7 +142,10 @@ export function getRequiredContributionStep(ctx: CallContext): string | undefine
 }
 
 export function hasRequestedHumanTransfer(text: string): boolean {
-  return /\b(?:menschen?|jemand(?:em)?|person|kollege|kollegen|kollegin|berater|mitarbeiter|herrn?\s+duic)\b/i.test(text)
+  if (/\b(?:kein interesse|nicht mehr anrufen|auf wiederhören|auf wiederhoeren)\b/i.test(text)) return false;
+  return /(?:nicht|will\s+keine[nr]?|möchte\s+keine[nr]?).*(?:mit\s+(?:gloria|ihnen|dir)|(?:einer?\s+)?(?:ki|künstlichen intelligenz|maschine|roboter)).*(?:sprechen|reden|telefonieren)/i.test(text)
+    || /(?:nicht|keine?).*(?:ki|roboter|maschine|gloria).*(?:sprechen|reden|telefonieren)/i.test(text)
+    || /\b(?:menschen?|jemand(?:em)?|person|kollege|kollegen|kollegin|berater|mitarbeiter|herrn?\s+duic)\b/i.test(text)
     && /\b(?:sprechen|verbinden|weiterleiten|übergeben|uebergeben|holen|bitte)\b/i.test(text);
 }
 
@@ -277,7 +280,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     ctx.confirmedSlotPhrase
       ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${APPOINTMENT_FAREWELL_TEXT}' Beende danach das Gespräch ohne weitere Frage.`
       : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
-    "Wenn ein Mensch verlangt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf.",
+    "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
@@ -347,7 +350,7 @@ function updateDialogPhase(ctx: CallContext): void {
   }
 }
 
-async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<void> {
+export async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<boolean> {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN || "";
   if (!baseUrl || !token) {
@@ -356,20 +359,26 @@ async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup")
       hasBaseUrl: Boolean(baseUrl),
       hasInternalToken: Boolean(token),
     });
-    return;
+    return false;
   }
 
   try {
-    await fetch(`${baseUrl}/api/telnyx/${action}`, {
+    const response = await fetch(`${baseUrl}/api/telnyx/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ callControlId: ctx.callSid }),
+      body: JSON.stringify({ callControlId: ctx.callSid, userId: ctx.userId }),
     });
+    if (!response.ok) {
+      log.error(`realtime.${action}_failed`, { callSid: ctx.callSid, status: response.status });
+      return false;
+    }
+    return true;
   } catch (error) {
     log.error(`realtime.${action}_failed`, {
       callSid: ctx.callSid,
       error: error instanceof Error ? error.message : String(error),
     });
+    return false;
   }
 }
 
@@ -824,6 +833,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     const event = classifyConversationEvent(transcript);
+    if (hasRequestedHumanTransfer(transcript)) {
+      requestEventResponse("Der Kunde verlangt einen Menschen oder lehnt das Gespräch mit Gloria ausdrücklich ab. Keine weiteren Fach-, Termin- oder Vorbereitungsfragen. Kündige kurz die Weiterleitung an den Auftraggeber an und rufe transfer_to_human auf.");
+      return;
+    }
     if (event.type === "unclear") {
       if (!unclearClarificationPending) {
         unclearClarificationPending = true;
@@ -986,9 +999,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse(instruction);
         return;
       }
-      sendToolResult(tool.callId, { ok: true });
-      log.info("realtime.transfer", { callSid: ctx.callSid });
-      await notifyCallAction(ctx, "transfer");
+      const transferred = await notifyCallAction(ctx, "transfer");
+      sendToolResult(tool.callId, { ok: transferred, ...(transferred ? {} : { error: "transfer_failed" }) });
+      if (transferred) {
+        log.info("realtime.transfer", { callSid: ctx.callSid });
+      } else {
+        requestDeterministicSpeech("Die Weiterleitung ist gerade leider nicht möglich. Möchten Sie stattdessen einen Rückruf vereinbaren?");
+      }
       return;
     }
 

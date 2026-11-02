@@ -12,6 +12,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 
 ## Auftragstreue im Live-Gespräch
 
+- Bei ausdrücklichem Wunsch nach einem Menschen oder Ablehnung des Gesprächs mit Gloria/KI wird an die reale Rufnummer des jeweiligen Auftraggebers weitergeleitet. Der Worker übergibt die Benutzer-ID; die authentifizierte Transfer-API liest und validiert die Rufnummer aus dem Benutzerkonto. Es gibt kein globales oder fest codiertes Ersatzziel. Fehlende Rufnummern und Telnyx-Fehler werden nicht als erfolgreiche Weiterleitung gemeldet; Gloria bietet stattdessen einen Rückruf an. Allgemeine Ablehnung und fehlendes Interesse führen weiterhin nicht zur Weiterleitung.
+
 - Eigene Kampagnen lassen sich auch als noch nicht gespeicherte Entwürfe löschen. Entwürfe werden lokal entfernt, gespeicherte Kampagnen erst nach erfolgreicher API-Bestätigung. Andere offene Entwürfe, Kontakte und Anrufreports bleiben erhalten; Standardthemen sind weiterhin vor dem Löschen geschützt.
 
 - Nach Vorstellung und Gesprächszusage verbindet eine kurze, zugewandte Überleitung den konkreten Anlass mit dem Alltag der Person, bevor eine offene Themenfrage folgt. Kein direkter Sprung zu Beitrag, Versicherung oder Termin; keine wiederholte Vorstellung oder Erlaubnisfrage. Dafür sind höchstens zwei kurze Sätze und eine Hauptfrage vorgesehen. Kundenfragen, Zeitmangel, Ablehnung und der bekannte Rückrufstand bleiben vorrangig.

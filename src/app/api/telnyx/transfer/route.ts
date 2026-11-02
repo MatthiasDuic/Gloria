@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
+import { findUserById } from "@/lib/report-db";
+import { normalizePhoneForDial } from "@/lib/phone-utils";
 
 export const runtime = "nodejs";
 
@@ -20,9 +22,11 @@ export async function POST(request: Request) {
   }
 
   let callControlId: string;
+  let userId: string;
   try {
-    const body = (await request.json()) as { callControlId?: string };
-    callControlId = String(body.callControlId || "").trim();
+    const body = (await request.json()) as { callControlId?: unknown; userId?: unknown };
+    callControlId = typeof body.callControlId === "string" ? body.callControlId.trim() : "";
+    userId = typeof body.userId === "string" ? body.userId.trim() : "";
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -30,9 +34,11 @@ export async function POST(request: Request) {
   if (!callControlId) {
     return NextResponse.json({ error: "callControlId required" }, { status: 400 });
   }
+  if (!userId) {
+    return NextResponse.json({ error: "userId required" }, { status: 400 });
+  }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();
-  const transferPhone = process.env.TRANSFER_PHONE?.trim() || "+491715358989";
   const from = process.env.TELNYX_PHONE_NUMBER?.trim();
 
   if (!apiKey) {
@@ -41,6 +47,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    const user = await findUserById(userId);
+    if (!user) {
+      log.warn("telnyx.transfer.user_not_found", { callControlId, userId });
+      return NextResponse.json({ error: "Benutzer nicht gefunden." }, { status: 404 });
+    }
+    const transferPhone = normalizePhoneForDial(user.realPhone);
+    if (!transferPhone || !/^\+[1-9]\d{7,14}$/.test(transferPhone)) {
+      log.warn("telnyx.transfer.missing_user_phone", { callControlId, userId });
+      return NextResponse.json({ error: "Keine gültige reale Rufnummer für diesen Benutzer hinterlegt." }, { status: 422 });
+    }
     const response = await fetch(`${getApiBaseUrl()}/calls/${encodeURIComponent(callControlId)}/actions/transfer`, {
       method: "POST",
       headers: {
