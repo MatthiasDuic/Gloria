@@ -3,7 +3,7 @@ import { getUserCrmConnection } from "@/lib/report-db";
 export interface CrmCompanySyncEvent {
   eventId: string;
   companyId: number;
-  companyUpdates?: Record<string, string | null>;
+  companyUpdates?: Record<string, string | number | null>;
   note?: { text: string };
   appointment?: {
     scheduledAt: string;

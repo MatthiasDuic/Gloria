@@ -121,6 +121,8 @@ export interface Lead {
   crmCompanyData?: Record<string, unknown>;
   listId?: string;
   listName?: string;
+  contactNames?: string[];
+  contactGroupNames?: string;
   customerKind?: LeadCustomerKind;
   customerOwner?: LeadCustomerOwner;
   lifecycle?: LeadLifecycle;
@@ -131,11 +133,19 @@ export interface Lead {
   additionalPhones?: string[];
   email?: string;
   birthDate?: string;
+  website?: string;
+  industry?: string;
   location?: string;
+  address?: string;
   addressStreet?: string;
   addressPostalCode?: string;
   addressCity?: string;
   addressCountry?: string;
+  registryNumber?: string;
+  registryCourt?: string;
+  foundedYear?: number;
+  employeeCount?: number;
+  vatId?: string;
   products?: string[];
   productDetails?: LeadProductDetail[];
   affiliations?: LeadAffiliation[];

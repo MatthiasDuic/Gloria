@@ -59,6 +59,10 @@ export async function POST(request: Request) {
       typeof company.company !== "string" ||
       !company.company.trim() ||
       typeof company.phone !== "string" ||
+      (company.contactNames !== undefined &&
+        (!Array.isArray(company.contactNames) ||
+          company.contactNames.length > 50 ||
+          company.contactNames.some((name) => typeof name !== "string" || name.length > 255))) ||
       !isRecord(company.crmCompanyData)
     ) {
       return NextResponse.json({ error: "Ein Firmendatensatz ist ungültig." }, { status: 400 });
@@ -70,6 +74,9 @@ export async function POST(request: Request) {
       phone: company.phone,
       email: typeof company.email === "string" ? company.email : undefined,
       contactName: typeof company.contactName === "string" ? company.contactName : undefined,
+      contactNames: Array.isArray(company.contactNames)
+        ? company.contactNames.filter((name): name is string => typeof name === "string")
+        : undefined,
       topic: typeof company.topic === "string" ? company.topic : undefined,
       crmCompanyData: company.crmCompanyData,
     });

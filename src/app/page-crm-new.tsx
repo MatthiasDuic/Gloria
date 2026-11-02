@@ -92,11 +92,28 @@ type ManualCustomerDraft = {
   contactName: string;
   phone: string;
   email: string;
+  website: string;
+  industry: string;
+  address: string;
+  addressStreet: string;
+  addressPostalCode: string;
+  addressCity: string;
+  addressCountry: string;
+  birthDate: string;
+  registryNumber: string;
+  registryCourt: string;
+  foundedYear: string;
+  employeeCount: string;
+  vatId: string;
   owner: "BarmeniaGothaer" | "Agentur-Duic";
   note: string;
 };
 
-type LeadDetailsDraft = Pick<Lead, "company" | "contactName" | "phone" | "directDial" | "email" | "birthDate" | "addressStreet" | "addressPostalCode" | "addressCity" | "addressCountry" | "customerKind" | "customerOwner">;
+type LeadDetailsDraft = Pick<Lead, "company" | "contactName" | "phone" | "directDial" | "email" | "birthDate" | "website" | "industry" | "address" | "addressStreet" | "addressPostalCode" | "addressCity" | "addressCountry" | "registryNumber" | "registryCourt" | "customerKind" | "customerOwner"> & {
+  foundedYear: string;
+  employeeCount: string;
+  vatId?: string;
+};
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -184,7 +201,27 @@ const crmFieldLabels: Record<string, string> = {
   founded_year: "Gründungsjahr",
   employee_count: "Mitarbeiter",
   vat_id: "Umsatzsteuer-ID",
+  team_id: "Team-ID",
+  created_at: "Angelegt am",
+  modified_at: "Zuletzt geändert",
+  modified_by: "Geändert von",
+  enrichment_metadata: "Anreicherungsdetails",
+  enrichment_status: "Anreicherungsstatus",
+  enrichment_error: "Anreicherungsfehler",
+  enrichment_timestamp: "Anreicherungszeitpunkt",
+  openregister_enriched_at: "OpenRegister-Abgleich",
+  openregister_raw_data: "OpenRegister-Rohdaten",
+  manually_edited_fields: "Manuell bearbeitete Felder",
 };
+
+const crmCompanyStammdatenFields = [
+  "id", "name", "website", "address", "country", "source", "industry", "street",
+  "postal_code", "city", "phone", "email", "contact_person", "contact_birthdate",
+  "registry_number", "registry_court", "founded_year", "employee_count", "vat_id",
+  "created_at", "modified_at", "modified_by", "team_id", "enrichment_status",
+  "enrichment_error", "enrichment_timestamp", "enrichment_metadata",
+  "openregister_enriched_at", "openregister_raw_data", "manually_edited_fields",
+] as const;
 
 function formatCrmFieldLabel(key: string): string {
   return crmFieldLabels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -308,6 +345,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     contactName: "",
     phone: "",
     email: "",
+    website: "",
+    industry: "",
+    address: "",
+    addressStreet: "",
+    addressPostalCode: "",
+    addressCity: "",
+    addressCountry: "DE",
+    birthDate: "",
+    registryNumber: "",
+    registryCourt: "",
+    foundedYear: "",
+    employeeCount: "",
+    vatId: "",
     owner: "Agentur-Duic",
     note: "",
   });
@@ -705,7 +755,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       escapeCsvCell(lead.customerOwner),
       escapeCsvCell(lead.customerKind),
       escapeCsvCell(lead.company),
-      escapeCsvCell(lead.contactName),
+      escapeCsvCell(lead.contactGroupNames || lead.contactName),
       escapeCsvCell(lead.phone || lead.directDial),
       escapeCsvCell(lead.email),
       escapeCsvCell(lead.topic),
@@ -729,13 +779,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   async function handleAddCustomerManually() {
     const draft = addCustomerDraft;
-    if (!draft.company.trim() || !draft.phone.trim()) {
-      setNotice("Firma und Telefonnummer sind Pflichtfelder.");
+    if (!draft.company.trim()) {
+      setNotice("Der Firmenname ist ein Pflichtfeld.");
       return;
     }
 
     const listName = `${draft.owner} | Manuell hinzugefügt`;
-    const header = "customerOwner,customerKind,company,contactName,phone,email,note";
+    const header = "customerOwner,customerKind,company,contactName,phone,email,website,industry,address,addressStreet,addressPostalCode,addressCity,addressCountry,birthDate,registryNumber,registryCourt,foundedYear,employeeCount,vatId,note";
     const row = [
       escapeCsvCell(draft.owner),
       escapeCsvCell("firma"),
@@ -743,6 +793,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       escapeCsvCell(draft.contactName),
       escapeCsvCell(draft.phone),
       escapeCsvCell(draft.email),
+      escapeCsvCell(draft.website),
+      escapeCsvCell(draft.industry),
+      escapeCsvCell(draft.address),
+      escapeCsvCell(draft.addressStreet),
+      escapeCsvCell(draft.addressPostalCode),
+      escapeCsvCell(draft.addressCity),
+      escapeCsvCell(draft.addressCountry),
+      escapeCsvCell(draft.birthDate),
+      escapeCsvCell(draft.registryNumber),
+      escapeCsvCell(draft.registryCourt),
+      escapeCsvCell(draft.foundedYear),
+      escapeCsvCell(draft.employeeCount),
+      escapeCsvCell(draft.vatId),
       escapeCsvCell(draft.note),
     ].join(",");
 
@@ -765,6 +828,19 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         contactName: "",
         phone: "",
         email: "",
+        website: "",
+        industry: "",
+        address: "",
+        addressStreet: "",
+        addressPostalCode: "",
+        addressCity: "",
+        addressCountry: "DE",
+        birthDate: "",
+        registryNumber: "",
+        registryCourt: "",
+        foundedYear: "",
+        employeeCount: "",
+        vatId: "",
         owner: "Agentur-Duic",
         note: "",
       });
@@ -922,6 +998,26 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [selectedLead]);
 
+  const saveLeadStammdaten = useCallback(() => {
+    if (!leadDetailsDraft) return;
+    const foundedYear = leadDetailsDraft.foundedYear.trim() ? Number(leadDetailsDraft.foundedYear) : undefined;
+    const employeeCount = leadDetailsDraft.employeeCount.trim() ? Number(leadDetailsDraft.employeeCount) : undefined;
+    if (foundedYear !== undefined && (!Number.isSafeInteger(foundedYear) || foundedYear < 1)) {
+      setNotice("✗ Gründungsjahr muss eine gültige Jahreszahl sein.");
+      return;
+    }
+    if (employeeCount !== undefined && (!Number.isSafeInteger(employeeCount) || employeeCount < 0)) {
+      setNotice("✗ Mitarbeiterzahl muss eine positive Ganzzahl sein.");
+      return;
+    }
+    void updateSelectedLead({
+      ...leadDetailsDraft,
+      foundedYear,
+      employeeCount,
+      location: leadDetailsDraft.addressCity || "",
+    }, "Stammdaten gespeichert");
+  }, [leadDetailsDraft, updateSelectedLead]);
+
   const syncSelectedCompanyToCrm = useCallback(async () => {
     if (!selectedLead || !leadDetailsDraft || selectedLead.callSource !== "crm" || !Number.isSafeInteger(selectedLead.crmCompanyId)) {
       setNotice("✗ Dieser Kontakt ist keiner CRM-Firma zugeordnet.");
@@ -929,25 +1025,59 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
 
     const data = selectedLead.crmCompanyData || {};
-    const values: Record<string, string | null> = {
+    let foundedYear: number | null;
+    let employeeCount: number | null;
+    try {
+      foundedYear = leadDetailsDraft.foundedYear.trim() ? Number(leadDetailsDraft.foundedYear) : null;
+      employeeCount = leadDetailsDraft.employeeCount.trim() ? Number(leadDetailsDraft.employeeCount) : null;
+      if (foundedYear !== null && (!Number.isSafeInteger(foundedYear) || foundedYear < 1)) {
+        throw new Error("Gründungsjahr muss eine gültige Jahreszahl sein.");
+      }
+      if (employeeCount !== null && (!Number.isSafeInteger(employeeCount) || employeeCount < 0)) {
+        throw new Error("Mitarbeiterzahl muss eine positive Ganzzahl sein.");
+      }
+    } catch (error) {
+      setNotice(`✗ ${error instanceof Error ? error.message : "Zahlenfeld ist ungültig."}`);
+      return;
+    }
+
+    const values: Record<string, string | number | null> = {
       name: leadDetailsDraft.company.trim(),
       contact_person: (leadDetailsDraft.contactName || "").trim() || null,
+      contact_birthdate: (leadDetailsDraft.birthDate || "").trim() || null,
       phone: (leadDetailsDraft.phone || "").trim() || null,
       email: (leadDetailsDraft.email || "").trim() || null,
+      website: (leadDetailsDraft.website || "").trim() || null,
+      industry: (leadDetailsDraft.industry || "").trim() || null,
+      address: (leadDetailsDraft.address || "").trim() || null,
       street: (leadDetailsDraft.addressStreet || "").trim() || null,
       postal_code: (leadDetailsDraft.addressPostalCode || "").trim() || null,
       city: (leadDetailsDraft.addressCity || "").trim() || null,
       country: (leadDetailsDraft.addressCountry || "").trim() || null,
+      registry_number: (leadDetailsDraft.registryNumber || "").trim() || null,
+      registry_court: (leadDetailsDraft.registryCourt || "").trim() || null,
+      founded_year: foundedYear,
+      employee_count: employeeCount,
+      vat_id: (leadDetailsDraft.vatId || "").trim() || null,
     };
     const original: Record<string, unknown> = {
       name: data.name ?? selectedLead.company,
       contact_person: data.contact_person ?? selectedLead.contactName,
+      contact_birthdate: data.contact_birthdate ?? selectedLead.birthDate,
       phone: data.phone ?? selectedLead.phone,
       email: data.email ?? selectedLead.email,
+      website: data.website ?? selectedLead.website,
+      industry: data.industry ?? selectedLead.industry,
+      address: data.address ?? selectedLead.address,
       street: data.street ?? selectedLead.addressStreet,
       postal_code: data.postal_code ?? selectedLead.addressPostalCode,
       city: data.city ?? selectedLead.addressCity,
       country: data.country ?? selectedLead.addressCountry,
+      registry_number: data.registry_number ?? selectedLead.registryNumber,
+      registry_court: data.registry_court ?? selectedLead.registryCourt,
+      founded_year: data.founded_year ?? selectedLead.foundedYear,
+      employee_count: data.employee_count ?? selectedLead.employeeCount,
+      vat_id: data.vat_id ?? selectedLead.vatId,
     };
     const companyUpdates = Object.fromEntries(
       Object.entries(values).filter(([field, value]) => value !== (typeof original[field] === "string" ? original[field].trim() : null)),
@@ -984,10 +1114,18 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         directDial: payload.lead.directDial || "",
         email: payload.lead.email || "",
         birthDate: payload.lead.birthDate || "",
+        website: payload.lead.website || "",
+        industry: payload.lead.industry || "",
+        address: payload.lead.address || "",
         addressStreet: payload.lead.addressStreet || "",
         addressPostalCode: payload.lead.addressPostalCode || "",
         addressCity: payload.lead.addressCity || "",
         addressCountry: payload.lead.addressCountry || "",
+        registryNumber: payload.lead.registryNumber || "",
+        registryCourt: payload.lead.registryCourt || "",
+        foundedYear: payload.lead.foundedYear === undefined ? "" : String(payload.lead.foundedYear),
+        employeeCount: payload.lead.employeeCount === undefined ? "" : String(payload.lead.employeeCount),
+        vatId: payload.lead.vatId || "",
         customerKind: payload.lead.customerKind,
         customerOwner: payload.lead.customerOwner,
       });
@@ -1418,10 +1556,18 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       directDial: selectedLead.directDial || "",
       email: selectedLead.email || "",
       birthDate: selectedLead.birthDate || "",
+      website: selectedLead.website || "",
+      industry: selectedLead.industry || "",
+      address: selectedLead.address || "",
       addressStreet: selectedLead.addressStreet || "",
       addressPostalCode: selectedLead.addressPostalCode || "",
       addressCity: selectedLead.addressCity || "",
       addressCountry: selectedLead.addressCountry || "",
+      registryNumber: selectedLead.registryNumber || "",
+      registryCourt: selectedLead.registryCourt || "",
+      foundedYear: selectedLead.foundedYear === undefined ? "" : String(selectedLead.foundedYear),
+      employeeCount: selectedLead.employeeCount === undefined ? "" : String(selectedLead.employeeCount),
+      vatId: selectedLead.vatId || "",
       customerKind: selectedLead.customerKind,
       customerOwner: selectedLead.customerOwner,
     } : null);
@@ -1610,7 +1756,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 {appointmentProspects.map(({ lead, appointmentAt }) => (
                   <tr key={lead.id}>
                     <td><strong>{lead.company}</strong></td>
-                    <td>{lead.contactName || "-"}</td>
+                    <td>{lead.contactGroupNames || lead.contactName || "-"}</td>
                     <td>{lead.phone || lead.directDial || "-"}</td>
                     <td>{formatDate(appointmentAt)}</td>
                     <td>
@@ -1659,9 +1805,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <div className="add-customer-panel top-gap">
               <div className="add-customer-grid">
                 <label>Firma *<input className="input" aria-label="Firmenname" value={addCustomerDraft.company} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, company: event.target.value }))} /></label>
-                <label>Ansprechpartner<input className="input" value={addCustomerDraft.contactName} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
-                <label>Telefon *<input className="input" type="tel" value={addCustomerDraft.phone} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
+                <label>Geschäftsführer / Ansprechpartner<input className="input" placeholder="Mehrere Namen mit / trennen" value={addCustomerDraft.contactName} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, contactName: event.target.value }))} /></label>
+                <label>Telefon<input className="input" type="tel" value={addCustomerDraft.phone} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, phone: event.target.value }))} /></label>
                 <label>E-Mail<input className="input" type="email" value={addCustomerDraft.email} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, email: event.target.value }))} /></label>
+                <label>Website<input className="input" type="url" value={addCustomerDraft.website} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, website: event.target.value }))} /></label>
+                <label>Branche<input className="input" value={addCustomerDraft.industry} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, industry: event.target.value }))} /></label>
+                <label>Gesamtadresse<input className="input" value={addCustomerDraft.address} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, address: event.target.value }))} /></label>
+                <label>Straße und Hausnummer<input className="input" value={addCustomerDraft.addressStreet} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, addressStreet: event.target.value }))} /></label>
+                <label>PLZ<input className="input" value={addCustomerDraft.addressPostalCode} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, addressPostalCode: event.target.value }))} /></label>
+                <label>Ort<input className="input" value={addCustomerDraft.addressCity} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, addressCity: event.target.value }))} /></label>
+                <label>Land<input className="input" value={addCustomerDraft.addressCountry} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, addressCountry: event.target.value }))} /></label>
+                <label>Geburtsdatum Ansprechpartner<input className="input" type="date" value={addCustomerDraft.birthDate} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, birthDate: event.target.value }))} /></label>
+                <label>Handelsregisternummer<input className="input" value={addCustomerDraft.registryNumber} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, registryNumber: event.target.value }))} /></label>
+                <label>Registergericht<input className="input" value={addCustomerDraft.registryCourt} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, registryCourt: event.target.value }))} /></label>
+                <label>Gründungsjahr<input className="input" type="number" min="1" step="1" value={addCustomerDraft.foundedYear} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, foundedYear: event.target.value }))} /></label>
+                <label>Mitarbeiterzahl<input className="input" type="number" min="0" step="1" value={addCustomerDraft.employeeCount} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, employeeCount: event.target.value }))} /></label>
+                <label>Umsatzsteuer-ID<input className="input" value={addCustomerDraft.vatId} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, vatId: event.target.value }))} /></label>
                 <label>Vertriebseinheit<select className="input" value={addCustomerDraft.owner} onChange={(event) => setAddCustomerDraft((current) => ({ ...current, owner: event.target.value as ManualCustomerDraft["owner"] }))}>
                   <option value="Agentur-Duic">Agentur-Duic</option>
                   <option value="BarmeniaGothaer">BarmeniaGothaer</option>
@@ -1788,7 +1947,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                         />
                       </td>
                       <td><strong>{lead.company}</strong></td>
-                      <td>{lead.contactName || "-"}</td>
+                      <td>{lead.contactGroupNames || lead.contactName || "-"}</td>
                       <td>{lead.phone || lead.directDial || "-"}</td>
                       <td>{lead.email || "-"}</td>
                       {isFirmListContacts ? <>
@@ -1869,20 +2028,29 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <>
                     <div className="add-customer-grid">
                       <label>Firma<input className="input" placeholder="Firmenname" value={leadDetailsDraft.company} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, company: event.target.value } : current)} /></label>
-                      <label>Ansprechpartner<input className="input" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
+                      <label>Geschäftsführer / Ansprechpartner<input className="input" placeholder="Mehrere Namen mit / trennen" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
                       <label>Telefon<input className="input" type="tel" value={leadDetailsDraft.phone} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, phone: event.target.value } : current)} /></label>
                       <label>Direktwahl / Mobil<input className="input" type="tel" value={leadDetailsDraft.directDial || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, directDial: event.target.value } : current)} /></label>
                       <label>E-Mail<input className="input" type="email" value={leadDetailsDraft.email || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, email: event.target.value } : current)} /></label>
+                      <label>Website<input className="input" type="url" value={leadDetailsDraft.website || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, website: event.target.value } : current)} /></label>
+                      <label>Branche<input className="input" value={leadDetailsDraft.industry || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, industry: event.target.value } : current)} /></label>
+                      <label>Gesamtadresse<input className="input" value={leadDetailsDraft.address || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, address: event.target.value } : current)} /></label>
                       <label>Straße und Hausnummer<input className="input" value={leadDetailsDraft.addressStreet || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressStreet: event.target.value } : current)} /></label>
                       <label>PLZ<input className="input" value={leadDetailsDraft.addressPostalCode || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressPostalCode: event.target.value } : current)} /></label>
                       <label>Ort<input className="input" value={leadDetailsDraft.addressCity || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCity: event.target.value } : current)} /></label>
                       <label>Land<input className="input" value={leadDetailsDraft.addressCountry || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCountry: event.target.value } : current)} /></label>
+                      <label>Geburtsdatum Ansprechpartner<input className="input" type="date" value={leadDetailsDraft.birthDate || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, birthDate: event.target.value } : current)} /></label>
+                      <label>Handelsregisternummer<input className="input" value={leadDetailsDraft.registryNumber || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, registryNumber: event.target.value } : current)} /></label>
+                      <label>Registergericht<input className="input" value={leadDetailsDraft.registryCourt || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, registryCourt: event.target.value } : current)} /></label>
+                      <label>Gründungsjahr<input className="input" type="number" min="1" step="1" value={leadDetailsDraft.foundedYear} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, foundedYear: event.target.value } : current)} /></label>
+                      <label>Mitarbeiterzahl<input className="input" type="number" min="0" step="1" value={leadDetailsDraft.employeeCount} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, employeeCount: event.target.value } : current)} /></label>
+                      <label>Umsatzsteuer-ID<input className="input" value={leadDetailsDraft.vatId || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, vatId: event.target.value } : current)} /></label>
                       <label>Vertriebseinheit<select className="input" value={leadDetailsDraft.customerOwner || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, customerOwner: (event.target.value || undefined) as Lead["customerOwner"] } : current)}>
                         <option value="">Vertriebseinheit</option><option value="Agentur-Duic">Agentur-Duic</option><option value="BarmeniaGothaer">BarmeniaGothaer</option>
                       </select></label>
                     </div>
                     <div className="detail-actions-row">
-                      <button className="btn" disabled={busy} onClick={() => void updateSelectedLead({ ...leadDetailsDraft, location: leadDetailsDraft.addressCity || "" }, "Kontaktdaten gespeichert")}>Kontaktdaten speichern</button>
+                      <button className="btn" disabled={busy} onClick={saveLeadStammdaten}>Stammdaten speichern</button>
                       {selectedLead.callSource === "crm" && Number.isSafeInteger(selectedLead.crmCompanyId) ? (
                         <button className="btn ghost" disabled={busy || crmSyncing} onClick={() => void syncSelectedCompanyToCrm()}>
                           {crmSyncing ? "Abgleich läuft..." : "Firmendaten in CRM abgleichen"}
@@ -1890,6 +2058,40 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       ) : null}
                     </div>
                   </>
+                ) : null}
+                {selectedLead.callSource === "crm" ? (
+                  <details className="crm-related-data top-gap">
+                    <summary>Alle Stammdatenfelder aus der Firmendatenbank</summary>
+                    <dl className="report-facts crm-company-facts">
+                      {crmCompanyStammdatenFields.map((key) => (
+                        <div key={key}>
+                          <dt>{formatCrmFieldLabel(key)}</dt>
+                          <dd>{formatCrmFieldValue(companyData[key]) || "–"}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {crmContacts.length ? (
+                      <section className="crm-related-data"><h4>Geschäftsführer / Ansprechpartner</h4>
+                        {crmContacts.map((person, index) => (
+                          <article className="crm-related-card" key={`stammdaten-contact-${index}`}>
+                            <strong>{formatCrmFieldValue(person.name) || "Kontakt"}</strong>
+                            <span>{formatCrmFieldValue(person.title || person.position) || "–"}</span>
+                            <span>Geburtsdatum: {formatCrmFieldValue(person.birthdate || person.birthDate) || "–"}</span>
+                          </article>
+                        ))}
+                      </section>
+                    ) : null}
+                    {crmCustomFields.length ? (
+                      <section className="crm-related-data"><h4>Zusätzliche Datenbankfelder</h4>
+                        {crmCustomFields.map((field, index) => (
+                          <article className="crm-related-card" key={`stammdaten-field-${index}`}>
+                            <strong>{formatCrmFieldValue(field.field_name || field.fieldName)}</strong>
+                            <span>{formatCrmFieldValue(field.field_value || field.fieldValue) || "–"}</span>
+                          </article>
+                        ))}
+                      </section>
+                    ) : null}
+                  </details>
                 ) : null}
                 <div className="subtle top-gap">Kontaktstatus: {isLeadCustomer(selectedLead) ? "Kunde" : "Interessent"}{isFirmListLeadOrRun(selectedLead) || (isLeadCustomer(selectedLead) && selectedLead.customerKind === "firma") ? "" : ` · Thema: ${selectedLead.topic}`}</div>
               </div>
@@ -1910,6 +2112,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <article className="crm-related-card" key={`contact-${index}`}>
                     <strong>{formatCrmFieldValue(person.name) || "Kontakt"}</strong>
                     <span>{formatCrmFieldValue(person.title || person.position)}</span>
+                    <span>Geburtsdatum: {formatCrmFieldValue(person.birthdate || person.birthDate) || "–"}</span>
                     <span>{formatCrmFieldValue(person.phone || person.mobile)}</span>
                     <span>{formatCrmFieldValue(person.email)}</span>
                   </article>

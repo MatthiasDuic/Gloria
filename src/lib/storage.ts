@@ -529,15 +529,23 @@ const CSV_HEADER_ALIASES: Record<string, string[]> = {
   company: ["company", "firma", "unternehmen", "firmenname"],
   contactName: ["contactname", "ansprechpartner", "kontakt", "kontaktperson", "name"],
   birthDate: ["birthdate", "geburtsdatum", "geburtstag"],
+  website: ["website", "webseite", "url"],
+  industry: ["industry", "branche"],
   phone: ["phone", "telefon", "telefonnummer", "rufnummer", "nummer"],
   directDial: ["directdial", "durchwahl", "direktdurchwahl", "mobil", "handy"],
   additionalPhones: ["additionalphones", "weiteretelefonnummern", "weitererufnummern", "zusatznummern", "telefon2", "telefonnummern"],
   email: ["email", "mail", "e-mail"],
   location: ["location", "ort", "stadt"],
-  addressStreet: ["addressstreet", "strasse", "straße", "strasseundnummer", "adresse"],
+  address: ["address", "gesamtadresse", "firmenadresse", "anschrift"],
+  addressStreet: ["addressstreet", "strasse", "straße", "strasseundnummer", "strasseundhausnummer"],
   addressPostalCode: ["addresspostalcode", "plz", "postleitzahl"],
   addressCity: ["addresscity", "stadt", "ort"],
   addressCountry: ["addresscountry", "land", "country"],
+  registryNumber: ["registrynumber", "handelsregisternummer", "handelsregisternr"],
+  registryCourt: ["registrycourt", "registergericht"],
+  foundedYear: ["foundedyear", "gruendungsjahr", "gründungsjahr"],
+  employeeCount: ["employeecount", "mitarbeiterzahl", "mitarbeiter"],
+  vatId: ["vatid", "ustid", "ustidnr", "umsatzsteuerid"],
   products: ["products", "produkt", "produkte", "product"],
   topic: ["topic", "thema", "bereich"],
   note: ["note", "notiz", "bemerkung", "hinweis"],
@@ -565,6 +573,10 @@ function splitProducts(value: string): string[] {
     .split(/[;,|\n]/)
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function splitContactNames(value: string): string[] {
+  return [...new Set(value.split(/\s*\/\s*/).map((name) => name.trim()).filter(Boolean))];
 }
 
 function buildHeaderIndex(headerRow: string[]): Record<string, number> {
@@ -1387,16 +1399,25 @@ export async function importLeadsFromCsv(
       customerOwner,
       company: company || `Firma ${index + 1}`,
       contactName: contactName || "Empfang",
+      contactNames: splitContactNames(contactName),
       birthDate: birthDate || undefined,
+      website: lookup("website") || undefined,
+      industry: lookup("industry") || undefined,
       phone: lookup("phone") || "",
       directDial: directDial || undefined,
       additionalPhones: additionalPhones.length ? additionalPhones : undefined,
       email: lookup("email") || undefined,
       location: location || undefined,
+      address: lookup("address") || undefined,
       addressStreet: lookup("addressStreet") || undefined,
       addressPostalCode: lookup("addressPostalCode") || undefined,
       addressCity: lookup("addressCity") || location || undefined,
       addressCountry: lookup("addressCountry") || undefined,
+      registryNumber: lookup("registryNumber") || undefined,
+      registryCourt: lookup("registryCourt") || undefined,
+      foundedYear: Number.parseInt(lookup("foundedYear"), 10) || undefined,
+      employeeCount: Number.parseInt(lookup("employeeCount"), 10) || undefined,
+      vatId: lookup("vatId") || undefined,
       products: products.length ? products : undefined,
       topic: options?.lifecycle === "customer" && customerKind === "firma"
         ? ""
@@ -1442,6 +1463,7 @@ export interface CrmCompanyImport {
   phone?: string;
   email?: string;
   contactName?: string;
+  contactNames?: string[];
   topic?: string;
   crmCompanyData: Record<string, unknown>;
 }
@@ -1470,7 +1492,7 @@ function buildCrmCallContext(record: CrmCompanyImport): string {
             .join(" – ");
         })
         .filter(Boolean)
-        .join("; ")
+        .join(" / ")
     : "";
   const notes = Array.isArray(data.notes)
     ? data.notes
@@ -1528,6 +1550,12 @@ export async function importLeadsFromCrm(
       if (matchesImport(nextLeads[index])) nextLeads.splice(index, 1);
     }
 
+    const contactNames = [...new Set(
+      (record.contactNames?.length ? record.contactNames : splitContactNames(record.contactName || ""))
+        .map((name) => name.trim())
+        .filter(Boolean),
+    )];
+    const contactGroupNames = contactNames.join(" / ");
     const lead: Lead = {
       ...prior,
       id: prior?.id || createLeadId(),
@@ -1539,15 +1567,26 @@ export async function importLeadsFromCrm(
       listName,
       lifecycle: "prospect",
       company: record.company,
-      contactName: record.contactName?.trim() || "Empfang",
+      contactName: contactGroupNames || record.contactName?.trim() || "Empfang",
+      contactNames,
+      contactGroupNames: contactNames.length > 1 ? contactGroupNames : undefined,
+      birthDate: typeof record.crmCompanyData.contact_birthdate === "string" ? record.crmCompanyData.contact_birthdate : prior?.birthDate,
       phone: record.phone?.trim() || "",
       email: record.email?.trim() || undefined,
       directDial: typeof record.crmCompanyData.phone === "string" ? record.crmCompanyData.phone : prior?.directDial,
+      website: typeof record.crmCompanyData.website === "string" ? record.crmCompanyData.website : prior?.website,
+      industry: typeof record.crmCompanyData.industry === "string" ? record.crmCompanyData.industry : prior?.industry,
       location: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.location,
+      address: typeof record.crmCompanyData.address === "string" ? record.crmCompanyData.address : prior?.address,
       addressStreet: typeof record.crmCompanyData.street === "string" ? record.crmCompanyData.street : prior?.addressStreet,
       addressPostalCode: typeof record.crmCompanyData.postal_code === "string" ? record.crmCompanyData.postal_code : prior?.addressPostalCode,
       addressCity: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.addressCity,
       addressCountry: typeof record.crmCompanyData.country === "string" ? record.crmCompanyData.country : prior?.addressCountry,
+      registryNumber: typeof record.crmCompanyData.registry_number === "string" ? record.crmCompanyData.registry_number : prior?.registryNumber,
+      registryCourt: typeof record.crmCompanyData.registry_court === "string" ? record.crmCompanyData.registry_court : prior?.registryCourt,
+      foundedYear: typeof record.crmCompanyData.founded_year === "number" ? record.crmCompanyData.founded_year : prior?.foundedYear,
+      employeeCount: typeof record.crmCompanyData.employee_count === "number" ? record.crmCompanyData.employee_count : prior?.employeeCount,
+      vatId: typeof record.crmCompanyData.vat_id === "string" ? record.crmCompanyData.vat_id : prior?.vatId,
       topic: "",
       note: buildCrmCallContext(record),
       status: prior?.status || "neu",
@@ -2281,17 +2320,29 @@ export async function createCampaignRunFromFirmList(
   const sourceListName = formatFirmListName(sourceLeads[0].listName || "");
   const listId = `crm-run-${createLeadId()}`;
   const listName = `${sourceListName} · ${campaignTopic}`;
-  const runLeads = sourceLeads.map((lead, index): Lead => ({
-    ...lead,
-    id: createLeadId(index),
-    listId,
-    listName,
-    topic: campaignTopic,
-    lifecycle: "prospect",
-    status: "neu",
-    attempts: 0,
-    nextCallAt: undefined,
-  }));
+  const runLeads = sourceLeads.flatMap((lead, leadIndex): Lead[] => {
+    const names = [...new Set(
+      (lead.contactNames?.length ? lead.contactNames : splitContactNames(lead.contactName || ""))
+        .map((name) => name.trim())
+        .filter(Boolean),
+    )];
+    const callTargets = names.length > 0 ? names : [lead.contactName || "Empfang"];
+    const contactGroupNames = names.length > 1 ? names.join(" / ") : undefined;
+    return callTargets.map((contactName, personIndex): Lead => ({
+      ...lead,
+      id: createLeadId(leadIndex * 100 + personIndex),
+      contactName,
+      contactNames: names,
+      contactGroupNames,
+      listId,
+      listName,
+      topic: campaignTopic,
+      lifecycle: "prospect",
+      status: "neu",
+      attempts: 0,
+      nextCallAt: undefined,
+    }));
+  });
   const campaignState = await readCampaignState(userId);
   campaignState.lists.unshift({
     userId,

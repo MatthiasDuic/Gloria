@@ -320,19 +320,34 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
     crmCompanyId: 911,
     company: "Testfirma GmbH",
     phone: "+49233112345",
+    contactName: "Max Beispiel / Erika Muster",
+    contactNames: ["Max Beispiel", "Erika Muster"],
     topic: "Energie",
     crmCompanyData: {
+      website: "https://testfirma.example",
       street: "Hauptstraße 1",
       postal_code: "45549",
       city: "Sprockhövel",
       country: "Deutschland",
       industry: "Maschinenbau",
       employee_count: 42,
+      founded_year: 1998,
+      registry_number: "HRB 12345",
+      registry_court: "Amtsgericht Essen",
+      vat_id: "DE123456789",
     },
   }], options);
 
   const importedLead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
   assert.equal(importedLead.topic, "");
+  assert.deepEqual(importedLead.contactNames, ["Max Beispiel", "Erika Muster"]);
+  assert.equal(importedLead.contactGroupNames, "Max Beispiel / Erika Muster");
+  assert.equal(importedLead.website, "https://testfirma.example");
+  assert.equal(importedLead.foundedYear, 1998);
+  assert.equal(importedLead.employeeCount, 42);
+  assert.equal(importedLead.registryNumber, "HRB 12345");
+  assert.equal(importedLead.registryCourt, "Amtsgericht Essen");
+  assert.equal(importedLead.vatId, "DE123456789");
   assert.equal(importedLead.listName, "Firmenliste: Testfirma");
   assert.equal(importedLead.addressStreet, "Hauptstraße 1");
   assert.equal(importedLead.addressPostalCode, "45549");
@@ -355,6 +370,11 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
   const dialedLead = await storage.pullNextLeadForCampaignList(firstRun.listId, options.userId);
   assert.equal(dialedLead?.topic, "betriebliche Krankenversicherung");
   assert.equal(dialedLead?.status, "angerufen");
+  assert.equal(dialedLead?.contactName, "Max Beispiel");
+  assert.equal(dialedLead?.contactGroupNames, "Max Beispiel / Erika Muster");
+  const secondDialedLead = await storage.pullNextLeadForCampaignList(firstRun.listId, options.userId);
+  assert.equal(secondDialedLead?.contactName, "Erika Muster");
+  assert.equal(secondDialedLead?.contactGroupNames, "Max Beispiel / Erika Muster");
 
   const secondRun = await storage.createCampaignRunFromFirmList(
     options.listId,
