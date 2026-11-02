@@ -72,6 +72,42 @@ type EnrichmentProgress = {
   }>;
 };
 
+async function readResearchResponse(response: Response): Promise<{
+  error?: string;
+  company?: string;
+  fields?: Array<{ label: string; value: string }>;
+  sources?: Array<{ title: string; url: string }>;
+  crmSyncError?: string;
+}> {
+  const body = await response.text();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    if (response.status === 504) {
+      throw new Error("Die Recherche hat das Zeitlimit erreicht. Die Firma wurde nicht verarbeitet; Sie können es später erneut versuchen.");
+    }
+    throw new Error(`Gloria lieferte eine ungültige Antwort (HTTP ${response.status}). Bitte versuchen Sie es erneut.`);
+  }
+  if (!response.ok) {
+    const error = typeof payload === "object" && payload !== null && "error" in payload
+      && typeof payload.error === "string"
+      ? payload.error
+      : `Recherche fehlgeschlagen (HTTP ${response.status}).`;
+    throw new Error(error);
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error("Gloria lieferte eine ungültige Rechercheantwort.");
+  }
+  return payload as {
+    error?: string;
+    company?: string;
+    fields?: Array<{ label: string; value: string }>;
+    sources?: Array<{ title: string; url: string }>;
+    crmSyncError?: string;
+  };
+}
+
 type SessionUser = {
   id: string;
   username: string;
@@ -1442,14 +1478,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ leadId: lead.id }),
         });
-        const payload = await response.json() as {
-          error?: string;
-          company?: string;
-          fields?: Array<{ label: string; value: string }>;
-          sources?: Array<{ title: string; url: string }>;
-          crmSyncError?: string;
-        };
-        if (!response.ok) throw new Error(payload.error || `Recherche fehlgeschlagen (HTTP ${response.status}).`);
+        const payload = await readResearchResponse(response);
         const fields = Array.isArray(payload.fields) ? payload.fields : [];
         updatedFieldCount += fields.length;
         results.push({

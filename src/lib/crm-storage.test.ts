@@ -668,6 +668,50 @@ test("company research fills only still-empty fields and returns web sources", a
   }
 });
 
+test("company research reports provider timeouts as a structured JSON error", async () => {
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  await seed([{
+    ...sampleLead,
+    callSource: "crm",
+    crmCompanyId: 925,
+    listId: "crm-search-timeout",
+    company: "Timeout GmbH",
+    phone: "",
+    crmCompanyData: {},
+  }]);
+
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = "test-openai-key";
+  globalThis.fetch = async () => {
+    throw Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" });
+  };
+  try {
+    const { POST } = await import("../app/api/campaigns/research/route");
+    const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({
+      id: sampleLead.userId!,
+      username: sampleLead.userId!,
+      role: "user",
+      realName: "",
+      companyName: "",
+      gesellschaft: "",
+    })}`;
+    const response = await POST(new Request("http://localhost/api/campaigns/research", {
+      method: "POST",
+      headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: sampleLead.id }),
+    }));
+    assert.equal(response.status, 504);
+    assert.match((await response.json()).error, /zu lange gedauert/);
+    const lead = await storage.getLeadById(sampleLead.id, sampleLead.userId);
+    assert.equal(lead?.phone, "");
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+});
+
 test("firm list reads migrate legacy CRM theme defaults to an empty topic", async () => {
   await seed([{
     ...sampleLead,

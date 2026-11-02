@@ -6,7 +6,7 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { buildLeadCallContext, getLeadById, updateLeadDetails } from "@/lib/storage";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const FIELD_SCHEMA = {
   type: "object",
@@ -252,7 +252,7 @@ export async function POST(request: Request) {
         },
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(55_000),
+      signal: AbortSignal.timeout(240_000),
     });
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => ({})) as unknown;
@@ -333,6 +333,11 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Webrecherche für CRM-Firma fehlgeschlagen:", error);
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      return NextResponse.json({
+        error: "Die Webrecherche hat zu lange gedauert. Für diese Firma wurden keine Rechercheergebnisse übernommen. Bitte versuchen Sie es später erneut.",
+      }, { status: 504 });
+    }
     return NextResponse.json({
       error: error instanceof Error ? error.message : "Webrecherche fehlgeschlagen.",
     }, { status: 502 });
