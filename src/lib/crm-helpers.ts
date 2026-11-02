@@ -45,6 +45,24 @@ export interface CampaignContactSelection {
 
 export class CampaignContactSelectionError extends Error {}
 
+const crmSortCollator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+
+export function compareCrmSortValues(
+  left: string | number | undefined,
+  right: string | number | undefined,
+  direction: "asc" | "desc",
+): number {
+  const a = typeof left === "string" ? left.trim() : left;
+  const b = typeof right === "string" ? right.trim() : right;
+  const aEmpty = a === undefined || a === "" || (typeof a === "number" && !Number.isFinite(a));
+  const bEmpty = b === undefined || b === "" || (typeof b === "number" && !Number.isFinite(b));
+  if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+  const result = typeof a === "number" && typeof b === "number"
+    ? a - b
+    : crmSortCollator.compare(String(a), String(b));
+  return direction === "asc" ? result : -result;
+}
+
 export function getCompanyContactPersons(lead: Lead): CompanyContactPerson[] {
   const contacts = new Map<string, CompanyContactPerson>();
   const data = lead.crmCompanyData || {};

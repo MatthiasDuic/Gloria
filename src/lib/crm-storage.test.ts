@@ -132,6 +132,33 @@ test("callback rescheduling and completion persist without changing another user
   assert.equal((await storage.getLeadById(other.id, "other-user"))?.nextCallAt, other.nextCallAt);
 });
 
+test("bulk contact deletion removes only selected user-owned contacts and preserves reports", async () => {
+  const { POST } = await import("../app/api/campaigns/lists/route");
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  await seed([
+    { ...sampleLead, id: "selected-a" },
+    { ...sampleLead, id: "selected-b", lifecycle: "customer" },
+    { ...sampleLead, id: "unselected" },
+    { ...sampleLead, id: "foreign", userId: "other-user" },
+  ]);
+  const reportPath = path.join(fixtureDirectory, "data", "report-database.json");
+  const reportsBefore = await readFile(reportPath, "utf8");
+  const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({
+    id: "test-user", username: "test-user", role: "user", realName: "", companyName: "", gesellschaft: "",
+  })}`;
+  const response = await POST(new Request("http://localhost/api/campaigns/lists", {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete_leads", leadIds: ["selected-a", "selected-b", "selected-a", "foreign"] }),
+  }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).removed, 2);
+  assert.equal(await storage.getLeadById("selected-a", "test-user"), undefined);
+  assert.equal(await storage.getLeadById("selected-b", "test-user"), undefined);
+  assert.ok(await storage.getLeadById("unselected", "test-user"));
+  assert.ok(await storage.getLeadById("foreign", "other-user"));
+  assert.equal(await readFile(reportPath, "utf8"), reportsBefore);
+});
+
 test("deleting a campaign preserves explicit and legacy customers in the customer lifecycle", async () => {
   const customer: Lead = { ...sampleLead, id: "customer", lifecycle: "customer" };
   const legacy: Lead = { ...sampleLead, id: "legacy", lifecycle: undefined, listName: "Manuell hinzugefügt" };

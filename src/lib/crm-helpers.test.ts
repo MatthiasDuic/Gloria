@@ -8,6 +8,7 @@ import {
   getLeadCustomerKindFormConfig,
   getCrmWorkspaceLeads,
   getCompanyContactPersons,
+  compareCrmSortValues,
   getCallSource,
   getCallWorkspaceData,
   isDueGloriaTask,
@@ -20,6 +21,23 @@ import {
 } from "./crm-helpers.ts";
 import type { CallReport, DashboardData, Lead } from "./types";
 import { CALENDAR_VIEWS, formatCalendarPeriod, getCalendarDays, getCalendarEntryColor, moveCalendarDate, saveCalendarCallback } from "./calendar-view";
+
+test("CRM column sorting uses German natural order, numeric counts and empty values last in both directions", () => {
+  const sort = (values: Array<string | number | undefined>, direction: "asc" | "desc") =>
+    [...values].sort((a, b) => compareCrmSortValues(a, b, direction));
+  assert.deepEqual(sort(["Zebra", "Äpfel", "Firma 10", "firma 2", "", "  "], "asc"),
+    ["Äpfel", "firma 2", "Firma 10", "Zebra", "", "  "]);
+  assert.deepEqual(sort(["Zebra", "Äpfel", "Firma 10", "firma 2", "", "  "], "desc"),
+    ["Zebra", "Firma 10", "firma 2", "Äpfel", "", "  "]);
+  assert.deepEqual(sort([100, 2, 0, 10, "", NaN], "asc"), [0, 2, 10, 100, "", NaN]);
+  assert.deepEqual(sort([100, 2, 0, 10, "", NaN], "desc"), [100, 10, 2, 0, "", NaN]);
+  assert.equal(compareCrmSortValues(" alpha ", "ALPHA", "asc"), 0);
+  assert.ok(compareCrmSortValues("+49 20", "+49 100", "asc") < 0);
+  assert.ok(compareCrmSortValues("a@example.de", "z@example.de", "desc") > 0);
+  assert.equal(compareCrmSortValues(undefined, "", "desc"), 0);
+  const contacts = [{ id: "one", value: "Same" }, { id: "two", value: "same" }];
+  assert.deepEqual([...contacts].sort((a, b) => compareCrmSortValues(a.value, b.value, "desc")), contacts);
+});
 
 test("company contacts retain individual birthdays from CRM snapshots without persisted contactNames", () => {
   const lead: Lead = {

@@ -100,6 +100,10 @@ Im Gloria-CRM lädt **„Aktualisieren“** Kontakte, Reports und Firmenlisten o
 
 In einer importierten Firmenakte lassen sich bearbeitete Firmendaten über **„Firmendaten in CRM abgleichen“** gezielt zurückschreiben. Gloria-Gesprächsnotizen und vereinbarte Gesprächstermine werden bei CRM-Firmen automatisch an das gekoppelte CRM-Konto übertragen. Team- und Feldberechtigungen im CRM bleiben maßgeblich; die Vertriebs-Pipeline wird in Gloria nicht angezeigt.
 
+Über jeder Kontakttabelle zeigt eine beim Scrollen sichtbare Auswahlleiste die Anzahl markierter Einträge. Kontakte lassen sich einzeln per Checkbox oder über **„Alle angezeigten auswählen“** markieren und nach Bestätigung mit **„Ausgewählte löschen“** gemeinsam entfernen. Die Aktion berücksichtigt ausschließlich markierte Kontakte der aktuell gefilterten Ansicht; ausgeblendete Markierungen werden nicht mitgelöscht. **„Auswahl aufheben“** entfernt alle Markierungen. Gelöscht wird nur in Gloria, nicht in der Firmendatenbank; Gesprächsreports bleiben erhalten.
+
+Die Daten-Spalten der Kontakttabelle lassen sich per Klick auf ihre Überschrift aufsteigend und mit erneutem Klick absteigend sortieren. Ein Pfeil kennzeichnet die aktive Sortierung. Texte verwenden deutsche, nicht zwischen Groß- und Kleinschreibung unterscheidende natürliche Sortierung; Mitarbeiter-, Produkt- und Anrufzahlen werden numerisch sortiert. Leere Werte stehen in beiden Richtungen am Ende. Die Sortierung verändert weder die Daten noch die Auswahl der markierten Kontakte und bleibt beim Aktualisieren innerhalb der geöffneten CRM-Ansicht erhalten.
+
 ## SMTP / E-Mail konfigurieren
 
 Kopiere `.env.example` nach `.env` und trage deine echten SMTP-Daten ein.

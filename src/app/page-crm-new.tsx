@@ -10,6 +10,9 @@ import { saveCalendarCallback } from "@/lib/calendar-view";
 import { MAX_CONCURRENT_OUTBOUND_CALLS } from "@/lib/outbound-call-queue-constants";
 import { getMissingCrmFields, type CrmEnrichmentField } from "@/lib/crm-enrichment";
 import GloriaCalendar from "@/components/GloriaCalendar";
+import { compareCrmSortValues } from "@/lib/crm-helpers";
+
+type ContactSortColumn = "company" | "contacts" | "phone" | "email" | "industry" | "employees" | "city" | "topic" | "status" | "products" | "attempts";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
 Musterbau GmbH,Herr Neumann,+49 2339 555100,neumann@musterbau.de,betriebliche Krankenversicherung,120 Mitarbeitende; Recruiting Thema,
@@ -397,6 +400,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [outlookBodyDraft, setOutlookBodyDraft] = useState("");
   const [outlookToDraft, setOutlookToDraft] = useState("");
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [contactSort, setContactSort] = useState<{ column: ContactSortColumn; direction: "asc" | "desc" } | null>(null);
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState<ManualCustomerDraft>({
     company: "",
@@ -595,7 +599,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   const activeCrmTab = activeView === "campaigns" && campaignTab === "followups" ? "callbacks" : "customers";
 
-  const allFilteredSelected = filteredLeads.length > 0 && filteredLeads.every((lead) => selectedLeadIds.includes(lead.id));
+  const selectedVisibleLeadIds = filteredLeads.filter((lead) => selectedLeadIds.includes(lead.id)).map((lead) => lead.id);
+  const allFilteredSelected = filteredLeads.length > 0 && selectedVisibleLeadIds.length === filteredLeads.length;
   function navigateWorkspace(workspace: CrmWorkspace, tab: CrmCampaignTab = "lists") {
     setActiveView(workspace);
     setCampaignTab(tab);
@@ -799,11 +804,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   async function handleDeleteSelectedCustomers() {
-    if (selectedLeadIds.length === 0) return;
-    if (!confirm(`${selectedLeadIds.length} ausgewählte Kontakte wirklich löschen?`)) {
+    if (selectedVisibleLeadIds.length === 0) return;
+    if (!confirm(`${selectedVisibleLeadIds.length} ausgewählte Firmen/Kontakte aus der aktuellen Ansicht wirklich in Gloria löschen? Die Firmendatenbank und bestehende Gesprächsreports bleiben unverändert.`)) {
       return;
     }
-    await handleDeleteLeads(selectedLeadIds);
+    await handleDeleteLeads(selectedVisibleLeadIds);
   }
 
   function handleExportSelectedCustomers() {
@@ -2039,6 +2044,37 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   function renderContacts() {
     const isCustomerWorkspace = activeView === "companies";
     const forecast = filteredLeads.flatMap((lead) => lead.productDetails || []);
+    const sortValue = (lead: Lead, column: ContactSortColumn): string | number | undefined => {
+      switch (column) {
+        case "company": return lead.company;
+        case "contacts": return lead.listId?.startsWith("crm-run-") ? lead.contactName : getCompanyContactPersons(lead).map((person) => person.name).join(" / ");
+        case "phone": return lead.phone || lead.directDial;
+        case "email": return lead.email;
+        case "industry": return getCrmCompanyField(lead, "industry");
+        case "employees": {
+          const value = getCrmCompanyField(lead, "employee_count");
+          return value ? Number(value) : undefined;
+        }
+        case "city": return lead.addressCity || getCrmCompanyField(lead, "city");
+        case "topic": return lead.topic;
+        case "status": return leadAmpelById.get(lead.id)?.label;
+        case "products": return (lead.productDetails || lead.products || []).length;
+        case "attempts": return lead.attempts;
+      }
+    };
+    const sortedLeads = contactSort
+      ? [...filteredLeads].sort((a, b) => compareCrmSortValues(sortValue(a, contactSort.column), sortValue(b, contactSort.column), contactSort.direction))
+      : filteredLeads;
+    const sortHeader = (column: ContactSortColumn, label: string) => {
+      const active = contactSort?.column === column;
+      return <th scope="col" aria-sort={active ? contactSort.direction === "asc" ? "ascending" : "descending" : "none"}>
+        <button type="button" className="contact-sort-button"
+          onClick={() => setContactSort((current) => ({ column, direction: current?.column === column && current.direction === "asc" ? "desc" : "asc" }))}
+          aria-label={`${label} ${active && contactSort.direction === "asc" ? "absteigend" : "aufsteigend"} sortieren`}>
+          {label} <span aria-hidden="true">{active ? contactSort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
+        </button>
+      </th>;
+    };
     return (
       <div className="contacts-view">
         <div className="view-header">
@@ -2055,11 +2091,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 : "Interessenten dieser Kampagnenliste."}</div>
             <div className="bulk-actions-row">
               {isCustomerWorkspace ? <button className="btn-small" onClick={() => setShowAddCustomerForm((value) => !value)}>{showAddCustomerForm ? "Formular schließen" : "+ Firmenkunde"}</button> : null}
-              <button className="btn-small ghost" disabled={selectedLeadIds.length === 0} onClick={handleExportSelectedCustomers}>
-                Export ({selectedLeadIds.length})
-              </button>
-              <button className="btn-small danger" disabled={busy || selectedLeadIds.length === 0} onClick={() => void handleDeleteSelectedCustomers()}>
-                Löschen ({selectedLeadIds.length})
+              <button className="btn-small ghost" disabled={selectedVisibleLeadIds.length === 0} onClick={handleExportSelectedCustomers}>
+                Export ({selectedVisibleLeadIds.length})
               </button>
             </div>
           </div>
@@ -2167,6 +2200,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           ) : null}
         </div>
 
+        <section className="contact-selection-toolbar" aria-label="Firmen und Kontakte gemeinsam auswählen und löschen">
+          <div>
+            <strong aria-live="polite">{selectedVisibleLeadIds.length} von {filteredLeads.length} Einträgen ausgewählt</strong>
+            <p className="subtle">Einträge links in der Tabelle markieren oder alle gefilterten Einträge auswählen.</p>
+          </div>
+          <div className="bulk-actions-row">
+            <button type="button" className="btn-small ghost" disabled={busy || filteredLeads.length === 0 || allFilteredSelected} onClick={() => toggleSelectAllFiltered(true)}>Alle angezeigten auswählen ({filteredLeads.length})</button>
+            <button type="button" className="btn-small ghost" disabled={busy || selectedLeadIds.length === 0} onClick={() => setSelectedLeadIds([])}>Auswahl aufheben</button>
+            <button type="button" className="btn-small danger" disabled={busy || selectedVisibleLeadIds.length === 0} onClick={() => void handleDeleteSelectedCustomers()}>Ausgewählte löschen ({selectedVisibleLeadIds.length})</button>
+          </div>
+        </section>
         <div className="contacts-list">
           {filteredLeads.length === 0 ? (
             <div className="empty-state">
@@ -2180,23 +2224,24 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <th className="checkbox-col">
                     <input
                       type="checkbox"
+                      disabled={busy}
                       checked={allFilteredSelected}
                       onChange={(event) => toggleSelectAllFiltered(event.target.checked)}
                       aria-label="Alle gefilterten Kontakte auswählen"
                     />
                   </th>
-                  <th>Firma</th>
-                  <th>Ansprechpartner</th>
-                  <th>Telefon</th>
-                  <th>Email</th>
-                  {isFirmListContacts ? <><th>Branche</th><th>Mitarbeiter</th><th>Ort</th></> : !isCustomerWorkspace ? <th>Thema</th> : null}
-                  {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Letzter Kontakt" : "Status"}</th> : null}
-                  {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Produkte" : "Anrufversuche"}</th> : null}
+                  {sortHeader("company", "Firma")}
+                  {sortHeader("contacts", "Ansprechpartner")}
+                  {sortHeader("phone", "Telefon")}
+                  {sortHeader("email", "E-Mail")}
+                  {isFirmListContacts ? <>{sortHeader("industry", "Branche")}{sortHeader("employees", "Mitarbeiter")}{sortHeader("city", "Ort")}</> : !isCustomerWorkspace ? sortHeader("topic", "Thema") : null}
+                  {!isFirmListContacts ? sortHeader("status", isCustomerWorkspace ? "Letzter Kontakt" : "Status") : null}
+                  {!isFirmListContacts ? sortHeader(isCustomerWorkspace ? "products" : "attempts", isCustomerWorkspace ? "Produkte" : "Anrufversuche") : null}
                   <th>Aktion</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredLeads.map((lead) => {
+                {sortedLeads.map((lead) => {
                   const status = leadAmpelById.get(lead.id);
                   const contacts = lead.listId?.startsWith("crm-run-")
                     ? (lead.contactName ? [{ name: lead.contactName, birthDate: lead.birthDate }] : [])
@@ -2206,6 +2251,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       <td className="checkbox-col" onClick={(event) => event.stopPropagation()}>
                         <input
                           type="checkbox"
+                          disabled={busy}
                           checked={selectedLeadIds.includes(lead.id)}
                           onChange={(event) => toggleLeadSelection(lead.id, event.target.checked)}
                           aria-label={`Kontakt ${lead.company} auswählen`}
@@ -3173,6 +3219,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       ) : null}
 
       <style jsx global>{`
+        .gloria-crm .contact-sort-button { display: inline-flex; align-items: center; gap: 0.4rem; border: 0; padding: 0.3rem 0; background: transparent; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; text-align: left; }
+        .gloria-crm .contact-sort-button:hover { color: #155e9b; }
+        .gloria-crm .contact-sort-button:focus-visible { outline: 2px solid #155e9b; outline-offset: 3px; border-radius: 3px; }
+        .gloria-crm .contact-selection-toolbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd9e8; border-radius: 12px; background: #f3f7fc; box-shadow: 0 3px 12px rgba(23,43,67,0.08); }
+        .gloria-crm .contact-selection-toolbar p { margin: 0.3rem 0 0; }
         .gloria-crm .company-contact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
         .gloria-crm .company-contact-list li { display: grid; gap: 0.2rem; }
         .gloria-crm .company-contact-list small { color: #64748b; }
