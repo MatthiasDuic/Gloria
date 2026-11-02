@@ -793,6 +793,33 @@ test("stable saved-search imports absorb partial legacy transfers without duplic
   ), false);
 });
 
+test("a four-section CRM transfer can retry its third section without duplicating companies", async () => {
+  const otherLead: Lead = { ...sampleLead, id: "untouched", userId: "other-user" };
+  await seed([otherLead]);
+  const companies = Array.from({ length: 350 }, (_, index) => ({
+    crmCompanyId: index + 1000,
+    company: `Transferfirma ${index}`,
+    phone: "",
+    crmCompanyData: {
+      industry: "Maschinenbau",
+      documents: [{ filename: "firmenprofil.pdf", content: "document-content" }],
+    },
+  }));
+  const options = { listId: "crm-search-209-user-1", listName: "Große Suche", userId: "test-user" };
+  for (const offset of [0, 100, 200, 200, 300]) {
+    const section = companies.slice(offset, offset + 100);
+    const result = await storage.importLeadsFromCrm(section, options);
+    assert.equal(result.imported, section.length);
+  }
+  const { leads } = await storage.getDashboardData({ userId: options.userId, role: "user" });
+  assert.equal(leads.length, 350);
+  assert.equal(new Set(leads.map((lead) => lead.crmCompanyId)).size, 350);
+  assert.equal(new Set(leads.map((lead) => lead.id)).size, 350);
+  assert.ok(leads.every((lead) => lead.listId === options.listId && lead.industry === "Maschinenbau"));
+  assert.ok(leads.every((lead) => lead.crmCompanyData?.documents));
+  assert.ok(await storage.getLeadById(otherLead.id, "other-user"));
+});
+
 test("CRM import API requires its shared token and rejects an unpaired CRM user", async () => {
   await seed([]);
   const previousToken = process.env.GLORIA_CRM_INTEGRATION_TOKEN;

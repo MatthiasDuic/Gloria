@@ -2468,7 +2468,47 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
         await client.query("DELETE FROM gloria_leads");
       }
 
-      for (const lead of leads) {
+      for (let offset = 0; offset < leads.length; offset += 100) {
+        const rows = leads.slice(offset, offset + 100).map((lead) => [
+          lead.id,
+          lead.userId || userId || null,
+          lead.listId || null,
+          lead.listName || null,
+          lead.customerKind || null,
+          lead.customerOwner || null,
+          lead.company,
+          lead.contactName,
+          lead.phone,
+          lead.directDial || null,
+          JSON.stringify((lead.additionalPhones || []).map((entry) => entry.trim()).filter(Boolean)),
+          lead.email || null,
+          lead.birthDate || null,
+          lead.location || null,
+          lead.addressStreet || null,
+          lead.addressPostalCode || null,
+          lead.addressCity || null,
+          lead.addressCountry || null,
+          JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
+          JSON.stringify(lead.productDetails || null),
+          JSON.stringify(lead.affiliations || null),
+          JSON.stringify(lead.emailHistory || []),
+          JSON.stringify(lead.tasks || []),
+          JSON.stringify(lead.activities || []),
+          JSON.stringify(lead.crmPipeline || null),
+          lead.topic,
+          lead.note || null,
+          lead.nextCallAt || null,
+          lead.status,
+          lead.attempts,
+          lead.lifecycle || null,
+          JSON.stringify(lead.notes || []),
+          lead.callSource || null,
+          lead.crmCompanyId || null,
+          JSON.stringify(lead.crmCompanyData || null),
+        ]);
+        const placeholders = rows.map((row, rowIndex) =>
+          `(${row.map((_, columnIndex) => `$${rowIndex * row.length + columnIndex + 1}`).join(",")},NOW())`,
+        ).join(",");
         await client.query(
           `
           INSERT INTO gloria_leads (
@@ -2508,9 +2548,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             crm_company_id,
             crm_company_data,
             updated_at
-          ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,NOW()
-          )
+          ) VALUES ${placeholders}
           ON CONFLICT (id)
           DO UPDATE SET
             user_id = EXCLUDED.user_id,
@@ -2549,43 +2587,7 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             crm_company_data = EXCLUDED.crm_company_data,
             updated_at = NOW();
           `,
-          [
-            lead.id,
-            lead.userId || userId || null,
-            lead.listId || null,
-            lead.listName || null,
-            lead.customerKind || null,
-            lead.customerOwner || null,
-            lead.company,
-            lead.contactName,
-            lead.phone,
-            lead.directDial || null,
-            JSON.stringify((lead.additionalPhones || []).map((entry) => entry.trim()).filter(Boolean)),
-            lead.email || null,
-            lead.birthDate || null,
-            lead.location || null,
-            lead.addressStreet || null,
-            lead.addressPostalCode || null,
-            lead.addressCity || null,
-            lead.addressCountry || null,
-            JSON.stringify((lead.products || []).map((entry) => entry.trim()).filter(Boolean)),
-            JSON.stringify(lead.productDetails || null),
-            JSON.stringify(lead.affiliations || null),
-            JSON.stringify(lead.emailHistory || []),
-            JSON.stringify(lead.tasks || []),
-            JSON.stringify(lead.activities || []),
-            JSON.stringify(lead.crmPipeline || null),
-            lead.topic,
-            lead.note || null,
-            lead.nextCallAt || null,
-            lead.status,
-            lead.attempts,
-            lead.lifecycle || null,
-            JSON.stringify(lead.notes || []),
-            lead.callSource || null,
-            lead.crmCompanyId || null,
-            JSON.stringify(lead.crmCompanyData || null),
-          ],
+          rows.flat(),
         );
       }
 
