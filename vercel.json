@@ -25,6 +25,14 @@
       "schedule": "0 5 * * *"
     },
     {
+      "path": "/api/controlling/daily-sync",
+      "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/controlling/daily-sync",
+      "schedule": "0 18 * * *"
+    },
+    {
       "path": "/api/jobs/process",
       "schedule": "*/1 * * * *"
     }

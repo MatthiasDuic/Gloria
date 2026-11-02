@@ -1768,7 +1768,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <th>Ansprechpartner</th>
                   <th>Telefon</th>
                   <th>Email</th>
-                  {isFirmListContacts ? <><th>Branche</th><th>Mitarbeiter</th><th>Ort</th></> : <th>Thema</th>}
+                  {isFirmListContacts ? <><th>Branche</th><th>Mitarbeiter</th><th>Ort</th></> : !isCustomerWorkspace ? <th>Thema</th> : null}
                   {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Letzter Kontakt" : "Status"}</th> : null}
                   {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Produkte" : "Anrufversuche"}</th> : null}
                   <th>Aktion</th>
@@ -1795,7 +1795,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                         <td>{getCrmCompanyField(lead, "industry") || "-"}</td>
                         <td>{getCrmCompanyField(lead, "employee_count") || "-"}</td>
                         <td>{lead.addressCity || getCrmCompanyField(lead, "city") || "-"}</td>
-                      </> : <td>{lead.topic}</td>}
+                      </> : !isCustomerWorkspace ? <td>{lead.topic}</td> : null}
                       {!isFirmListContacts ? <td>
                         <span className={`status-badge ${status?.color}`}>
                           {status?.label}
@@ -1891,7 +1891,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                     </div>
                   </>
                 ) : null}
-                <div className="subtle top-gap">Kontaktstatus: {isLeadCustomer(selectedLead) ? "Kunde" : "Interessent"}{isFirmListLeadOrRun(selectedLead) ? "" : ` · Thema: ${selectedLead.topic}`}</div>
+                <div className="subtle top-gap">Kontaktstatus: {isLeadCustomer(selectedLead) ? "Kunde" : "Interessent"}{isFirmListLeadOrRun(selectedLead) || (isLeadCustomer(selectedLead) && selectedLead.customerKind === "firma") ? "" : ` · Thema: ${selectedLead.topic}`}</div>
               </div>
 
               <div className="detail-section" hidden={detailTab !== "crm"}>

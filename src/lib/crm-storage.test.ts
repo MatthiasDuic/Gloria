@@ -154,6 +154,9 @@ test("manual customers have no campaign while normal imports remain callable pro
   const csv = "company,contactName,phone,topic,customerKind\nFixture GmbH,Alex Beispiel,+492339555100,bKV,firma";
   await storage.importLeadsFromCsv(csv, { userId: "test-user", lifecycle: "customer", listName: "Manuell hinzugefügt" });
   assert.equal((await storage.getCampaignListsSummary("test-user")).length, 0);
+  const manualCustomer = (await storage.getDashboardData({ userId: "test-user", role: "user" })).leads[0];
+  assert.equal(manualCustomer.customerKind, "firma");
+  assert.equal(manualCustomer.topic, "");
   const state = JSON.parse(await readFile(path.join(fixtureDirectory, "data", "campaign-state.json"), "utf8"));
   assert.equal(state.lists.length, 1);
   await storage.importLeadsFromCsv(csv, { userId: "test-user", listId: "import", listName: "Anrufliste" });
@@ -162,6 +165,8 @@ test("manual customers have no campaign while normal imports remain callable pro
   assert.equal(next.lifecycle, "prospect");
   assert.equal(next.status, "angerufen");
   assert.equal(await storage.pullNextLeadForCampaignList("import", "test-user"), undefined);
+  const converted = await storage.updateLeadDetails(next.id, { lifecycle: "customer", customerKind: "firma" }, "test-user");
+  assert.equal(converted?.topic, "");
 });
 
 test("fresh campaign calls skip confirmed customers even when their call status is new", async () => {

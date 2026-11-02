@@ -780,13 +780,15 @@ export async function updateLeadDetails(
   let updatedLead: Lead | undefined;
   const nextLeads = leads.map((lead) => {
     if (lead.id !== leadId) return lead;
+    const lifecycle = updates.lifecycle ?? lead.lifecycle;
+    const customerKind = updates.customerKind ?? lead.customerKind;
     const nextLead: Lead = {
       ...lead,
       status: updates.status ?? lead.status,
       nextCallAt: updates.nextCallAt !== undefined ? updates.nextCallAt || undefined : lead.nextCallAt,
-      lifecycle: updates.lifecycle ?? lead.lifecycle,
+      lifecycle,
       company: updates.company ?? lead.company,
-      customerKind: updates.customerKind ?? lead.customerKind,
+      customerKind,
       customerOwner: updates.customerOwner ?? lead.customerOwner,
       contactName: updates.contactName ?? lead.contactName,
       phone: updates.phone ?? lead.phone,
@@ -802,7 +804,7 @@ export async function updateLeadDetails(
       products: updates.products ?? lead.products,
       productDetails: normalizeLeadProductDetails(updates.productDetails ?? lead.productDetails ?? lead.products),
       affiliations: normalizeLeadAffiliations(updates.affiliations ?? lead.affiliations),
-      topic: updates.topic ?? lead.topic,
+      topic: lifecycle === "customer" && customerKind === "firma" ? "" : updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
       notes: updates.notes ?? lead.notes,
       crmCompanyData: updates.crmCompanyData ?? lead.crmCompanyData,
@@ -1371,6 +1373,7 @@ export async function importLeadsFromCsv(
     const ownerFromRow = normalizeCustomerOwner(lookup("customerOwner"));
     const ownerFromList = normalizeCustomerOwner(listName);
     const customerOwner = ownerFromRow || ownerFromList;
+    const customerKind = normalizeCustomerKind(lookup("customerKind"));
     const products = splitProducts(lookup("products"));
     const additionalPhones = splitProducts(lookup("additionalPhones"));
 
@@ -1380,7 +1383,7 @@ export async function importLeadsFromCsv(
       listId: options?.lifecycle === "customer" ? undefined : listId,
       listName: options?.lifecycle === "customer" ? undefined : listName,
       lifecycle: options?.lifecycle || "prospect",
-      customerKind: normalizeCustomerKind(lookup("customerKind")),
+      customerKind,
       customerOwner,
       company: company || `Firma ${index + 1}`,
       contactName: contactName || "Empfang",
@@ -1395,7 +1398,9 @@ export async function importLeadsFromCsv(
       addressCity: lookup("addressCity") || location || undefined,
       addressCountry: lookup("addressCountry") || undefined,
       products: products.length ? products : undefined,
-      topic: normalizeTopic(topic || (options?.lifecycle === "customer" ? "" : "Energie")),
+      topic: options?.lifecycle === "customer" && customerKind === "firma"
+        ? ""
+        : normalizeTopic(topic || (options?.lifecycle === "customer" ? "" : "Energie")),
       note: lookup("note") || undefined,
       nextCallAt: nextCallAt || undefined,
       status: nextCallAt ? "wiedervorlage" : "neu",

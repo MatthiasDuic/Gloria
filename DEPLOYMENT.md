@@ -154,6 +154,11 @@ User speaks → Twilio transcribes
 - `DATABASE_URL` and `CRON_SECRET` must be configured in Vercel. The
   `/api/calls/queue/process` cron runs every minute as a recovery path; Telnyx
   hangup events normally start the next queued calls immediately.
+- `/api/controlling/daily-sync` writes that day's Gloria call outcomes
+  into each paired CRM user's daily Controlling entry at 19:00 Europe/Berlin.
+  Vercel invokes it at 17:00 and 18:00 UTC; the endpoint's timezone check runs
+  only the invocation that corresponds to 19:00 locally. It requires both
+  `CRON_SECRET` and `GLORIA_CRM_INTEGRATION_TOKEN`.
 
 ---
 
