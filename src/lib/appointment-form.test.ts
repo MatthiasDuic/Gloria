@@ -85,6 +85,48 @@ test("appointment form offers only customer location and Microsoft Teams", () =>
   assert.equal(APPOINTMENT_FORM_MODES.includes("In unserem Büro" as never), false);
 });
 
+test("retains the reported 630 Euro contribution from discovery in both transcript sources", async () => {
+  const turns = [
+    { speaker: "Gloria" as const, text: "Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr für Ihre Gesundheitsversorgung?" },
+    { speaker: "Interessent" as const, text: "." },
+    { speaker: "Interessent" as const, text: "630 Euro." },
+    { speaker: "Gloria" as const, text: "In zehn Jahren wären das rund 935 Euro monatlich." },
+    { speaker: "Interessent" as const, text: "Das klingt erschreckend." },
+    { speaker: "Gloria" as const, text: "Sind Sie aktuell privat oder gesetzlich krankenversichert?" },
+    { speaker: "Interessent" as const, text: "Gesetzlich." },
+    { speaker: "Gloria" as const, text: "Wie hoch ist Ihr aktueller Monatsbeitrag?" },
+    { speaker: "Interessent" as const, text: "Das habe ich doch schon gesagt." },
+  ];
+  for (const useSeparateEvents of [true, false]) {
+    const input = buildAppointmentFormInputFromReport({
+      company: "Musterbau", topic: "private Krankenversicherung", conversationDate: "2026-11-02T10:05:12Z",
+      summary: useSeparateEvents ? "Zusammenfassung." : `Zusammenfassung.\n\n--- GESPRAECHSPROTOKOLL ---\n${turns.map((turn) => `- [11:05:12] ${turn.speaker}: ${turn.text}`).join("\n")}`,
+      transcriptEvents: useSeparateEvents ? turns : undefined,
+    });
+    assert.equal(input.monthlyContribution, "630 Euro.");
+    const pdf = await buildAppointmentFormPdf(input);
+    assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+  }
+});
+
+test("never substitutes a projection, initial contribution or unrelated answer for the current contribution", () => {
+  const input = buildAppointmentFormInputFromReport({
+    company: "Musterbau", topic: "private Krankenversicherung", conversationDate: "2026-11-02",
+    summary: "Zusammenfassung.",
+    transcriptEvents: [
+      { speaker: "Gloria", text: "Mit welchem Beitrag haben Sie angefangen?" },
+      { speaker: "Interessent", text: "300 Euro." },
+      { speaker: "Gloria", text: "Welchen monatlichen Beitrag zahlen Sie aktuell?" },
+      { speaker: "Interessent", text: "Das möchte ich nicht sagen." },
+      { speaker: "Gloria", text: "Als Beispiel wären aus 630 Euro in zehn Jahren 935 Euro geworden." },
+      { speaker: "Interessent", text: "Das klingt hoch." },
+      { speaker: "Gloria", text: "Welches Geburtsdatum haben Sie?" },
+      { speaker: "Interessent", text: "2. Mai 1987." },
+    ],
+  });
+  assert.equal(input.monthlyContribution, undefined);
+});
+
 test("buildAppointmentFormPdf creates a valid PDF document", async () => {
   const pdf = await buildAppointmentFormPdf({
     title: "Kundenterminbogen",

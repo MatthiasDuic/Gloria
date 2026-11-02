@@ -126,6 +126,21 @@ export function buildRequiredContributionProjection(ctx: CallContext): string | 
   return convertNumbersForSpeech(`${buildTenYearProjectionSentence(currentContribution)} Haben Sie dafür bereits eine Strategie oder Planung?`);
 }
 
+export function getRequiredContributionStep(ctx: CallContext): string | undefined {
+  if (ctx.topicKind !== "pkv" || !/(?:zehn[- ]jahres|zehn\s+jahre|10[- ]jahre)/i.test(ctx.callObjective || "")) return undefined;
+  const contribution = extractCurrentContributionPhrase(ctx.transcript);
+  const projection = convertNumbersForSpeech(buildTenYearProjectionSentence(contribution));
+  if (ctx.transcript.some((turn) => turn.role === "assistant" && turn.text.includes(projection))) return undefined;
+  if (contribution) return `${projection} Haben Sie dafür bereits eine Strategie oder Planung?`;
+  const latestUser = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
+  const latestAssistant = [...ctx.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
+  if (/beitrag|zahlen|gesundheitsversorgung/i.test(latestAssistant)
+    && /wei[ßs].*nicht|keine ahnung|nicht.*(?:sagen|nennen|angeben)|nicht beantworten/i.test(latestUser)) {
+    return `${projection} Ohne Ihren heutigen Beitrag ist das nur eine allgemeine Beispielrechnung. Wäre eine individuelle Einordnung für Sie interessant?`;
+  }
+  return "Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr für Ihre Gesundheitsversorgung? Sie können die Angabe auch überspringen.";
+}
+
 export function hasRequestedHumanTransfer(text: string): boolean {
   return /\b(?:menschen?|jemand(?:em)?|person|kollege|kollegen|kollegin|berater|mitarbeiter|herrn?\s+duic)\b/i.test(text)
     && /\b(?:sprechen|verbinden|weiterleiten|übergeben|uebergeben|holen|bitte)\b/i.test(text);
@@ -187,7 +202,7 @@ function buildDecisionMakerIdentity(
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
   const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
   const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
-  return `Guten Tag, hier ist Gloria, die KI-Assistentin von ${addressedOwner} bei ${company}.`;
+  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}.`;
 }
 
 export function buildDecisionMakerIntro(
@@ -212,7 +227,7 @@ function buildGatekeeperIntro(
   const addressedTarget = /^herr\s+/i.test(targetName)
     ? targetName.replace(/^herr\s+/i, "Herrn ")
     : targetName;
-  return `Guten Tag, ich bin Gloria, die KI-Assistentin von ${addressedOwner} bei ${company}. Könnten Sie mich bitte mit ${addressedTarget} verbinden?`;
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}. Könnten Sie mich bitte mit ${addressedTarget} verbinden?`;
 }
 
 function buildDecisionMakerConfirmation(ctx: Pick<CallContext, "contactName">): string {
@@ -243,7 +258,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   const parts = [
     GLORIA_CORE_INSTRUCTIONS,
-    `Du bist Gloria, die digitale Assistentin von ${company}, und telefonierst im Auftrag von ${owner}.`,
+    `Du bist Gloria, die digitale Vertriebsassistentin von ${company}, und telefonierst im Auftrag von ${owner}. Stelle dich mit genau dieser Rollenbezeichnung vor, nicht als 'KI-Assistentin'. Bleibe bei Nachfragen transparent darüber, dass du eine KI bist.`,
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: natürlich daran anknüpfen und zum nächsten Schritt überleiten, nicht abrupt zur nächsten Frage springen. Bei Interesse: den passenden nächsten Schritt anbieten. Vermeide routinemäßige Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder wiederholtes Bedanken.",
@@ -285,6 +300,10 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
   }
   if (ctx.topicPolicyPrompt) parts.push(ctx.topicPolicyPrompt);
+  const requiredContributionStep = !ctx.confirmedSlotPhrase ? getRequiredContributionStep(ctx) : undefined;
+  if (requiredContributionStep) {
+    parts.push(`VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN: Nach dem weichen Einstieg und der ersten inhaltlichen Antwort zur Beitragsentwicklung ist zuerst dieser Schritt offen: ${requiredContributionStep} Überspringe die Beitragsfrage und die konkrete Zehn-Jahres-Rechnung nicht. Keine Terminfrage, keine Zeitpräferenz und kein Konzeptabschluss davor. Beantworte Kundenfragen zuerst; Zeitmangel, Ablehnung und das freiwillige Überspringen der Beitragsangabe bleiben vorrangig.`);
+  }
   if (!ctx.confirmedSlotPhrase) {
     parts.push(ctx.freeSlotsPrompt
       ? `AKTUELLER KALENDERSTATUS UND TERMINAUSWAHL:\n${ctx.freeSlotsPrompt}\nNutze diese geprüften Slots für konkrete Angebote, sobald die fachlichen Auftragsschritte erledigt sind. Bei Vormittags- oder Nachmittagspräferenz biete zwei passende freie Optionen an verschiedenen Tagen an. Behaupte bei vorhandenen Slots nicht, es lägen keine freien Zeiten vor. Ein Kundenwunsch außerhalb der Liste wird vor Bestätigung ebenfalls auf tatsächliche Verfügbarkeit geprüft. Eine menschliche Übergabe ist kein Ersatz für die Kalenderprüfung und erfolgt nur auf ausdrücklichen Kundenwunsch.`
@@ -820,6 +839,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (preparationState.stage === "inactive") {
+      const requiredStep = getRequiredContributionStep(currentContext);
+      const lastAssistant = [...currentContext.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
+      if (event.type === "answer" && requiredStep
+        && (extractCurrentContributionPhrase(currentContext.transcript)
+          || (!/passt es.*(?:kurz|minuten)|haben sie.*(?:moment|zeit)/i.test(lastAssistant)
+            && /beitragserh[öo]hung|(?:wie|kosten).*(?:erleben|wahrnehmen)|(?:beitr[äa]ge|kosten).*(?:steigen|entwicklung)|monatlichen\s+beitrag|monatsbeitrag|durchgerechnet|hochgerechnet|strategie|planung/i.test(lastAssistant)))) {
+        requestDeterministicSpeech(requiredStep);
+        return;
+      }
       const routing = event.type === "answer"
         ? advanceAppointmentRouting(currentContext, currentContext.transcript, currentContext.freeSlotsPrompt)
         : { state: currentContext, speechText: undefined, readyToBook: false };
@@ -884,6 +912,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         const requestedPhrase=typeof args.slot_phrase==="string"? args.slot_phrase.trim():"";
         const phrase=ctx.selectedAppointmentSlot||requestedPhrase;
+        const requiredStep = getRequiredContributionStep(ctx);
+        if (requiredStep) {
+          sendToolResult(tool.callId, { ok: false, error: "contribution_projection_missing", instruction: requiredStep });
+          requestDeterministicSpeech(requiredStep);
+          return;
+        }
         const appointmentMode=detectAppointmentMode(ctx.transcript)||ctx.appointmentMode;
         if(!appointmentMode) {
           const instruction="Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";

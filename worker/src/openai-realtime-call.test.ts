@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -65,7 +65,7 @@ test("asks for a callback instead of continuing the pitch when the contact has n
 test("applies shared natural-dialogue and safety rules to live campaigns", () => {
   const instructions = buildRealtimeInstructions(buildPkvContext());
   assert.match(instructions, /individuellen Dialog statt ein Skript/);
-  assert.match(instructions, /transparent als digitale Assistentin\/KI vor/);
+  assert.match(instructions, /transparent als digitale Vertriebsassistentin vor/);
   assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
   assert.match(instructions, /Erfinde keine Tarife, Zahlen, Quellen/);
 });
@@ -107,6 +107,45 @@ test("calculates the reported 480 Euro contribution before moving to the concept
   assert.equal(buildRequiredContributionProjection(ctx), undefined);
   assert.match(buildRealtimeInstructions(ctx), /KONZEPT VOR TERMIN/);
   assert.match(buildRealtimeInstructions(ctx), /konkreten Lösungsansatz aus dem Auftrag/);
+});
+
+test("requires the contribution and exact projection before scheduling, not merely a generic outlook", () => {
+  const ctx = buildPkvContext();
+  ctx.callObjective = "Den Zehn-Jahres-Ausblick immer vor dem Termin durchführen.";
+  ctx.transcript = [
+    { role: "assistant", text: "Haben Sie Beitragserhöhungen bemerkt?", at: 1 },
+    { role: "user", text: "Ja, die Beiträge steigen jedes Jahr.", at: 2 },
+  ];
+  assert.match(getRequiredContributionStep(ctx) || "", /Welchen monatlichen Beitrag zahlen Sie aktuell/);
+  assert.match(buildRealtimeInstructions(ctx), /VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN/);
+  ctx.transcript.push(
+    { role: "assistant", text: getRequiredContributionStep(ctx) || "", at: 3 },
+    { role: "user", text: "630 Euro.", at: 4 },
+    { role: "assistant", text: "In zehn Jahren könnte es deutlich teurer sein. Wäre ein Termin interessant?", at: 5 },
+  );
+  const projection = getRequiredContributionStep(ctx);
+  assert.match(projection || "", /neunhundert fünfunddreißig Euro monatlich/);
+  assert.match(projection || "", /dreihundert fünf Euro mehr/);
+  ctx.transcript.push({ role: "assistant", text: projection || "", at: 6 });
+  assert.equal(getRequiredContributionStep(ctx), undefined);
+  assert.doesNotMatch(buildRealtimeInstructions(ctx), /VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN/);
+});
+
+test("allows declining a contribution without inventing a personal calculation or asking forever", () => {
+  const ctx = buildPkvContext();
+  ctx.callObjective = "Zehn-Jahres-Ausblick";
+  ctx.transcript = [
+    { role: "assistant", text: "Welchen monatlichen Beitrag zahlen Sie aktuell?", at: 1 },
+    { role: "user", text: "Das möchte ich nicht sagen.", at: 2 },
+  ];
+  const example = getRequiredContributionStep(ctx);
+  assert.match(example || "", /nur eine allgemeine Beispielrechnung/);
+  assert.doesNotMatch(example || "", /Ihr Beitrag läge dann|Welchen monatlichen Beitrag/);
+  ctx.transcript.push({ role: "assistant", text: example || "", at: 3 });
+  assert.equal(getRequiredContributionStep(ctx), undefined);
+  ctx.topicKind = "commercial";
+  ctx.transcript = [];
+  assert.equal(getRequiredContributionStep(ctx), undefined);
 });
 
 test("does not project initial contributions, customer questions or unrelated campaigns", () => {
@@ -266,7 +305,7 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /stelle dich transparent und kurz vor/);
-  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic/);
+  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic/);
   assert.match(buildDecisionMakerIntro(ctx), /Ich rufe zum Thema Individuelle Gesundheitsvorsorge an/);
   assert.match(instructions, /bitte freundlich um Weiterleitung an Herrn Neumann/);
   assert.doesNotMatch(instructions, /Barmenia Gothar|Beitragsentwicklung in der Gesundheitsversorgung/);
@@ -299,7 +338,7 @@ for (const mode of ["normal", "test", "callback"] as const) {
     if (mode === "callback") assert.match(instructions, /Einstiegsbeitrag bereits erfasst/);
 
     const intro = buildDecisionMakerIntroInstructions(ctx);
-    assert.match(intro, /Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
+    assert.match(intro, /Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
     assert.match(intro, /Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen/);
     assert.doesNotMatch(intro, /Ich rufe zum Thema private Krankenversicherung/);
     assert.match(intro, /Noch keinen Pitch, keine Fachfragen und keine Terminfrage/);

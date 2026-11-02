@@ -75,6 +75,18 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     || report.summary.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
   const ongoingTreatment = answerAfter(/laufende behandlungen?/i);
   const diagnosis = answerAfter(/bestehende diagnosen|bekannte diagnosen|diagnosen/i);
+  let monthlyContribution: string | undefined;
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    if (turn.speaker !== "Gloria"
+      || !/aktuellen?\s+(?:monatlichen\s+)?beitrag|monatsbeitrag|welchen\s+(?:monatlichen\s+)?beitrag|wie\s+viel\s+zahlen.*(?:aktuell|derzeit|heute)|beitrag\s+zahlen\s+sie\s+heute/i.test(turn.text)) continue;
+    for (const answer of turns.slice(index + 1)) {
+      if (answer.speaker === "Gloria") break;
+      if (/(?:\d[\d.,]*|[a-zäöüß]*(?:hundert|tausend)[a-zäöüß-]*(?:\s+[a-zäöüß-]+)*)\s*(?:euro|€)|^\s*\d{2,5}[.!]?\s*$/i.test(answer.text)) {
+        monthlyContribution = answer.text;
+      }
+    }
+  }
 
   return {
     title: "Kundenterminbogen",
@@ -92,7 +104,7 @@ export function buildAppointmentFormInputFromReport(report: AppointmentReportSou
     birthDate: answerAfter(/geburtsdatum/i),
     insuranceStatus: answerAfter(/privat\s+oder\s+gesetzlich|versicherungsstatus/i),
     healthInsurance: answerAfter(/krankenversicherer|krankenkasse/i),
-    monthlyContribution: answerAfter(/aktuellen beitrag|monatsbeitrag|welchen beitrag zahlen sie heute|beitrag zahlen sie heute/i),
+    monthlyContribution,
     height: answerAfter(/wie gro[ßs] sind sie|körpergröße|groesse/i),
     weight: answerAfter(/wie viel wiegen sie|aktuelles gewicht|gewicht/i),
     ongoingTreatment,

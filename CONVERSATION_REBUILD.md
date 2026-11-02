@@ -99,3 +99,6 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Kundenfragen und Einwände werden vor dem nächsten Pflichtschritt beantwortet.
 - Nur tatsächlich bereitgestellte freie Termine dürfen bestätigt werden.
 - Dialogszenarien, Typecheck und Build müssen vor jedem Rollout grün sein.
+- Gloria stellt sich als „digitale Vertriebsassistentin“ vor und beantwortet Rückfragen nach ihrer KI-Identität offen.
+- Bei einem Gesundheitskostenauftrag mit Zehn-Jahres-Ausblick erzwingt der Controller vor der Terminierung die Frage nach dem heutigen Beitrag und die tatsächlich gesprochene Rechnung. Ein allgemeiner Hinweis auf steigende Kosten genügt nicht. Bei freiwillig übersprungener oder unbekannter Angabe bleibt eine ausdrücklich allgemeine Beispielrechnung möglich; andere Kampagnen erhalten diese Pflicht nicht.
+- Der Kundenterminbogen erkennt auch die Beitragsfrage aus dem Erstgespräch („Welchen monatlichen Beitrag zahlen Sie aktuell …?“). Er übernimmt ausschließlich die dazugehörige Kundenantwort, nicht den hochgerechneten Betrag oder spätere sachfremde Antworten. Dies gilt für separate Transkriptereignisse und das eingebettete Protokoll; eine frühere Angabe wird bei übersprungener Wiederholungsfrage nicht verloren.
