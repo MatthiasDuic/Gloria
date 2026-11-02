@@ -121,11 +121,27 @@ export async function POST(request: Request) {
     }, { status });
   }
 
+  const contentType = response.headers.get("content-type") || "nicht angegeben";
+  let responseBody: string;
+  try {
+    responseBody = await response.text();
+  } catch {
+    console.error("Could not read CRM account pairing response:", { status: response.status, contentType });
+    return NextResponse.json({ error: "CRM-Antwort konnte nicht gelesen werden. Bitte Backend-Adresse und Verbindung prüfen." }, { status: 502 });
+  }
+
   let pairing: unknown;
   try {
-    pairing = await response.json();
+    pairing = JSON.parse(responseBody);
   } catch {
-    return NextResponse.json({ error: "CRM hat keine gültige Verknüpfungsbestätigung zurückgegeben." }, { status: 502 });
+    console.error("CRM account pairing response was not valid JSON:", {
+      status: response.status,
+      contentType,
+      bodyLength: responseBody.length,
+    });
+    return NextResponse.json({
+      error: `CRM antwortete mit HTTP ${response.status}, aber nicht mit gültigem JSON (Content-Type: ${contentType}). Bitte die CRM-Backend-Adresse prüfen: https://versifon-crm-backend.onrender.com`,
+    }, { status: 502 });
   }
   if (
     !pairing ||
@@ -137,7 +153,13 @@ export async function POST(request: Request) {
     !pairing.crm_user_id.trim() ||
     pairing.crm_user_id.length > 160
   ) {
-    return NextResponse.json({ error: "CRM hat eine ungültige Verknüpfungsbestätigung zurückgegeben." }, { status: 502 });
+    console.error("CRM account pairing response was missing required confirmation fields:", {
+      status: response.status,
+      contentType,
+    });
+    return NextResponse.json({
+      error: "CRM hat keine passende Verknüpfungsbestätigung zurückgegeben. Bitte prüfen, dass die Adresse auf das CRM-Backend zeigt und dieses aktuell ist.",
+    }, { status: 502 });
   }
 
   try {

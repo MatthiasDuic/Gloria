@@ -217,7 +217,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [outboundQueue, setOutboundQueue] = useState<OutboundCallQueueState | null>(null);
   const [outboundQueueError, setOutboundQueueError] = useState("");
   const [crmConnection, setCrmConnection] = useState<{ connected: boolean; apiUrl: string }>({ connected: false, apiUrl: "" });
-  const [crmApiUrlDraft, setCrmApiUrlDraft] = useState("");
+  const [crmApiUrlDraft, setCrmApiUrlDraft] = useState("https://versifon-crm-backend.onrender.com");
   const [crmApiKeyDraft, setCrmApiKeyDraft] = useState("");
   const [crmConnectionBusy, setCrmConnectionBusy] = useState(false);
   const [crmConnectionNotice, setCrmConnectionNotice] = useState("");
@@ -1311,7 +1311,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         if (!response.ok) throw new Error(payload.error || "Verbindungsstatus konnte nicht geladen werden.");
         if (!cancelled) {
           setCrmConnection({ connected: Boolean(payload.connected), apiUrl: typeof payload.apiUrl === "string" ? payload.apiUrl : "" });
-          setCrmApiUrlDraft(typeof payload.apiUrl === "string" ? payload.apiUrl : "");
+          setCrmApiUrlDraft(typeof payload.apiUrl === "string" && payload.apiUrl
+            ? payload.apiUrl
+            : "https://versifon-crm-backend.onrender.com");
         }
       })
       .catch((error: unknown) => {
