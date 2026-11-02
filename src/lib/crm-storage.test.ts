@@ -249,6 +249,19 @@ test("deleting the legacy CRM list cannot delete manual callbacks", async () => 
   assert.equal((await storage.getLeadById(manual.id, sampleLead.userId))?.callSource, "manual");
 });
 
+test("retries with the same note ID do not create duplicate Gloria notes", async () => {
+  await seed([sampleLead]);
+  const first = await storage.addLeadNote(sampleLead.id, "Gespräch vereinbart", sampleLead.userId, "gloria-note-retry");
+  const retry = await storage.addLeadNote(sampleLead.id, "Gespräch vereinbart", sampleLead.userId, "gloria-note-retry");
+  assert.equal(first?.notes?.length, 1);
+  assert.equal(retry?.notes?.length, 1);
+  assert.equal(retry?.notes?.[0].id, "gloria-note-retry");
+  await assert.rejects(
+    storage.addLeadNote(sampleLead.id, "Anderer Text", sampleLead.userId, "gloria-note-retry"),
+    /Notizkennung wurde bereits/,
+  );
+});
+
 test("imports full CRM snapshots into an inactive campaign and safely refreshes existing leads", async () => {
   await seed([]);
   const company = {

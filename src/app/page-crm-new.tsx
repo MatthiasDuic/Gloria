@@ -90,14 +90,6 @@ type ManualCustomerDraft = {
 
 type LeadDetailsDraft = Pick<Lead, "company" | "contactName" | "phone" | "directDial" | "email" | "birthDate" | "addressStreet" | "addressPostalCode" | "addressCity" | "addressCountry" | "customerKind" | "customerOwner">;
 
-type PipelineMoveSnapshot = {
-  leadId: string;
-  leadCompany: string;
-  fromStage: string;
-  toStage: string;
-  expiresAt: number;
-};
-
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -237,30 +229,26 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterOwner, setFilterOwner] = useState<"" | "BarmeniaGothaer" | "Agentur-Duic">("");
   const [filterCustomerKind, setFilterCustomerKind] = useState<"" | "privat" | "firma">("");
-  const [filterPipeline, setFilterPipeline] = useState<string>("");
   const [filterContact, setFilterContact] = useState<"" | "mitEmail" | "ohneEmail" | "mitTelefon">("");
   const [filterCampaignListId, setFilterCampaignListId] = useState("");
   const [crmSavedViews, setCrmSavedViews] = useState<CrmSavedView[]>([]);
   const [crmViewNameDraft, setCrmViewNameDraft] = useState("");
   const [crmPrefsReady, setCrmPrefsReady] = useState(false);
   const [leadNoteDraft, setLeadNoteDraft] = useState("");
+  const [pendingNoteRequest, setPendingNoteRequest] = useState<{ leadId: string; noteId: string; text: string } | null>(null);
   const [leadDetailsDraft, setLeadDetailsDraft] = useState<LeadDetailsDraft | null>(null);
+  const [crmSyncPendingRequest, setCrmSyncPendingRequest] = useState<{ eventId: string; updatesKey: string } | null>(null);
+  const [crmSyncing, setCrmSyncing] = useState(false);
   const [productDrafts, setProductDrafts] = useState<LeadProductDetail[]>([]);
   const [newProductDraft, setNewProductDraft] = useState({ category: "", label: "", applicationStatus: "interested" as LeadProductDetail["applicationStatus"], expectedUnits: "", expectedCommissionEUR: "", notes: "" });
   const [leadTaskAssignee, setLeadTaskAssignee] = useState<"user" | "gloria">("user");
   const [conversionKinds, setConversionKinds] = useState<Record<string, "privat" | "firma">>({});
   const [leadTaskTitleDraft, setLeadTaskTitleDraft] = useState("");
   const [leadTaskDueAtDraft, setLeadTaskDueAtDraft] = useState("");
-  const [leadPipelineStageDraft, setLeadPipelineStageDraft] = useState("");
   const [outlookSubjectDraft, setOutlookSubjectDraft] = useState("");
   const [outlookBodyDraft, setOutlookBodyDraft] = useState("");
   const [outlookToDraft, setOutlookToDraft] = useState("");
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
-  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
-  const [pipelineDropStage, setPipelineDropStage] = useState<string>("");
-  const [quickPipelineStageByLeadId, setQuickPipelineStageByLeadId] = useState<Record<string, string>>({});
-  const [lastPipelineMove, setLastPipelineMove] = useState<PipelineMoveSnapshot | null>(null);
-  const [undoTick, setUndoTick] = useState(0);
   const [showAddCustomerForm, setShowAddCustomerForm] = useState(false);
   const [addCustomerDraft, setAddCustomerDraft] = useState<ManualCustomerDraft>({
     company: "",
@@ -286,7 +274,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [rescheduleAt, setRescheduleAt] = useState("");
   const crmPrefsLastSavedKeyRef = useRef("");
   const crmPrefsAbortRef = useRef<AbortController | null>(null);
-  const pipelineUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contactPanelRef = useRef<HTMLDivElement | null>(null);
   const rescheduleDialogRef = useRef<HTMLFormElement | null>(null);
   const reportPanelRef = useRef<HTMLDivElement | null>(null);
@@ -383,9 +370,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     if (filterCustomerKind) {
       leads = leads.filter((l) => (l.customerKind || "") === filterCustomerKind);
     }
-    if (filterPipeline) {
-      leads = leads.filter((l) => l.crmPipeline?.stage === filterPipeline);
-    }
     if (filterContact === "mitEmail") {
       leads = leads.filter((l) => Boolean((l.email || "").trim()));
     }
@@ -408,7 +392,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     }
     return leads;
-  }, [activeView, data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterPipeline, filterContact, filterCampaignListId, searchQuery]);
+  }, [activeView, data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterContact, filterCampaignListId, searchQuery]);
 
   const appointmentProspects = useMemo(() => {
     const appointments = new Map<string, { lead: Lead; appointmentAt: string }>();
@@ -426,12 +410,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     return [...appointments.values()].sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt));
   }, [data.leads, data.reports]);
 
-  const availablePipelineStages = useMemo(() => {
-    const defaults = ["neu", "qualifiziert", "angebot", "verhandlung", "gewonnen", "verloren"];
-    const dynamic = (data.leads || []).map((lead) => lead.crmPipeline?.stage || "").filter(Boolean);
-    return Array.from(new Set([...defaults, ...dynamic])).sort((a, b) => a.localeCompare(b, "de"));
-  }, [data.leads]);
-
   const reportingStats = useMemo(() => {
     const reports = data.reports || [];
     const total = reports.length;
@@ -444,14 +422,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     return { total, appointments, rejections, callbacks, contactRate, appointmentRate };
   }, [data.reports]);
 
-  const activeCrmTab = activeView === "campaigns" && campaignTab === "followups" ? "callbacks" : activeView === "pipeline" ? "pipeline" : "customers";
+  const activeCrmTab = activeView === "campaigns" && campaignTab === "followups" ? "callbacks" : "customers";
 
   const allFilteredSelected = filteredLeads.length > 0 && filteredLeads.every((lead) => selectedLeadIds.includes(lead.id));
-  const undoSecondsLeft = useMemo(() => {
-    if (!lastPipelineMove) return 0;
-    return Math.max(0, Math.ceil((lastPipelineMove.expiresAt - Date.now()) / 1000));
-  }, [lastPipelineMove, undoTick]);
-
   function navigateWorkspace(workspace: CrmWorkspace, tab: CrmCampaignTab = "lists") {
     setActiveView(workspace);
     setCampaignTab(tab);
@@ -460,7 +433,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setFilterTopic("");
     setFilterOwner("");
     setFilterCustomerKind("");
-    setFilterPipeline("");
     setFilterContact("");
     setFilterCampaignListId("");
     setSelectedLeadIds([]);
@@ -495,7 +467,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         if (typeof prefs.crmSearch === "string") setSearchQuery(prefs.crmSearch);
         if (prefs.crmTypeFilter !== undefined) setFilterOwner(prefs.crmTypeFilter || "");
         if (prefs.crmCustomerKindFilter !== undefined) setFilterCustomerKind(prefs.crmCustomerKindFilter || "");
-        if (prefs.crmPipelineFilter !== undefined) setFilterPipeline(prefs.crmPipelineFilter || "");
         if (prefs.crmContactFilter !== undefined) setFilterContact(prefs.crmContactFilter || "");
         if (prefs.crmWorkspace) setActiveView(prefs.crmWorkspace);
         if (prefs.crmCampaignTab) setCampaignTab(prefs.crmCampaignTab);
@@ -506,7 +477,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           crmSearch: prefs.crmSearch || "",
           crmTypeFilter: prefs.crmTypeFilter || "",
           crmCustomerKindFilter: prefs.crmCustomerKindFilter || "",
-          crmPipelineFilter: prefs.crmPipelineFilter || "",
           crmContactFilter: prefs.crmContactFilter || "",
         });
       }
@@ -561,7 +531,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       search: searchQuery,
       owner: filterOwner,
       customerKind: filterCustomerKind,
-      pipelineStage: filterPipeline as CrmSavedView["pipelineStage"],
+      pipelineStage: "",
       contactFilter: filterContact,
       createdAt: new Date().toISOString(),
     };
@@ -580,7 +550,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setSearchQuery(view.search || "");
     setFilterOwner(view.owner || "");
     setFilterCustomerKind(view.customerKind || "");
-    setFilterPipeline(view.pipelineStage || "");
     setFilterContact(view.contactFilter || "");
     setNotice(`Suche "${view.name}" geladen.`);
   }
@@ -844,12 +813,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       return;
     }
     setBusy(true);
+    const text = note.trim();
+    const pending = pendingNoteRequest?.leadId === leadId && pendingNoteRequest.text === text
+      ? pendingNoteRequest
+      : { leadId, noteId: `gloria-note-${crypto.randomUUID()}`, text };
+    setPendingNoteRequest(pending);
     try {
       const res = await fetch("/api/campaigns/lists", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_lead_note", leadId, note }),
+        body: JSON.stringify({ action: "add_lead_note", leadId, note: text, noteId: pending.noteId }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
       if (!res.ok || !payload.lead) {
@@ -862,13 +836,14 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       }));
       setSelectedLead(updatedLead);
       setLeadNoteDraft("");
+      setPendingNoteRequest(null);
       setNotice("✓ Notiz gespeichert");
     } catch (error) {
       setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
     } finally {
       setBusy(false);
     }
-  }, [selectedLead]);
+  }, [pendingNoteRequest, selectedLead]);
 
   const updateSelectedLead = useCallback(async (updates: Partial<Lead>, successMessage: string) => {
     if (!selectedLead) return;
@@ -891,6 +866,84 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setBusy(false);
     }
   }, [selectedLead]);
+
+  const syncSelectedCompanyToCrm = useCallback(async () => {
+    if (!selectedLead || !leadDetailsDraft || selectedLead.callSource !== "crm" || !Number.isSafeInteger(selectedLead.crmCompanyId)) {
+      setNotice("✗ Dieser Kontakt ist keiner CRM-Firma zugeordnet.");
+      return;
+    }
+
+    const data = selectedLead.crmCompanyData || {};
+    const values: Record<string, string | null> = {
+      name: leadDetailsDraft.company.trim(),
+      contact_person: (leadDetailsDraft.contactName || "").trim() || null,
+      phone: (leadDetailsDraft.phone || "").trim() || null,
+      email: (leadDetailsDraft.email || "").trim() || null,
+      street: (leadDetailsDraft.addressStreet || "").trim() || null,
+      postal_code: (leadDetailsDraft.addressPostalCode || "").trim() || null,
+      city: (leadDetailsDraft.addressCity || "").trim() || null,
+      country: (leadDetailsDraft.addressCountry || "").trim() || null,
+    };
+    const original: Record<string, unknown> = {
+      name: data.name ?? selectedLead.company,
+      contact_person: data.contact_person ?? selectedLead.contactName,
+      phone: data.phone ?? selectedLead.phone,
+      email: data.email ?? selectedLead.email,
+      street: data.street ?? selectedLead.addressStreet,
+      postal_code: data.postal_code ?? selectedLead.addressPostalCode,
+      city: data.city ?? selectedLead.addressCity,
+      country: data.country ?? selectedLead.addressCountry,
+    };
+    const companyUpdates = Object.fromEntries(
+      Object.entries(values).filter(([field, value]) => value !== (typeof original[field] === "string" ? original[field].trim() : null)),
+    );
+    if (Object.keys(companyUpdates).length === 0) {
+      setNotice("Alle Firmendaten sind bereits mit dem CRM abgeglichen.");
+      return;
+    }
+
+    setCrmSyncing(true);
+    const updatesKey = JSON.stringify(companyUpdates);
+    const eventId = crmSyncPendingRequest?.updatesKey === updatesKey
+      ? crmSyncPendingRequest.eventId
+      : `gloria-company-${crypto.randomUUID()}`;
+    setCrmSyncPendingRequest({ eventId, updatesKey });
+    try {
+      const response = await fetch("/api/integrations/crm/company-sync", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: selectedLead.id, eventId, companyUpdates }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; lead?: Lead };
+      if (!response.ok || !payload.lead) {
+        throw new Error(payload.error || "Firmendaten konnten nicht abgeglichen werden.");
+      }
+      setData((current) => ({ ...current, leads: current.leads.map((lead) => lead.id === payload.lead!.id ? payload.lead! : lead) }));
+      setSelectedLead(payload.lead);
+      setLeadDetailsDraft({
+        ...leadDetailsDraft,
+        company: payload.lead.company || "",
+        contactName: payload.lead.contactName || "",
+        phone: payload.lead.phone || "",
+        directDial: payload.lead.directDial || "",
+        email: payload.lead.email || "",
+        birthDate: payload.lead.birthDate || "",
+        addressStreet: payload.lead.addressStreet || "",
+        addressPostalCode: payload.lead.addressPostalCode || "",
+        addressCity: payload.lead.addressCity || "",
+        addressCountry: payload.lead.addressCountry || "",
+        customerKind: payload.lead.customerKind,
+        customerOwner: payload.lead.customerOwner,
+      });
+      setCrmSyncPendingRequest(null);
+      setNotice("✓ Firmendaten wurden mit dem CRM abgeglichen.");
+    } catch (error) {
+      setNotice(`✗ ${error instanceof Error ? error.message : "Firmendaten konnten nicht abgeglichen werden."}`);
+    } finally {
+      setCrmSyncing(false);
+    }
+  }, [crmSyncPendingRequest, leadDetailsDraft, selectedLead]);
 
   const handleSaveProducts = useCallback(() => {
     void updateSelectedLead({
@@ -1016,131 +1069,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       setBusy(false);
     }
   }, [selectedLead]);
-
-  const clearPipelineUndo = useCallback(() => {
-    if (pipelineUndoTimerRef.current) {
-      clearTimeout(pipelineUndoTimerRef.current);
-      pipelineUndoTimerRef.current = null;
-    }
-    setLastPipelineMove(null);
-  }, []);
-
-  const stageLabel = useCallback((value: string) => value || "ohne Stage", []);
-
-  const rememberPipelineMoveForUndo = useCallback((snapshot: PipelineMoveSnapshot) => {
-    if (pipelineUndoTimerRef.current) {
-      clearTimeout(pipelineUndoTimerRef.current);
-    }
-    setLastPipelineMove(snapshot);
-    pipelineUndoTimerRef.current = setTimeout(() => {
-      setLastPipelineMove(null);
-      pipelineUndoTimerRef.current = null;
-    }, 5000);
-  }, []);
-
-  const updateLeadPipelineStage = useCallback(async (
-    leadId: string,
-    stage: string,
-    options?: { fromStage?: string; createUndo?: boolean; noticePrefix?: string },
-  ) => {
-    const leadBeforeUpdate = (data.leads || []).find((lead) => lead.id === leadId);
-    const fromStage = options?.fromStage ?? String(leadBeforeUpdate?.crmPipeline?.stage || "").trim();
-    setBusy(true);
-    try {
-      const res = await fetch("/api/campaigns/lists", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update_lead_details",
-          leadId,
-          updates: {
-            crmPipeline: {
-              stage,
-              updatedAt: new Date().toISOString(),
-            },
-          },
-        }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; lead?: DashboardData["leads"][number] };
-      if (!res.ok || !payload.lead) {
-        throw new Error(payload.error || "Pipeline-Stufe konnte nicht gespeichert werden.");
-      }
-      const updatedLead = payload.lead;
-      setData((current) => ({
-        ...current,
-        leads: current.leads.map((lead) => lead.id === updatedLead.id ? updatedLead : lead),
-      }));
-      setSelectedLead((current) => (current && current.id === updatedLead.id ? updatedLead : current));
-      setQuickPipelineStageByLeadId((current) => {
-        const next = { ...current };
-        delete next[leadId];
-        return next;
-      });
-      setLeadPipelineStageDraft(updatedLead.crmPipeline?.stage || stage);
-      if (options?.createUndo) {
-        rememberPipelineMoveForUndo({
-          leadId: updatedLead.id,
-          leadCompany: updatedLead.company,
-          fromStage,
-          toStage: stage,
-          expiresAt: Date.now() + 5000,
-        });
-      }
-      setNotice(
-        `${options?.noticePrefix || "✓ Pipeline-Stufe aktualisiert"}: ${updatedLead.company} (${stageLabel(fromStage)} -> ${stageLabel(stage)})`,
-      );
-      return true;
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Pipeline-Update fehlgeschlagen.");
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [data.leads, rememberPipelineMoveForUndo, stageLabel]);
-
-  const handleUpdatePipelineStage = useCallback(async () => {
-    if (!selectedLead || !leadPipelineStageDraft) return;
-    const ok = await updateLeadPipelineStage(selectedLead.id, leadPipelineStageDraft, {
-      fromStage: String(selectedLead.crmPipeline?.stage || "").trim(),
-      createUndo: true,
-    });
-    if (ok) {
-      setNotice("✓ Pipeline-Stufe gespeichert");
-    }
-  }, [leadPipelineStageDraft, selectedLead, updateLeadPipelineStage]);
-
-  async function handlePipelineDrop(targetStage: string) {
-    if (!draggedLeadId) return;
-    if (currentUser?.role !== "master") {
-      setNotice("Nur Master-User können Pipeline-Stufen ändern.");
-      setDraggedLeadId(null);
-      setPipelineDropStage("");
-      return;
-    }
-
-    const lead = (data.leads || []).find((entry) => entry.id === draggedLeadId);
-    const currentStage = String(lead?.crmPipeline?.stage || "").trim();
-    if (!lead || !targetStage || currentStage === targetStage) {
-      setDraggedLeadId(null);
-      setPipelineDropStage("");
-      return;
-    }
-
-    await updateLeadPipelineStage(lead.id, targetStage, { fromStage: currentStage, createUndo: true });
-    setDraggedLeadId(null);
-    setPipelineDropStage("");
-  }
-
-  const handleUndoPipelineMove = useCallback(async () => {
-    if (!lastPipelineMove) return;
-    const snapshot = lastPipelineMove;
-    clearPipelineUndo();
-    await updateLeadPipelineStage(snapshot.leadId, snapshot.fromStage, {
-      fromStage: snapshot.toStage,
-      noticePrefix: "↩ Rückgängig",
-    });
-  }, [clearPipelineUndo, lastPipelineMove, updateLeadPipelineStage]);
 
   const handleAddOutlookEmail = useCallback(async () => {
     if (!selectedLead || !outlookSubjectDraft.trim()) return;
@@ -1378,7 +1306,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       crmSearch: searchQuery,
       crmTypeFilter: filterOwner,
       crmCustomerKindFilter: filterCustomerKind,
-      crmPipelineFilter: filterPipeline as CrmUiPreferences["crmPipelineFilter"],
       crmContactFilter: filterContact,
     };
     const nextKey = JSON.stringify(snapshot);
@@ -1400,10 +1327,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [activeCrmTab, activeView, campaignTab, crmPrefsReady, searchQuery, filterOwner, filterCustomerKind, filterPipeline, filterContact]);
+  }, [activeCrmTab, activeView, campaignTab, crmPrefsReady, searchQuery, filterOwner, filterCustomerKind, filterContact]);
 
   useEffect(() => {
     setLeadNoteDraft("");
+    setPendingNoteRequest(null);
+    setCrmSyncPendingRequest(null);
     setLeadDetailsDraft(selectedLead ? {
       company: selectedLead.company || "",
       contactName: selectedLead.contactName || "",
@@ -1429,7 +1358,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setLeadTaskTitleDraft("");
     setLeadTaskDueAtDraft("");
     setLeadTaskAssignee("user");
-    setLeadPipelineStageDraft(selectedLead?.crmPipeline?.stage || "");
     setOutlookSubjectDraft("");
     setOutlookBodyDraft("");
     setOutlookToDraft(selectedLead?.email || "");
@@ -1443,20 +1371,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   useEffect(() => {
     setDetailTab("overview");
   }, [selectedLead?.id]);
-
-  useEffect(() => {
-    if (!lastPipelineMove) return;
-    const timer = setInterval(() => setUndoTick((value) => value + 1), 250);
-    return () => clearInterval(timer);
-  }, [lastPipelineMove]);
-
-  useEffect(() => {
-    return () => {
-      if (pipelineUndoTimerRef.current) {
-        clearTimeout(pipelineUndoTimerRef.current);
-      }
-    };
-  }, []);
 
   // ========================================================================
   // RENDER FUNCTIONS
@@ -1745,14 +1659,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               <option value="firma">Firma</option>
             </select> : null}
             <select
-              value={filterPipeline}
-              onChange={(e) => setFilterPipeline(e.target.value)}
-              className="filter-select"
-            >
-              <option value="">Alle Pipeline-Stufen</option>
-              {availablePipelineStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
-            </select>
-            <select
               value={filterContact}
               onChange={(e) => setFilterContact(e.target.value as typeof filterContact)}
               className="filter-select"
@@ -1910,6 +1816,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                     </div>
                     <div className="detail-actions-row">
                       <button className="btn" disabled={busy} onClick={() => void updateSelectedLead({ ...leadDetailsDraft, company: leadDetailsDraft.customerKind === "privat" ? leadDetailsDraft.contactName : leadDetailsDraft.company, location: leadDetailsDraft.addressCity || "" }, "Kontaktdaten gespeichert")}>Kontaktdaten speichern</button>
+                      {selectedLead.callSource === "crm" && Number.isSafeInteger(selectedLead.crmCompanyId) ? (
+                        <button className="btn ghost" disabled={busy || crmSyncing} onClick={() => void syncSelectedCompanyToCrm()}>
+                          {crmSyncing ? "Abgleich läuft..." : "Firmendaten in CRM abgleichen"}
+                        </button>
+                      ) : null}
                     </div>
                   </>
                 ) : null}
@@ -1943,25 +1854,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <input className="input" placeholder="Notiz" value={newProductDraft.notes} onChange={(event) => setNewProductDraft((current) => ({ ...current, notes: event.target.value }))} />
                 </div>
                 <div className="detail-actions-row"><button className="btn" disabled={busy || !newProductDraft.category.trim()} onClick={handleAddProduct}>Produkt hinzufügen</button></div>
-              </div>
-
-              <div className="detail-section" hidden={detailTab !== "overview"}>
-                <h4>CRM-Pipeline</h4>
-                <div className="task-form-grid">
-                  <select className="input" value={leadPipelineStageDraft} onChange={(event) => setLeadPipelineStageDraft(event.target.value)}>
-                    <option value="">Bitte wählen</option>
-                    <option value="neu">neu</option>
-                    <option value="qualifiziert">qualifiziert</option>
-                    <option value="angebot">angebot</option>
-                    <option value="verhandlung">verhandlung</option>
-                    <option value="gewonnen">gewonnen</option>
-                    <option value="verloren">verloren</option>
-                  </select>
-                  <div className="subtle">Aktuell: {selectedLead.crmPipeline?.stage || "-"}</div>
-                  <button className="btn" disabled={busy || !leadPipelineStageDraft} onClick={() => void handleUpdatePipelineStage()}>
-                    Pipeline speichern
-                  </button>
-                </div>
               </div>
 
               <div className="detail-section" hidden={detailTab !== "history"}>
@@ -2155,99 +2047,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           if (report) openReportDetail(report);
           else setNotice("Der zugehörige Anrufreport ist nicht mehr verfügbar.");
         }} onOpenContact={setSelectedLead} onChanged={reloadLiveData} />
-      </div>
-    );
-  }
-
-  function renderPipeline() {
-    return (
-      <div className="contacts-view">
-        <div className="view-header">
-          <h3 style={{ margin: 0 }}>Pipeline-Ansicht</h3>
-          <p className="subtle" style={{ marginBottom: 0 }}>Kontakte nach CRM-Pipeline gruppiert.</p>
-        </div>
-        <div className="pipeline-board">
-          {availablePipelineStages.length === 0 ? (
-            <div className="empty-state">
-              <p>Keine Pipeline-Stufen vorhanden</p>
-            </div>
-          ) : (
-            availablePipelineStages.map((stage) => {
-              const stageLeads = filteredLeads.filter((lead) => (lead.crmPipeline?.stage || "neu") === stage);
-              return (
-                <div
-                  key={stage}
-                  className={`pipeline-column ${pipelineDropStage === stage ? "drop-target" : ""}`}
-                  onDragOver={(event) => {
-                    if (!draggedLeadId || busy) return;
-                    event.preventDefault();
-                    setPipelineDropStage(stage);
-                  }}
-                  onDragLeave={() => {
-                    if (pipelineDropStage === stage) {
-                      setPipelineDropStage("");
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    void handlePipelineDrop(stage);
-                  }}
-                >
-                  <div className="pipeline-column-header">
-                    <strong>{stage}</strong>
-                    <span>{stageLeads.length}</span>
-                  </div>
-                  <div className="pipeline-column-body">
-                    {stageLeads.map((lead) => (
-                      <div key={lead.id} className={`pipeline-card-wrap ${draggedLeadId === lead.id ? "dragging" : ""}`}>
-                        <button
-                          className="pipeline-card"
-                          onClick={() => setSelectedLead(lead)}
-                          draggable={!busy && currentUser?.role === "master"}
-                          onDragStart={() => setDraggedLeadId(lead.id)}
-                          onDragEnd={() => {
-                            setDraggedLeadId(null);
-                            setPipelineDropStage("");
-                          }}
-                          title={currentUser?.role === "master" ? "Ziehen zum Verschieben der Stage" : "Nur Master-User können Stages ändern"}
-                        >
-                          <strong>{lead.company}</strong>
-                          <span>{lead.contactName || "-"}</span>
-                          <small>{lead.topic}</small>
-                        </button>
-                        <div className="pipeline-quick-controls" onClick={(event) => event.stopPropagation()}>
-                          <select
-                            className="input"
-                            value={quickPipelineStageByLeadId[lead.id] || stage}
-                            onChange={(event) => {
-                              const nextStage = event.target.value;
-                              setQuickPipelineStageByLeadId((current) => ({ ...current, [lead.id]: nextStage }));
-                            }}
-                            aria-label={`Pipeline-Stufe für ${lead.company}`}
-                          >
-                            {availablePipelineStages.map((candidateStage) => (
-                              <option key={`${lead.id}-${candidateStage}`} value={candidateStage}>{candidateStage}</option>
-                            ))}
-                          </select>
-                          <button
-                            className="btn-small ghost"
-                            disabled={busy || currentUser?.role !== "master" || (quickPipelineStageByLeadId[lead.id] || stage) === stage}
-                            onClick={() => void updateLeadPipelineStage(lead.id, quickPipelineStageByLeadId[lead.id] || stage, {
-                              fromStage: stage,
-                              createUndo: true,
-                            })}
-                          >
-                            Setzen
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
       </div>
     );
   }
@@ -2478,18 +2277,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   return (
     <div className={`gloria-crm app-container ${embedded ? "embedded" : ""}`}>
-      {lastPipelineMove ? (
-        <div className="pipeline-toast" role="status" aria-live="polite">
-          <div>
-            <strong>{lastPipelineMove.leadCompany}</strong>
-            <span> verschoben: {stageLabel(lastPipelineMove.fromStage)} {"->"} {stageLabel(lastPipelineMove.toStage)}</span>
-          </div>
-          <div className="pipeline-toast-actions">
-            <span className="pipeline-toast-timer">{undoSecondsLeft}s</span>
-            <button className="btn-small ghost" disabled={busy} onClick={() => void handleUndoPipelineMove()}>Rückgängig</button>
-          </div>
-        </div>
-      ) : null}
       {embedded ? (
         <div className="embedded-hero">
           <div>
@@ -2518,7 +2305,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       <nav className={`app-nav ${embedded ? "embedded" : ""}`} aria-label="CRM-Arbeitsbereiche">
         {([
           ["dashboard", "Dashboard"], ["campaigns", "Kampagnen"], ["companies", "Firmenkunden"],
-          ["private", "Privatkunden"], ["calendar", "Kalender"], ["pipeline", "Vertriebspipeline"], ["profile", "Profil / CRM-Verbindung"],
+          ["private", "Privatkunden"], ["calendar", "Kalender"], ["profile", "Profil / CRM-Verbindung"],
         ] as const).map(([workspace, label]) => (
           <button key={workspace} className={`nav-btn ${activeView === workspace ? "active" : ""}`} aria-current={activeView === workspace ? "page" : undefined} onClick={() => navigateWorkspace(workspace)}>{label}</button>
         ))}
@@ -2536,7 +2323,6 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         {activeView === "dashboard" && renderDashboard()}
         {activeView === "campaigns" && renderCampaigns()}
         {(activeView === "companies" || activeView === "private") && renderContacts()}
-        {activeView === "pipeline" && renderPipeline()}
         {activeView === "calendar" && renderCalendar()}
         {activeView === "profile" && renderProfile()}
       </main>

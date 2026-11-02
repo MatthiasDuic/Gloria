@@ -12,7 +12,7 @@ function sanitizePreferences(input: unknown): CrmUiPreferences {
 
   const row = input as Record<string, unknown>;
   return {
-    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "pipeline" || row.crmWorkspace === "profile" ? row.crmWorkspace : undefined,
+    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "profile" ? row.crmWorkspace : undefined,
     crmCampaignTab: row.crmCampaignTab === "lists" || row.crmCampaignTab === "prospects" || row.crmCampaignTab === "followups" || row.crmCampaignTab === "calls" ? row.crmCampaignTab : undefined,
     crmTab: row.crmTab === "customers" || row.crmTab === "pipeline" || row.crmTab === "callbacks" ? row.crmTab : undefined,
     crmDetailTab:
@@ -27,16 +27,6 @@ function sanitizePreferences(input: unknown): CrmUiPreferences {
     crmSearch: typeof row.crmSearch === "string" ? row.crmSearch : undefined,
     crmTypeFilter: row.crmTypeFilter === "BarmeniaGothaer" || row.crmTypeFilter === "Agentur-Duic" || row.crmTypeFilter === "" ? row.crmTypeFilter : undefined,
     crmCustomerKindFilter: row.crmCustomerKindFilter === "privat" || row.crmCustomerKindFilter === "firma" || row.crmCustomerKindFilter === "" ? row.crmCustomerKindFilter : undefined,
-    crmPipelineFilter:
-      row.crmPipelineFilter === "neu"
-      || row.crmPipelineFilter === "qualifiziert"
-      || row.crmPipelineFilter === "angebot"
-      || row.crmPipelineFilter === "verhandlung"
-      || row.crmPipelineFilter === "gewonnen"
-      || row.crmPipelineFilter === "verloren"
-      || row.crmPipelineFilter === ""
-        ? row.crmPipelineFilter
-        : undefined,
     crmContactFilter:
       row.crmContactFilter === "mitEmail"
       || row.crmContactFilter === "ohneEmail"

@@ -803,6 +803,7 @@ export async function updateLeadDetails(
       topic: updates.topic ?? lead.topic,
       note: updates.note ?? lead.note,
       notes: updates.notes ?? lead.notes,
+      crmCompanyData: updates.crmCompanyData ?? lead.crmCompanyData,
       emailHistory: normalizeEmailHistory(updates.emailHistory ?? lead.emailHistory),
       tasks: normalizeLeadTasks(updates.tasks ?? lead.tasks),
       activities: normalizeLeadActivities(updates.activities ?? lead.activities),
@@ -832,6 +833,7 @@ export async function updateLeadDetails(
       topic: lead.topic,
       note: lead.note,
       notes: lead.notes,
+      crmCompanyData: lead.crmCompanyData,
       crmPipeline: lead.crmPipeline,
     };
     const after = {
@@ -858,6 +860,7 @@ export async function updateLeadDetails(
       topic: nextLead.topic,
       note: nextLead.note,
       notes: nextLead.notes,
+      crmCompanyData: nextLead.crmCompanyData,
       crmPipeline: nextLead.crmPipeline,
     };
     const changed = JSON.stringify(after) !== JSON.stringify(before);
@@ -981,6 +984,7 @@ export async function addLeadNote(
   leadId: string,
   text: string,
   userId?: string,
+  noteId?: string,
 ): Promise<Lead | undefined> {
   const normalizedText = text.trim();
   if (!leadId || !normalizedText) return undefined;
@@ -988,9 +992,17 @@ export async function addLeadNote(
   let updatedLead: Lead | undefined;
   const nextLeads = leads.map((lead) => {
     if (lead.id !== leadId) return lead;
+    const existingNote = noteId ? lead.notes?.find((entry) => entry.id === noteId) : undefined;
+    if (existingNote) {
+      if (existingNote.text !== normalizedText) {
+        throw new Error("Notizkennung wurde bereits für einen anderen Text verwendet.");
+      }
+      updatedLead = lead;
+      return lead;
+    }
     const createdAt = new Date().toISOString();
     const note = {
-      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: noteId || `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text: normalizedText,
       createdAt,
     };

@@ -11,6 +11,7 @@ import {
 } from "@/lib/report-db";
 import { globalJobQueue } from "@/lib/job-queue";
 import { buildReportTranscriptFallback } from "@/lib/transcript-utils";
+import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -267,6 +268,45 @@ async function persistTranscriptArray(
   };
 }
 
+async function syncCrmCallReport(report: Awaited<ReturnType<typeof storeCallReport>>) {
+  if (!report.userId || !report.leadId) return;
+  const lead = await getLeadById(report.leadId, report.userId);
+  if (!lead || lead.callSource !== "crm" || !lead.crmCompanyId) return;
+
+  const summary = report.summary.split(/\n---\s*GESPRAECHSPROTOKOLL\b/i)[0].trim();
+  const noteText = [
+    `Gloria-Gespräch am ${report.conversationDate}`,
+    `Ergebnis: ${report.outcome}`,
+    `Thema: ${report.topic}`,
+    report.contactName ? `Ansprechpartner: ${report.contactName}` : "",
+    summary,
+  ].filter(Boolean).join("\n");
+  const appointment = report.outcome === "Termin" && report.appointmentAt
+    ? {
+      scheduledAt: report.appointmentAt,
+      title: `Gloria-Beratungstermin – ${report.topic}`,
+      description: `Im Gloria-Gespräch vereinbarter Termin. Thema: ${report.topic}${report.appointmentMode ? `; Modus: ${report.appointmentMode}` : ""}.`,
+      contactPerson: report.contactName,
+    }
+    : undefined;
+
+  try {
+    await syncCrmCompanyEvent(report.userId, {
+      eventId: `gloria-call-${report.id}`,
+      companyId: lead.crmCompanyId,
+      note: { text: noteText.slice(0, 9_500) },
+      appointment,
+    });
+  } catch (error) {
+    console.error("Gloria call result could not be synchronized with CRM:", {
+      reportId: report.id,
+      companyId: lead.crmCompanyId,
+      error,
+    });
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as {
     userId?: string;
@@ -369,6 +409,7 @@ export async function POST(request: Request) {
           recordingUrl: payload.recordingUrl,
         });
 
+        await syncCrmCallReport(report);
         return NextResponse.json({
           ok: true,
           recoveredFinalizePayload: true,
@@ -490,6 +531,7 @@ export async function POST(request: Request) {
     recordingConsent: payload.recordingConsent,
     recordingUrl: payload.recordingUrl,
   });
+  await syncCrmCallReport(report);
 
   let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
   // Enqueue email job asynchronously instead of blocking

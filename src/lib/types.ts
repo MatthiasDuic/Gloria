@@ -74,14 +74,13 @@ export interface CrmSavedView {
 }
 
 export interface CrmUiPreferences {
-  crmWorkspace?: "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline" | "profile";
+  crmWorkspace?: "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "profile";
   crmCampaignTab?: "lists" | "prospects" | "followups" | "calls";
   crmTab?: "customers" | "pipeline" | "callbacks";
   crmDetailTab?: "stammdaten" | "produkte" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
   crmSearch?: string;
   crmTypeFilter?: "" | "BarmeniaGothaer" | "Agentur-Duic";
   crmCustomerKindFilter?: "" | "privat" | "firma";
-  crmPipelineFilter?: "" | LeadPipelineStage;
   crmContactFilter?: "" | "mitEmail" | "ohneEmail" | "mitTelefon";
 }
 

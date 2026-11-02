@@ -18,6 +18,7 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 import { queueOutboundCall } from "@/lib/outbound-call-queue";
+import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 
 export const runtime = "nodejs";
 
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
       leadId?: string;
       leadIds?: string[];
       note?: string;
+      noteId?: string;
       taskId?: string;
       task?: {
         title?: string;
@@ -107,9 +109,32 @@ export async function POST(request: Request) {
       if (!text) {
         return NextResponse.json({ error: "Notiztext ist erforderlich." }, { status: 400 });
       }
-      const updatedLead = await addLeadNote(leadId, text, sessionUser.id);
+      if (payload.noteId !== undefined && (typeof payload.noteId !== "string" || payload.noteId.length > 200)) {
+        return NextResponse.json({ error: "Notizkennung ist ungültig." }, { status: 400 });
+      }
+      const updatedLead = await addLeadNote(leadId, text, sessionUser.id, payload.noteId);
       if (!updatedLead) {
         return NextResponse.json({ error: "Lead nicht gefunden." }, { status: 404 });
+      }
+      if (updatedLead.callSource === "crm" && updatedLead.crmCompanyId) {
+        const note = payload.noteId
+          ? updatedLead.notes?.find((entry) => entry.id === payload.noteId)
+          : updatedLead.notes?.[0];
+        if (!note) {
+          return NextResponse.json({ error: "Notiz wurde gespeichert, aber die CRM-Übertragung konnte nicht vorbereitet werden." }, { status: 500 });
+        }
+        try {
+          await syncCrmCompanyEvent(sessionUser.id, {
+            eventId: `gloria-note-${note.id}`,
+            companyId: updatedLead.crmCompanyId,
+            note: { text: note.text },
+          });
+        } catch (error) {
+          console.error("Gloria-Notiz konnte nicht an die Firmendatenbank übertragen werden:", error);
+          return NextResponse.json({
+            error: `Notiz wurde in Gloria gespeichert, aber nicht an die Firmendatenbank übertragen: ${error instanceof Error ? error.message : "unbekannter Fehler"}`,
+          }, { status: 502 });
+        }
       }
       return NextResponse.json({ ok: true, action, lead: updatedLead });
     }
