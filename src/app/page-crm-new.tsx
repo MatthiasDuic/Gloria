@@ -2031,8 +2031,15 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   function openReportDetail(report: DashboardData["reports"][number]) {
+    if (isPrivateCustomerReport(report)) return;
     setSelectedLead(null);
     setSelectedReport(report);
+  }
+
+  function isPrivateCustomerReport(report: DashboardData["reports"][number]) {
+    return data.leads.some((lead) =>
+      isLeadCustomer(lead) && lead.customerKind === "privat" && reportMatchesLead(report, lead),
+    );
   }
 
   async function deleteCrmReport(report: DashboardData["reports"][number]) {
@@ -2057,6 +2064,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const listLeadIds = new Set(data.leads.filter((lead) => (lead.listId || "legacy") === filterCampaignListId).map((lead) => lead.id));
     const query = searchQuery.trim().toLowerCase();
     const reports = data.reports.filter((report) => {
+      if (isPrivateCustomerReport(report)) return false;
       if (filterCampaignListId && (!report.leadId || !listLeadIds.has(report.leadId))) return false;
       return !query || `${report.company} ${report.contactName || ""} ${report.topic} ${report.summary}`.toLowerCase().includes(query);
     }).sort((a, b) => Date.parse(b.conversationDate) - Date.parse(a.conversationDate));
@@ -2084,7 +2092,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }
 
   function renderReportDetail() {
-    if (!selectedReport) return null;
+    if (!selectedReport || isPrivateCustomerReport(selectedReport)) return null;
     const manual = getCallSource(selectedReport, calendarData.leads) === "manual";
     const sourceLabel = manual ? "Manuelle Anrufdetails" : "CRM-Anrufdetails";
     const lead = calendarData.leads.find((candidate) => candidate.id === selectedReport.leadId)
