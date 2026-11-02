@@ -25,6 +25,24 @@ function buildPkvContext() {
   return ctx;
 }
 
+test("keeps a warm contextual bridge after the introduction without skipping the assignment or consent", () => {
+  const ctx = buildPkvContext();
+  ctx.callObjective = "Ein Erstgespräch zur Beitragsentwicklung in der Gesundheitsversorgung führen.";
+  ctx.transcript = [
+    { role: "assistant", text: "Ich bin Gloria, die KI-Assistentin. Es geht um die Gesundheitskostenentwicklung. Passt es gerade kurz?", at: 1 },
+    { role: "user", text: "Ja.", at: 2 },
+  ];
+  const response = buildRealtimeResponseInstructions(ctx, "Antworte auf die Zusage.");
+  assert.match(response, /WEICHER GESPRÄCHSÜBERGANG/);
+  assert.match(response, /Anlass aus dem Auftrag mit dem Alltag der Person verbindet/);
+  assert.match(response, /Nicht direkt nach Versicherung, Beitrag oder Termin fragen/);
+  assert.match(response, /keine zweite Erlaubnisfrage und keine erneute Vorstellung/);
+  assert.match(response, /höchstens zwei kurze Sätze und eine Hauptfrage/);
+  assert.match(response, /Bei 'Worum geht es genau\?' beantworte zuerst diese Frage/);
+  assert.match(response, /bei Zeitmangel oder Ablehnung/i);
+  assert.match(response, /Bei Rückrufen knüpfe weich an/);
+});
+
 test("maps the configured bidirectional codec to Realtime audio", () => {
   assert.equal(openAiAudioFormat("PCMU"), "audio/pcmu");
   assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
