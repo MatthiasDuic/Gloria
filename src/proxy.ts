@@ -16,7 +16,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/auth/logout",
   "/api/auth/me",
 ];
-const PUBLIC_PATHS = ["/favicon.ico", "/logout", "/login"];
+const PUBLIC_PATHS = ["/favicon.ico", "/logout", "/login", "/api/integrations/crm/campaigns"];
 
 function isPublicPath(pathname: string) {
   return (
