@@ -194,12 +194,14 @@ export function beginPreparation(
   state: PreparationState,
   confirmedSlotPhrase: string,
   turns: ConversationTurn[],
+  appointmentMode?: import("./appointment-controller.js").AppointmentMode,
 ): PreparationTransition {
+  const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.${appointmentMode === "Microsoft Teams" ? " Den Link zum Meeting erhalten Sie in der Bestätigungsmail." : ""}`;
   if (state.questions.length === 0) {
     return {
       state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
-      speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
+      speechText: `${confirmation} Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
     };
   }
   const firstQuestion = nextUnansweredQuestion(state, turns, 0);
@@ -207,7 +209,7 @@ export function beginPreparation(
     return {
       state: { ...state, stage: "awaiting_email" },
       instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
-      speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
+      speechText: `${confirmation} Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
     };
   }
   return {
@@ -219,7 +221,7 @@ export function beginPreparation(
       questionRetryCount: 0,
     },
     instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "${preparationConsentQuestion(state)}"`,
-    speechText: `Der Termin ${confirmedSlotPhrase} ist bestätigt. ${preparationConsentQuestion(state)}`,
+    speechText: `${confirmation} ${preparationConsentQuestion(state)}`,
   };
 }
 

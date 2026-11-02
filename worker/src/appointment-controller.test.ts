@@ -19,7 +19,7 @@ test("locks the selected Tuesday, retains the location and proceeds to booking w
   turns.push({ role: "assistant", text: transition.speechText || "" }, { role: "user", text: "Der Dienstag passt sehr gut." });
   transition = advanceAppointmentRouting(transition.state, turns, slots);
   assert.equal(transition.state.selectedAppointmentSlot, "Dienstag, 10. November um 10:00 Uhr");
-  assert.equal(transition.speechText, "Soll der Termin digital oder bei Ihnen vor Ort stattfinden?");
+  assert.equal(transition.speechText, "Soll der Termin persönlich oder digital stattfinden?");
   turns.push({ role: "assistant", text: transition.speechText }, { role: "user", text: "Gerne bei mir vor Ort." });
   transition = advanceAppointmentRouting(transition.state, turns, slots);
   assert.equal(transition.readyToBook, true);
@@ -32,6 +32,8 @@ test("locks the selected Tuesday, retains the location and proceeds to booking w
 });
 
 test("recognizes the offered digital appointment mode", () => {
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Persönlich bitte." }]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne persoenlich." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne digital." }]), "Microsoft Teams");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne bei mir vor Ort." }]), "Beim Kunden vor Ort");
 });

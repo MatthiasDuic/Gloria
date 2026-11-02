@@ -157,7 +157,7 @@ test("does not invent a personal euro forecast or offer an agency appointment", 
   const scheduling = instructionForPkvStep(6);
   assert.match(projection, /eineinhalbmal so hoch/i);
   assert.doesNotMatch(projection, /rund hundert Euro mehr/i);
-  assert.match(scheduling, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/i);
+  assert.match(scheduling, /Soll der Termin persönlich oder digital stattfinden/i);
   assert.doesNotMatch(scheduling, /bei Ihnen vor Ort, in (?:unserer )?Agentur|in (?:unserer )?Agentur oder/i);
 });
 

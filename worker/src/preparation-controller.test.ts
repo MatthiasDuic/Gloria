@@ -8,6 +8,26 @@ const policy = {
 };
 const knownStatusTurns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
 
+test("digital bookings mention the meeting link once while personal bookings continue unchanged", () => {
+  for (const questions of ["", "Welche Themen sind Ihnen wichtig?"]) {
+    const state = createPreparationState({ topic: "Test", preparationQuestions: questions });
+    const personal = beginPreparation(state, "Montag um zehn Uhr", [], "Beim Kunden vor Ort");
+    const digital = beginPreparation(state, "Montag um zehn Uhr", [], "Microsoft Teams");
+    const unchanged = beginPreparation(state, "Montag um zehn Uhr", []);
+    assert.deepEqual(personal, unchanged);
+    assert.equal(digital.state.stage, personal.state.stage);
+    assert.match(digital.speechText || "", /ist bestätigt\. Den Link zum Meeting erhalten Sie in der Bestätigungsmail\./);
+    assert.equal(digital.speechText?.replace(" Den Link zum Meeting erhalten Sie in der Bestätigungsmail.", ""), personal.speechText);
+    assert.doesNotMatch(personal.speechText || "", /Meeting|Link/);
+  }
+  const state = createPreparationState({
+    topic: "Test", preparationQuestions: "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+  });
+  const digital = beginPreparation(state, "Montag um zehn Uhr", knownStatusTurns, "Microsoft Teams");
+  assert.equal(digital.state.stage, "awaiting_email");
+  assert.match(digital.speechText || "", /Link zum Meeting.*bereits geklärten Angaben/);
+});
+
 test("completes configured closing questions after booking without reasking the known 480 Euro contribution", () => {
   const turns: ConversationTurn[] = [
     { role: "assistant", text: "Welchen monatlichen Beitrag wenden Sie aktuell auf?" },

@@ -61,7 +61,7 @@ export function detectAppointmentMode(turns: ConversationTurn[]): AppointmentMod
     const text = turn.text;
     if (/\b(?:teams|video(?:termin|call)?|online|digital)\b/i.test(text)) return "Microsoft Teams";
     if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(text)) return "In der Agentur";
-    if (/\b(?:bei\s+mir(?=\s*(?:[.!?,]|$))|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
+    if (/\b(?:persönlich|persoenlich|bei\s+mir(?=\s*(?:[.!?,]|$))|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
   }
   return undefined;
 }
@@ -192,7 +192,7 @@ export function advanceAppointmentRouting(
     const nextState = { ...state, selectedAppointmentSlot: selected, appointmentMode: mode };
     return mode
       ? { state: nextState, readyToBook: true }
-      : { state: nextState, speechText: "Soll der Termin digital oder bei Ihnen vor Ort stattfinden?" };
+      : { state: nextState, speechText: "Soll der Termin persönlich oder digital stattfinden?" };
   }
   if (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant)) return { state };
   const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);

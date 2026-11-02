@@ -513,7 +513,8 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
   const instructions = buildRealtimeInstructions(ctx);
   assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
-  assert.match(instructions, /Soll der Termin digital oder bei Ihnen vor Ort stattfinden/);
+  assert.match(instructions, /Soll der Termin persönlich oder digital stattfinden/);
+  assert.match(instructions, /Den Link zum Meeting erhalten Sie in der Bestätigungsmail/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /höchstens eine klare Hauptfrage pro Antwort/);
 });
@@ -543,7 +544,7 @@ test("uses only the campaign objective, not a fixed sequence, before preparation
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
   assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
   assert.match(instructions, /Nach einem bestätigten Termin führt der Worker/);
-  assert.match(instructions, /bei der Kundin\/dem Kunden vor Ort|bei Ihnen vor Ort/i);
+  assert.match(instructions, /persönlich oder digital/i);
   assert.doesNotMatch(instructions, /bei Ihnen vor Ort, in unserer Agentur/);
 });
 

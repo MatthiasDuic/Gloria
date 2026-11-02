@@ -63,7 +63,7 @@ const REALTIME_TOOLS = [
   {
     type: "function",
     name: "confirm_appointment",
-    description: "Speichert einen vom Kunden eindeutig ausgewählten Termin. Eine eindeutige Auswahl wie 'der Montag' genügt ohne zweite Ja-Bestätigung. Erst aufrufen, nachdem der Kunde zusätzlich gewählt hat, ob der Termin digital oder bei ihm vor Ort stattfindet. Biete keinen Termin in der Agentur an. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
+    description: "Speichert einen vom Kunden eindeutig ausgewählten Termin. Eine eindeutige Auswahl wie 'der Montag' genügt ohne zweite Ja-Bestätigung. Erst aufrufen, nachdem der Kunde zusätzlich gewählt hat, ob der Termin persönlich oder digital stattfindet. Biete keinen Termin in der Agentur an. Niemals bei Hallo, Bitte, Mhm oder unklarem Audio.",
     parameters: {
       type: "object",
       properties: {
@@ -281,7 +281,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
       ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${APPOINTMENT_FAREWELL_TEXT}' Beende danach das Gespräch ohne weitere Frage.`
       : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin persönlich oder digital stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Bei digitaler Durchführung ergänzt der Worker nach erfolgreicher Buchung kurz: 'Den Link zum Meeting erhalten Sie in der Bestätigungsmail.' Bei persönlicher Durchführung fahre ohne zusätzlichen Hinweis normal fort. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -937,7 +937,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         const appointmentMode=detectAppointmentMode(ctx.transcript)||ctx.appointmentMode;
         if(!appointmentMode) {
-          const instruction="Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin digital oder bei Ihnen vor Ort stattfinden?' Biete keinen Termin in der Agentur an. Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";
+          const instruction="Der Termin wurde ausgewählt, aber die Durchführungsart fehlt noch. Frage exakt: 'Soll der Termin persönlich oder digital stattfinden?' Biete keinen Termin in der Agentur an. Rufe confirm_appointment erst nach der Kundenantwort erneut für denselben Termin auf.";
           sendToolResult(tool.callId,{ ok: false,error: "missing_appointment_mode",instruction });
           requestResponse(instruction);
           return;
@@ -981,7 +981,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           log.info("realtime.slot_locked",{ callSid: ctx.callSid,slot: decision.slotPhrase,speechSlot: speechSlotPhrase,preference: decision.preference,appointmentMode });
           sendToolResult(tool.callId,{ ok: true,confirmed_slot: speechSlotPhrase,appointment_mode: appointmentMode });
           updateSession();
-          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript);
+          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode);
           preparationState=transition.state;
           if(transition.speechText) requestDeterministicSpeech(transition.speechText);
           else requestResponse(transition.instruction);
