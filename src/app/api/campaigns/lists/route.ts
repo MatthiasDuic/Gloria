@@ -4,10 +4,12 @@ import {
   addLeadNote,
   appendLeadEmailHistory,
   completeLeadTask,
+  createCampaignRunFromFirmList,
   deleteCampaignList,
   deleteLeads,
   getDashboardData,
   getCampaignListsSummary,
+  getFirmListsSummary,
   isCampaignListActive,
   pullNextLeadForCampaignList,
   setCampaignListActive,
@@ -32,8 +34,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Nicht angemeldet." }, { status: 401 });
     }
 
-    const lists = await getCampaignListsSummary(sessionUser.id);
-    return NextResponse.json({ lists });
+    const [lists, firmLists] = await Promise.all([
+      getCampaignListsSummary(sessionUser.id),
+      getFirmListsSummary(sessionUser.id),
+    ]);
+    return NextResponse.json({ lists, firmLists });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Listen konnten nicht geladen werden." },
@@ -266,8 +271,9 @@ export async function POST(request: Request) {
     if (action === "start") {
       const selectedTopic = String(payload.topic || "").trim();
       if (listId.startsWith("crm-search-") && !selectedTopic) {
-        return NextResponse.json({ error: "Bitte vor dem Start eine vorhandene Kampagne auswählen." }, { status: 400 });
+        return NextResponse.json({ error: "Bitte vor dem Start eine Kampagne auswählen." }, { status: 400 });
       }
+      let campaignListId = listId;
       if (selectedTopic) {
         const dashboard = await getDashboardData({ userId: sessionUser.id, role: sessionUser.role });
         const allowedTopics = new Set([
@@ -278,15 +284,25 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Die ausgewählte Kampagne ist nicht verfügbar." }, { status: 400 });
         }
       }
-      await setCampaignListActive(listId, true, sessionUser.id, selectedTopic || undefined);
-      const lists = await getCampaignListsSummary(sessionUser.id);
-      return NextResponse.json({ ok: true, action, listId, lists });
+      if (listId.startsWith("crm-search-")) {
+        const run = await createCampaignRunFromFirmList(listId, selectedTopic, sessionUser.id);
+        campaignListId = run.listId;
+      }
+      await setCampaignListActive(campaignListId, true, sessionUser.id);
+      const [lists, firmLists] = await Promise.all([
+        getCampaignListsSummary(sessionUser.id),
+        getFirmListsSummary(sessionUser.id),
+      ]);
+      return NextResponse.json({ ok: true, action, listId: campaignListId, sourceListId: listId, lists, firmLists });
     }
 
     if (action === "stop") {
       await setCampaignListActive(listId, false, sessionUser.id);
-      const lists = await getCampaignListsSummary(sessionUser.id);
-      return NextResponse.json({ ok: true, action, listId, lists });
+      const [lists, firmLists] = await Promise.all([
+        getCampaignListsSummary(sessionUser.id),
+        getFirmListsSummary(sessionUser.id),
+      ]);
+      return NextResponse.json({ ok: true, action, listId, lists, firmLists });
     }
 
     if (action === "delete") {

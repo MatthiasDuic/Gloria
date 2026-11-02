@@ -23,8 +23,13 @@ export function getCrmWorkspaceLeads(leads: Lead[], workspace: CrmWorkspace): Le
   leads = leads.filter((lead) => lead.callSource !== "manual" && lead.customerKind !== "privat");
   if (workspace === "companies") return leads.filter((lead) => isLeadCustomer(lead) && lead.customerKind === "firma");
   if (workspace === "private") return [];
-  if (workspace === "campaigns") return leads.filter((lead) => !isLeadCustomer(lead));
+  if (workspace === "campaigns") return leads.filter((lead) => !isLeadCustomer(lead) && !isCrmFirmListLead(lead));
+  leads = leads.filter((lead) => !isCrmFirmListLead(lead));
   return leads;
+}
+
+export function isCrmFirmListLead(lead: Pick<Lead, "callSource" | "listId">): boolean {
+  return lead.callSource === "crm" && Boolean(lead.listId?.startsWith("crm-search-"));
 }
 
 export interface CrmCalendarEntry {

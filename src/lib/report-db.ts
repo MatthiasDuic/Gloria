@@ -22,9 +22,12 @@ export interface ReportDatabase {
 }
 
 export interface CampaignListStateRow {
+  userId?: string;
   listId: string;
   listName: string;
   active: boolean;
+  sourceListId?: string;
+  campaignTopic?: Topic;
   startedAt?: string;
   stoppedAt?: string;
   lastRunAt?: string;
@@ -968,6 +971,8 @@ async function initializeSchema() {
     ALTER TABLE gloria_campaign_lists
     ADD COLUMN IF NOT EXISTS user_id TEXT;
   `);
+  await db.query(`ALTER TABLE gloria_campaign_lists ADD COLUMN IF NOT EXISTS source_list_id TEXT;`);
+  await db.query(`ALTER TABLE gloria_campaign_lists ADD COLUMN IF NOT EXISTS campaign_topic TEXT;`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS gloria_calendar_events (
@@ -2608,16 +2613,19 @@ export async function readCampaignListsStateFromPostgres(userId?: string): Promi
     await ensureSchema();
     const db = getPool();
     const result = await db.query(`
-      SELECT list_id, list_name, active, started_at, stopped_at, last_run_at
+      SELECT user_id, list_id, list_name, active, source_list_id, campaign_topic, started_at, stopped_at, last_run_at
       FROM gloria_campaign_lists
       ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY updated_at DESC;
     `, userId ? [userId] : []);
 
     return result.rows.map((row) => ({
+      userId: row.user_id ? String(row.user_id) : undefined,
       listId: String(row.list_id),
       listName: String(row.list_name),
       active: Boolean(row.active),
+      sourceListId: row.source_list_id ? String(row.source_list_id) : undefined,
+      campaignTopic: row.campaign_topic ? String(row.campaign_topic) : undefined,
       startedAt: toIso(row.started_at),
       stoppedAt: toIso(row.stopped_at),
       lastRunAt: toIso(row.last_run_at),
@@ -2660,16 +2668,20 @@ export async function writeCampaignListsStateToPostgres(
             list_id,
             list_name,
             active,
+            source_list_id,
+            campaign_topic,
             started_at,
             stopped_at,
             last_run_at,
             updated_at
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
           ON CONFLICT (list_id)
           DO UPDATE SET
             user_id = EXCLUDED.user_id,
             list_name = EXCLUDED.list_name,
             active = EXCLUDED.active,
+            source_list_id = EXCLUDED.source_list_id,
+            campaign_topic = EXCLUDED.campaign_topic,
             started_at = EXCLUDED.started_at,
             stopped_at = EXCLUDED.stopped_at,
             last_run_at = EXCLUDED.last_run_at,
@@ -2680,6 +2692,8 @@ export async function writeCampaignListsStateToPostgres(
             list.listId,
             list.listName,
             list.active,
+            list.sourceListId || null,
+            list.campaignTopic || null,
             list.startedAt || null,
             list.stoppedAt || null,
             list.lastRunAt || null,

@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import type { CrmSavedView, CrmUiPreferences, DashboardData, Lead, LeadProductDetail, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
-import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallSource, getCallWorkspaceData, getCrmWorkspaceLeads, isLeadCustomer, type CrmCalendarEntry, type CrmCampaignTab, type CrmWorkspace } from "@/lib/crm-helpers";
+import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallSource, getCallWorkspaceData, getCrmWorkspaceLeads, isCrmFirmListLead, isLeadCustomer, type CrmCalendarEntry, type CrmCampaignTab, type CrmWorkspace } from "@/lib/crm-helpers";
 import { parseReportTranscriptFallback } from "@/lib/transcript-utils";
 import { saveCalendarCallback } from "@/lib/calendar-view";
 import { MAX_CONCURRENT_OUTBOUND_CALLS } from "@/lib/outbound-call-queue-constants";
@@ -34,6 +34,8 @@ const EMPTY_DATA: DashboardData = {
 type CampaignListSummary = {
   listId: string;
   listName: string;
+  sourceListId?: string;
+  campaignTopic?: string;
   active: boolean;
   currentlyDialing?: boolean;
   total: number;
@@ -42,6 +44,14 @@ type CampaignListSummary = {
   appointments: number;
   callbacks: number;
   rejections: number;
+};
+
+type FirmListSummary = {
+  listId: string;
+  listName: string;
+  total: number;
+  withPhone: number;
+  withEmail: number;
 };
 
 type SessionUser = {
@@ -154,6 +164,50 @@ function escapeCsvCell(value?: string) {
   return `"${normalized.replace(/"/g, '""')}"`;
 }
 
+const crmRelationKeys = new Set(["contactPersons", "customFields", "notes", "calls", "emails", "documents"]);
+const crmFieldLabels: Record<string, string> = {
+  name: "Firma",
+  website: "Website",
+  address: "Adresse",
+  country: "Land",
+  source: "Datenquelle",
+  industry: "Branche",
+  street: "Straße",
+  postal_code: "PLZ",
+  city: "Ort",
+  phone: "Telefon",
+  email: "E-Mail",
+  contact_person: "Hauptansprechpartner",
+  contact_birthdate: "Geburtsdatum Ansprechpartner",
+  registry_number: "Handelsregisternummer",
+  registry_court: "Registergericht",
+  founded_year: "Gründungsjahr",
+  employee_count: "Mitarbeiter",
+  vat_id: "Umsatzsteuer-ID",
+};
+
+function formatCrmFieldLabel(key: string): string {
+  return crmFieldLabels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatCrmFieldValue(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value == null) return "";
+  return JSON.stringify(value, null, 2) || "";
+}
+
+function getCrmRecords(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+    : [];
+}
+
+function getCrmCompanyField(lead: Lead, key: string): string {
+  return formatCrmFieldValue(lead.crmCompanyData?.[key]).trim();
+}
+
 function reportMatchesLead(
   report: DashboardData["reports"][number],
   lead: DashboardData["leads"][number],
@@ -218,7 +272,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [showImportForm, setShowImportForm] = useState(false);
   const [campaignStartListId, setCampaignStartListId] = useState<string | null>(null);
   const [campaignStartTopic, setCampaignStartTopic] = useState("");
-  const [detailTab, setDetailTab] = useState<"overview" | "products" | "tasks" | "history" | "communication">("overview");
+  const [detailTab, setDetailTab] = useState<"overview" | "products" | "tasks" | "history" | "communication" | "crm">("overview");
   const [selectedLead, setSelectedLead] = useState<DashboardData["leads"][number] | null>(null);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
   const [reportTranscript, setReportTranscript] = useState<Array<{ speaker: string; text: string; latencyMs?: number }>>([]);
@@ -264,6 +318,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [importListName, setImportListName] = useState("");
   const [importTopic, setImportTopic] = useState<Topic | "">(TOPICS[0]);
   const [campaignLists, setCampaignLists] = useState<CampaignListSummary[]>([]);
+  const [firmLists, setFirmLists] = useState<FirmListSummary[]>([]);
   const [runningListIds, setRunningListIds] = useState<string[]>([]);
 
   // Calendar State
@@ -338,6 +393,12 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const calendarEntries = useMemo(() => buildCrmCalendarEntries(data.leads, data.reports), [data.leads, data.reports]);
   const callbacks = useMemo(() => calendarEntries.filter((entry) => entry.kind === "callback"), [calendarEntries]);
   const companyCustomers = useMemo(() => getCrmWorkspaceLeads(data.leads, "companies"), [data.leads]);
+  const isFirmListContacts = activeView === "campaigns" && Boolean(filterCampaignListId) && (
+    filterCampaignListId.startsWith("crm-search-")
+    || campaignLists.some((list) => list.listId === filterCampaignListId && Boolean(list.sourceListId))
+  );
+  const isFirmListLeadOrRun = (lead: Lead) => isCrmFirmListLead(lead)
+    || campaignLists.some((list) => list.listId === lead.listId && Boolean(list.sourceListId));
   const importedLists = useMemo(() => campaignLists.filter((list) =>
     !list.listName.toLowerCase().includes("manuell hinzugefügt"),
   ), [campaignLists]);
@@ -353,11 +414,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }, [data.leads, data.reports]);
 
   const filteredLeads = useMemo(() => {
-    let leads = getCrmWorkspaceLeads(data.leads || [], activeView);
+    let leads = activeView === "campaigns" && filterCampaignListId
+      ? (data.leads || []).filter((lead) => lead.listId === filterCampaignListId)
+      : getCrmWorkspaceLeads(data.leads || [], activeView);
     if (filterStatus) {
       leads = leads.filter((l) => l.status === filterStatus);
     }
-    if (filterTopic) {
+    if (filterTopic && !isFirmListContacts) {
       leads = leads.filter((l) => l.topic === filterTopic);
     }
     if (filterOwner) {
@@ -388,7 +451,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     }
     return leads;
-  }, [activeView, data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterContact, filterCampaignListId, searchQuery]);
+  }, [activeView, data.leads, filterStatus, filterTopic, filterOwner, filterCustomerKind, filterContact, filterCampaignListId, searchQuery, isFirmListContacts]);
 
   const appointmentProspects = useMemo(() => {
     const appointments = new Map<string, { lead: Lead; appointmentAt: string }>();
@@ -558,8 +621,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     setCalendarData(payload);
     setData(getCallWorkspaceData(payload, "crm"));
     if (listsRes.ok) {
-      const payload = (await listsRes.json()) as { lists?: CampaignListSummary[] };
+      const payload = (await listsRes.json()) as { lists?: CampaignListSummary[]; firmLists?: FirmListSummary[] };
       setCampaignLists(payload.lists || []);
+      setFirmLists(payload.firmLists || []);
     }
   }, []);
 
@@ -1115,9 +1179,15 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         body: JSON.stringify({ action, listId, ...(topic ? { topic } : {}) }),
       });
 
-      const result = (await res.json()) as { error?: string; lists?: CampaignListSummary[]; removedLeads?: number };
+      const result = (await res.json()) as {
+        error?: string;
+        lists?: CampaignListSummary[];
+        firmLists?: FirmListSummary[];
+        removedLeads?: number;
+      };
       if (!res.ok) throw new Error(result.error || "Aktion fehlgeschlagen");
       if (result.lists) setCampaignLists(result.lists);
+      if (result.firmLists) setFirmLists(result.firmLists);
       setNotice(action === "delete"
         ? `✓ Kampagne gelöscht. ${result.removedLeads ?? 0} Interessenten entfernt; Kunden und Reports bleiben erhalten.`
         : `✓ Kampagne ${action === "start" ? "gestartet" : "gestoppt"}`);
@@ -1131,7 +1201,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [reloadLiveData]);
 
-  function startCampaignList(list: CampaignListSummary) {
+  function startCampaignList(list: Pick<CampaignListSummary, "listId" | "listName">) {
     if (list.listId.startsWith("crm-search-")) {
       setCampaignStartListId(list.listId);
       setCampaignStartTopic("");
@@ -1182,8 +1252,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         }
 
         if (listsRes.ok && !cancelled) {
-          const payload = (await listsRes.json()) as { lists?: CampaignListSummary[] };
+          const payload = (await listsRes.json()) as { lists?: CampaignListSummary[]; firmLists?: FirmListSummary[] };
           setCampaignLists(payload.lists || []);
+          setFirmLists(payload.firmLists || []);
         }
 
         if (userRes.ok && !cancelled) {
@@ -1455,7 +1526,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     const openTasks = data.leads.flatMap((lead) => lead.tasks || []).filter((task) => task.status === "open").length;
     const customerCount = companyCustomers.length;
     const shortcuts: Array<{ title: string; text: string; count: number; workspace: CrmWorkspace; tab?: CrmCampaignTab; icon: string }> = [
-      { title: "Kampagnen", text: "Anruflisten importieren und Gloria steuern", count: importedLists.length, workspace: "campaigns", icon: "↗" },
+      { title: "Firmenlisten", text: "CRM-Firmenlisten für Kampagnen vorbereiten", count: firmLists.length, workspace: "campaigns", icon: "↗" },
       { title: "Termin-Interessenten", text: "Termine prüfen und Kunden übernehmen", count: appointmentProspects.length, workspace: "campaigns", tab: "prospects", icon: "✓" },
       { title: "Firmenkunden", text: "Unternehmen, Ansprechpartner und Produkte", count: companyCustomers.length, workspace: "companies", icon: "▦" },
       { title: "Kalender", text: "Termine und Wiedervorlagen auf einen Blick", count: todaysEntries.length, workspace: "calendar", icon: "▤" },
@@ -1508,7 +1579,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <div className="stats-grid">
               <div className="stat"><span>Gespräche / Reports</span><strong>{reportingStats.total}</strong></div>
               <div className="stat"><span>Terminquote</span><strong>{reportingStats.appointmentRate}%</strong></div>
-              <div className="stat"><span>Aktive Listen</span><strong>{importedLists.filter((list) => list.active || list.currentlyDialing).length}</strong></div>
+              <div className="stat"><span>Aktive Kampagnen</span><strong>{importedLists.filter((list) => list.active || list.currentlyDialing).length}</strong></div>
             </div>
             <p className="subtle">Die Terminquote misst vereinbarte Termine je erreichtem Kontakt, nicht gewonnene Kunden.</p>
             {data.leads.filter((lead) => isLeadCustomer(lead) && !lead.customerKind).map((lead) => (
@@ -1570,7 +1641,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             </div>
           ) : null}
           <div className="contacts-toolbar">
-            <div className="subtle">{isCustomerWorkspace ? "Nur bestätigte Kunden. Kampagnenimporte erscheinen hier nicht automatisch." : "Interessenten dieser Anrufliste"}</div>
+            <div className="subtle">{isCustomerWorkspace
+              ? "Nur bestätigte Kunden. Kampagnenimporte erscheinen hier nicht automatisch."
+              : isFirmListContacts ? "Übertragene Firmendaten dieser Firmenliste."
+                : "Interessenten dieser Kampagnenliste."}</div>
             <div className="bulk-actions-row">
               {isCustomerWorkspace ? <button className="btn-small" onClick={() => setShowAddCustomerForm((value) => !value)}>{showAddCustomerForm ? "Formular schließen" : "+ Firmenkunde"}</button> : null}
               <button className="btn-small ghost" disabled={selectedLeadIds.length === 0} onClick={handleExportSelectedCustomers}>
@@ -1615,7 +1689,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               onChange={(e) => setSearchQuery(e.target.value)}
               className="search-input"
             />
-            <select
+            {!isFirmListContacts ? <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
               className="filter-select"
@@ -1626,15 +1700,15 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               <option value="termin">Termin</option>
               <option value="absage">Absage</option>
               <option value="wiedervorlage">Wiedervorlage</option>
-            </select>
-            <select
+            </select> : null}
+            {!isFirmListContacts ? <select
               value={filterTopic}
               onChange={(e) => setFilterTopic(e.target.value)}
               className="filter-select"
             >
               <option value="">Alle Themen</option>
               {campaignTopics.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            </select> : null}
             <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value as typeof filterOwner)} className="filter-select">
               <option value="">Alle Owner</option>
               <option value="BarmeniaGothaer">BarmeniaGothaer</option>
@@ -1694,9 +1768,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                   <th>Ansprechpartner</th>
                   <th>Telefon</th>
                   <th>Email</th>
-                  <th>Thema</th>
-                  <th>{isCustomerWorkspace ? "Letzter Kontakt" : "Status"}</th>
-                  <th>{isCustomerWorkspace ? "Produkte" : "Anrufversuche"}</th>
+                  {isFirmListContacts ? <><th>Branche</th><th>Mitarbeiter</th><th>Ort</th></> : <th>Thema</th>}
+                  {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Letzter Kontakt" : "Status"}</th> : null}
+                  {!isFirmListContacts ? <th>{isCustomerWorkspace ? "Produkte" : "Anrufversuche"}</th> : null}
                   <th>Aktion</th>
                 </tr>
               </thead>
@@ -1717,13 +1791,17 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       <td>{lead.contactName || "-"}</td>
                       <td>{lead.phone || lead.directDial || "-"}</td>
                       <td>{lead.email || "-"}</td>
-                      <td>{lead.topic}</td>
-                      <td>
+                      {isFirmListContacts ? <>
+                        <td>{getCrmCompanyField(lead, "industry") || "-"}</td>
+                        <td>{getCrmCompanyField(lead, "employee_count") || "-"}</td>
+                        <td>{lead.addressCity || getCrmCompanyField(lead, "city") || "-"}</td>
+                      </> : <td>{lead.topic}</td>}
+                      {!isFirmListContacts ? <td>
                         <span className={`status-badge ${status?.color}`}>
                           {status?.label}
                         </span>
-                      </td>
-                      <td>{isCustomerWorkspace ? (lead.productDetails || lead.products || []).length : lead.attempts}</td>
+                      </td> : null}
+                      {!isFirmListContacts ? <td>{isCustomerWorkspace ? (lead.productDetails || lead.products || []).length : lead.attempts}</td> : null}
                       <td>
                         <div className="task-actions">
                           <button
@@ -1758,6 +1836,15 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
 
   function renderLeadDetail() {
     if (selectedLead && isLeadCustomer(selectedLead) && selectedLead.customerKind === "privat") return null;
+    const companyData = selectedLead?.crmCompanyData || {};
+    const companyFields = Object.entries(companyData)
+      .filter(([key, value]) => !crmRelationKeys.has(key) && value !== null && value !== undefined && value !== "");
+    const crmContacts = getCrmRecords(companyData.contactPersons);
+    const crmCustomFields = getCrmRecords(companyData.customFields);
+    const crmNotes = getCrmRecords(companyData.notes);
+    const crmCalls = getCrmRecords(companyData.calls);
+    const crmEmails = getCrmRecords(companyData.emails);
+    const crmDocuments = getCrmRecords(companyData.documents);
     return (
       <div className="detail-overlay" hidden={!selectedLead} onClick={(event) => {
         if (event.target === event.currentTarget) setSelectedLead(null);
@@ -1771,8 +1858,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <div className="subnav" aria-label="Kontaktakte">
               {([
                 ["overview", "Stammdaten"], ["products", "Produkte & Anträge"], ["tasks", "Aufgaben & Notizen"],
-                ["history", "Historie"], ["communication", "Kommunikation"],
-              ] as const).map(([tab, label]) => <button key={tab} className={detailTab === tab ? "active" : ""} aria-pressed={detailTab === tab} onClick={() => setDetailTab(tab)}>{label}</button>)}
+                ["history", "Historie"], ["communication", "Kommunikation"], ["crm", "CRM-Daten"],
+              ] as const).filter(([tab]) => tab !== "crm" || Object.keys(companyData).length > 0)
+                .map(([tab, label]) => <button key={tab} className={detailTab === tab ? "active" : ""} aria-pressed={detailTab === tab} onClick={() => setDetailTab(tab)}>{label}</button>)}
             </div>
             <div className="detail-body">
               <div className="detail-section" hidden={detailTab !== "overview"}>
@@ -1803,7 +1891,52 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                     </div>
                   </>
                 ) : null}
-                <div className="subtle top-gap">Kontaktstatus: {isLeadCustomer(selectedLead) ? "Kunde" : "Interessent"} · Thema: {selectedLead.topic}</div>
+                <div className="subtle top-gap">Kontaktstatus: {isLeadCustomer(selectedLead) ? "Kunde" : "Interessent"}{isFirmListLeadOrRun(selectedLead) ? "" : ` · Thema: ${selectedLead.topic}`}</div>
+              </div>
+
+              <div className="detail-section" hidden={detailTab !== "crm"}>
+                <h4>Übertragene Firmendaten</h4>
+                <dl className="report-facts crm-company-facts">
+                  {companyFields.map(([key, value]) => {
+                    const formatted = formatCrmFieldValue(value);
+                    return <div key={key}><dt>{formatCrmFieldLabel(key)}</dt><dd>
+                      {formatted.length > 240
+                        ? <details><summary>Details anzeigen</summary><pre>{formatted}</pre></details>
+                        : formatted}
+                    </dd></div>;
+                  })}
+                </dl>
+                {crmContacts.length ? <section className="crm-related-data"><h4>Ansprechpartner</h4>{crmContacts.map((person, index) => (
+                  <article className="crm-related-card" key={`contact-${index}`}>
+                    <strong>{formatCrmFieldValue(person.name) || "Kontakt"}</strong>
+                    <span>{formatCrmFieldValue(person.title || person.position)}</span>
+                    <span>{formatCrmFieldValue(person.phone || person.mobile)}</span>
+                    <span>{formatCrmFieldValue(person.email)}</span>
+                  </article>
+                ))}</section> : null}
+                {crmCustomFields.length ? <section className="crm-related-data"><h4>Individuelle Felder</h4>{crmCustomFields.map((field, index) => (
+                  <div className="crm-related-card" key={`field-${index}`}><strong>{formatCrmFieldValue(field.field_name || field.fieldName)}</strong><span>{formatCrmFieldValue(field.field_value || field.fieldValue)}</span></div>
+                ))}</section> : null}
+                {crmNotes.length ? <section className="crm-related-data"><h4>Firmennotizen</h4>{crmNotes.map((entry, index) => (
+                  <article className="crm-related-card" key={`note-${index}`}><p>{formatCrmFieldValue(entry.text || entry.note)}</p><span>{formatCrmFieldValue(entry.created_at || entry.createdAt)}</span></article>
+                ))}</section> : null}
+                {crmCalls.length ? <section className="crm-related-data"><h4>Frühere CRM-Anrufe</h4>{crmCalls.map((entry, index) => (
+                  <article className="crm-related-card" key={`call-${index}`}><strong>{formatCrmFieldValue(entry.outcome || entry.result || "Anruf")}</strong><span>{formatCrmFieldValue(entry.called_at || entry.created_at)}</span><p>{formatCrmFieldValue(entry.notes || entry.summary)}</p></article>
+                ))}</section> : null}
+                {crmEmails.length ? <section className="crm-related-data"><h4>CRM-E-Mails</h4>{crmEmails.map((entry, index) => (
+                  <article className="crm-related-card" key={`email-${index}`}><strong>{formatCrmFieldValue(entry.subject || "E-Mail")}</strong><span>{formatCrmFieldValue(entry.sent_at || entry.created_at)} · {formatCrmFieldValue(entry.to || entry.recipient)}</span><p>{formatCrmFieldValue(entry.body || entry.content)}</p></article>
+                ))}</section> : null}
+                {crmDocuments.length ? <section className="crm-related-data"><h4>Dokumente</h4>{crmDocuments.map((document, index) => {
+                  const content = typeof document.content === "string" ? document.content : "";
+                  const rawType = typeof document.content_type === "string" ? document.content_type : "application/octet-stream";
+                  const contentType = /^[\w.+-]+\/[\w.+-]+$/.test(rawType) ? rawType : "application/octet-stream";
+                  const fileName = formatCrmFieldValue(document.filename || document.name || `Dokument ${index + 1}`);
+                  return <article className="crm-related-card" key={`document-${index}`}>
+                    <strong>{fileName}</strong>
+                    <span>{formatCrmFieldValue(document.content_type)}</span>
+                    {content ? <a href={`data:${contentType};base64,${content}`} target="_blank" rel="noreferrer">Datei öffnen</a> : <span>Kein Dateiinhalt übertragen</span>}
+                  </article>;
+                })}</section> : null}
               </div>
 
               <div className="detail-section" hidden={detailTab !== "products"}>
@@ -2136,20 +2269,23 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       const leads = (data.leads || []).filter((lead) => (lead.listId || "legacy") === list.listId);
       const isRunning = runningListIds.has(list.listId);
       const progress = list.total ? Math.round(((list.total - list.pending) / list.total) * 100) : 0;
+      const sourceList = firmLists.find((entry) => entry.listId === list.sourceListId);
       return (
         <article key={list.listId} className={`campaign-item ${isRunning ? "campaign-running" : ""}`}>
           <div className="campaign-heading">
             <div>
-              <strong>{list.listName}</strong>
+              <span className="eyebrow">{list.sourceListId ? "Kampagnenlauf" : "Anrufkampagne"}</span>
+              <strong>{list.campaignTopic || list.listName}</strong>
+              {sourceList ? <span className="subtle">{sourceList.listName}</span> : null}
               <div className="subtle">{list.total} Kontakte | {list.pending} offen | {list.called} angerufen | {list.appointments} Termine</div>
             </div>
             <span className={`campaign-state ${isRunning ? "running" : "stopped"}`}>{isRunning ? (list.currentlyDialing ? "Gloria ruft an" : "Aktiv") : (list.pending === 0 ? "Beendet" : "Gestoppt")}</span>
           </div>
           <div className="campaign-progress" aria-label={`${progress}% bearbeitet`}><span style={{ width: `${progress}%` }} /></div>
           <div className="campaign-controls">
-            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => startCampaignList(list)}>Starten</button>
+            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => startCampaignList(list)}>{list.sourceListId ? "Fortsetzen" : "Starten"}</button>
             <button className="btn-small ghost" disabled={busy || !isRunning} onClick={() => void controlCampaignList(list.listId, "stop")}>Stoppen</button>
-            <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Liste öffnen ({leads.length})</button>
+            <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Kontakte öffnen ({leads.length})</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); setCampaignTab("calls"); }}>Anrufdetails</button>
             <button
               className="btn-small danger"
@@ -2164,15 +2300,32 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       );
     };
 
+    const renderFirmList = (list: FirmListSummary) => (
+      <article key={list.listId} className="firm-list-item">
+        <div className="campaign-heading">
+          <div>
+            <span className="eyebrow">Firmenliste aus dem CRM</span>
+            <strong>{list.listName}</strong>
+            <div className="subtle">{list.total} Firmen · {list.withPhone} mit Telefonnummer · {list.withEmail} mit E-Mail</div>
+          </div>
+          <span className="campaign-state stopped">Bereit</span>
+        </div>
+        <div className="campaign-controls">
+          <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Liste öffnen ({list.total})</button>
+          <button className="btn-small" disabled={busy} onClick={() => startCampaignList(list)}>Kampagne starten</button>
+        </div>
+      </article>
+    );
+
     return (
       <div className="campaigns-view">
         <div className="workspace-heading">
-          <div><div className="eyebrow">Von der Liste zum Termin</div><h2>Kampagnen</h2><p>Importierte Anruflisten, Termin-Interessenten und Follow-ups in einem Arbeitsbereich.</p></div>
+          <div><div className="eyebrow">Von der Firmenliste zum Gespräch</div><h2>Firmenlisten & Kampagnen</h2><p>Firmenlisten bleiben themenfrei. Für jeden Kampagnenlauf wählen Sie ein eigenes Gesprächsthema.</p></div>
           <button className="btn" onClick={() => { setCampaignTab("lists"); setFilterCampaignListId(""); setShowImportForm((value) => !value); }}>{showImportForm ? "Import schließen" : "+ Anrufliste importieren"}</button>
         </div>
         <div className="subnav" aria-label="Kampagnenbereiche">
           {([
-            ["lists", `Anruflisten (${importedLists.length})`],
+            ["lists", `Firmenlisten & Kampagnen (${firmLists.length + importedLists.length})`],
             ["prospects", `Termin-Interessenten (${appointmentProspects.length})`],
             ["followups", `Follow-ups (${callbacks.length})`],
             ["calls", `Gesprächsreports (${data.reports.length})`],
@@ -2181,18 +2334,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         {campaignTab === "lists" ? <>
         {showImportForm ? renderSettings() : null}
         {filterCampaignListId ? <>
-          <div className="list-breadcrumb"><button className="btn-small ghost" onClick={() => { setFilterCampaignListId(""); setSearchQuery(""); }}>← Alle Anruflisten</button><strong>{importedLists.find((list) => list.listId === filterCampaignListId)?.listName || "Anrufliste"}</strong></div>
+          <div className="list-breadcrumb"><button className="btn-small ghost" onClick={() => { setFilterCampaignListId(""); setSearchQuery(""); }}>← Zur Übersicht</button><strong>{firmLists.find((list) => list.listId === filterCampaignListId)?.listName || (campaignLists.find((list) => list.listId === filterCampaignListId)?.campaignTopic ? `Kampagnenlauf: ${campaignLists.find((list) => list.listId === filterCampaignListId)?.campaignTopic}` : campaignLists.find((list) => list.listId === filterCampaignListId)?.listName) || "Firmenliste"}</strong></div>
           {renderContacts()}
         </> : <div className="surface">
         <section className="task-section">
-          <div className="section-heading"><h3>Aktive Anruflisten</h3><span className="subtle">Gloria bearbeitet diese Listen automatisch.</span></div>
+          <div className="section-heading"><h3>Übertragene Firmenlisten</h3><span className="subtle">Eine Liste kann für mehrere Kampagnen verwendet werden.</span></div>
+          {firmLists.length === 0 ? <p className="subtle">Noch keine Firmenliste aus dem CRM übertragen.</p> : <div className="campaign-list">{firmLists.map(renderFirmList)}</div>}
+        </section>
+        <section className="task-section">
+          <div className="section-heading"><h3>Aktive Kampagnenläufe</h3><span className="subtle">Gloria arbeitet die gewählte Kampagne ab.</span></div>
           {activeLists.length === 0 ? <p className="subtle">Keine aktive Anrufliste.</p> : <div className="campaign-list">{activeLists.map(renderCampaignList)}</div>}
         </section>
         <section className="task-section">
-          <div className="section-heading"><h3>Beendete & gestoppte Listen</h3><span className="subtle">Listen können weiterbearbeitet und erneut gestartet werden.</span></div>
-          {completedLists.length === 0 ? <p className="subtle">Keine beendeten oder gestoppten Listen.</p> : <div className="campaign-list">{completedLists.map(renderCampaignList)}</div>}
+          <div className="section-heading"><h3>Beendete & gestoppte Kampagnenläufe</h3><span className="subtle">Eine Firmenliste kann erneut mit einer anderen Kampagne gestartet werden.</span></div>
+          {completedLists.length === 0 ? <p className="subtle">Keine beendeten oder gestoppten Kampagnenläufe.</p> : <div className="campaign-list">{completedLists.map(renderCampaignList)}</div>}
         </section>
-        {importedLists.length === 0 ? <div className="empty-state"><h3>Ihre erste Kampagne beginnt mit einer Liste</h3><p>Importieren Sie eine CSV- oder Excel-Datei. Diese Kontakte bleiben Interessenten, bis Sie sie ausdrücklich als Kunden übernehmen.</p><button className="btn" onClick={() => setShowImportForm(true)}>Anrufliste importieren</button></div> : null}
+        {firmLists.length === 0 && importedLists.length === 0 ? <div className="empty-state"><h3>Ihre erste Kampagne beginnt mit einer Firmenliste</h3><p>Übertragen Sie Firmen aus einer gespeicherten CRM-Suche oder importieren Sie eine Anrufliste.</p><button className="btn" onClick={() => setShowImportForm(true)}>Anrufliste importieren</button></div> : null}
         </div>}
         </> : null}
         {campaignTab === "prospects" ? renderConversions() : null}
@@ -2330,9 +2487,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             onSubmit={confirmCampaignStart}
           >
             <h3 id="campaign-start-title">Kampagne für diese Firmenliste wählen</h3>
-            <p>{campaignLists.find((list) => list.listId === campaignStartListId)?.listName || "CRM-Firmenliste"}</p>
+            <p>{firmLists.find((list) => list.listId === campaignStartListId)?.listName || "Firmenliste"}</p>
             <label>
-              Vorhandene Kampagne
+              Kampagne / Gesprächsthema
               <select
                 className="input"
                 required
@@ -3340,7 +3497,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .gloria-crm.app-container button, .gloria-crm.app-container input, .gloria-crm.app-container select, .gloria-crm.app-container textarea { font: inherit; }
         .gloria-crm.app-container button:focus-visible, .gloria-crm.app-container a:focus-visible, .gloria-crm.app-container input:focus-visible, .gloria-crm.app-container select:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
         .gloria-crm.app-container button:disabled { cursor: not-allowed; opacity: 0.6; }
-        .gloria-crm .app-main { padding: 1.5rem; overflow: visible; }
+        .gloria-crm .app-main { width: min(100%, 1560px); box-sizing: border-box; margin: 0 auto; padding: clamp(1rem, 2.2vw, 2rem); overflow: visible; }
         .gloria-crm .workspace-heading { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; margin-bottom: 1.5rem; }
         .gloria-crm .workspace-heading h2 { font-size: 1.6rem; line-height: 1.25; margin: 0.3rem 0 0.5rem; letter-spacing: -0.04em; color: #122c49; }
         .gloria-crm .workspace-heading p { color: #62758b; margin: 0; line-height: 1.6; max-width: 48rem; }
@@ -3379,7 +3536,8 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .gloria-crm .subnav.compact { margin: 0; flex-shrink: 0; }
         .gloria-crm .customer-totals { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; color: #61748a; font-size: 0.82rem; }
         .gloria-crm .customer-totals strong { font-size: 1.2rem; color: #173d67; }
-        .gloria-crm .contacts-view { border: 1px solid #dfe7f0; border-radius: 14px; overflow: hidden; background: white; }
+        .gloria-crm .contacts-view { border: 1px solid #dfe7f0; border-radius: 14px; overflow: hidden; background: white; box-shadow: 0 4px 18px rgba(23,43,67,0.03); }
+        .gloria-crm .view-header { border: 1px solid #dfe7f0; border-radius: 14px; box-shadow: 0 4px 18px rgba(23,43,67,0.03); }
         .gloria-crm .contacts-list { overflow-x: auto; }
         .gloria-crm .contacts-table th { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em; color: #61748a; background: #f7f9fc; }
         .gloria-crm .contacts-table td { font-size: 0.88rem; }
@@ -3394,15 +3552,22 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         .gloria-crm .btn:hover { background: #173e6a; }
         .gloria-crm .btn-small { border-radius: 7px; font-size: 0.8rem; white-space: nowrap; }
         .gloria-crm .campaign-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
-        .gloria-crm .campaign-item { background: #fafcfe; border: 1px solid #dfe7f0; border-left: 4px solid #90a6bd; border-radius: 10px; padding: 1.2rem; }
+        .gloria-crm .campaign-item, .gloria-crm .firm-list-item { background: white; border: 1px solid #dfe7f0; border-left: 4px solid #90a6bd; border-radius: 12px; padding: 1.2rem; box-shadow: 0 3px 12px rgba(23,43,67,0.035); }
         .gloria-crm .campaign-running { border-left-color: #249767; }
+        .gloria-crm .firm-list-item { border-left-color: #4678ad; }
         .gloria-crm .campaign-heading { align-items: flex-start; }
-        .gloria-crm .campaign-heading strong { font-size: 1rem; }
+        .gloria-crm .campaign-heading strong { display: block; font-size: 1rem; margin-top: 0.25rem; }
         .gloria-crm .campaign-heading .subtle { font-size: 0.8rem; margin-top: 0.45rem; }
         .gloria-crm .campaign-state { white-space: nowrap; background: #edf1f5; border-radius: 6px; padding: 0.3rem 0.5rem; }
         .gloria-crm .campaign-state.running { background: #e8f6ee; }
         .gloria-crm .campaign-progress { height: 5px; background: #e8eef5; border-radius: 5px; overflow: hidden; }
         .gloria-crm .campaign-progress span { display: block; height: 100%; background: #7197c2; }
+        .gloria-crm .crm-related-data { display: grid; gap: 0.65rem; margin-top: 1.25rem; }
+        .gloria-crm .crm-related-data h4 { margin: 0; color: #284766; }
+        .gloria-crm .crm-related-card { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.8rem 0.9rem; border: 1px solid #e1e9f2; border-radius: 9px; background: #f8fafc; overflow-wrap: anywhere; }
+        .gloria-crm .crm-related-card p { margin: 0.25rem 0; white-space: pre-wrap; }
+        .gloria-crm .crm-company-facts pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .gloria-crm .crm-company-facts summary { cursor: pointer; color: #285b8c; }
         .gloria-crm .list-breadcrumb { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0 1rem; }
         .gloria-crm .calendar-view { padding: 1.5rem; border: 1px solid #dfe7f0; border-radius: 14px; box-shadow: none; }
         .gloria-crm .calendar-header { margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap; }

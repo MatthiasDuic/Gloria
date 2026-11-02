@@ -308,22 +308,76 @@ test("imports full CRM snapshots into an inactive campaign and safely refreshes 
   assert.equal(campaignState.lists.find((list: { listId: string }) => list.listId === options.listId)?.active, false);
 });
 
-test("CRM company imports start without a topic and use the selected campaign when started", async () => {
+test("CRM firm lists stay topic-free and create isolated runs for selected campaigns", async () => {
   await seed([]);
   const options = { listId: "crm-search-19-user-crm-user", listName: "CRM: Testfirma", userId: "crm-user" };
   await storage.importLeadsFromCrm([{
     crmCompanyId: 911,
     company: "Testfirma GmbH",
     phone: "+49233112345",
-    crmCompanyData: {},
+    topic: "Energie",
+    crmCompanyData: {
+      street: "Hauptstraße 1",
+      postal_code: "45549",
+      city: "Sprockhövel",
+      country: "Deutschland",
+      industry: "Maschinenbau",
+      employee_count: 42,
+    },
   }], options);
 
   const importedLead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
   assert.equal(importedLead.topic, "");
+  assert.equal(importedLead.listName, "Firmenliste: Testfirma");
+  assert.equal(importedLead.addressStreet, "Hauptstraße 1");
+  assert.equal(importedLead.addressPostalCode, "45549");
+  assert.equal(importedLead.addressCity, "Sprockhövel");
+  assert.equal(importedLead.addressCountry, "Deutschland");
+  assert.equal(importedLead.crmCompanyData?.industry, "Maschinenbau");
+  assert.equal((await storage.getCampaignListsSummary(options.userId)).length, 0);
+  assert.equal((await storage.getFirmListsSummary(options.userId))[0].total, 1);
 
-  await storage.setCampaignListActive(options.listId, true, options.userId, "betriebliche Krankenversicherung");
-  const startedLead = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads[0];
-  assert.equal(startedLead.topic, "betriebliche Krankenversicherung");
+  const firstRun = await storage.createCampaignRunFromFirmList(
+    options.listId,
+    "betriebliche Krankenversicherung",
+    options.userId,
+  );
+  await storage.setCampaignListActive(firstRun.listId, true, options.userId);
+  const firstCampaignLead = (await storage.getDashboardData({ userId: options.userId, role: "user" }))
+    .leads.find((lead) => lead.listId === firstRun.listId);
+  assert.equal(firstCampaignLead?.topic, "betriebliche Krankenversicherung");
+  assert.equal(firstCampaignLead?.status, "neu");
+  const dialedLead = await storage.pullNextLeadForCampaignList(firstRun.listId, options.userId);
+  assert.equal(dialedLead?.topic, "betriebliche Krankenversicherung");
+  assert.equal(dialedLead?.status, "angerufen");
+
+  const secondRun = await storage.createCampaignRunFromFirmList(
+    options.listId,
+    "private Krankenversicherung",
+    options.userId,
+  );
+  const allLeads = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads;
+  assert.equal(allLeads.find((lead) => lead.listId === options.listId)?.topic, "");
+  assert.equal(allLeads.find((lead) => lead.listId === secondRun.listId)?.topic, "private Krankenversicherung");
+  assert.equal(allLeads.find((lead) => lead.listId === firstRun.listId)?.status, "angerufen");
+  assert.equal((await storage.getCampaignListsSummary(options.userId)).length, 2);
+});
+
+test("firm list reads migrate legacy CRM theme defaults to an empty topic", async () => {
+  await seed([{
+    ...sampleLead,
+    callSource: "crm",
+    crmCompanyId: 912,
+    listId: "crm-search-legacy-user",
+    listName: "CRM: Alte Suche",
+    topic: "Energie",
+  }]);
+
+  const lists = await storage.getFirmListsSummary(sampleLead.userId);
+  assert.equal(lists[0].listName, "Firmenliste: Alte Suche");
+  const storedLeads = JSON.parse(await readFile(path.join(fixtureDirectory, "data", "leads.json"), "utf8"));
+  assert.equal(storedLeads[0].topic, "");
+  assert.equal(storedLeads[0].listName, "Firmenliste: Alte Suche");
 });
 
 test("stable saved-search imports absorb partial legacy transfers without duplicate leads", async () => {

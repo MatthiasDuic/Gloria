@@ -141,6 +141,8 @@ interface CampaignListState {
   listId: string;
   listName: string;
   active: boolean;
+  sourceListId?: string;
+  campaignTopic?: Topic;
   startedAt?: string;
   stoppedAt?: string;
   lastRunAt?: string;
@@ -154,7 +156,7 @@ export type ActiveCampaignList = CampaignListState;
 
 export async function listActiveCampaignLists(): Promise<ActiveCampaignList[]> {
   const state = await readCampaignState();
-  return state.lists.filter((entry) => entry.active);
+  return state.lists.filter((entry) => entry.active && !entry.listId.startsWith("crm-search-"));
 }
 
 interface StoredConversationEvent extends ConversationEvent {
@@ -1439,6 +1441,15 @@ export interface CrmCompanyImport {
   crmCompanyData: Record<string, unknown>;
 }
 
+function formatFirmListName(value: string): string {
+  const name = value.trim().replace(/^(?:CRM|Firmenliste):\s*/i, "");
+  return `Firmenliste: ${name || "Unbenannte Firmenliste"}`;
+}
+
+function isCrmFirmListLead(lead: Lead): boolean {
+  return lead.callSource === "crm" && Boolean(lead.listId?.startsWith("crm-search-"));
+}
+
 function buildCrmCallContext(record: CrmCompanyImport): string {
   const data = record.crmCompanyData;
   const address = [data.street, data.postal_code, data.city, data.country]
@@ -1494,6 +1505,7 @@ export async function importLeadsFromCrm(
   companies: CrmCompanyImport[],
   options: { listId: string; listName: string; userId: string },
 ): Promise<{ listId: string; listName: string; imported: number; total: number }> {
+  const listName = formatFirmListName(options.listName);
   const existing = await readLeads(options.userId);
   const imported = companies.length;
   const nextLeads = [...existing];
@@ -1519,13 +1531,19 @@ export async function importLeadsFromCrm(
       crmCompanyId: record.crmCompanyId,
       crmCompanyData: record.crmCompanyData,
       listId: options.listId,
-      listName: options.listName,
+      listName,
       lifecycle: "prospect",
       company: record.company,
       contactName: record.contactName?.trim() || "Empfang",
       phone: record.phone?.trim() || "",
       email: record.email?.trim() || undefined,
-      topic: normalizeTopic(record.topic || ""),
+      directDial: typeof record.crmCompanyData.phone === "string" ? record.crmCompanyData.phone : prior?.directDial,
+      location: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.location,
+      addressStreet: typeof record.crmCompanyData.street === "string" ? record.crmCompanyData.street : prior?.addressStreet,
+      addressPostalCode: typeof record.crmCompanyData.postal_code === "string" ? record.crmCompanyData.postal_code : prior?.addressPostalCode,
+      addressCity: typeof record.crmCompanyData.city === "string" ? record.crmCompanyData.city : prior?.addressCity,
+      addressCountry: typeof record.crmCompanyData.country === "string" ? record.crmCompanyData.country : prior?.addressCountry,
+      topic: "",
       note: buildCrmCallContext(record),
       status: prior?.status || "neu",
       attempts: prior?.attempts || 0,
@@ -1538,10 +1556,16 @@ export async function importLeadsFromCrm(
 
   const campaignState = await readCampaignState(options.userId);
   let campaignStateChanged = false;
-  if (!campaignState.lists.some((list) => list.listId === options.listId)) {
+  const existingSourceList = campaignState.lists.find((list) => list.listId === options.listId);
+  if (existingSourceList) {
+    existingSourceList.listName = listName;
+    existingSourceList.active = false;
+    existingSourceList.stoppedAt = new Date().toISOString();
+    campaignStateChanged = true;
+  } else {
     campaignState.lists.unshift({
       listId: options.listId,
-      listName: options.listName,
+      listName,
       active: false,
       stoppedAt: new Date().toISOString(),
       userId: options.userId,
@@ -1567,7 +1591,7 @@ export async function importLeadsFromCrm(
 
   return {
     listId: options.listId,
-    listName: options.listName,
+    listName,
     imported,
     total: nextLeads.length,
   };
@@ -2062,10 +2086,45 @@ export async function markLeadCallbackScheduled(leadId: string, taskId?: string)
   await writeLeads(updated);
 }
 
+export async function getFirmListsSummary(userId?: string): Promise<
+  Array<{ listId: string; listName: string; total: number; withPhone: number; withEmail: number }>
+> {
+  const leads = await readLeads(userId);
+  let needsCleanup = false;
+  const normalizedLeads = leads.map((lead) => {
+    if (!isCrmFirmListLead(lead)) return lead;
+    const listName = formatFirmListName(lead.listName || "");
+    if (!lead.topic && listName === lead.listName) return lead;
+    needsCleanup = true;
+    return { ...lead, listName, topic: "" };
+  });
+  if (needsCleanup) await writeLeads(normalizedLeads, userId);
+  const grouped = new Map<string, { listId: string; listName: string; total: number; withPhone: number; withEmail: number }>();
+
+  for (const lead of normalizedLeads) {
+    if (!isCrmFirmListLead(lead) || !lead.listId) continue;
+    const list = grouped.get(lead.listId) || {
+      listId: lead.listId,
+      listName: formatFirmListName(lead.listName || ""),
+      total: 0,
+      withPhone: 0,
+      withEmail: 0,
+    };
+    list.total += 1;
+    if ((lead.phone || lead.directDial || "").trim()) list.withPhone += 1;
+    if ((lead.email || "").trim()) list.withEmail += 1;
+    grouped.set(lead.listId, list);
+  }
+
+  return [...grouped.values()].sort((a, b) => a.listName.localeCompare(b.listName, "de"));
+}
+
 export async function getCampaignListsSummary(userId?: string): Promise<
   Array<{
     listId: string;
     listName: string;
+    sourceListId?: string;
+    campaignTopic?: Topic;
     active: boolean;
     currentlyDialing: boolean;
     total: number;
@@ -2146,6 +2205,7 @@ export async function getCampaignListsSummary(userId?: string): Promise<
 
   for (const lead of leads) {
     if (lead.callSource === "manual") continue;
+    if (isCrmFirmListLead(lead)) continue;
     if (isLeadCustomer(lead) && (!lead.listId || (lead.listName || "").toLowerCase().includes("manuell hinzugefügt"))) continue;
     const listId = lead.listId || "legacy";
     const listName = lead.listName || "Standardliste";
@@ -2183,6 +2243,8 @@ export async function getCampaignListsSummary(userId?: string): Promise<
   return [...grouped.values()]
     .map((list) => ({
       ...list,
+      sourceListId: campaignState.lists.find((entry) => entry.listId === list.listId)?.sourceListId,
+      campaignTopic: campaignState.lists.find((entry) => entry.listId === list.listId)?.campaignTopic,
       active: Boolean(
         campaignState.lists.find((entry) => entry.listId === list.listId)?.active,
       ),
@@ -2191,28 +2253,73 @@ export async function getCampaignListsSummary(userId?: string): Promise<
     .sort((a, b) => a.listName.localeCompare(b.listName, "de"));
 }
 
+export async function createCampaignRunFromFirmList(
+  sourceListId: string,
+  campaignTopic: Topic,
+  userId: string,
+): Promise<{ listId: string; listName: string }> {
+  if (!sourceListId.startsWith("crm-search-")) {
+    throw new Error("Die ausgewählte Firmenliste ist ungültig.");
+  }
+  if (!campaignTopic.trim()) {
+    throw new Error("Bitte eine Kampagne auswählen.");
+  }
+
+  const leads = await readLeads(userId);
+  const sourceLeads = leads.filter((lead) =>
+    isCrmFirmListLead(lead) && lead.listId === sourceListId && !isLeadCustomer(lead),
+  );
+  if (sourceLeads.length === 0) {
+    throw new Error("Die Firmenliste enthält keine Kontakte mehr.");
+  }
+
+  const sourceListName = formatFirmListName(sourceLeads[0].listName || "");
+  const listId = `crm-run-${createLeadId()}`;
+  const listName = `${sourceListName} · ${campaignTopic}`;
+  const runLeads = sourceLeads.map((lead, index): Lead => ({
+    ...lead,
+    id: createLeadId(index),
+    listId,
+    listName,
+    topic: campaignTopic,
+    lifecycle: "prospect",
+    status: "neu",
+    attempts: 0,
+    nextCallAt: undefined,
+  }));
+  const campaignState = await readCampaignState(userId);
+  campaignState.lists.unshift({
+    userId,
+    listId,
+    listName,
+    sourceListId,
+    campaignTopic,
+    active: false,
+    stoppedAt: new Date().toISOString(),
+  });
+
+  await writeLeads([...leads, ...runLeads], userId);
+  await writeCampaignState(campaignState, userId);
+  return { listId, listName };
+}
+
 export async function setCampaignListActive(
   listId: string,
   active: boolean,
   userId?: string,
-  topic?: Topic,
 ): Promise<void> {
+  if (listId.startsWith("crm-search-")) {
+    throw new Error("Eine Firmenliste muss vor dem Start einer Kampagne zugeordnet werden.");
+  }
   const leads = await readLeads(userId);
   const listLeads = leads.filter((lead) => (lead.listId || "legacy") === listId);
   const listLead = listLeads[0];
   const listName = listLead?.listName || (listId === "legacy" ? "Standardliste" : listId);
 
-  if (topic !== undefined) {
-    if (!topic.trim()) throw new Error("Bitte eine Kampagne auswählen.");
-    const updatedLeads = leads.map((lead) =>
-      (lead.listId || "legacy") === listId ? { ...lead, topic } : lead,
-    );
-    await writeLeads(updatedLeads, userId);
-  }
-
   const campaignState = await readCampaignState(userId);
   const existingIndex = campaignState.lists.findIndex((entry) => entry.listId === listId);
   const next = {
+    ...(existingIndex >= 0 ? campaignState.lists[existingIndex] : {}),
     listId,
     listName,
     active,
@@ -2257,11 +2364,13 @@ export async function deleteCampaignList(listId: string, userId?: string): Promi
 }
 
 export async function isCampaignListActive(listId: string, userId?: string): Promise<boolean> {
+  if (listId.startsWith("crm-search-")) return false;
   const campaignState = await readCampaignState(userId);
   return Boolean(campaignState.lists.find((entry) => entry.listId === listId)?.active);
 }
 
 export async function pullNextLeadForCampaignList(listId: string, userId?: string): Promise<Lead | undefined> {
+  if (listId.startsWith("crm-search-")) return undefined;
   const leads = await readLeads(userId);
   const index = leads.findIndex(
     (lead) => lead.callSource !== "manual" && (lead.listId || "legacy") === listId && !isLeadCustomer(lead) && lead.status === "neu" && Boolean(lead.phone?.trim()),

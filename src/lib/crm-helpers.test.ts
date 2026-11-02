@@ -228,12 +228,13 @@ test("product normalization preserves application, unit forecast and commission 
   assert.equal(normalized?.expectedCommissionEUR, 345.67);
 });
 
-test("CRM workspaces hide private contacts while retaining company customers and prospects", () => {
+test("CRM workspaces separate imported firm lists from campaign prospects and hide private contacts", () => {
     const leads: Lead[] = [
       sampleLead,
       { ...sampleLead, id: "company-1", lifecycle: "customer" },
       { ...sampleLead, id: "private-1", lifecycle: "customer", customerKind: "privat" },
       { ...sampleLead, id: "private-prospect", customerKind: "privat" },
+      { ...sampleLead, id: "firm-list-1", callSource: "crm", listId: "crm-search-19-user-1" },
     ];
     assert.deepEqual(getCrmWorkspaceLeads(leads, "campaigns").map((lead) => lead.id), ["prospect-1"]);
     assert.deepEqual(getCrmWorkspaceLeads(leads, "companies").map((lead) => lead.id), ["company-1"]);
