@@ -248,3 +248,89 @@ test("deleting the legacy CRM list cannot delete manual callbacks", async () => 
   assert.equal((await storage.deleteCampaignList("legacy", sampleLead.userId)).removedLeads, 1);
   assert.equal((await storage.getLeadById(manual.id, sampleLead.userId))?.callSource, "manual");
 });
+
+test("imports full CRM snapshots into an inactive campaign and safely refreshes existing leads", async () => {
+  await seed([]);
+  const company = {
+    crmCompanyId: 812,
+    company: "Beispiel GmbH",
+    phone: "+49233112345",
+    email: "info@example.invalid",
+    contactName: "Max Beispiel",
+    topic: "Energie",
+    crmCompanyData: {
+      industry: "Maschinenbau",
+      street: "Hauptstraße 1",
+      city: "Sprockhövel",
+      contactPersons: [{ name: "Max Beispiel", title: "Geschäftsführer" }],
+      notes: [{ text: "Rückruf am Vormittag bevorzugt." }],
+      documents: [{ filename: "firmenprofil.pdf", content: "base64-pdf-data" }],
+    },
+  };
+  const options = { listId: "crm-search-7", listName: "CRM: Maschinenbau", userId: "crm-user" };
+
+  const firstImport = await storage.importLeadsFromCrm([company], options);
+  assert.equal(firstImport.imported, 1);
+  let dashboard = await storage.getDashboardData({ userId: "crm-user", role: "user" });
+  assert.equal(dashboard.leads.length, 1);
+  assert.equal(dashboard.leads[0].crmCompanyId, 812);
+  assert.deepEqual(dashboard.leads[0].crmCompanyData, company.crmCompanyData);
+  assert.match(dashboard.leads[0].note || "", /Maschinenbau/);
+
+  const leadId = dashboard.leads[0].id;
+  await storage.updateLeadDetails(leadId, { status: "angerufen" }, "crm-user");
+  const savedLeadsPath = path.join(fixtureDirectory, "data", "leads.json");
+  const savedLeads = JSON.parse(await readFile(savedLeadsPath, "utf8"));
+  savedLeads[0].attempts = 2;
+  await writeFile(savedLeadsPath, JSON.stringify(savedLeads));
+  const secondImport = await storage.importLeadsFromCrm([company], options);
+  assert.equal(secondImport.imported, 1);
+  dashboard = await storage.getDashboardData({ userId: "crm-user", role: "user" });
+  assert.equal(dashboard.leads.length, 1);
+  assert.equal(dashboard.leads[0].id, leadId);
+  assert.equal(dashboard.leads[0].status, "angerufen");
+  assert.equal(dashboard.leads[0].attempts, 2);
+
+  const campaignState = JSON.parse(await readFile(path.join(fixtureDirectory, "data", "campaign-state.json"), "utf8"));
+  assert.equal(campaignState.lists.find((list: { listId: string }) => list.listId === options.listId)?.active, false);
+});
+
+test("CRM import API requires its shared token and rejects an unpaired CRM user", async () => {
+  await seed([]);
+  const previousToken = process.env.GLORIA_CRM_INTEGRATION_TOKEN;
+  process.env.GLORIA_CRM_INTEGRATION_TOKEN = "test-crm-shared-token";
+
+  try {
+    const { POST } = await import("../app/api/integrations/crm/campaigns/route");
+    const payload = {
+      crmUserId: "crm-user",
+      listId: "crm-api-list",
+      listName: "CRM API Test",
+      companies: [{
+        crmCompanyId: 95,
+        company: "API GmbH",
+        phone: "+49233112345",
+        crmCompanyData: {
+          vat_id: "DE123456789",
+          documents: [{ filename: "profile.pdf", content: "base64-pdf-data" }],
+        },
+      }],
+    };
+    const request = (token?: string) => new Request("http://localhost/api/integrations/crm/campaigns", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "x-gloria-integration-token": token } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    assert.equal((await POST(request())).status, 401);
+    const response = await POST(request("test-crm-shared-token"));
+    assert.equal(response.status, 403);
+    assert.match((await response.json()).error, /gepaartes Gloria-Konto/i);
+  } finally {
+    if (previousToken === undefined) delete process.env.GLORIA_CRM_INTEGRATION_TOKEN;
+    else process.env.GLORIA_CRM_INTEGRATION_TOKEN = previousToken;
+  }
+});

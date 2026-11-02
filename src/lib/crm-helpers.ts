@@ -1,6 +1,6 @@
 import type { CallReport, CallSource, DashboardData, Lead, LeadProductDetail, LeadTask } from "./types";
 
-export type CrmWorkspace = "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline";
+export type CrmWorkspace = "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline" | "profile";
 export type CrmCampaignTab = "lists" | "prospects" | "followups" | "calls";
 
 export function getCallSource(report: Pick<CallReport, "callSource" | "leadId" | "summary">, leads: Lead[] = []): CallSource {

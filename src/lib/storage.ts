@@ -1417,6 +1417,128 @@ export async function importLeadsFromCsv(
   };
 }
 
+export interface CrmCompanyImport {
+  crmCompanyId: number;
+  company: string;
+  phone?: string;
+  email?: string;
+  contactName?: string;
+  topic?: string;
+  crmCompanyData: Record<string, unknown>;
+}
+
+function buildCrmCallContext(record: CrmCompanyImport): string {
+  const data = record.crmCompanyData;
+  const address = [data.street, data.postal_code, data.city, data.country]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(", ");
+  const contactPersons = Array.isArray(data.contactPersons)
+    ? data.contactPersons
+        .map((person) => {
+          if (!person || typeof person !== "object") return "";
+          const entry = person as Record<string, unknown>;
+          return [entry.name, entry.title]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join(" – ");
+        })
+        .filter(Boolean)
+        .join("; ")
+    : "";
+  const notes = Array.isArray(data.notes)
+    ? data.notes
+        .map((note) => note && typeof note === "object" ? (note as Record<string, unknown>).text : "")
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .slice(0, 5)
+        .join("\n")
+    : "";
+  const calls = Array.isArray(data.calls)
+    ? data.calls
+        .map((call) => {
+          if (!call || typeof call !== "object") return "";
+          const entry = call as Record<string, unknown>;
+          return [entry.called_at, entry.outcome, entry.notes]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join(": ");
+        })
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .slice(0, 5)
+        .join("\n")
+    : "";
+  const context = [
+    `CRM-Firmen-ID: ${record.crmCompanyId}`,
+    typeof data.industry === "string" && data.industry ? `Branche: ${data.industry}` : "",
+    address ? `Adresse: ${address}` : "",
+    record.email ? `E-Mail: ${record.email}` : "",
+    typeof data.website === "string" && data.website ? `Website: ${data.website}` : "",
+    typeof data.employee_count === "number" ? `Mitarbeiter: ${data.employee_count}` : "",
+    contactPersons ? `Weitere Ansprechpartner: ${contactPersons}` : "",
+    notes ? `CRM-Notizen:\n${notes}` : "",
+    calls ? `Bisherige Anrufe:\n${calls}` : "",
+  ].filter(Boolean).join("\n");
+  return context.slice(0, 2_000);
+}
+
+export async function importLeadsFromCrm(
+  companies: CrmCompanyImport[],
+  options: { listId: string; listName: string; userId: string },
+): Promise<{ listId: string; listName: string; imported: number; total: number }> {
+  const existing = await readLeads(options.userId);
+  const imported = companies.length;
+  const nextLeads = [...existing];
+
+  for (const record of companies) {
+    const existingIndex = nextLeads.findIndex(
+      (lead) => lead.listId === options.listId && lead.crmCompanyId === record.crmCompanyId,
+    );
+    const prior = existingIndex >= 0 ? nextLeads[existingIndex] : undefined;
+    const lead: Lead = {
+      ...prior,
+      id: prior?.id || createLeadId(),
+      callSource: "crm",
+      userId: options.userId,
+      crmCompanyId: record.crmCompanyId,
+      crmCompanyData: record.crmCompanyData,
+      listId: options.listId,
+      listName: options.listName,
+      lifecycle: "prospect",
+      company: record.company,
+      contactName: record.contactName?.trim() || "Empfang",
+      phone: record.phone?.trim() || "",
+      email: record.email?.trim() || undefined,
+      topic: normalizeTopic(record.topic || "Energie"),
+      note: buildCrmCallContext(record),
+      status: prior?.status || "neu",
+      attempts: prior?.attempts || 0,
+    };
+
+    if (existingIndex >= 0) nextLeads[existingIndex] = lead;
+    else {
+      nextLeads.unshift(lead);
+    }
+  }
+
+  await writeLeads(ensureUniqueLeadIds(nextLeads), options.userId);
+
+  const campaignState = await readCampaignState(options.userId);
+  if (!campaignState.lists.some((list) => list.listId === options.listId)) {
+    campaignState.lists.unshift({
+      listId: options.listId,
+      listName: options.listName,
+      active: false,
+      stoppedAt: new Date().toISOString(),
+      userId: options.userId,
+    } as CampaignListState);
+    await writeCampaignState(campaignState, options.userId);
+  }
+
+  return {
+    listId: options.listId,
+    listName: options.listName,
+    imported,
+    total: nextLeads.length,
+  };
+}
+
 export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, options?: { userId?: string }) {
   if (options?.userId) {
     const user = await findUserById(options.userId);

@@ -50,6 +50,7 @@ Danach im Browser öffnen:
 |---|---|
 | Dashboard-Daten | `/api/reports` |
 | CSV-Auftrag importieren | `/api/campaigns/import` |
+| CRM-Kampagne sicher importieren | `/api/integrations/crm/campaigns` |
 | Playbooks lesen/speichern | `/api/playbooks` |
 | Stimmtest / Prompt-Vorschau | `/api/voice-preview` |
 | Gesprächsreport von Telefonie empfangen | `/api/calls/webhook` |
@@ -86,6 +87,10 @@ BASIC_AUTH_PASSWORD=dein_starkes_passwort
 ```
 
 Wichtig: Die Admin-Seite und internen APIs sind geschützt. Die Telnyx-Callbacks für Telefonie bleiben bewusst erreichbar.
+
+## CRM-Integration
+
+CRM-Kampagnen werden serverseitig über `/api/integrations/crm/campaigns` mit dem Header `x-gloria-integration-token` importiert. Setze `GLORIA_CRM_INTEGRATION_TOKEN` auf denselben geheimen Transportwert wie im CRM und verwalte ihn ausschließlich über die Secret-Verwaltung des Deployments. Eine feste `GLORIA_CRM_USER_ID` wird nicht mehr verwendet: Nutzer verbinden ihr eigenes Konto über „Profil / CRM-Verbindung“ und geben dort die CRM-Backend-Adresse sowie den persönlichen API-Schlüssel ein. Gloria validiert diesen Schlüssel beim CRM; das CRM bindet ihn an die angemeldete Gloria-Benutzer-ID. Der Schlüssel wird in Gloria nicht gespeichert. Bei einem Import wird der gepaarte Benutzer aus dieser serverseitigen Bindung ermittelt, nicht aus einer frei gelieferten Ziel-ID. Importierte CRM-Listen bleiben inaktiv, bis sie in Gloria ausdrücklich gestartet werden. Der vollständige CRM-Firmendatensatz wird in der Lead-Akte gespeichert; ein begrenzter Gesprächskontext steht Gloria beim Telefonat zur Verfügung.
 
 ## SMTP / E-Mail konfigurieren
 

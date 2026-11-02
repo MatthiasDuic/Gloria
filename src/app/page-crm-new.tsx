@@ -216,6 +216,11 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [notice, setNotice] = useState("Dashboard wird geladen ...");
   const [outboundQueue, setOutboundQueue] = useState<OutboundCallQueueState | null>(null);
   const [outboundQueueError, setOutboundQueueError] = useState("");
+  const [crmConnection, setCrmConnection] = useState<{ connected: boolean; apiUrl: string }>({ connected: false, apiUrl: "" });
+  const [crmApiUrlDraft, setCrmApiUrlDraft] = useState("");
+  const [crmApiKeyDraft, setCrmApiKeyDraft] = useState("");
+  const [crmConnectionBusy, setCrmConnectionBusy] = useState(false);
+  const [crmConnectionNotice, setCrmConnectionNotice] = useState("");
 
   // View & Filter State
   const [activeView, setActiveView] = useState<CrmWorkspace>("dashboard");
@@ -1298,6 +1303,70 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   }, [loadCrmPreferences]);
 
   useEffect(() => {
+    if (activeView !== "profile") return;
+    let cancelled = false;
+    void fetch("/api/integrations/crm/connection", { credentials: "include", cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Verbindungsstatus konnte nicht geladen werden.");
+        if (!cancelled) {
+          setCrmConnection({ connected: Boolean(payload.connected), apiUrl: typeof payload.apiUrl === "string" ? payload.apiUrl : "" });
+          setCrmApiUrlDraft(typeof payload.apiUrl === "string" ? payload.apiUrl : "");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setCrmConnectionNotice(error instanceof Error ? error.message : "Verbindungsstatus konnte nicht geladen werden.");
+      });
+    return () => { cancelled = true; };
+  }, [activeView]);
+
+  async function connectCrmAccount() {
+    setCrmConnectionBusy(true);
+    setCrmConnectionNotice("");
+    try {
+      const response = await fetch("/api/integrations/crm/connection", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiUrl: crmApiUrlDraft, apiKey: crmApiKeyDraft }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "CRM-Verbindung konnte nicht hergestellt werden.");
+      setCrmConnection({ connected: true, apiUrl: payload.apiUrl });
+      setCrmApiKeyDraft("");
+      setCrmConnectionNotice("CRM-Konto erfolgreich mit diesem Gloria-Benutzerkonto verbunden.");
+    } catch (error) {
+      setCrmConnectionNotice(error instanceof Error ? error.message : "CRM-Verbindung konnte nicht hergestellt werden.");
+    } finally {
+      setCrmConnectionBusy(false);
+    }
+  }
+
+  async function disconnectCrmAccount() {
+    if (!window.confirm("CRM-Verbindung wirklich trennen?")) return;
+    setCrmConnectionBusy(true);
+    setCrmConnectionNotice("");
+    try {
+      const response = await fetch("/api/integrations/crm/connection", {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: crmApiKeyDraft }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "CRM-Verbindung konnte nicht getrennt werden.");
+      setCrmConnection({ connected: false, apiUrl: "" });
+      setCrmApiUrlDraft("");
+      setCrmApiKeyDraft("");
+      setCrmConnectionNotice("CRM-Verbindung getrennt.");
+    } catch (error) {
+      setCrmConnectionNotice(error instanceof Error ? error.message : "CRM-Verbindung konnte nicht getrennt werden.");
+    } finally {
+      setCrmConnectionBusy(false);
+    }
+  }
+
+  useEffect(() => {
     if (!crmPrefsReady) return;
 
     const snapshot: CrmUiPreferences = {
@@ -1390,6 +1459,70 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   // ========================================================================
   // RENDER FUNCTIONS
   // ========================================================================
+
+  function renderProfile() {
+    return (
+      <section className="surface" aria-labelledby="crm-connection-title" style={{ maxWidth: 820, padding: 24 }}>
+        <div className="section-heading">
+          <div>
+            <p className="section-eyebrow">Persönliche Integration</p>
+            <h2 id="crm-connection-title">CRM-Konto verbinden</h2>
+            <p>Die Verbindung gilt nur für Ihr CRM- und Gloria-Benutzerkonto. Importierte Listen sind ausschließlich Ihrem Gloria-Konto zugeordnet.</p>
+          </div>
+        </div>
+        <div role="status" aria-live="polite" style={{
+          margin: "16px 0",
+          padding: 12,
+          borderRadius: 10,
+          background: crmConnection.connected ? "#ecfdf5" : "#f1f5f9",
+          color: crmConnection.connected ? "#166534" : "#334155",
+        }}>
+          {crmConnection.connected
+            ? `Verbunden mit ${crmConnection.apiUrl}`
+            : "Noch kein CRM-Benutzerkonto verbunden."}
+        </div>
+        <form onSubmit={(event) => { event.preventDefault(); void connectCrmAccount(); }} style={{ display: "grid", gap: 14 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>CRM-API-Adresse (Backend)</span>
+            <input
+              className="input"
+              type="url"
+              autoComplete="url"
+              placeholder="https://crm.example.com"
+              value={crmApiUrlDraft}
+              onChange={(event) => setCrmApiUrlDraft(event.target.value)}
+              required
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>Persönlicher CRM-API-Schlüssel</span>
+            <input
+              className="input"
+              type="password"
+              autoComplete="off"
+              value={crmApiKeyDraft}
+              onChange={(event) => setCrmApiKeyDraft(event.target.value)}
+              required={!crmConnection.connected}
+            />
+          </label>
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>
+            Der Schlüssel wird nur zur Prüfung beziehungsweise zum Trennen der Verbindung verwendet und nicht in Gloria gespeichert. Erstellen oder erneuern Sie ihn im CRM unter Profil → Gloria-Verbindung.
+          </p>
+          {crmConnectionNotice && <div role="status" aria-live="polite" className={crmConnectionNotice.toLowerCase().includes("nicht") ? "crm-notice error" : "crm-notice"}>{crmConnectionNotice}</div>}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <button type="submit" className="btn" disabled={crmConnectionBusy || !crmApiUrlDraft.trim() || !crmApiKeyDraft.trim()}>
+              {crmConnectionBusy ? "Prüft Verbindung..." : crmConnection.connected ? "Verbindung aktualisieren" : "CRM-Konto verbinden"}
+            </button>
+            {crmConnection.connected && (
+              <button type="button" className="btn-small ghost" disabled={crmConnectionBusy || !crmApiKeyDraft.trim()} onClick={() => void disconnectCrmAccount()}>
+                Verbindung trennen
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+    );
+  }
 
   function renderDashboard() {
     const today = toDateKey(new Date());
@@ -2383,7 +2516,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       <nav className={`app-nav ${embedded ? "embedded" : ""}`} aria-label="CRM-Arbeitsbereiche">
         {([
           ["dashboard", "Dashboard"], ["campaigns", "Kampagnen"], ["companies", "Firmenkunden"],
-          ["private", "Privatkunden"], ["calendar", "Kalender"], ["pipeline", "Vertriebspipeline"],
+          ["private", "Privatkunden"], ["calendar", "Kalender"], ["pipeline", "Vertriebspipeline"], ["profile", "Profil / CRM-Verbindung"],
         ] as const).map(([workspace, label]) => (
           <button key={workspace} className={`nav-btn ${activeView === workspace ? "active" : ""}`} aria-current={activeView === workspace ? "page" : undefined} onClick={() => navigateWorkspace(workspace)}>{label}</button>
         ))}
@@ -2403,6 +2536,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         {(activeView === "companies" || activeView === "private") && renderContacts()}
         {activeView === "pipeline" && renderPipeline()}
         {activeView === "calendar" && renderCalendar()}
+        {activeView === "profile" && renderProfile()}
       </main>
       {renderLeadDetail()}
       {renderReportDetail()}

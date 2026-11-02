@@ -74,7 +74,7 @@ export interface CrmSavedView {
 }
 
 export interface CrmUiPreferences {
-  crmWorkspace?: "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline";
+  crmWorkspace?: "dashboard" | "campaigns" | "companies" | "private" | "calendar" | "pipeline" | "profile";
   crmCampaignTab?: "lists" | "prospects" | "followups" | "calls";
   crmTab?: "customers" | "pipeline" | "callbacks";
   crmDetailTab?: "stammdaten" | "produkte" | "pipeline" | "historie" | "kommunikation" | "termine" | "aufgaben" | "zugehoerigkeiten";
@@ -118,6 +118,8 @@ export interface Lead {
   id: string;
   callSource?: CallSource;
   userId?: string;
+  crmCompanyId?: number;
+  crmCompanyData?: Record<string, unknown>;
   listId?: string;
   listName?: string;
   customerKind?: LeadCustomerKind;

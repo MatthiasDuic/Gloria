@@ -259,7 +259,7 @@ function parseCrmUiPreferences(value: unknown): CrmUiPreferences {
   }
   const row = value as Record<string, unknown>;
   return {
-    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "pipeline" ? row.crmWorkspace : undefined,
+    crmWorkspace: row.crmWorkspace === "dashboard" || row.crmWorkspace === "campaigns" || row.crmWorkspace === "companies" || row.crmWorkspace === "private" || row.crmWorkspace === "calendar" || row.crmWorkspace === "pipeline" || row.crmWorkspace === "profile" ? row.crmWorkspace : undefined,
     crmCampaignTab: row.crmCampaignTab === "lists" || row.crmCampaignTab === "prospects" || row.crmCampaignTab === "followups" || row.crmCampaignTab === "calls" ? row.crmCampaignTab : undefined,
     crmTab: row.crmTab === "customers" || row.crmTab === "pipeline" || row.crmTab === "callbacks" ? row.crmTab : undefined,
     crmDetailTab:
@@ -458,6 +458,12 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_playbook_topics JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_saved_views JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_ui_preferences JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_api_url TEXT NOT NULL DEFAULT '';`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_user_id TEXT NOT NULL DEFAULT '';`);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS users_crm_user_id_unique_idx
+    ON users (crm_user_id) WHERE crm_user_id <> '';
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS phone_numbers (
@@ -905,6 +911,8 @@ async function initializeSchema() {
       attempts INTEGER NOT NULL DEFAULT 0,
       lifecycle TEXT,
       notes JSONB,
+      crm_company_id INTEGER,
+      crm_company_data JSONB,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -928,6 +936,8 @@ async function initializeSchema() {
   }
 
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_kind TEXT;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS crm_company_id INTEGER;`);
+  await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS crm_company_data JSONB;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS customer_owner TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS birth_date TEXT;`);
   await db.query(`ALTER TABLE gloria_leads ADD COLUMN IF NOT EXISTS address_street TEXT;`);
@@ -1415,6 +1425,51 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
     role: row.role === "master" ? "master" : "user",
     createdAt: toIso(row.created_at) || new Date().toISOString(),
   };
+}
+
+export async function findUserByCrmUserId(crmUserId: string): Promise<AppUser | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `SELECT id FROM users WHERE crm_user_id = $1 LIMIT 1`,
+    [crmUserId],
+  );
+  const userId = result.rows[0]?.id;
+  return userId ? findUserById(String(userId)) : null;
+}
+
+export async function getUserCrmConnection(userId: string): Promise<{ apiUrl: string; crmUserId: string } | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  await ensureSchema();
+  const db = getPool();
+  const result = await db.query(
+    `SELECT crm_api_url, crm_user_id FROM users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+  return { apiUrl: String(row.crm_api_url || ""), crmUserId: String(row.crm_user_id || "") };
+}
+
+export async function updateUserCrmConnection(
+  userId: string,
+  connection: { apiUrl: string; crmUserId: string },
+): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(
+    `UPDATE users SET crm_api_url = $2, crm_user_id = $3 WHERE id = $1`,
+    [userId, connection.apiUrl, connection.crmUserId],
+  );
 }
 
 export function verifyUserPassword(rawPassword: string, passwordHash: string): boolean {
@@ -2337,7 +2392,9 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
         attempts,
         lifecycle,
         notes,
-        call_source
+        call_source,
+        crm_company_id,
+        crm_company_data
       FROM gloria_leads
       ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY updated_at DESC;
@@ -2352,6 +2409,10 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       customerOwner: row.customer_owner === "BarmeniaGothaer" || row.customer_owner === "Agentur-Duic" ? row.customer_owner : undefined,
       lifecycle: row.lifecycle === "customer" || row.lifecycle === "prospect" ? row.lifecycle : undefined,
       callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
+      crmCompanyId: row.crm_company_id == null ? undefined : Number(row.crm_company_id),
+      crmCompanyData: row.crm_company_data
+        ? (typeof row.crm_company_data === "string" ? JSON.parse(row.crm_company_data) : row.crm_company_data)
+        : undefined,
       company: String(row.company),
       contactName: String(row.contact_name || "Empfang"),
       phone: String(row.phone || ""),
@@ -2449,9 +2510,11 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lifecycle,
             notes,
             call_source,
+            crm_company_id,
+            crm_company_data,
             updated_at
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,NOW()
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,NOW()
           )
           ON CONFLICT (id)
           DO UPDATE SET
@@ -2487,6 +2550,8 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lifecycle = EXCLUDED.lifecycle,
             notes = EXCLUDED.notes,
             call_source = EXCLUDED.call_source,
+            crm_company_id = EXCLUDED.crm_company_id,
+            crm_company_data = EXCLUDED.crm_company_data,
             updated_at = NOW();
           `,
           [
@@ -2523,6 +2588,8 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
             lead.lifecycle || null,
             JSON.stringify(lead.notes || []),
             lead.callSource || null,
+            lead.crmCompanyId || null,
+            JSON.stringify(lead.crmCompanyData || null),
           ],
         );
       }
