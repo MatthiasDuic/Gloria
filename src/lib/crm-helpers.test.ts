@@ -7,6 +7,7 @@ import {
   buildLeadProductRecord,
   getLeadCustomerKindFormConfig,
   getCrmWorkspaceLeads,
+  getCompanyContactPersons,
   getCallSource,
   getCallWorkspaceData,
   isDueGloriaTask,
@@ -19,6 +20,33 @@ import {
 } from "./crm-helpers.ts";
 import type { CallReport, DashboardData, Lead } from "./types";
 import { CALENDAR_VIEWS, formatCalendarPeriod, getCalendarDays, getCalendarEntryColor, moveCalendarDate, saveCalendarCallback } from "./calendar-view";
+
+test("company contacts retain individual birthdays from CRM snapshots without persisted contactNames", () => {
+  const lead: Lead = {
+    id: "company", company: "Firma", contactName: "Max Beispiel / Erika Muster", phone: "",
+    topic: "", status: "neu", attempts: 0, birthDate: "1980-03-01",
+    crmCompanyData: {
+      contact_person: "Max Beispiel / Erika Muster",
+      contact_birthdate: "1980-03-01",
+      contactPersons: [
+        { name: "Max Beispiel", title: "Geschäftsführer" },
+        { name: "Erika Muster", birthdate: "1985-06-02", position: "Geschäftsführerin" },
+        { name: "" }, null, "invalid",
+      ],
+    },
+  };
+  assert.deepEqual(getCompanyContactPersons(lead), [
+    { name: "Max Beispiel", birthDate: "1980-03-01", title: "Geschäftsführer" },
+    { name: "Erika Muster", birthDate: "1985-06-02", title: "Geschäftsführerin" },
+  ]);
+  assert.deepEqual(getCompanyContactPersons({ ...lead, contactName: "", crmCompanyData: undefined }), []);
+  assert.deepEqual(getCompanyContactPersons({
+    ...lead, contactName: "Einzelperson", crmCompanyData: undefined,
+  }), [{ name: "Einzelperson", birthDate: "1980-03-01" }]);
+  assert.deepEqual(getCompanyContactPersons({
+    ...lead, contactName: "A / B", crmCompanyData: undefined,
+  }), [{ name: "A" }, { name: "B" }]);
+});
 
 test("calendar views show one day, Monday-based weeks, weekdays, month grid and monthly agenda", () => {
   const sunday = new Date(2026, 9, 18, 16);

@@ -47,7 +47,7 @@ import type {
   Topic,
 } from "./types";
 import { TOPICS } from "./types";
-import { getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails } from "./crm-helpers";
+import { CampaignContactSelectionError, getCompanyContactPersons, getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails, type CampaignContactSelection } from "./crm-helpers";
 import { getMissingCrmFields } from "./crm-enrichment";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -1545,6 +1545,9 @@ export function buildLeadCallContext(lead: Lead): string {
     `Firma: ${lead.company}`,
   ];
   if (lead.contactName?.trim()) lines.push(`Ansprechpartner im aktuellen Anruf: ${lead.contactName}`);
+  if (lead.listId?.startsWith("crm-run-")) {
+    lines.push("In diesem Kampagnenkontakt ausschließlich die oben genannte Zielperson kontaktieren. Weitere Personen aus den Firmenstammdaten sind nur Hintergrundwissen und keine zusätzlichen Anrufziele.");
+  }
   const otherContactNames = (lead.contactNames || []).filter((name) => name !== lead.contactName);
   if (otherContactNames.length) {
     appendContextValue(lines, "Weitere Ansprechpartner der Firma", otherContactNames);
@@ -2396,6 +2399,7 @@ export async function createCampaignRunFromFirmList(
   sourceListId: string,
   campaignTopic: Topic,
   userId: string,
+  contactSelections: CampaignContactSelection[] = [],
 ): Promise<{ listId: string; listName: string }> {
   if (!sourceListId.startsWith("crm-search-")) {
     throw new Error("Die ausgewählte Firmenliste ist ungültig.");
@@ -2411,22 +2415,40 @@ export async function createCampaignRunFromFirmList(
   if (sourceLeads.length === 0) {
     throw new Error("Die Firmenliste enthält keine Kontakte mehr.");
   }
+  const selections = new Map<string, string[]>();
+  for (const selection of contactSelections) {
+    if (selections.has(selection.leadId) || !sourceLeads.some((lead) => lead.id === selection.leadId)) {
+      throw new CampaignContactSelectionError("Die Ansprechpartnerauswahl gehört nicht zur aktuellen Firmenliste. Bitte die Liste aktualisieren.");
+    }
+    selections.set(selection.leadId, selection.contactNames);
+  }
+  const targets = new Map(sourceLeads.map((lead) => {
+    const contacts = getCompanyContactPersons(lead);
+    const selectedNames = selections.get(lead.id);
+    if (contacts.length > 1 && (!selectedNames || selectedNames.length === 0)) {
+      throw new CampaignContactSelectionError(`Bitte für ${lead.company} mindestens einen Ansprechpartner auswählen.`);
+    }
+    if (selectedNames && (selectedNames.length === 0
+      || new Set(selectedNames).size !== selectedNames.length
+      || selectedNames.some((name) => !contacts.some((contact) => contact.name === name)))) {
+      throw new CampaignContactSelectionError(`Die Ansprechpartner für ${lead.company} haben sich geändert. Bitte die Auswahl aktualisieren.`);
+    }
+    return [lead.id, selectedNames ? contacts.filter((contact) => selectedNames.includes(contact.name)) : contacts] as const;
+  }));
 
   const sourceListName = formatFirmListName(sourceLeads[0].listName || "");
   const listId = `crm-run-${createLeadId()}`;
   const listName = `${sourceListName} · ${campaignTopic}`;
   const runLeads = sourceLeads.flatMap((lead, leadIndex): Lead[] => {
-    const names = [...new Set(
-      (lead.contactNames?.length ? lead.contactNames : splitContactNames(lead.contactName || ""))
-        .map((name) => name.trim())
-        .filter(Boolean),
-    )];
-    const callTargets = names.length > 0 ? names : [lead.contactName || ""];
+    const contacts = targets.get(lead.id) || [];
+    const names = contacts.map((contact) => contact.name);
+    const callTargets = contacts.length > 0 ? contacts : [{ name: "" }];
     const contactGroupNames = names.length > 1 ? names.join(" / ") : undefined;
-    return callTargets.map((contactName, personIndex): Lead => ({
+    return callTargets.map((contact, personIndex): Lead => ({
       ...lead,
       id: createLeadId(leadIndex * 100 + personIndex),
-      contactName,
+      contactName: contact.name,
+      birthDate: contact.birthDate,
       contactNames: names,
       contactGroupNames,
       listId,

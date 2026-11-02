@@ -32,6 +32,51 @@ export function isCrmFirmListLead(lead: Pick<Lead, "callSource" | "listId">): bo
   return lead.callSource === "crm" && Boolean(lead.listId?.startsWith("crm-search-"));
 }
 
+export interface CompanyContactPerson {
+  name: string;
+  birthDate?: string;
+  title?: string;
+}
+
+export interface CampaignContactSelection {
+  leadId: string;
+  contactNames: string[];
+}
+
+export class CampaignContactSelectionError extends Error {}
+
+export function getCompanyContactPersons(lead: Lead): CompanyContactPerson[] {
+  const contacts = new Map<string, CompanyContactPerson>();
+  const data = lead.crmCompanyData || {};
+  const records = Array.isArray(data.contactPersons) ? data.contactPersons : [];
+  for (const record of records) {
+    if (!record || typeof record !== "object" || typeof record.name !== "string" || !record.name.trim()) continue;
+    const name = record.name.trim();
+    const birthDate = record.birthdate || record.birthDate;
+    const title = record.title || record.position;
+    contacts.set(name, {
+      name,
+      birthDate: typeof birthDate === "string" ? birthDate : undefined,
+      title: typeof title === "string" ? title : undefined,
+    });
+  }
+  const names = lead.contactNames?.length ? lead.contactNames : (lead.contactName || "").split(/\s*\/\s*/);
+  for (const value of names) {
+    const name = value.trim();
+    if (!name || /^empfang$/i.test(name) || contacts.has(name)) continue;
+    contacts.set(name, { name });
+  }
+  const primaryName = typeof data.contact_person === "string"
+    ? data.contact_person.split(/\s*\/\s*/)[0]?.trim()
+    : undefined;
+  const primary = primaryName ? contacts.get(primaryName) : contacts.size === 1 ? [...contacts.values()][0] : undefined;
+  if (primary && !primary.birthDate) {
+    const birthDate = data.contact_birthdate || lead.birthDate;
+    if (typeof birthDate === "string") primary.birthDate = birthDate;
+  }
+  return [...contacts.values()];
+}
+
 export interface CrmCalendarEntry {
   id: string;
   callSource?: CallSource;

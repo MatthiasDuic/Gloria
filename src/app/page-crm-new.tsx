@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import type { CrmSavedView, CrmUiPreferences, DashboardData, Lead, LeadProductDetail, TopicPolicyConfig, Topic } from "@/lib/types";
 import { TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
-import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallSource, getCallWorkspaceData, getCrmWorkspaceLeads, isCrmFirmListLead, isLeadCustomer, type CrmCalendarEntry, type CrmCampaignTab, type CrmWorkspace } from "@/lib/crm-helpers";
+import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCompanyContactPersons, getCallSource, getCallWorkspaceData, getCrmWorkspaceLeads, isCrmFirmListLead, isLeadCustomer, type CampaignContactSelection, type CrmCalendarEntry, type CrmCampaignTab, type CrmWorkspace } from "@/lib/crm-helpers";
 import { parseReportTranscriptFallback } from "@/lib/transcript-utils";
 import { saveCalendarCallback } from "@/lib/calendar-view";
 import { MAX_CONCURRENT_OUTBOUND_CALLS } from "@/lib/outbound-call-queue-constants";
@@ -363,6 +363,10 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   const [showImportForm, setShowImportForm] = useState(false);
   const [campaignStartListId, setCampaignStartListId] = useState<string | null>(null);
   const [campaignStartTopic, setCampaignStartTopic] = useState("");
+  const [campaignStartError, setCampaignStartError] = useState("");
+  const [campaignStartLeads, setCampaignStartLeads] = useState<Lead[]>([]);
+  const [campaignContactSelections, setCampaignContactSelections] = useState<Record<string, string[]>>({});
+  const [refreshing, setRefreshing] = useState(false);
   const [detailTab, setDetailTab] = useState<"overview" | "products" | "tasks" | "history" | "communication" | "crm">("overview");
   const [selectedLead, setSelectedLead] = useState<DashboardData["leads"][number] | null>(null);
   const [selectedReport, setSelectedReport] = useState<DashboardData["reports"][number] | null>(null);
@@ -725,15 +729,28 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       fetch("/api/campaigns/lists", { credentials: "include", cache: "no-store" }),
     ]);
     if (!dataRes.ok) throw new Error(`CRM-Daten konnten nicht geladen werden (HTTP ${dataRes.status}).`);
-    const payload = await dataRes.json() as DashboardData;
+    const payload = await dataRes.json() as DashboardData & { degraded?: boolean };
+    if (payload.degraded) throw new Error("CRM-Daten sind momentan nicht vollständig verfügbar. Bitte erneut aktualisieren.");
+    if (!listsRes.ok) throw new Error(`Firmenlisten konnten nicht geladen werden (HTTP ${listsRes.status}).`);
+    const listsPayload = await listsRes.json() as { lists?: CampaignListSummary[]; firmLists?: FirmListSummary[] };
     setCalendarData(payload);
     setData(getCallWorkspaceData(payload, "crm"));
-    if (listsRes.ok) {
-      const payload = (await listsRes.json()) as { lists?: CampaignListSummary[]; firmLists?: FirmListSummary[] };
-      setCampaignLists(payload.lists || []);
-      setFirmLists(payload.firmLists || []);
-    }
+    setCampaignLists(listsPayload.lists || []);
+    setFirmLists(listsPayload.firmLists || []);
+    return payload;
   }, []);
+
+  async function refreshCrm() {
+    setRefreshing(true);
+    try {
+      await reloadLiveData();
+      setNotice("✓ CRM und Firmenlisten aktualisiert.");
+    } catch (error) {
+      setNotice(`✗ ${error instanceof Error ? error.message : "CRM konnte nicht aktualisiert werden."}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   function toggleLeadSelection(leadId: string, enabled: boolean) {
     setSelectedLeadIds((current) => {
@@ -1360,19 +1377,20 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, [outlookBodyDraft, outlookSubjectDraft, outlookToDraft, selectedLead]);
 
-  const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete", topic?: string) => {
+  const controlCampaignList = useCallback(async (listId: string, action: "start" | "stop" | "delete", topic?: string, contactSelections?: CampaignContactSelection[]) => {
     if (action === "delete" && !window.confirm(
       "Diese Kampagne wirklich löschen? Zugehörige Interessenten werden entfernt. Bestehende Kunden und Anrufreports bleiben erhalten.",
     )) {
       return;
     }
     setBusy(true);
+    setCampaignStartError("");
     try {
       const res = await fetch("/api/campaigns/lists", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, listId, ...(topic ? { topic } : {}) }),
+        body: JSON.stringify({ action, listId, ...(topic ? { topic } : {}), ...(contactSelections ? { contactSelections } : {}) }),
       });
 
       const result = (await res.json()) as {
@@ -1382,6 +1400,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         removedLeads?: number;
       };
       if (!res.ok) throw new Error(result.error || "Aktion fehlgeschlagen");
+      if (action === "start") setCampaignStartListId(null);
       if (result.lists) setCampaignLists(result.lists);
       if (result.firmLists) setFirmLists(result.firmLists);
       setNotice(action === "delete"
@@ -1391,7 +1410,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       // Reload data
       await reloadLiveData();
     } catch (error) {
-      setNotice(`✗ Fehler: ${error instanceof Error ? error.message : "Unbekannt"}`);
+      const message = error instanceof Error ? error.message : "Unbekannt";
+      if (action === "start" && listId.startsWith("crm-search-")) setCampaignStartError(message);
+      setNotice(`✗ Fehler: ${message}`);
     } finally {
       setBusy(false);
     }
@@ -1562,10 +1583,23 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }, []);
 
-  function startCampaignList(list: Pick<CampaignListSummary, "listId" | "listName">) {
+  async function startCampaignList(list: Pick<CampaignListSummary, "listId" | "listName">) {
     if (list.listId.startsWith("crm-search-")) {
-      setCampaignStartListId(list.listId);
-      setCampaignStartTopic("");
+      setRefreshing(true);
+      try {
+        const fresh = await reloadLiveData();
+        const leads = fresh.leads.filter((lead) => lead.listId === list.listId && !isLeadCustomer(lead));
+        if (!leads.length) throw new Error("Diese Firmenliste enthält keine Interessenten mehr.");
+        setCampaignStartLeads(leads);
+        setCampaignContactSelections({});
+        setCampaignStartTopic("");
+        setCampaignStartError("");
+        setCampaignStartListId(list.listId);
+      } catch (error) {
+        setNotice(`✗ ${error instanceof Error ? error.message : "Firmenliste konnte nicht geladen werden."}`);
+      } finally {
+        setRefreshing(false);
+      }
       return;
     }
     void controlCampaignList(list.listId, "start");
@@ -1574,8 +1608,13 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
   function confirmCampaignStart(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!campaignStartListId || !campaignStartTopic) return;
-    void controlCampaignList(campaignStartListId, "start", campaignStartTopic);
-    setCampaignStartListId(null);
+    const multiContactLeads = campaignStartLeads.filter((lead) => getCompanyContactPersons(lead).length > 1);
+    if (multiContactLeads.some((lead) => !campaignContactSelections[lead.id]?.length)) {
+      setCampaignStartError("Bitte für jede Firma mit mehreren Ansprechpartnern mindestens eine Person auswählen.");
+      return;
+    }
+    void controlCampaignList(campaignStartListId, "start", campaignStartTopic,
+      multiContactLeads.map((lead) => ({ leadId: lead.id, contactNames: campaignContactSelections[lead.id] || [] })));
   }
 
   // Initialization & Polling
@@ -2159,6 +2198,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
               <tbody>
                 {filteredLeads.map((lead) => {
                   const status = leadAmpelById.get(lead.id);
+                  const contacts = lead.listId?.startsWith("crm-run-")
+                    ? (lead.contactName ? [{ name: lead.contactName, birthDate: lead.birthDate }] : [])
+                    : getCompanyContactPersons(lead);
                   return (
                     <tr key={lead.id} className="lead-row">
                       <td className="checkbox-col" onClick={(event) => event.stopPropagation()}>
@@ -2170,7 +2212,9 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                         />
                       </td>
                       <td><strong>{lead.company}</strong></td>
-                      <td>{lead.contactGroupNames || lead.contactName || "-"}</td>
+                      <td>{contacts.length ? <ul className="company-contact-list">{contacts.map((person) => (
+                        <li key={person.name}><strong>{person.name}</strong>{person.birthDate ? <small>Geburtsdatum: {person.birthDate}</small> : null}</li>
+                      ))}</ul> : "–"}</td>
                       <td>{lead.phone || lead.directDial || "-"}</td>
                       <td>{lead.email || "-"}</td>
                       {isFirmListContacts ? <>
@@ -2246,12 +2290,30 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             </div>
             <div className="detail-body">
               <div className="detail-section" hidden={detailTab !== "overview"}>
+                <section className="crm-related-data">
+                  <h4>Geschäftsführer / Ansprechpartner</h4>
+                  {getCompanyContactPersons(selectedLead).length ? (
+                    <div className="contacts-list">
+                      <table className="contacts-table">
+                        <thead><tr><th>Name</th><th>Funktion</th><th>Geburtsdatum</th></tr></thead>
+                        <tbody>{getCompanyContactPersons(selectedLead).map((person) => (
+                          <tr key={person.name}>
+                            <td><strong>{person.name}</strong></td>
+                            <td>{person.title || "–"}</td>
+                            <td>{person.birthDate || "–"}</td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  ) : <p className="subtle">Noch keine Ansprechpartner vorhanden.</p>}
+                  {selectedLead.listId?.startsWith("crm-run-") ? <p className="subtle">Anrufziel in diesem Kampagnenkontakt: <strong>{selectedLead.contactName || "Kein namentlicher Ansprechpartner"}</strong></p> : null}
+                </section>
                 <h4>Stamm- und Kommunikationsdaten bearbeiten</h4>
                 {leadDetailsDraft ? (
                   <>
                     <div className="add-customer-grid">
                       <label>Firma<input className="input" placeholder="Firmenname" value={leadDetailsDraft.company} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, company: event.target.value } : current)} /></label>
-                      <label>Geschäftsführer / Ansprechpartner<input className="input" placeholder="Mehrere Namen mit / trennen" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
+                      <label>Namen bearbeiten (mit / trennen)<input className="input" placeholder="Mehrere Namen mit / trennen" value={leadDetailsDraft.contactName} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, contactName: event.target.value } : current)} /></label>
                       <label>Telefon<input className="input" type="tel" value={leadDetailsDraft.phone} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, phone: event.target.value } : current)} /></label>
                       <label>Direktwahl / Mobil<input className="input" type="tel" value={leadDetailsDraft.directDial || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, directDial: event.target.value } : current)} /></label>
                       <label>E-Mail<input className="input" type="email" value={leadDetailsDraft.email || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, email: event.target.value } : current)} /></label>
@@ -2262,7 +2324,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       <label>PLZ<input className="input" value={leadDetailsDraft.addressPostalCode || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressPostalCode: event.target.value } : current)} /></label>
                       <label>Ort<input className="input" value={leadDetailsDraft.addressCity || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCity: event.target.value } : current)} /></label>
                       <label>Land<input className="input" value={leadDetailsDraft.addressCountry || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, addressCountry: event.target.value } : current)} /></label>
-                      <label>Geburtsdatum Ansprechpartner<input className="input" type="date" value={leadDetailsDraft.birthDate || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, birthDate: event.target.value } : current)} /></label>
+                      {getCompanyContactPersons(selectedLead).length <= 1 || selectedLead.listId?.startsWith("crm-run-") ? <label>Geburtsdatum des Anrufziels<input className="input" type="date" value={leadDetailsDraft.birthDate || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, birthDate: event.target.value } : current)} /></label> : null}
                       <label>Handelsregisternummer<input className="input" value={leadDetailsDraft.registryNumber || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, registryNumber: event.target.value } : current)} /></label>
                       <label>Registergericht<input className="input" value={leadDetailsDraft.registryCourt || ""} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, registryCourt: event.target.value } : current)} /></label>
                       <label>Gründungsjahr<input className="input" type="number" min="1" step="1" value={leadDetailsDraft.foundedYear} onChange={(event) => setLeadDetailsDraft((current) => current ? { ...current, foundedYear: event.target.value } : current)} /></label>
@@ -2584,7 +2646,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           const report = calendarData.reports.find((candidate) => candidate.id === entry.reportId);
           if (report) openReportDetail(report);
           else setNotice("Der zugehörige Anrufreport ist nicht mehr verfügbar.");
-        }} onOpenContact={setSelectedLead} onChanged={reloadLiveData} />
+        }} onOpenContact={setSelectedLead} onChanged={async () => { await reloadLiveData(); }} />
       </div>
     );
   }
@@ -2709,7 +2771,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           </div>
           <div className="campaign-progress" aria-label={`${progress}% bearbeitet`}><span style={{ width: `${progress}%` }} /></div>
           <div className="campaign-controls">
-            <button className="btn-small" disabled={busy || isRunning || list.pending === 0} onClick={() => startCampaignList(list)}>{list.sourceListId ? "Fortsetzen" : "Starten"}</button>
+            <button className="btn-small" disabled={busy || refreshing || isRunning || list.pending === 0} onClick={() => void startCampaignList(list)}>{list.sourceListId ? "Fortsetzen" : "Starten"}</button>
             <button className="btn-small ghost" disabled={busy || !isRunning} onClick={() => void controlCampaignList(list.listId, "stop")}>Stoppen</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); }}>Kontakte öffnen ({leads.length})</button>
             <button className="btn-small ghost" onClick={() => { setSearchQuery(""); setFilterCampaignListId(list.listId); setCampaignTab("calls"); }}>Anrufdetails</button>
@@ -2764,7 +2826,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 ? "Felder werden geprüft …"
                 : progress?.status === "running" ? "Fortschritt ansehen" : "Fehlende Daten prüfen"}
             </button>
-            <button className="btn-small" disabled={busy} onClick={() => startCampaignList(list)}>Kampagne starten</button>
+            <button className="btn-small" disabled={busy || refreshing} onClick={() => void startCampaignList(list)}>Kampagne starten</button>
             <button
               className="btn-small danger"
               disabled={busy || campaignLists.some((campaign) => campaign.sourceListId === list.listId && (campaign.active || campaign.currentlyDialing))}
@@ -2916,6 +2978,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
         ] as const).map(([workspace, label]) => (
           <button key={workspace} className={`nav-btn ${activeView === workspace ? "active" : ""}`} aria-current={activeView === workspace ? "page" : undefined} onClick={() => navigateWorkspace(workspace)}>{label}</button>
         ))}
+        <button className="nav-btn" disabled={refreshing || busy} aria-busy={refreshing} onClick={() => void refreshCrm()}>{refreshing ? "Wird aktualisiert …" : "Aktualisieren"}</button>
       </nav>
       {notice ? <div className={`crm-notice ${notice.startsWith("✗") ? "error" : ""}`} role="status" aria-live="polite"><span>{notice}</span><button aria-label="Meldung schließen" onClick={() => setNotice("")}>✕</button></div> : null}
       {outboundQueueError ? <div className="crm-notice error" role="alert">{outboundQueueError}</div> : null}
@@ -3057,7 +3120,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
       {campaignStartListId ? (
         <div className="reschedule-overlay">
           <form
-            className="surface reschedule-dialog"
+            className="surface reschedule-dialog campaign-start-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="campaign-start-title"
@@ -3071,21 +3134,55 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                 className="input"
                 required
                 value={campaignStartTopic}
+                disabled={busy}
                 onChange={(event) => setCampaignStartTopic(event.target.value)}
               >
                 <option value="">Bitte auswählen</option>
                 {campaignTopics.map((topic) => <option value={topic} key={topic}>{topic}</option>)}
               </select>
             </label>
+            <section className="campaign-contact-selection">
+              <h4>Ansprechpartner für diesen Kampagnenlauf</h4>
+              <p className="subtle">Firmen mit genau einem Ansprechpartner werden automatisch übernommen. Bei mehreren Personen wählen Sie mindestens eine aus. Nur ausgewählte Personen erhalten einen Kampagnenkontakt.</p>
+              {campaignStartLeads.filter((lead) => getCompanyContactPersons(lead).length > 1).map((lead) => (
+                <fieldset key={lead.id}>
+                  <legend>{lead.company}</legend>
+                  {getCompanyContactPersons(lead).map((person) => (
+                    <label className="campaign-person-option" key={person.name}>
+                      <input type="checkbox" disabled={busy} checked={(campaignContactSelections[lead.id] || []).includes(person.name)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setCampaignContactSelections((current) => ({
+                            ...current,
+                            [lead.id]: checked ? [...(current[lead.id] || []), person.name] : (current[lead.id] || []).filter((name) => name !== person.name),
+                          }));
+                        }} />
+                      <span><strong>{person.name}</strong><small>{person.title || "Ansprechpartner"} · Geburtsdatum: {person.birthDate || "–"}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+              ))}
+            </section>
+            {campaignStartError ? <p role="alert">{campaignStartError}</p> : null}
             <div className="detail-actions-row">
-              <button type="button" className="btn-small ghost" onClick={() => setCampaignStartListId(null)}>Abbrechen</button>
-              <button className="btn" disabled={busy || !campaignStartTopic}>Kampagne starten</button>
+              <button type="button" className="btn-small ghost" disabled={busy} onClick={() => setCampaignStartListId(null)}>Abbrechen</button>
+              <button className="btn" disabled={busy || !campaignStartTopic || campaignStartLeads.some((lead) => getCompanyContactPersons(lead).length > 1 && !campaignContactSelections[lead.id]?.length)}>Kampagne starten</button>
             </div>
           </form>
         </div>
       ) : null}
 
       <style jsx global>{`
+        .gloria-crm .company-contact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+        .gloria-crm .company-contact-list li { display: grid; gap: 0.2rem; }
+        .gloria-crm .company-contact-list small { color: #64748b; }
+        .gloria-crm .reschedule-dialog.campaign-start-dialog { width: min(680px, calc(100vw - 2rem)); max-height: 85vh; overflow-y: auto; }
+        .gloria-crm .campaign-contact-selection { margin: 1.25rem 0; }
+        .gloria-crm .campaign-contact-selection fieldset { border: 1px solid #dfe7f0; border-radius: 12px; margin: 1rem 0; padding: 1rem; }
+        .gloria-crm .campaign-contact-selection legend { font-weight: 600; padding: 0 0.4rem; }
+        .gloria-crm .campaign-start-dialog label.campaign-person-option { display: flex; flex-direction: row; align-items: center; gap: 0.75rem; padding: 0.6rem; cursor: pointer; }
+        .gloria-crm .campaign-person-option span { display: grid; gap: 0.25rem; }
+        .gloria-crm .campaign-person-option small { color: #64748b; }
         .gloria-crm.app-container {
           display: flex;
           flex-direction: column;

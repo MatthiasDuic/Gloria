@@ -25,6 +25,7 @@ import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/r
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 import { queueOutboundCall } from "@/lib/outbound-call-queue";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
+import { CampaignContactSelectionError, type CampaignContactSelection } from "@/lib/crm-helpers";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
       action?: "start" | "stop" | "run" | "delete" | "delete_firm_list" | "delete_lead" | "delete_leads" | "update_note" | "add_lead_note" | "convert_to_customer" | "update_lead_details" | "add_outlook_email" | "add_lead_task" | "complete_lead_task";
       listId?: string;
       topic?: string;
+      contactSelections?: unknown;
       leadId?: string;
       leadIds?: string[];
       note?: string;
@@ -307,7 +309,22 @@ export async function POST(request: Request) {
         }
       }
       if (listId.startsWith("crm-search-")) {
-        const run = await createCampaignRunFromFirmList(listId, selectedTopic, sessionUser.id);
+        const contactSelections: CampaignContactSelection[] = [];
+        if (payload.contactSelections !== undefined) {
+          if (!Array.isArray(payload.contactSelections)) {
+            return NextResponse.json({ error: "Ungültige Ansprechpartnerauswahl." }, { status: 400 });
+          }
+          for (const selection of payload.contactSelections) {
+            if (!selection || typeof selection !== "object"
+              || typeof selection.leadId !== "string"
+              || !Array.isArray(selection.contactNames)
+              || selection.contactNames.some((name: unknown) => typeof name !== "string")) {
+              return NextResponse.json({ error: "Ungültige Ansprechpartnerauswahl." }, { status: 400 });
+            }
+            contactSelections.push({ leadId: selection.leadId, contactNames: selection.contactNames });
+          }
+        }
+        const run = await createCampaignRunFromFirmList(listId, selectedTopic, sessionUser.id, contactSelections);
         campaignListId = run.listId;
       }
       await setCampaignListActive(campaignListId, true, sessionUser.id);
@@ -471,7 +488,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Listenaktion fehlgeschlagen." },
-      { status: 500 },
+      { status: error instanceof CampaignContactSelectionError ? 400 : 500 },
     );
   }
 }

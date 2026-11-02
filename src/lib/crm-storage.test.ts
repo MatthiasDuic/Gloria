@@ -437,6 +437,7 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
     options.listId,
     "betriebliche Krankenversicherung",
     options.userId,
+    [{ leadId: importedLead.id, contactNames: ["Max Beispiel", "Erika Muster"] }],
   );
   await storage.setCampaignListActive(firstRun.listId, true, options.userId);
   const firstCampaignLead = (await storage.getDashboardData({ userId: options.userId, role: "user" }))
@@ -460,6 +461,7 @@ test("CRM firm lists stay topic-free and create isolated runs for selected campa
     options.listId,
     "private Krankenversicherung",
     options.userId,
+    [{ leadId: importedLead.id, contactNames: ["Erika Muster"] }],
   );
   const allLeads = (await storage.getDashboardData({ userId: options.userId, role: "user" })).leads;
   assert.equal(allLeads.find((lead) => lead.listId === options.listId)?.topic, "");
@@ -793,10 +795,85 @@ test("stable saved-search imports absorb partial legacy transfers without duplic
   ), false);
 });
 
-test("a four-section CRM transfer can retry its third section without duplicating companies", async () => {
+test("campaign contact selections are mandatory, user-scoped and restrict the actual dial queue", async () => {
+  const listId = "crm-search-contact-selection";
+  const multi: Lead = {
+    ...sampleLead, id: "multi", listId, callSource: "crm",
+    contactName: "Max / Erika",
+    birthDate: "1980-01-02",
+    crmCompanyData: {
+      contact_person: "Max", contact_birthdate: "1980-01-02",
+      contactPersons: [
+        { name: "Max", birthdate: "1980-01-02" },
+        { name: "Erika", birthdate: "1986-03-04" },
+      ],
+    },
+  };
+  const single: Lead = { ...multi, id: "single", contactName: "Solo", crmCompanyData: undefined, birthDate: "1970-05-06" };
+  const unnamed: Lead = { ...single, id: "unnamed", contactName: "", birthDate: undefined };
+  await seed([multi, single, unnamed, { ...multi, id: "foreign", userId: "other-user" }]);
+  const before = await readFile(path.join(fixtureDirectory, "data", "leads.json"), "utf8");
+  for (const selection of [
+    [],
+    [{ leadId: "multi", contactNames: [] }],
+    [{ leadId: "multi", contactNames: ["Unknown"] }],
+    [{ leadId: "multi", contactNames: ["Erika", "Erika"] }],
+    [{ leadId: "foreign", contactNames: ["Erika"] }],
+    [{ leadId: "multi", contactNames: ["Erika"] }, { leadId: "multi", contactNames: ["Max"] }],
+  ]) {
+    await assert.rejects(storage.createCampaignRunFromFirmList(listId, "bKV", "test-user", selection));
+    assert.equal(await readFile(path.join(fixtureDirectory, "data", "leads.json"), "utf8"), before);
+  }
+  const run = await storage.createCampaignRunFromFirmList(listId, "bKV", "test-user", [
+    { leadId: "multi", contactNames: ["Erika"] },
+  ]);
+  const leads = (await storage.getDashboardData({ userId: "test-user", role: "user" })).leads.filter((lead) => lead.listId === run.listId);
+  assert.deepEqual(leads.map((lead) => lead.contactName), ["Erika", "Solo", ""]);
+  assert.deepEqual(leads.map((lead) => lead.birthDate), ["1986-03-04", "1970-05-06", undefined]);
+  assert.deepEqual(leads[0].contactNames, ["Erika"]);
+  assert.deepEqual(leads[0].crmCompanyData, multi.crmCompanyData);
+  assert.match(storage.buildLeadCallContext(leads[0]), /ausschließlich die oben genannte Zielperson/);
+  await storage.setCampaignListActive(run.listId, true, "test-user");
+  assert.equal((await storage.pullNextLeadForCampaignList(run.listId, "test-user"))?.contactName, "Erika");
+  assert.equal((await storage.pullNextLeadForCampaignList(run.listId, "test-user"))?.contactName, "Solo");
+  assert.equal((await storage.pullNextLeadForCampaignList(run.listId, "test-user"))?.contactName, "");
+  assert.equal(await storage.pullNextLeadForCampaignList(run.listId, "test-user"), undefined);
+  const original = await storage.getLeadById("multi", "test-user");
+  assert.deepEqual(original?.crmCompanyData, multi.crmCompanyData);
+});
+
+test("campaign start API rejects invalid or omitted multi-contact selections before starting a run", async () => {
+  const { POST } = await import("../app/api/campaigns/lists/route");
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  const listId = "crm-search-api-selection";
+  await seed([{
+    ...sampleLead, id: "api-multi", listId, callSource: "crm", contactName: "A / B",
+  }]);
+  const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({
+    id: "test-user", username: "test-user", role: "user", realName: "", companyName: "", gesellschaft: "",
+  })}`;
+  const start = (selection?: unknown) => POST(new Request("http://localhost/api/campaigns/lists", {
+    method: "POST", headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start", listId, topic: "betriebliche Krankenversicherung", contactSelections: selection }),
+  }));
+  for (const selection of [undefined, {}, [null], [{ leadId: "api-multi", contactNames: [7] }], [{ leadId: "api-multi", contactNames: ["C"] }]]) {
+    const response = await start(selection);
+    assert.equal(response.status, 400);
+    assert.ok((await response.json()).error);
+    assert.equal((await storage.getCampaignListsSummary("test-user")).length, 0);
+  }
+  const response = await start([{ leadId: "api-multi", contactNames: ["B"] }]);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  const run = (await storage.getDashboardData({ userId: "test-user", role: "user" })).leads.filter((lead) => lead.listId === payload.listId);
+  assert.deepEqual(run.map((lead) => lead.contactName), ["B"]);
+  assert.equal(await storage.isCampaignListActive(payload.listId, "test-user"), true);
+});
+
+test("a seven-section CRM transfer can retry its third section without duplicating companies", async () => {
   const otherLead: Lead = { ...sampleLead, id: "untouched", userId: "other-user" };
   await seed([otherLead]);
-  const companies = Array.from({ length: 350 }, (_, index) => ({
+  const companies = Array.from({ length: 650 }, (_, index) => ({
     crmCompanyId: index + 1000,
     company: `Transferfirma ${index}`,
     phone: "",
@@ -806,15 +883,15 @@ test("a four-section CRM transfer can retry its third section without duplicatin
     },
   }));
   const options = { listId: "crm-search-209-user-1", listName: "Große Suche", userId: "test-user" };
-  for (const offset of [0, 100, 200, 200, 300]) {
+  for (const offset of [0, 100, 200, 200, 300, 400, 500, 600]) {
     const section = companies.slice(offset, offset + 100);
     const result = await storage.importLeadsFromCrm(section, options);
     assert.equal(result.imported, section.length);
   }
   const { leads } = await storage.getDashboardData({ userId: options.userId, role: "user" });
-  assert.equal(leads.length, 350);
-  assert.equal(new Set(leads.map((lead) => lead.crmCompanyId)).size, 350);
-  assert.equal(new Set(leads.map((lead) => lead.id)).size, 350);
+  assert.equal(leads.length, 650);
+  assert.equal(new Set(leads.map((lead) => lead.crmCompanyId)).size, 650);
+  assert.equal(new Set(leads.map((lead) => lead.id)).size, 650);
   assert.ok(leads.every((lead) => lead.listId === options.listId && lead.industry === "Maschinenbau"));
   assert.ok(leads.every((lead) => lead.crmCompanyData?.documents));
   assert.ok(await storage.getLeadById(otherLead.id, "other-user"));
