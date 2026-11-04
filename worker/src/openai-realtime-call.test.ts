@@ -40,7 +40,7 @@ import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -110,6 +110,10 @@ test("keeps a warm contextual bridge after the introduction without skipping the
 test("maps the configured bidirectional codec to Realtime audio", () => {
   assert.equal(openAiAudioFormat("PCMU"), "audio/pcmu");
   assert.equal(openAiAudioFormat("PCMA"), "audio/pcma");
+});
+
+test("enables full near-field noise reduction before speech detection", () => {
+  assert.deepEqual(OPENAI_REALTIME_INPUT_NOISE_REDUCTION, { type: "near_field", strength: 1 });
 });
 
 test("asks for a callback instead of continuing the pitch when the contact has no time", () => {

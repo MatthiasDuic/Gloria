@@ -121,6 +121,8 @@ export function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu
     : "audio/pcmu";
 }
 
+export const OPENAI_REALTIME_INPUT_NOISE_REDUCTION = { type: "near_field", strength: 1 } as const;
+
 export function isLikelyNoiseTranscript(text: string): boolean {
   return isUnclearConversationText(text);
 }
@@ -545,6 +547,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         audio: {
           input: {
             format: { type: inputAudioFormat },
+            noise_reduction: OPENAI_REALTIME_INPUT_NOISE_REDUCTION,
             transcription: {
               model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               language: "de",
