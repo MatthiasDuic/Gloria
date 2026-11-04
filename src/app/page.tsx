@@ -3208,7 +3208,7 @@ export default function HomePage() {
                             value={activeDraft.callObjective ?? ""}
                             readOnly={sharedCampaignReadOnly}
                             rows={5}
-                            maxLength={3000}
+                            maxLength={5000}
                             placeholder={"Beispiel: Finde heraus, ob ein Beratungstermin zum Thema sinnvoll ist. Erkläre den passenden Nutzen mit dem Kampagnenwissen und vereinbare bei echtem Interesse einen Termin. Bei Ablehnung respektvoll beenden."}
                             onChange={(event) => setDraftScripts((current) => ({
                               ...current,
@@ -3216,7 +3216,7 @@ export default function HomePage() {
                             }))}
                           />
                           <span className="subtle">
-                            Beschreibe das gewünschte Ergebnis und wichtige Schwerpunkte (maximal 3.000 Zeichen). Gloria verfolgt diesen Auftrag flexibel, beantwortet erst die Anliegen der Person und nutzt die Wissensquellen für passende, belegte Antworten.
+                            Beschreibe das gewünschte Ergebnis und wichtige Schwerpunkte (maximal 5.000 Zeichen). Gloria verfolgt diesen Auftrag flexibel, beantwortet erst die Anliegen der Person und nutzt die Wissensquellen für passende, belegte Antworten.
                           </span>
                         </label>
                         <label className="full-row">

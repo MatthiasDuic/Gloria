@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPromptBlocks, firstFilled, joinFilled } from "./prompt-builder";
-import { TopicPolicyPayloadSchema } from "./topic-policy-schema";
+import { TopicPolicyPayloadSchema, TOPIC_POLICY_JSON_SCHEMA_V1 } from "./topic-policy-schema";
 
 test("buildPromptBlocks keeps only non-empty sections", () => {
   const prompt = buildPromptBlocks([
@@ -31,4 +31,13 @@ test("accepts administrator-created campaign topics without a code change", () =
 test("rejects empty or oversized campaign topic names", () => {
   assert.equal(TopicPolicyPayloadSchema.safeParse({ topic: "  " }).success, false);
   assert.equal(TopicPolicyPayloadSchema.safeParse({ topic: "x".repeat(121) }).success, false);
+});
+
+test("preserves assignments up to 5000 characters and rejects longer assignments", () => {
+  const callObjective = "x".repeat(5000);
+  const parsed = TopicPolicyPayloadSchema.safeParse({ topic: "Test", callObjective });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal(parsed.data.callObjective, callObjective);
+  assert.equal(TopicPolicyPayloadSchema.safeParse({ topic: "Test", callObjective: `${callObjective}x` }).success, false);
+  assert.equal(TOPIC_POLICY_JSON_SCHEMA_V1.properties.callObjective.maxLength, 5000);
 });

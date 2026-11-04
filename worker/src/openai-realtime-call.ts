@@ -10,6 +10,7 @@ import { classifyConversationEvent, instructionForConversationEvent, isConversat
 import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
+import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { advancePreparation, APPOINTMENT_FAREWELL_TEXT, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
@@ -433,6 +434,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
+  let streamNextOpening = false;
+  let openingSpeech: OpeningSpeechStream | null = null;
+  let responseVersion = 0;
   let assistantContinuationRequested = false;
   let ttsAbortController: AbortController | null = null;
   let ttsTurn = 0;
@@ -561,7 +565,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     });
   };
 
-  const speakWithElevenLabs = async (text: string): Promise<void> => {
+  const speakWithElevenLabs = async (text: string, finishAudio = true): Promise<void> => {
     if (!isElevenLabsConfigured()) {
       log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
       playback.interrupt();
@@ -587,8 +591,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
                 firstAudioLogged = true;
                 log.info("realtime.start_latency", { callSid: ctx?.callSid, streamToFirstTtsChunkMs: now - callStartedAt });
               }
-              ttsPlaybackStartedAt = now;
-              firstTtsChunkAt = now;
+              if (finishAudio || !ttsPlaybackStartedAt) ttsPlaybackStartedAt = now;
+              if (!firstTtsChunkAt) firstTtsChunkAt = now;
               const userFinalAt = ctx?.lastUserFinalAt;
               if (ctx && userFinalAt) {
                 log.info("realtime.turn_latency", {
@@ -614,7 +618,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
       }
       if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
-        playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
+        if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
         if (audioBytes === 0) {
           log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
           playback.interrupt();
@@ -762,6 +766,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
       return;
     }
+    openingSpeech?.stop();
     if (playback.isPending()) {
       ttsTurn += 1;
       ttsAbortController?.abort();
@@ -835,6 +840,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (currentContext.callObjective?.trim()) {
+        streamNextOpening = true;
         requestEventResponse(buildDecisionMakerIntroInstructions(currentContext));
       } else {
         speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
@@ -1122,6 +1128,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
         // Only actually interrupt if: plan says to AND TTS has played long enough
         if (plan.interrupted && ttsAge >= MIN_TTS_PLAY_MS) {
+          responseVersion += 1;
+          openingSpeech?.stop();
           bargeInAwaitingTranscript = true;
           clearBargeInRecovery();
           ttsTurn += 1;
@@ -1187,6 +1195,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.created") {
+        responseVersion += 1;
+        ttsPlaybackStartedAt = null;
+        openingSpeech?.stop();
+        openingSpeech = streamNextOpening ? new OpeningSpeechStream((text) => speakWithElevenLabs(text, false)) : null;
+        streamNextOpening = false;
+        playback.startResponse();
         responseCreatedAt = Date.now();
         firstModelTokenAt = null;
         firstTtsChunkAt = null;
@@ -1203,6 +1217,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (responseInterrupted) return;
         if (!firstModelTokenAt) firstModelTokenAt = Date.now();
         assistantTranscript += message.delta || "";
+        openingSpeech?.append(message.delta || "");
         assistantTranscriptDeltaSeen = true;
         return;
       }
@@ -1214,6 +1229,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (responseInterrupted) return;
         if (!assistantTranscriptDeltaSeen) {
           assistantTranscript += message.transcript || message.text || "";
+          openingSpeech?.append(message.transcript || message.text || "");
         }
         return;
       }
@@ -1229,7 +1245,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.done") {
+        const currentVersion = responseVersion;
+        const currentOpening = openingSpeech;
         if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
+          responseVersion += 1;
+          currentOpening?.stop();
+          ttsAbortController?.abort();
+          playback.interrupt();
           responses.markCancelled();
           responseInterrupted = false;
           responseCreatedAt = null;
@@ -1237,6 +1259,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
           firstTtsChunkAt = null;
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
+          const next = pendingUserTranscripts.splice(0).at(-1);
+          if (next && !terminationInProgress) processUserTranscript(next);
           return;
         }
         const rawTranscript = assistantTranscript.replace(/\s+/g, " ").trim();
@@ -1268,7 +1292,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         if (!transcript) playback.interrupt();
         responses.markFinished();
-        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
+        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested && !currentOpening?.hasStarted()) {
+          currentOpening?.stop();
           playback.interrupt();
           assistantContinuationRequested = true;
           log.warn("realtime.incomplete_response_recovery", {
@@ -1281,8 +1306,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
         if (transcript) {
-          await speakWithElevenLabs(transcript);
+          if (currentOpening) {
+            await currentOpening.finish();
+            if (responseVersion !== currentVersion || responseInterrupted) return;
+            playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
+          } else {
+            await speakWithElevenLabs(transcript);
+          }
         }
+        if (responseVersion !== currentVersion) return;
 
         assistantContinuationRequested = false;
         for (const item of message.response?.output || []) {
@@ -1313,6 +1345,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "response.cancelled" || message.type === "response.canceled") {
+        responseVersion += 1;
+        openingSpeech?.stop();
+        ttsAbortController?.abort();
+        playback.interrupt();
         responses.markCancelled();
         responseInterrupted = false;
         responseCreatedAt = null;
@@ -1320,6 +1356,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         firstTtsChunkAt = null;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
+        const next = pendingUserTranscripts.splice(0).at(-1);
+        if (next && !terminationInProgress) processUserTranscript(next);
       }
     };
 
@@ -1454,6 +1492,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   telnyx.on("close", async (code, reason) => {
     if (closed) return;
     closed = true;
+    openingSpeech?.stop();
     if (callDeadline) clearTimeout(callDeadline);
     responses.stop();
     playback.stop();

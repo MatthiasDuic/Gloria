@@ -669,6 +669,11 @@ async function readScripts(userId?: string): Promise<ScriptConfig[]> {
   return scriptsState.data;
 }
 
+export async function getTelephonyTopicPolicies(userId?: string) {
+  const scripts = await readScriptsWithMode(userId);
+  return { topicPolicies: scripts.data, topicPoliciesStorageMode: scripts.mode };
+}
+
 async function readLeads(userId?: string): Promise<Lead[]> {
   const postgresLeads = await readLeadsFromPostgres(userId);
   if (postgresLeads) {

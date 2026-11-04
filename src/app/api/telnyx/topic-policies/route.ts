@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDashboardData } from "@/lib/storage";
+import { getTelephonyTopicPolicies } from "@/lib/storage";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { readScriptsFromPostgres, readUserScriptsFromPostgres, writeUserScriptToPostgres } from "@/lib/report-db";
 
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     }
 
     const userId = url.searchParams.get("userId")?.trim() || undefined;
-    const data = await getDashboardData({ userId, role: userId ? "user" : "master" });
+    const data = await getTelephonyTopicPolicies(userId);
     return NextResponse.json(
       {
         topicPolicies: data.topicPolicies,

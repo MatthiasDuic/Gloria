@@ -1,4 +1,41 @@
 import assert from "node:assert/strict";
+import { OpeningSpeechStream } from "./opening-speech-stream.js";
+
+test("the opening starts at a complete sentence before the model finishes without changing its words", async () => {
+  const spoken: string[] = [];
+  const stream = new OpeningSpeechStream(async (text) => { spoken.push(text); });
+  stream.append("Guten Tag, hier ist Gloria. Es geht um ");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(spoken, ["Guten Tag, hier ist Gloria."]);
+  stream.append("die Gesundheitsversorgung. Passt es gerade kurz?");
+  await stream.finish();
+  assert.equal(spoken.join(" "), "Guten Tag, hier ist Gloria. Es geht um die Gesundheitsversorgung. Passt es gerade kurz?");
+});
+
+test("an interrupted opening never speaks queued sentences or an unfinished remainder", async () => {
+  const spoken: string[] = [];
+  let release: (() => void) | undefined;
+  const stream = new OpeningSpeechStream(async (text) => {
+    spoken.push(text);
+    await new Promise<void>((resolve) => { release = resolve; });
+  });
+  stream.append("Guten Tag. Zweiter Satz. Noch nicht fertig");
+  await new Promise((resolve) => setImmediate(resolve));
+  stream.stop();
+  release?.();
+  await stream.finish();
+  assert.deepEqual(spoken, ["Guten Tag."]);
+});
+
+test("opening segments retain titles, decimal values and email addresses", async () => {
+  const spoken: string[] = [];
+  const stream = new OpeningSpeechStream(async (text) => { spoken.push(text); });
+  const text = "Herr Dr. Neumann zahlt 480,50 Euro. Die Adresse ist musta@musterbau.de. Ist das richtig?";
+  for (const part of [text.slice(0, 9), text.slice(9, 33), text.slice(33)]) stream.append(part);
+  await stream.finish();
+  assert.equal(spoken.join(" "), text);
+  assert.equal(spoken.some((sentence) => sentence === "Herr Dr."), false);
+});
 import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";

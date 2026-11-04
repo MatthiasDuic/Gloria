@@ -7,6 +7,36 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("the telephony assignment endpoint never loads contacts or call reports", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  const previousToken = process.env.APP_INTERNAL_TOKEN;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  process.env.APP_INTERNAL_TOKEN = "fixture-policy";
+  const statements: string[] = [];
+  mock.method(Pool.prototype, "query", async (sql: string) => {
+    statements.push(sql);
+    if (/^\s*SELECT topic, data\s+FROM gloria_playbooks/.test(sql)) return { rows: [{ topic: "private Krankenversicherung", data: { id: "shared", callObjective: "Unveränderter Originalauftrag" } }], rowCount: 1 };
+    if (sql.includes("FROM users")) return { rows: [{ id: "owner", username: "owner", role: "user", allowed_playbook_topics: [] }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { getDatabasePool } = await import("./report-db");
+    await getDatabasePool();
+    statements.length = 0;
+    const { GET } = await import("../app/api/telnyx/topic-policies/route");
+    const response = await GET(new Request("https://example.test/api/telnyx/topic-policies?userId=owner", { headers: { "x-gloria-internal-token": "fixture-policy" } }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).topicPolicies[0].callObjective, "Unveränderter Originalauftrag");
+    assert.equal(statements.some((sql) => /FROM (?:gloria_leads|gloria_reports|conversation_events|gloria_calendar_events)/.test(sql)), false);
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = previousToken;
+  }
+});
+
 test("users save personal topics while master changes update the single shared source", async () => {
   const previous = process.env.DATABASE_URL;
   process.env.DATABASE_URL = "postgres://localhost/gloria-test";

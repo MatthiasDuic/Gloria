@@ -5,7 +5,7 @@ export const TopicPolicyPayloadSchema = z
   .object({
     id: z.string().optional(),
     topic: z.string().trim().min(1).max(120).optional(),
-    callObjective: z.string().max(3000).optional(),
+    callObjective: z.string().max(5000).optional(),
     knowledgeSources: z.array(z.string().trim().min(1).max(2048)).max(6).optional(),
     topicSummary: z.string().optional(),
     behavior: z.string().optional(),
@@ -63,7 +63,7 @@ export const TOPIC_POLICY_JSON_SCHEMA_V1 = {
     callObjective: {
       type: "string",
       description: "Der konkrete Auftrag für Gloria: gewünschtes Ergebnis, wichtige Schwerpunkte und gewünschtes Vorgehen.",
-      maxLength: 3000,
+      maxLength: 5000,
     },
     knowledgeSources: {
       type: "array",
