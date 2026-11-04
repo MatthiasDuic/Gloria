@@ -4,6 +4,18 @@ import { log } from "./log.js";
 export type TopicPolicyFields = {
   topic?: string;
   callObjective?: string;
+  opener?: string;
+  discovery?: string;
+  objectionHandling?: string;
+  close?: string;
+  behavior?: string;
+  conversationGuardrails?: string;
+  requiredQuestions?: string;
+  aiKeyInfo?: string;
+  receptionTopicReason?: string;
+  problemBuildup?: string;
+  conceptTransition?: string;
+  appointmentConfirmation?: string;
   preparationQuestions?: string;
   pkvHealthQuestions?: string;
   knowledgeSources?: string[];
@@ -11,6 +23,10 @@ export type TopicPolicyFields = {
   knowledgeFetchedAt?: string;
   knowledgeFetchError?: string;
 };
+
+export function hasUsableCallAssignment(policy: TopicPolicyFields | null): boolean {
+  return Boolean(policy?.callObjective?.trim());
+}
 
 export function findTopicPolicy(
   policies: TopicPolicyFields[],
@@ -108,6 +124,22 @@ export function topicPolicyToSystemPrompt(policy: TopicPolicyFields): string {
       objective,
       "AUFTRAGSTREUE: Dieser vollständige Auftrag bestimmt den tatsächlichen Gesprächsanlass, die fachlichen Schritte und das Ziel bei jedem Anruf, auch bei Testanrufen und Rückrufen. Der Kampagnenname ist nur eine interne Zuordnung, kein vorgegebener gesprochener Anlass. Verwende die im Auftrag gewählte Themenbezeichnung und ersetze oder verenge sie nicht durch den Kampagnennamen oder ein Versicherungsprodukt. Arbeite die vorgesehenen Schritte im Dialog ab, ohne bereits beantwortete Fragen zu wiederholen. Bei Rückrufen berücksichtige den bisherigen Stand. Kundenfragen und Einwände zuerst beantworten, danach bei passender Gelegenheit zum noch offenen Auftrag zurückkehren. Zustimmung, Datenschutz, Zeitmangel und klare Ablehnung bleiben vorrangig.",
     );
+  }
+  const savedGuidance: Array<[string, string | undefined]> = [
+    ["GESPEICHERTE GESPRÄCHSFÜHRUNG", policy.behavior],
+    ["GESPEICHERTE GESPRÄCHSGRENZEN", policy.conversationGuardrails],
+    ["GESPEICHERTER EINSTIEG", policy.opener],
+    ["GESPEICHERTE BEDARFSKLÄRUNG", policy.discovery],
+    ["GESPEICHERTE EINWANDBEHANDLUNG", policy.objectionHandling],
+    ["GESPEICHERTE FACHLICHE EINORDNUNG", policy.aiKeyInfo],
+    ["GESPEICHERTER ANLASS AM EMPFANG", policy.receptionTopicReason],
+    ["GESPEICHERTER PROBLEMAUFBAU", policy.problemBuildup],
+    ["GESPEICHERTER KONZEPTÜBERGANG", policy.conceptTransition],
+    ["GESPEICHERTER TERMINABSCHLUSS", policy.close],
+    ["GESPEICHERTE TERMINBESTÄTIGUNG", policy.appointmentConfirmation],
+  ];
+  for (const [label, text] of savedGuidance) {
+    if (text?.trim()) parts.push("", `${label}:`, text.trim());
   }
   if (websiteKnowledge) {
     parts.push(

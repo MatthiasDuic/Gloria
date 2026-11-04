@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { findTopicPolicy, hasUsableCallAssignment, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+
+test("never treats a campaign label or a legacy opener as a loaded conversation assignment", () => {
+  assert.equal(hasUsableCallAssignment(null), false);
+  assert.equal(hasUsableCallAssignment({ topic: "private Krankenversicherung" }), false);
+  assert.equal(hasUsableCallAssignment({ callObjective: "   " }), false);
+  assert.equal(hasUsableCallAssignment({ topic: "private Krankenversicherung", callObjective: "Unveränderter gespeicherter Gesprächsauftrag." }), true);
+});
 
 test("selects only the requested dynamic campaign", () => {
   const campaigns = [
@@ -36,6 +43,18 @@ test("keeps a detailed campaign assignment in the model context", () => {
   const prompt = topicPolicyToSystemPrompt({ topic: "Service", callObjective: task });
 
   assert.match(prompt, /Besonderen Schwerpunkt auf die Terminvorbereitung legen/);
+});
+
+test("keeps stored conversation guidance verbatim rather than replacing it with a generic pitch", () => {
+  const policy = {
+    callObjective: "Unveränderter Originalauftrag.",
+    behavior: "Originale Gesprächsführung.",
+    discovery: "Originale Frage zur Beitragsentwicklung.",
+    conceptTransition: "Originaler Übergang zum gespeicherten Konzept.",
+    objectionHandling: "Originale Reaktion auf Zufriedenheit.",
+  };
+  const prompt = topicPolicyToSystemPrompt(policy);
+  for (const text of Object.values(policy)) assert.ok(prompt.includes(text), text);
 });
 
 test("preserves every assignment step beyond the former line and length limits", () => {

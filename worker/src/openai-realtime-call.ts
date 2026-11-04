@@ -15,7 +15,7 @@ import { advancePreparation, APPOINTMENT_FAREWELL_TEXT, beginPreparation, create
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
-import { loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { hasUsableCallAssignment, loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { GLORIA_CORE_INSTRUCTIONS } from "./gloria-core-instructions.js";
 import { buildTenYearProjectionSentence, extractContributionPhrase, extractCurrentContributionPhrase } from "./pkv-conversation-controller.js";
 
@@ -1378,7 +1378,15 @@ export async function handleOpenAiRealtimeTelnyxStream(
       connectOpenAi();
 
       const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
-        if (!ctx || !policy) return;
+        if (!ctx) return;
+        if (!hasUsableCallAssignment(policy)) {
+          terminationInProgress = true;
+          log.error("realtime.missing_campaign_assignment", { callSid: ctx.callSid, topic: ctx.topic });
+          void notifyCallAction(ctx, "hangup");
+          telnyx.close(1011, "missing_campaign_assignment");
+          return;
+        }
+        if (!policy) return;
         ctx.callObjective = policy.callObjective?.trim();
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
@@ -1386,7 +1394,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
       }).finally(() => {
-        topicPolicyReady = true;
+        topicPolicyReady = !terminationInProgress;
         if (ctx) updateSession();
       });
 
