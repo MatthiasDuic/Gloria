@@ -15,8 +15,8 @@ const VOICEMAIL_PATTERNS: RegExp[] = [
   /nachricht(?:\s+nach)?\s+dem\s+(?:signalton|piepton|ton)\b/i,
   /(?:signalton|piepton)\s+abwart(?:en|et)/i,
   /^\s*[\[(]?(?:piep|beep|signalton|piepton)[\])\s.!?]*$/i,
-  /teilnehmer\s+ist\s+(?:zurzeit\s+)?nicht\s+erreichbar/i,
-  /momentan\s+nicht\s+erreichbar/i,
+  /teilnehmer\s+ist\s+(?:(?:zurzeit|momentan|derzeit)\s+)?nicht\s+erreichbar/i,
+  /(?:unser\s+b[üu]ro|unsere\s+praxis|unser\s+gesch[äa]ft)[\s\S]{0,40}nicht\s+besetzt/i,
   /sind\s+vor[üu]bergehend\s+nicht\s+erreichbar/i,
   /(?:hinterlassen|aufzeichnen)\s+sie\s+(?:ihre\s+)?(?:nachricht|aufnahme)\b/i,
 ];

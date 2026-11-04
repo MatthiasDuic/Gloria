@@ -35,6 +35,7 @@ export type OpenAiRealtimeSessionOptions = {
   apiKey: string;
   model: string;
   onOpen?: () => void | Promise<void>;
+  onReady?: () => void;
   onEvent: (event: RealtimeServerEvent) => void;
   onClose?: (code: number, reason: string) => void;
   onError?: (error: Error) => void;
@@ -63,18 +64,24 @@ export class OpenAiRealtimeSession {
     this.socket = factory(url, { Authorization: `Bearer ${this.options.apiKey}` });
     const openedSocket = this.socket;
     this.socket.on("open", () => {
-      this.reconnectAttempts = 0;
-      this.ready = true;
+      this.ready = false;
       void Promise.resolve(this.options.onOpen?.()).then(() => {
-        if (!this.ready || this.socket !== openedSocket) return;
-        for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
+        if (this.socket !== openedSocket) return;
       }).catch((error) => {
         this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
       });
     });
     this.socket.on("message", (data) => {
       try {
-        this.options.onEvent(JSON.parse(data.toString()) as RealtimeServerEvent);
+        const event = JSON.parse(data.toString()) as RealtimeServerEvent;
+        if (event.type === "session.updated" && !this.ready) {
+          this.ready = true;
+          for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
+          this.options.onReady?.();
+        }
+        void Promise.resolve(this.options.onEvent(event)).catch((error) => {
+          this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        });
       } catch {
         // Ignore malformed server frames; the socket remains usable.
       }
@@ -104,6 +111,10 @@ export class OpenAiRealtimeSession {
 
   isReady(): boolean {
     return this.ready;
+  }
+
+  isConnected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN;
   }
 
   send(event: Record<string, unknown>): boolean {

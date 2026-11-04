@@ -14,6 +14,7 @@ import {
   deleteReportsOlderThanInPostgres,
   getLastPostgresFailureReason,
   isDatabaseUrlConfigured,
+  reserveCallAppointment,
   readCampaignListsStateFromPostgres,
   readConversationEventsFromPostgres,
   findUserById,
@@ -1875,6 +1876,11 @@ export async function storeCallReport(payload: {
     }
   }
 
+  if (payload.outcome === "Termin" && payload.appointmentAt && resolvedUserId && callSid) {
+    if (!await reserveCallAppointment(resolvedUserId, callSid, payload.appointmentAt)) {
+      throw new Error("Der Termin ist inzwischen belegt und wurde nicht gebucht.");
+    }
+  }
   const leads = await readLeads(resolvedUserId);
   const callSource = existingReport?.callSource || payload.callSource || getCallSource({
     ...existingReport,
@@ -1996,7 +2002,7 @@ export async function storeCallReport(payload: {
       return lead;
     }
 
-    const nextAttempts = payload.attempts ?? lead.attempts + 1;
+    const nextAttempts = Math.max(lead.attempts, payload.attempts ?? existingReport?.attempts ?? 1);
 
     // Auto-Retry bei "Kein Kontakt":
     // Nach Versuch 1 -> erneut in 1 Tag, nach Versuch 2 -> in 3 Tagen,
@@ -2069,10 +2075,21 @@ export async function storeCallReport(payload: {
     })
     : updatedLeads;
 
-  await Promise.all([
-    writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
-    writeLeads(leadsWithEmailHistory, resolvedUserId),
-  ]);
+  if (isDatabaseUrlConfigured()) {
+    const changedLeads = leadsWithEmailHistory.filter((lead, index) => lead !== leads[index] || lead === manualCallbackLead);
+    const saved = await writeReportDatabaseToPostgres({
+      reports: [report],
+      recordings: updatedRecordings.filter((entry) => entry.callSid === (report.callSid || report.id)),
+    });
+    if (!saved || (changedLeads.length > 0 && !await writeLeadsToPostgres(changedLeads, resolvedUserId, false))) {
+      throw new Error("Anrufbericht konnte nicht dauerhaft gespeichert werden.");
+    }
+  } else {
+    await Promise.all([
+      writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
+      writeLeads(leadsWithEmailHistory, resolvedUserId),
+    ]);
+  }
 
   // Live-Monitor: Terminal-Event mit dem finalen Outcome anhaengen, damit
   // der Live-Monitor das Gespraech als beendet markieren kann.

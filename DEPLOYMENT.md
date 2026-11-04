@@ -146,7 +146,15 @@ User speaks → Twilio transcribes
 
 ### Shared outbound-call queue
 
-- Gloria starts at most **three outbound calls at a time** across all users.
+- Campaign calls run Monday through Friday from **09:00 to 17:30 Europe/Berlin**,
+  without a midday pause. At 17:30 no new campaign call may start, including
+  calls requested by the dashboard or already waiting in the shared queue.
+  Active conversations finish normally. Campaigns remain active overnight;
+  pending queue jobs and active lists resume automatically from 09:00 on the
+  next working day through the existing queue and campaign cron jobs.
+- `CAMPAIGN_TIMEZONE` and `CAMPAIGN_SLOTS` can override this schedule. Production
+  defaults apply when these variables are not configured.
+- Gloria starts at most **five outbound calls at a time** across all users.
 - Further manual calls, campaign calls, and callbacks are stored in the shared
   PostgreSQL queue and started in fair per-user rotation as active calls finish.
 - The CRM polls queue state and shows active calls, each user's waiting position,

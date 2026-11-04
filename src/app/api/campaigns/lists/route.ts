@@ -24,6 +24,7 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { acquireCampaignCallLock, releaseCampaignCallLockByToken } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
 import { queueOutboundCall } from "@/lib/outbound-call-queue";
+import { describeCampaignSchedule, isWithinCampaignHours } from "@/lib/campaign-schedule";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 import { CampaignContactSelectionError, type CampaignContactSelection } from "@/lib/crm-helpers";
 
@@ -374,6 +375,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, action, listId, skipped: true, reason: "list_not_active" });
     }
 
+    if (!isWithinCampaignHours()) {
+      return NextResponse.json({
+        ok: true,
+        action,
+        listId,
+        skipped: true,
+        reason: "outside_business_hours",
+        schedule: describeCampaignSchedule(),
+      });
+    }
+
     const lockToken = `campaign-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const lockAcquired = await acquireCampaignCallLock({
       userId: sessionUser.id,
@@ -415,6 +427,7 @@ export async function POST(request: Request) {
     // flight, do not start another call.
     const stillActive = await isCampaignListActive(listId, sessionUser.id);
     if (!stillActive) {
+      await releaseCampaignCallLockByToken(lockToken);
       const lists = await getCampaignListsSummary(sessionUser.id);
       return NextResponse.json({
         ok: true,

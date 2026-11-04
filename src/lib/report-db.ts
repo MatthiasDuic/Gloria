@@ -1,10 +1,12 @@
 import { Pool } from "pg";
+import { attachDatabasePool } from "@vercel/functions";
 import { TOPICS } from "./types";
 import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lead, LeadActivity, LeadNote, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
 import type { CalendarEvent, LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
 import { defaultScripts } from "./sample-data";
 import { MAX_CONCURRENT_OUTBOUND_CALLS } from "./outbound-call-queue-constants";
+import { isWithinCampaignHours } from "./campaign-schedule";
 
 export interface RecordingEntry {
   id: string;
@@ -126,9 +128,58 @@ function getPool() {
   pool = new Pool({
     connectionString,
     ssl: connectionString.includes("localhost") ? false : { rejectUnauthorized: false },
+    max: 2,
+    idleTimeoutMillis: 1000,
+    connectionTimeoutMillis: 5000,
+    maxLifetimeSeconds: 60,
   });
+  attachDatabasePool(pool);
 
   return pool;
+}
+
+export async function getDatabasePool(): Promise<Pool> {
+  await ensureSchema();
+  return getPool();
+}
+
+export async function reserveCallAppointment(userId: string, callSid: string, startAt: string): Promise<boolean> {
+  if (!shouldUsePostgres()) return true;
+  const start = Date.parse(startAt);
+  if (!Number.isFinite(start) || start <= Date.now()) return false;
+  const endAt = new Date(start + 90 * 60_000).toISOString();
+  const database = await getDatabasePool();
+  await database.query(`CREATE TABLE IF NOT EXISTS gloria_booking_holds (
+    user_id TEXT NOT NULL, call_sid TEXT NOT NULL, start_at TIMESTAMPTZ NOT NULL,
+    end_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (user_id, call_sid))`);
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`appointment:${userId}`]);
+    const conflicts = await client.query(`SELECT 1 FROM (
+      SELECT appointment_at AS start_at, appointment_at + INTERVAL '90 minutes' AS end_at
+      FROM gloria_reports WHERE user_id = $1 AND outcome = 'Termin' AND call_sid IS DISTINCT FROM $4
+      UNION ALL SELECT start_at,end_at FROM gloria_booking_holds
+        WHERE user_id = $1 AND call_sid <> $4 AND expires_at > NOW()
+      UNION ALL SELECT (payload->>'startAt')::timestamptz,(payload->>'endAt')::timestamptz
+        FROM gloria_calendar_events WHERE user_id = $1
+    ) AS busy WHERE start_at < $3::timestamptz AND end_at > $2::timestamptz LIMIT 1`, [userId,startAt,endAt,callSid]);
+    if (conflicts.rows.length) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(`INSERT INTO gloria_booking_holds (user_id,call_sid,start_at,end_at,expires_at)
+      VALUES ($1,$2,$3,$4,NOW() + INTERVAL '2 minutes')
+      ON CONFLICT (user_id,call_sid) DO UPDATE SET start_at=EXCLUDED.start_at,end_at=EXCLUDED.end_at,expires_at=EXCLUDED.expires_at`, [userId,callSid,startAt,endAt]);
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function normalizeTopic(value: string): Topic {
@@ -1115,6 +1166,13 @@ export async function claimOutboundCall(): Promise<OutboundCallQueueJob | null> 
               status, call_sid, error, created_at, started_at
        FROM outbound_call_queue
        WHERE status = 'queued'
+         AND ($1::boolean OR (
+           campaign_lock_token IS NULL
+           AND COALESCE(payload->>'callSource', report_payload->>'callSource',
+             CASE WHEN payload->>'leadId' IS NOT NULL
+                    AND COALESCE(payload->>'isTestCall', 'false') <> 'true'
+                  THEN 'crm' ELSE 'manual' END) <> 'crm'
+         ))
        ORDER BY
          (SELECT MAX(previous.started_at)
           FROM outbound_call_queue previous
@@ -1122,6 +1180,7 @@ export async function claimOutboundCall(): Promise<OutboundCallQueueJob | null> 
          created_at, id
        FOR UPDATE SKIP LOCKED
        LIMIT 1`,
+      [isWithinCampaignHours()],
     );
     const row = selected.rows[0];
     if (!row) {
@@ -1157,6 +1216,24 @@ export async function claimOutboundCall(): Promise<OutboundCallQueueJob | null> 
   }
 }
 
+export async function deferOutboundCall(id: string): Promise<void> {
+  if (!shouldUsePostgres()) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE outbound_call_queue
+     SET status = 'queued', updated_at = NOW(), started_at = NULL
+     WHERE id = $1 AND status = 'starting'`,
+    [id],
+  );
+}
+
+export async function restoreUnstartedCampaignLead(leadId: string, userId: string): Promise<void> {
+  if (!shouldUsePostgres()) return;
+  await ensureSchema();
+  await getPool().query(`UPDATE gloria_leads SET status = 'neu', attempts = GREATEST(0,attempts - 1), updated_at = NOW()
+    WHERE id = $1 AND user_id = $2 AND status = 'angerufen'`, [leadId,userId]);
+}
+
 export async function markOutboundCallActive(id: string, callSid: string): Promise<void> {
   if (!shouldUsePostgres()) return;
   await ensureSchema();
@@ -1166,6 +1243,8 @@ export async function markOutboundCallActive(id: string, callSid: string): Promi
      WHERE id = $1 AND status = 'starting'`,
     [id, callSid],
   );
+  await getPool().query(`UPDATE campaign_call_locks SET call_sid = $2
+    WHERE lock_token = (SELECT campaign_lock_token FROM outbound_call_queue WHERE id = $1)`, [id, callSid]);
 }
 
 export async function markOutboundCallFailed(id: string, error: string): Promise<void> {
@@ -1183,9 +1262,11 @@ export async function completeOutboundCall(callSid: string, queueId?: string): P
   if (!shouldUsePostgres() || !callSid.trim()) return;
   await ensureSchema();
   await getPool().query(
-    `UPDATE outbound_call_queue
+    `WITH finished AS (UPDATE outbound_call_queue
      SET status = 'completed', updated_at = NOW(), completed_at = NOW()
-     WHERE (call_sid = $1 OR id = $2) AND status IN ('starting', 'active')`,
+     WHERE (call_sid = $1 OR id = $2) AND status IN ('starting', 'active')
+     RETURNING campaign_lock_token)
+     DELETE FROM campaign_call_locks WHERE call_sid = $1 OR lock_token IN (SELECT campaign_lock_token FROM finished)`,
     [callSid.trim(), queueId || callSid.trim()],
   );
 }
@@ -1195,13 +1276,14 @@ export async function listOutboundCallsForUser(userId: string): Promise<{
   queued: Array<{ id: string; company: string; createdAt: string; position: number }>;
   activeCalls: Array<{ id: string; company: string; startedAt?: string }>;
   failed: Array<{ id: string; company: string; error: string; createdAt: string }>;
+  campaignLock: { acquiredAt: string; expiresAt: string; callSid?: string; queueStatus?: string } | null;
 }> {
   if (!shouldUsePostgres()) {
     throw new Error("Die gemeinsame Telefon-Warteschlange benötigt eine konfigurierte PostgreSQL-Datenbank.");
   }
   await ensureSchema();
   const db = getPool();
-  const [activeResult, ownResult, waitingResult, failedResult] = await Promise.all([
+  const [activeResult, ownResult, waitingResult, failedResult, lockResult] = await Promise.all([
     db.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM outbound_call_queue WHERE status IN ('starting', 'active')`,
     ),
@@ -1246,8 +1328,29 @@ export async function listOutboundCallsForUser(userId: string): Promise<{
        LIMIT 5`,
       [userId],
     ),
+    db.query<{
+      acquired_at: Date;
+      expires_at: Date;
+      call_sid: string | null;
+      queue_status: string | null;
+    }>(
+      `SELECT locks.acquired_at, locks.expires_at, locks.call_sid,
+              (SELECT status FROM outbound_call_queue AS calls
+               WHERE calls.campaign_lock_token = locks.lock_token
+                  OR calls.call_sid = locks.call_sid
+               ORDER BY calls.created_at DESC LIMIT 1) AS queue_status
+       FROM campaign_call_locks AS locks
+       WHERE locks.user_id = $1 AND locks.expires_at > NOW()`,
+      [userId],
+    ),
   ]);
   return {
+    campaignLock: lockResult.rows[0] ? {
+      acquiredAt: lockResult.rows[0].acquired_at.toISOString(),
+      expiresAt: lockResult.rows[0].expires_at.toISOString(),
+      callSid: lockResult.rows[0].call_sid || undefined,
+      queueStatus: lockResult.rows[0].queue_status || undefined,
+    } : null,
     active: Number(activeResult.rows[0]?.count || 0),
     queued: waitingResult.rows.map((row) => ({
       id: row.id,
@@ -1988,15 +2091,16 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             direct_dial = EXCLUDED.direct_dial,
             called_phone = EXCLUDED.called_phone,
             topic = EXCLUDED.topic,
-            summary = EXCLUDED.summary,
-            outcome = EXCLUDED.outcome,
+            summary = CASE WHEN gloria_reports.summary LIKE '%Dokumentation:%' AND EXCLUDED.summary NOT LIKE '%Dokumentation:%'
+              THEN gloria_reports.summary ELSE EXCLUDED.summary END,
+            outcome = CASE WHEN COALESCE(EXCLUDED.appointment_at, gloria_reports.appointment_at) IS NOT NULL THEN 'Termin' ELSE EXCLUDED.outcome END,
             conversation_date = EXCLUDED.conversation_date,
-            appointment_at = EXCLUDED.appointment_at,
+            appointment_at = COALESCE(EXCLUDED.appointment_at, gloria_reports.appointment_at),
             appointment_mode = EXCLUDED.appointment_mode,
             next_call_at = EXCLUDED.next_call_at,
             attempts = EXCLUDED.attempts,
-            recording_consent = EXCLUDED.recording_consent,
-            recording_url = EXCLUDED.recording_url,
+            recording_consent = false,
+            recording_url = gloria_reports.recording_url,
             emailed_to = EXCLUDED.emailed_to,
             call_source = EXCLUDED.call_source,
             updated_at = NOW();
@@ -2447,7 +2551,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
   }
 }
 
-export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Promise<boolean> {
+export async function writeLeadsToPostgres(leads: Lead[], userId?: string, replace = true): Promise<boolean> {
   if (!shouldUsePostgres()) {
     return false;
   }
@@ -2462,9 +2566,9 @@ export async function writeLeadsToPostgres(leads: Lead[], userId?: string): Prom
       const leadsLockKey = `gloria_leads:${userId || "__all__"}`;
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1));", [leadsLockKey]);
 
-      if (userId) {
+      if (replace && userId) {
         await client.query("DELETE FROM gloria_leads WHERE user_id = $1", [userId]);
-      } else {
+      } else if (replace) {
         await client.query("DELETE FROM gloria_leads");
       }
 
@@ -3175,7 +3279,25 @@ export async function acquireCampaignCallLock(params: {
       const db = getPool();
       
       // Cleanup expired locks first
-      await db.query(`DELETE FROM campaign_call_locks WHERE expires_at <= NOW();`);
+      await db.query(`
+        DELETE FROM campaign_call_locks AS locks
+        WHERE locks.expires_at <= NOW()
+           OR (
+             locks.user_id = $1
+             AND EXISTS (
+               SELECT 1 FROM outbound_call_queue AS completed
+               WHERE completed.status = 'completed'
+                 AND (completed.campaign_lock_token = locks.lock_token
+                      OR completed.call_sid = locks.call_sid)
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM outbound_call_queue AS pending
+               WHERE pending.status IN ('queued', 'starting', 'active')
+                 AND (pending.campaign_lock_token = locks.lock_token
+                      OR pending.call_sid = locks.call_sid)
+             )
+           );
+      `, [params.userId]);
       
       const result = await db.query(
         `

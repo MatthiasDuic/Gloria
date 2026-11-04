@@ -49,6 +49,21 @@ async function seed(leads: Lead[]) {
   await writeFile(path.join(fixtureDirectory, "data", "reports.json"), "[]");
 }
 
+test("repeated final reports do not count one physical call as multiple attempts", async () => {
+  await seed([{ ...sampleLead, attempts: 1, status: "angerufen" }]);
+  const report = {
+    callSid: "idempotent-call", leadId: sampleLead.id, userId: sampleLead.userId,
+    company: sampleLead.company, topic: sampleLead.topic,
+  };
+  await storage.storeCallReport({ ...report, summaryChunk: "Anruf gestartet.", attempts: 1 });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await storage.storeCallReport({ ...report, summary: "Nicht erreicht.", outcome: "Nicht erreicht / kein Kontakt" });
+  }
+  const lead = await storage.getLeadById(sampleLead.id, sampleLead.userId);
+  assert.equal(lead?.attempts, 1);
+  assert.equal(lead?.status, "wiedervorlage");
+});
+
 test("own calendar API validates intervals, reserves 90 minutes, persists updates and isolates users", async () => {
   const { POST, GET, DELETE } = await import("../app/api/calendar/events/route");
   const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");

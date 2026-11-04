@@ -12,6 +12,7 @@ import {
 import { globalJobQueue } from "@/lib/job-queue";
 import { buildReportTranscriptFallback } from "@/lib/transcript-utils";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
+import { isDoNotCallRequest, suppressPhoneNumber } from "@/lib/call-safety";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -335,16 +336,19 @@ export async function POST(request: Request) {
     followUpAt?: string;
   };
 
-  if (payload.callSid) {
-    await releaseCampaignCallLock(payload.callSid);
-  }
-
   const internalToken = process.env.APP_INTERNAL_TOKEN?.trim();
+  if (!internalToken) return NextResponse.json({ error: "Internal authentication is not configured" }, { status: 503 });
   if (internalToken) {
     const provided = request.headers.get("x-gloria-internal-token");
     if (provided !== internalToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
+  payload.recordingConsent = false;
+  payload.recordingUrl = undefined;
+  if (payload.userId && payload.calledPhone && Array.isArray(payload.transcript)
+    && payload.transcript.some((entry) => (entry.role === "user" || entry.speaker === "Interessent") && isDoNotCallRequest(entry.text || ""))) {
+    await suppressPhoneNumber(payload.userId, payload.calledPhone);
   }
 
   // Transcript always persisted regardless of recording consent (for report detail).
@@ -535,22 +539,15 @@ export async function POST(request: Request) {
 
   let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
   // Enqueue email job asynchronously instead of blocking
-  if (report.recordingConsent === true) {
-    const jobId = globalJobQueue.enqueue("send_email", report.callSid || "unknown", {
+  {
+    const jobId = await globalJobQueue.enqueue("send_email", report.callSid || "unknown", {
       reportId: report.id,
       report,
     });
     emailResult = {
-      delivered: true,
-      to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
-      reason: `Email queued for delivery (jobId: ${jobId})`,
-    };
-  } else {
-    console.info(`Report for call ${report.callSid} stored without email: recording consent not obtained`);
-    emailResult = {
       delivered: false,
       to: process.env.REPORT_TO_EMAIL || "Matthias.duic@agentur-duic-sprockhoevel.de",
-      reason: "Email nicht versendet: keine Aufnahmezustimmung des Gesprächspartners.",
+      reason: `Email queued for delivery (jobId: ${jobId})`,
     };
   }
 
@@ -560,7 +557,7 @@ export async function POST(request: Request) {
 
   if (report.outcome === "Termin" && report.appointmentAt) {
     // Enqueue appointment invite job asynchronously
-    const jobId = globalJobQueue.enqueue("send_invite", report.callSid || "unknown", {
+    const jobId = await globalJobQueue.enqueue("send_invite", report.callSid || "unknown", {
       reportId: report.id,
       report,
       leadId: report.leadId,
@@ -569,7 +566,7 @@ export async function POST(request: Request) {
       missingBasisQuestions: collectMissingBasisQuestions(transcriptPersist.events),
     });
     inviteResult = {
-      delivered: true,
+      delivered: false,
       reason: `Appointment invite queued for delivery (jobId: ${jobId})`,
     };
   }

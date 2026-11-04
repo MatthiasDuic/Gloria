@@ -3,6 +3,28 @@ import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 
+const transcriptProgress = new WeakMap<CallContext, { saved: number; pending: Promise<void> }>();
+
+export function persistTranscriptDelta(ctx: CallContext): Promise<void> {
+  const baseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
+  const token = process.env.APP_INTERNAL_TOKEN?.trim();
+  if (!baseUrl || !token || !ctx.userId) return Promise.resolve();
+  const progress = transcriptProgress.get(ctx) || { saved: 0, pending: Promise.resolve() };
+  transcriptProgress.set(ctx, progress);
+  progress.pending = progress.pending.then(async () => {
+    const turns = ctx.transcript.slice(progress.saved);
+    if (!turns.length) return;
+    const response = await fetch(`${baseUrl}/api/calls/transcript`, {
+      method: "POST", headers: { "content-type": "application/json", "x-gloria-internal-token": token },
+      body: JSON.stringify({ callSid: ctx.callSid, userId: ctx.userId, calledPhone: ctx.calledPhone, turns }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error(`Transcript persistence failed: ${response.status}`);
+    progress.saved += turns.length;
+  }).catch((error) => { log.warn("transcript.incremental_failed", { callSid: ctx.callSid, error: String(error) }); });
+  return progress.pending;
+}
+
 export async function persistAppointmentBooking(ctx: CallContext, appointmentAt: string, appointmentMode: string): Promise<boolean> {
   const baseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN?.trim();
@@ -298,7 +320,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     email: resolvedExtraction.contactEmail,
   });
 
-  await postWithRetry(url, headers, {
+  const finalPosted = await postWithRetry(url, headers, {
     userId: ctx.userId,
     leadId: ctx.leadId,
     callSid: ctx.callSid,
@@ -319,7 +341,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     recordingConsent,
     transcript: transcriptEntries,
   });
-  log.info("finalize.final_posted", { callSid: ctx.callSid, outcome });
+  if (finalPosted) log.info("finalize.final_posted", { callSid: ctx.callSid, outcome });
+  else log.error("finalize.final_post_failed", { callSid: ctx.callSid, outcome });
 }
 
 async function postWithRetry(

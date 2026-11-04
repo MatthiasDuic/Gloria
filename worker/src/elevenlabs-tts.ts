@@ -58,7 +58,7 @@ export async function streamElevenLabsAudio(
             : voiceProfile?.speakerBoost ?? false,
         },
       }),
-      signal,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
     },
   );
   if (!response.ok) {

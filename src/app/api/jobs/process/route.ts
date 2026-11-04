@@ -66,7 +66,7 @@ async function processInviteJob(job: Job): Promise<void> {
 export async function POST(request: Request): Promise<NextResponse> {
   // Verify this is an internal request
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.APP_INTERNAL_TOKEN}`) {
+  if (![process.env.APP_INTERNAL_TOKEN, process.env.CRON_SECRET].filter(Boolean).some((token) => authHeader === `Bearer ${token}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -77,7 +77,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Process up to maxJobs from the queue
   for (let i = 0; i < maxJobs; i++) {
-    const job = globalJobQueue.dequeue();
+    const job = await globalJobQueue.dequeue();
     if (!job) break;
 
     try {
@@ -91,16 +91,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         throw new Error(`Unknown job type: ${job.type}`);
       }
 
-      globalJobQueue.markSuccess(job.id);
+      await globalJobQueue.markSuccess(job.id);
       processed++;
     } catch (error) {
       console.error(`Job ${job.id} failed:`, error);
-      globalJobQueue.markFailure(job.id, error instanceof Error ? error : new Error(String(error)));
+      await globalJobQueue.markFailure(job.id, error instanceof Error ? error : new Error(String(error)));
       failed++;
     }
   }
 
-  const stats = globalJobQueue.getStats();
+  const stats = await globalJobQueue.getStats();
 
   return NextResponse.json({
     ok: true,
@@ -110,12 +110,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
 }
 
-export async function GET(): Promise<NextResponse> {
-  const stats = globalJobQueue.getStats();
-  const jobs = globalJobQueue.getAllJobs().slice(-20); // Last 20 jobs
-
-  return NextResponse.json({
-    stats,
-    recentJobs: jobs,
-  });
+export async function GET(request: Request): Promise<NextResponse> {
+  return POST(request);
 }

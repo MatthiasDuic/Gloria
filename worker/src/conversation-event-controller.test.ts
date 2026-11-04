@@ -18,6 +18,15 @@ test("prioritizes a customer question over continuing the scripted flow", () => 
   assert.match(instruction, /nächsten fachlichen Schritt/);
 });
 
+test("never treats ordinary call questions or callback requests as a rejection", () => {
+  for (const text of ["Warum rufen Sie an?", "Können Sie mich morgen anrufen?", "Rufen Sie bitte in zehn Minuten wieder an."]) {
+    assert.notEqual(classifyConversationEvent(text).type, "clear_rejection", text);
+  }
+  for (const text of ["Rufen Sie mich bitte nicht mehr an.", "Bitte nicht mehr anrufen.", "Ich möchte keine weiteren Anrufe."]) {
+    assert.equal(classifyConversationEvent(text).type, "clear_rejection", text);
+  }
+});
+
 test("classifies common objections by intent", () => {
   assert.deepEqual(classifyConversationEvent("Ich habe gerade wirklich keine Zeit."), {
     type: "objection",

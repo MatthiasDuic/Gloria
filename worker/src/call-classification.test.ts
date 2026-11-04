@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 
+test("distinguishes closed-office announcements from an unavailable named person", () => {
+  assert.equal(classifyInboundSpeech("Unser Büro ist momentan nicht besetzt."), "voicemail");
+  assert.equal(classifyInboundSpeech("Herr Schneider ist momentan nicht erreichbar."), "human");
+});
+
 test("classifies voicemail prompts", () => {
   for (const prompt of [
     "Bitte hinterlassen Sie eine Nachricht nach dem Signalton.",

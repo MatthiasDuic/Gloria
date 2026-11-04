@@ -83,14 +83,11 @@ export function computeFreeSlots(
   });
 
   // Berlin-Stunde aus einem UTC-Date holen.
+  const berlinClock = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false, timeZone: "Europe/Berlin",
+  });
   function berlinHourMinute(d: Date): { hour: number; minute: number; weekday: number } {
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      weekday: "short",
-      hour12: false,
-      timeZone: "Europe/Berlin",
-    }).formatToParts(d);
+    const parts = berlinClock.formatToParts(d);
     const hour = Number(parts.find((p) => p.type === "hour")?.value || "0");
     const minute = Number(parts.find((p) => p.type === "minute")?.value || "0");
     const wd = parts.find((p) => p.type === "weekday")?.value || "Mon";

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
@@ -25,6 +27,15 @@ function buildPkvContext() {
   );
   return ctx;
 }
+
+test("worker refuses unsigned, tampered and expired stream contexts", () => {
+  const unsigned = { company: "Fixture", userId: "owner", streamExpiresAt: Date.now() + 60_000 };
+  const state = { ...unsigned, streamSignature: createHmac("sha256", "fixture").update(JSON.stringify(unsigned)).digest("hex") };
+  assert.equal(isTrustedStreamState(state, "fixture"), true);
+  assert.equal(isTrustedStreamState({ ...state, userId: "another-owner" }, "fixture"), false);
+  assert.equal(isTrustedStreamState(state, "fixture", unsigned.streamExpiresAt + 1), false);
+  assert.equal(isTrustedStreamState(unsigned, "fixture"), false);
+});
 
 test("the healthcare reason takes precedence over private-insurance wording at reception", () => {
   const instructions = buildRealtimeInstructions(buildPkvContext());

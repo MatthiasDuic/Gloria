@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   claimOutboundCall,
+  deferOutboundCall,
+  restoreUnstartedCampaignLead,
   enqueueOutboundCall,
   getOutboundCallQueueStatus,
   markOutboundCallActive,
@@ -9,11 +11,15 @@ import {
   bindCampaignCallLock,
   type OutboundCallQueueJob,
 } from "@/lib/report-db";
-import { storeCallReport } from "@/lib/storage";
+import { getLeadById, isCampaignListActive, storeCallReport } from "@/lib/storage";
+import { isPhoneNumberSuppressed } from "@/lib/call-safety";
 import { createTelnyxCall, type TelnyxCallRequest } from "@/lib/telnyx";
 import { log } from "@/lib/log";
+import { CampaignOutsideHoursError, isWithinCampaignHours } from "@/lib/campaign-schedule";
 
 type CallReportPayload = Omit<Parameters<typeof storeCallReport>[0], "callSid">;
+
+class CampaignStoppedError extends Error {}
 
 export async function queueOutboundCall(params: {
   payload: TelnyxCallRequest;
@@ -60,8 +66,16 @@ export async function processOutboundCallQueue(): Promise<{ started: number }> {
 }
 
 async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
+  let startedCallSid: string | undefined;
   try {
+    const callSource = job.payload.callSource || job.reportPayload.callSource
+      || (job.payload.leadId && !job.payload.isTestCall ? "crm" : "manual");
+    if ((job.campaignLockToken || callSource === "crm") && !isWithinCampaignHours()) {
+      await deferOutboundCall(job.id);
+      return false;
+    }
     const call = await startQueuedCall(job);
+    startedCallSid = call.sid;
     await markOutboundCallActive(job.id, call.sid);
     if (job.campaignLockToken) {
       await bindCampaignCallLock(job.campaignLockToken, call.sid);
@@ -72,6 +86,20 @@ async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
     });
     return true;
   } catch (error) {
+    if (startedCallSid) {
+      log.error("outbound_call_queue.persistence_after_start_failed", { queueId: job.id, callSid: startedCallSid, error: String(error) });
+      return true;
+    }
+    if (error instanceof CampaignOutsideHoursError) {
+      await deferOutboundCall(job.id);
+      return false;
+    }
+    if (error instanceof CampaignStoppedError && job.userId && typeof job.payload.leadId === "string") {
+      await markOutboundCallFailed(job.id, "campaign_stopped");
+      await restoreUnstartedCampaignLead(job.payload.leadId, job.userId);
+      if (job.campaignLockToken) await releaseCampaignCallLockByToken(job.campaignLockToken);
+      return false;
+    }
     const reason = error instanceof Error ? error.message : String(error);
     await markOutboundCallFailed(job.id, reason);
     if (job.campaignLockToken) {
@@ -87,6 +115,15 @@ async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
 }
 
 async function startQueuedCall(job: OutboundCallQueueJob) {
+  if (job.userId && typeof job.payload.to === "string" && await isPhoneNumberSuppressed(job.userId, job.payload.to)) {
+    throw new Error("Anrufsperre: Diese Telefonnummer darf nicht mehr angerufen werden.");
+  }
+  if (job.campaignLockToken && typeof job.payload.leadId === "string") {
+    const lead = await getLeadById(job.payload.leadId, job.userId);
+    if (!lead || !await isCampaignListActive(lead.listId || "legacy", job.userId)) {
+      throw new CampaignStoppedError();
+    }
+  }
   const request = new Request(job.requestUrl);
   return createTelnyxCall(
     { ...(job.payload as unknown as TelnyxCallRequest), queueId: job.id },

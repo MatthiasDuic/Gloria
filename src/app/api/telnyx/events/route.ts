@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
 import { completeOutboundCall, markOutboundCallActive, releaseCampaignCallLock } from "@/lib/report-db";
 import { processOutboundCallQueue } from "@/lib/outbound-call-queue";
+import { getTelnyxPublicKey, telnyxCommandId, verifyTelnyxWebhook } from "@/lib/telnyx-webhook-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,8 +101,9 @@ async function sendTelnyxCommand(
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, command_id: telnyxCommandId(callControlId, action) }),
     cache: "no-store",
+    signal: AbortSignal.timeout(5000),
   });
 
   if (!response.ok) {
@@ -152,79 +154,16 @@ function decodeClientState(raw?: string): DecodedClientState {
   return tryDecode("base64") || tryDecode("base64url") || {};
 }
 
-function findRecordingUrl(input: unknown): string | undefined {
-  if (!input) return undefined;
-  if (typeof input === "string") {
-    const value = input.trim();
-    if (!/^https?:\/\//i.test(value)) return undefined;
-    if (/record|recording|\.mp3\b|\.wav\b|\.m4a\b/i.test(value)) return value;
-    return undefined;
-  }
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      const nested = findRecordingUrl(item);
-      if (nested) return nested;
-    }
-    return undefined;
-  }
-  if (typeof input === "object") {
-    for (const value of Object.values(input as Record<string, unknown>)) {
-      const nested = findRecordingUrl(value);
-      if (nested) return nested;
-    }
-  }
-  return undefined;
-}
-
-function buildRecordingUrlFromId(recordingId?: string): string | undefined {
-  const id = recordingId?.trim();
-  if (!id) return undefined;
-  return `${getApiBaseUrl()}/recordings/${encodeURIComponent(id)}/actions/download`;
-}
-
-async function postRecordingToCallsWebhook(params: {
-  callSid: string;
-  state: DecodedClientState;
-  recordingUrl: string;
-}): Promise<void> {
-  const baseUrl = process.env.APP_BASE_URL?.trim()?.replace(/\/$/, "");
-  if (!baseUrl || !params.state.company || !params.state.topic) {
-    return;
-  }
-
-  const token = process.env.APP_INTERNAL_TOKEN?.trim() || "";
-  const payload = {
-    userId: params.state.userId,
-    leadId: params.state.leadId,
-    callSource: params.state.callSource || (params.state.isTestCall || !params.state.leadId ? "manual" : "crm"),
-    calledPhone: params.state.calledPhone,
-    callSid: params.callSid,
-    company: params.state.company,
-    contactName: params.state.contactName,
-    topic: params.state.topic,
-    recordingUrl: params.recordingUrl,
-  };
-
-  const response = await fetch(`${baseUrl}/api/calls/webhook`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { "x-gloria-internal-token": token } : {}),
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = await response.text().catch(() => "");
-    throw new Error(`calls/webhook recording post failed: ${response.status} ${details}`);
-  }
-}
-
 export async function POST(request: Request): Promise<NextResponse> {
+  const publicKey = await getTelnyxPublicKey().catch(() => undefined);
+  if (!publicKey) return NextResponse.json({ error: "Webhook verification is unavailable" }, { status: 503 });
+  const rawBody = await request.text();
+  if (!verifyTelnyxWebhook(rawBody, request.headers, publicKey)) {
+    return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
+  }
   let parsedBody: unknown;
   try {
-    parsedBody = await request.json();
+    parsedBody = JSON.parse(rawBody);
   } catch {
     return new NextResponse("", { status: 200 });
   }
@@ -233,10 +172,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   const eventType = event.event_type || "unknown";
   const callControlId = event.payload?.call_control_id;
   const clientState = decodeClientState(event.payload?.client_state);
-  const extractedRecordingUrl =
-    event.payload?.recording_url ||
-    buildRecordingUrlFromId(event.payload?.recording_id) ||
-    findRecordingUrl((parsedBody as { data?: { payload?: unknown } })?.data?.payload);
 
   if (!callControlId) {
     log.warn("telnyx.events.missing_call_control_id", { eventType });
@@ -265,59 +200,14 @@ export async function POST(request: Request): Promise<NextResponse> {
         bidirectionalMode: "rtp",
         bidirectionalCodec: streamBidirectionalCodec,
       });
-      // Recording parallel zum Media-Stream starten, damit bei erteilter
-      // Einwilligung eine echte Audiodatei fuer den Report vorliegt.
-      await sendTelnyxCommand(callControlId, "record_start", {
-        format: "mp3",
-        channels: "dual",
-        ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
-      }).catch(async (error) => {
-        log.warn("telnyx.events.record_start_with_options_failed", {
-          callControlId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        try {
-          await sendTelnyxCommand(callControlId, "record_start", {
-            ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
-          });
-        } catch (fallbackError) {
-          log.warn("telnyx.events.record_start_fallback_failed", {
-            callControlId,
-            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-          });
-        }
-      });
     } else if (eventType === "call.streaming.failed") {
+      await sendTelnyxCommand(callControlId, "hangup", {});
       log.warn("telnyx.events.streaming_failed", {
         callControlId,
         callLegId: event.payload?.call_leg_id,
         callSessionId: event.payload?.call_session_id,
       });
-    } else if (eventType === "call.recording.saved" || eventType === "call.recording.available") {
-      if (extractedRecordingUrl) {
-        await postRecordingToCallsWebhook({
-          callSid: callControlId,
-          state: clientState,
-          recordingUrl: extractedRecordingUrl,
-        });
-        log.info("telnyx.events.recording_forwarded", {
-          callControlId,
-          recordingId: event.payload?.recording_id,
-        });
-      } else {
-        log.warn("telnyx.events.recording_missing_url", {
-          callControlId,
-          eventType,
-        });
-      }
     } else if (eventType === "call.hangup") {
-      if (extractedRecordingUrl) {
-        await postRecordingToCallsWebhook({
-          callSid: callControlId,
-          state: clientState,
-          recordingUrl: extractedRecordingUrl,
-        });
-      }
       await completeOutboundCall(callControlId, clientState.queueId);
       await releaseCampaignCallLock(callControlId);
       await processOutboundCallQueue().catch((error) => {
@@ -338,11 +228,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       callControlId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return NextResponse.json({ error: "Event processing failed" }, { status: 503 });
   }
 
   return new NextResponse("", { status: 200 });
 }
 
 export async function GET(): Promise<NextResponse> {
-  return new NextResponse("telnyx events endpoint ok", { status: 200 });
+  let verificationError: string | undefined;
+  const publicKey = await getTelnyxPublicKey().catch((error) => {
+    verificationError = error instanceof Error ? error.message : "Verification unavailable";
+    return undefined;
+  });
+  return NextResponse.json({ ok: Boolean(publicKey), signatureVerificationReady: Boolean(publicKey), publicKey, verificationError, audioRecordingEnabled: false }, { status: publicKey ? 200 : 503 });
 }

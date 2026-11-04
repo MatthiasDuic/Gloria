@@ -1,4 +1,6 @@
 import type { CallSource, Topic } from "./types";
+import { createHmac } from "node:crypto";
+import { CampaignOutsideHoursError, isWithinCampaignHours } from "./campaign-schedule";
 import { prepareCall } from "./telephony-runtime";
 import { listPhoneNumbersByUser } from "./report-db";
 
@@ -163,7 +165,11 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     previousSummary: (payload.previousSummary || "").slice(0, 320),
   };
 
-  const json = JSON.stringify(data);
+  const secret = process.env.APP_INTERNAL_TOKEN?.trim();
+  const expiresAt = Date.now() + 24 * 60 * 60_000;
+  const unsigned = { ...data, streamExpiresAt: expiresAt };
+  const streamSignature = secret ? createHmac("sha256", secret).update(JSON.stringify(unsigned)).digest("hex") : undefined;
+  const json = JSON.stringify({ ...unsigned, streamSignature });
   return Buffer.from(json, "utf8").toString("base64");
 }
 
@@ -297,6 +303,10 @@ async function listOwnedTelnyxNumbers(): Promise<string[]> {
 }
 
 export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
+  const isCampaign = (payload.callSource || (payload.isTestCall || !payload.leadId ? "manual" : "crm")) === "crm";
+  if (isCampaign && !isWithinCampaignHours()) {
+    throw new CampaignOutsideHoursError();
+  }
   const apiKey = readEnv("TELNYX_API_KEY");
   const connectionId = readEnv("TELNYX_CONNECTION_ID");
   const defaultFrom = readEnv("TELNYX_PHONE_NUMBER");
@@ -381,6 +391,10 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     throw new Error(`RUNTIME_NOT_READY: ${reason}`);
   }
 
+  if (isCampaign && !isWithinCampaignHours()) {
+    throw new CampaignOutsideHoursError();
+  }
+
   const apiBaseUrl = getTelnyxApiBaseUrl();
   const timeoutMs = Math.max(
     3_000,
@@ -391,6 +405,7 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
 
   const body = {
     connection_id: connectionId,
+    ...(payload.queueId ? { command_id: payload.queueId } : {}),
     to: payload.to,
     from,
     client_state: encodeTelnyxClientState(payload),

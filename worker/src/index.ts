@@ -62,15 +62,11 @@ server.listen(PORT, () => {
 
 function shutdown(signal: string) {
   log.info("server.shutdown", { signal });
-  wss.clients.forEach((client) => {
-    try {
-      client.close(1001, "shutdown");
-    } catch {
-      /* ignore */
-    }
-  });
   server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 5000).unref();
+  setTimeout(() => {
+    wss.clients.forEach((client) => client.close(1001, "shutdown"));
+    setTimeout(() => process.exit(0), 25_000).unref();
+  }, 270_000).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

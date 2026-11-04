@@ -31,11 +31,16 @@ test("buffers inbound audio until session initialization completes", async () =>
   assert.deepEqual(socket.sent, []);
 
   socket.open();
-  assert.equal(session.isReady(), true);
+  assert.equal(session.isReady(), false);
   assert.deepEqual(socket.sent, []);
   finishInitialization?.();
   await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(socket.sent, []);
+  session.appendInputAudio("audio-two");
+  socket.message({ type: "session.updated" });
+  assert.equal(session.isReady(), true);
   assert.deepEqual(JSON.parse(socket.sent[0]), { type: "input_audio_buffer.append", audio: "audio-one" });
+  assert.deepEqual(JSON.parse(socket.sent[1]), { type: "input_audio_buffer.append", audio: "audio-two" });
 });
 
 test("parses server events and ignores malformed frames", () => {

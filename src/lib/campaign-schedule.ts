@@ -1,9 +1,9 @@
 /**
  * Arbeitszeit-Fenster fuer automatische Kampagnenanrufe.
  *
- * Default: Mo-Fr 09:00-12:00 und 13:00-17:00 in Europe/Berlin.
+ * Default: Mo-Fr 09:00-17:30 in Europe/Berlin.
  * Einstellungen koennen via Env-Variablen ueberschrieben werden
- * (CAMPAIGN_TIMEZONE, CAMPAIGN_SLOTS im Format "09:00-12:00,13:00-17:00").
+ * (CAMPAIGN_TIMEZONE, CAMPAIGN_SLOTS im Format "09:00-17:30").
  */
 
 export interface ScheduleWindow {
@@ -11,8 +11,15 @@ export interface ScheduleWindow {
   endMinute: number;
 }
 
+export class CampaignOutsideHoursError extends Error {
+  constructor() {
+    super("outside_business_hours");
+    this.name = "CampaignOutsideHoursError";
+  }
+}
+
 const DEFAULT_TIMEZONE = "Europe/Berlin";
-const DEFAULT_SLOTS = "09:00-12:00,13:00-17:00";
+const DEFAULT_SLOTS = "09:00-17:30";
 
 function getTimezone(): string {
   return process.env.CAMPAIGN_TIMEZONE?.trim() || DEFAULT_TIMEZONE;

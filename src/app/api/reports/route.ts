@@ -16,22 +16,9 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("/api/reports GET failed:", error);
     return NextResponse.json({
-      leads: [],
-      reports: [],
-      topicPolicies: [],
-      metrics: {
-        dialAttempts: 0,
-        conversations: 0,
-        appointments: 0,
-        rejections: 0,
-        callbacksOpen: 0,
-        gatekeeperLoops: 0,
-        transferSuccessRate: 0,
-      },
-      reportStorageMode: "file",
-      topicPoliciesStorageMode: "file",
+      error: "Reports sind voruebergehend nicht verfuegbar. Bitte erneut versuchen.",
       degraded: true,
-    });
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }
 

@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
 import { advanceAppointmentRouting, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, isSuppliedAppointmentSlot } from "./appointment-controller.js";
@@ -6,7 +7,7 @@ import { planBargeIn } from "./barge-in-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
 import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, isGatekeeperReasonQuestion, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
-import { parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
+import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
@@ -38,6 +39,8 @@ type TelnyxFrame =
   | { event: "error"; payload?: { code?: number; title?: string; detail?: string } };
 
 type ClientState = {
+  streamExpiresAt?: number;
+  streamSignature?: string;
   calledPhone?: string;
   company?: string;
   contactName?: string;
@@ -52,6 +55,14 @@ type ClientState = {
   isCallback?: number;
   isTestCall?: boolean;
 };
+
+export function isTrustedStreamState(state: ClientState, secret: string, now = Date.now()): boolean {
+  const { streamSignature, ...unsigned } = state;
+  if (!secret || !streamSignature || !state.streamExpiresAt || state.streamExpiresAt <= now) return false;
+  const expected = createHmac("sha256", secret).update(JSON.stringify(unsigned)).digest();
+  const provided = Buffer.from(streamSignature, "hex");
+  return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
 
 type RealtimeToolCall = {
   name: string;
@@ -374,6 +385,7 @@ export async function notifyCallAction(ctx: CallContext, action: "transfer" | "h
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ callControlId: ctx.callSid, userId: ctx.userId }),
+      signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
       log.error(`realtime.${action}_failed`, { callSid: ctx.callSid, status: response.status });
@@ -394,32 +406,9 @@ export async function notifyCallAction(ctx: CallContext, action: "transfer" | "h
  * Keeps only recent turns + summary of oldest turns when length exceeds threshold.
  */
 function rotateTranscriptIfNeeded(ctx: CallContext): void {
-  const MAX_TRANSCRIPT_LENGTH = 250;
-  const RETENTION_AFTER_ROTATION = 120;
-  
-  if (ctx.transcript.length > MAX_TRANSCRIPT_LENGTH) {
-    const discardedTurns = ctx.transcript.slice(0, ctx.transcript.length - RETENTION_AFTER_ROTATION);
-    const retainedTurns = ctx.transcript.slice(ctx.transcript.length - RETENTION_AFTER_ROTATION);
-    
-    // Create brief summary of discarded turns (including dialog state info)
-    const userTurnsCount = discardedTurns.filter(t => t.role === "user").length;
-    const assistantTurnsCount = discardedTurns.filter(t => t.role === "assistant").length;
-    const summaryText = 
-      `[Transcript Rotation: ${discardedTurns.length} älteren Turns gerotiert (${userTurnsCount} Kunde, ${assistantTurnsCount} Gloria). ` +
-      `Gesprächsverlauf bis hierher: Termin-Qualifizierung fortlaufend. ` +
-      `Aktuelles Dialog-Fortschritt: Phase=${ctx.dialogState.phase}.]`;
-    
-    ctx.transcript = [
-      { role: "assistant", text: summaryText, at: discardedTurns[0]?.at || Date.now() },
-      ...retainedTurns,
-    ];
-    
-    log.info("realtime.transcript_rotated", {
-      callSid: ctx.callSid,
-      discarded: discardedTurns.length,
-      retained: retainedTurns.length,
-      dialogPhase: ctx.dialogState.phase,
-    });
+  void persistTranscriptDelta(ctx);
+  if (ctx.transcript.length === 250) {
+    log.info("realtime.full_transcript_retained", { callSid: ctx.callSid, turns: ctx.transcript.length });
   }
 }
 
@@ -435,6 +424,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let outputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
   let closed = false;
   let reportPosted = false;
+  let callStartedAt = 0;
+  let firstAudioLogged = false;
+  let callDeadline: NodeJS.Timeout | null = null;
   let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let bargeInAwaitingTranscript = false;
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
@@ -525,7 +517,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   });
 
   const updateSession = () => {
-    if (!ctx || !topicPolicyReady || !openaiSession?.isReady()) return;
+    if (!ctx || !topicPolicyReady || !openaiSession?.isConnected()) return;
     const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.7");
     const silenceDurationMs = Number.parseInt(
       process.env.OPENAI_REALTIME_SILENCE_MS?.trim()
@@ -590,6 +582,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
             if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
             if (audioBytes === 0) {
               const now = Date.now();
+              if (!firstAudioLogged) {
+                firstAudioLogged = true;
+                log.info("realtime.start_latency", { callSid: ctx?.callSid, streamToFirstTtsChunkMs: now - callStartedAt });
+              }
               ttsPlaybackStartedAt = now;
               firstTtsChunkAt = now;
               const userFinalAt = ctx?.lastUserFinalAt;
@@ -713,6 +709,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (!ctx) return;
     playback.startResponse();
     ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
+    void persistTranscriptDelta(ctx);
     currentAssistantTurnIndex = ctx.transcript.length - 1;
     decisionMakerIntroWasLastResponse = route === "decision_maker";
     log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
@@ -1047,11 +1044,37 @@ export async function handleOpenAiRealtimeTelnyxStream(
       model,
       onOpen: () => {
         updateSession();
+        if (ctx) {
+          for (const turn of ctx.transcript.slice(-80)) {
+            sendOpenAi({ type: "conversation.item.create", item: {
+              type: "message", role: turn.role,
+              content: [{ type: turn.role === "assistant" ? "output_text" : "input_text", text: turn.text }],
+            } });
+          }
+        }
         log.info("realtime.connected", { callSid: ctx?.callSid, model, inputAudioFormat, outputAudioFormat });
+      },
+      onReady: () => {
+        log.info("realtime.session_ready", { callSid: ctx?.callSid, streamToReadyMs: Date.now() - callStartedAt });
+        if (silenceOpenerTimer || !ctx || ctx.transcript.length > 0) return;
+        silenceOpenerTimer = setTimeout(() => {
+          silenceOpenerTimer = null;
+          if (!ctx || userIsSpeaking || ctx.transcript.length > 0 || terminationInProgress) return;
+          speakDeterministicIntro(buildGatekeeperIntro(ctx), "gatekeeper");
+          if (contactRouting) {
+            contactRouting.stage = "gatekeeper";
+            contactRouting.gatekeeperRequestMade = true;
+          }
+        }, 1200);
       },
       onEvent: (message) => handleRealtimeEvent(message),
       onClose: (code, reason) => {
         log.info("realtime.closed", { callSid: ctx?.callSid, code, reason });
+        if (ctx && !closed && !terminationInProgress) {
+          terminationInProgress = true;
+          void notifyCallAction(ctx, "hangup");
+          telnyx.close(1011, "upstream_unavailable");
+        }
       },
       onError: (error) => {
         log.error("realtime.socket_error", { callSid: ctx?.callSid, error: error.message });
@@ -1311,7 +1334,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (frame.event === "start") {
+      callStartedAt = Date.now();
       const state = decodeClientState(frame.start.client_state);
+      if (!isTrustedStreamState(state, process.env.APP_INTERNAL_TOKEN?.trim() || "")) {
+        telnyx.close(1008, "invalid_call_signature");
+        return;
+      }
       streamId = frame.stream_id;
       inputAudioFormat = openAiAudioFormat(frame.start.media_format?.encoding);
       outputAudioFormat = openAiAudioFormat(process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA");
@@ -1334,6 +1362,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
       });
       preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", ctx.topic);
       contactRouting = createContactRoutingState(state.contactName);
+      callDeadline = setTimeout(() => {
+        if (!ctx || closed) return;
+        terminationInProgress = true;
+        void notifyCallAction(ctx, "hangup");
+        telnyx.close(1000, "call_time_limit");
+      }, 30 * 60_000);
       log.info("realtime.call_started", {
         callSid: ctx.callSid,
         streamSid: streamId,
@@ -1408,6 +1442,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   telnyx.on("close", async (code, reason) => {
     if (closed) return;
     closed = true;
+    if (callDeadline) clearTimeout(callDeadline);
     responses.stop();
     playback.stop();
     if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
@@ -1422,6 +1457,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     log.info("realtime.telnyx_closed", { callSid: ctx?.callSid, code, reason: reason.toString() });
     if (ctx && !reportPosted) {
       reportPosted = true;
+      await persistTranscriptDelta(ctx);
       await postReport(ctx).catch((error) => {
         log.error("realtime.finalize_failed", {
           callSid: ctx?.callSid,
