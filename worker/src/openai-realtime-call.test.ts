@@ -40,7 +40,7 @@ import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -124,6 +124,14 @@ test("acknowledges annual PKV cost increases before asking for the monthly contr
   assert.match(followup || "", /^Ja, das höre ich öfter:/);
   assert.match(followup || "", /Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr/);
   assert.equal(buildPkvCostIncreaseFollowup("Was kostet das?", "Die steigen jedes Jahr."), undefined);
+});
+
+test("offers basic information by email only after a declined appointment-interest question", () => {
+  const appointmentQuestion = "Wäre so eine individuelle Orientierung für Sie grundsätzlich interessant?";
+  assert.equal(shouldOfferBasicInfoEmailAfterAppointmentRejection(appointmentQuestion, "Ich denke nicht."), true);
+  assert.equal(shouldOfferBasicInfoEmailAfterAppointmentRejection(appointmentQuestion, "Nein, danke."), true);
+  assert.equal(shouldOfferBasicInfoEmailAfterAppointmentRejection("Welchen Beitrag zahlen Sie aktuell?", "Ich denke nicht."), false);
+  assert.equal(shouldOfferBasicInfoEmailAfterAppointmentRejection(appointmentQuestion, "Bitte rufen Sie mich nicht mehr an."), false);
 });
 
 test("asks for a callback instead of continuing the pitch when the contact has no time", () => {

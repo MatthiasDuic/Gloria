@@ -39,6 +39,48 @@ export function findTopicPolicy(
   return policies.find((policy) => (policy.topic || "").trim().toLocaleLowerCase() === requestedTopic) || null;
 }
 
+export const PRELOADED_TOPIC_POLICY_TTL_MS = 60_000;
+
+const preloadedTopicPolicies = new Map<string, {
+  userId: string;
+  topic: string;
+  policy: TopicPolicyFields;
+  expiresAt: number;
+}>();
+
+export function cachePreloadedTopicPolicy(preloadId: string, userId: string, policy: TopicPolicyFields, now = Date.now()): void {
+  const topic = policy.topic?.trim();
+  if (!preloadId || !userId || !topic || !hasUsableCallAssignment(policy)) return;
+  for (const [key, entry] of preloadedTopicPolicies) {
+    if (entry.expiresAt <= now) preloadedTopicPolicies.delete(key);
+  }
+  while (preloadedTopicPolicies.size >= 200) {
+    const oldest = preloadedTopicPolicies.keys().next().value;
+    if (!oldest) break;
+    preloadedTopicPolicies.delete(oldest);
+  }
+  preloadedTopicPolicies.set(preloadId, { userId, topic, policy, expiresAt: now + PRELOADED_TOPIC_POLICY_TTL_MS });
+}
+
+export function takePreloadedTopicPolicy(preloadId: string, userId: string, topic: string, now = Date.now()): TopicPolicyFields | null {
+  const entry = preloadedTopicPolicies.get(preloadId);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    preloadedTopicPolicies.delete(preloadId);
+    return null;
+  }
+  if (entry.userId !== userId || entry.topic.toLocaleLowerCase() !== topic.trim().toLocaleLowerCase()) return null;
+  preloadedTopicPolicies.delete(preloadId);
+  return entry.policy;
+}
+
+export async function preloadTopicPolicy(preloadId: string, userId: string, topic: string): Promise<boolean> {
+  const policy = await loadTopicPolicy({ userId, topic });
+  if (!policy || !hasUsableCallAssignment(policy)) return false;
+  cachePreloadedTopicPolicy(preloadId, userId, policy);
+  return true;
+}
+
 function compactPolicyText(value: string, maxLines = 5, maxLength = 700): string {
   const lines = value
     .split("\n")
@@ -52,15 +94,24 @@ function compactPolicyText(value: string, maxLines = 5, maxLength = 700): string
 export async function loadTopicPolicy(opts: {
   userId?: string;
   topic?: string;
+  preloadId?: string;
 }): Promise<TopicPolicyFields | null> {
+  if (!opts.topic) {
+    log.warn("topic_policy.skipped_no_topic");
+    return null;
+  }
+  if (opts.preloadId && opts.userId) {
+    const preloaded = takePreloadedTopicPolicy(opts.preloadId, opts.userId, opts.topic);
+    if (preloaded) {
+      log.info("topic_policy.preloaded", { topic: preloaded.topic, fields: Object.keys(preloaded).length });
+      return preloaded;
+    }
+  }
+
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN?.trim();
   if (!baseUrl || !token) {
     log.warn("topic_policy.skipped_no_config");
-    return null;
-  }
-  if (!opts.topic) {
-    log.warn("topic_policy.skipped_no_topic");
     return null;
   }
 

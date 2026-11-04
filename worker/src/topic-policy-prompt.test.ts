@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTopicPolicy, hasUsableCallAssignment, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { cachePreloadedTopicPolicy, findTopicPolicy, hasUsableCallAssignment, takePreloadedTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 
 test("never treats a campaign label or a legacy opener as a loaded conversation assignment", () => {
   assert.equal(hasUsableCallAssignment(null), false);
@@ -18,6 +18,19 @@ test("selects only the requested dynamic campaign", () => {
   assert.equal(findTopicPolicy(campaigns, " jahresgespräch ")?.topic, "Jahresgespräch");
   assert.equal(findTopicPolicy(campaigns, "Unbekannte Kampagne"), null);
   assert.equal(findTopicPolicy(campaigns, undefined), null);
+});
+
+test("preloaded policies are single-use, short-lived, and bound to the exact user and topic", () => {
+  const policy = { topic: "private Krankenversicherung", callObjective: "Auftrag A" };
+  cachePreloadedTopicPolicy("queue-a", "user-a", policy, 1_000);
+
+  assert.equal(takePreloadedTopicPolicy("queue-a", "user-b", policy.topic, 1_001), null);
+  assert.equal(takePreloadedTopicPolicy("queue-a", "user-a", "betriebliche Krankenversicherung", 1_001), null);
+  assert.equal(takePreloadedTopicPolicy("queue-a", "user-a", policy.topic, 1_001), policy);
+  assert.equal(takePreloadedTopicPolicy("queue-a", "user-a", policy.topic, 1_002), null);
+
+  cachePreloadedTopicPolicy("queue-expired", "user-a", policy, 1_000);
+  assert.equal(takePreloadedTopicPolicy("queue-expired", "user-a", policy.topic, 61_000), null);
 });
 
 test("treats the campaign objective as Gloria's task and uses website knowledge as context", () => {

@@ -5,7 +5,7 @@ import { classifyConversationEvent, instructionForConversationEvent } from "./co
 test("distinguishes a factual no from a clear conversation rejection", () => {
   assert.equal(classifyConversationEvent("Nein.").type, "answer");
   assert.equal(classifyConversationEvent("Nein, ich bin gesetzlich versichert.").type, "answer");
-  assert.equal(classifyConversationEvent("Ich denke nicht.").type, "clear_rejection");
+  assert.equal(classifyConversationEvent("Ich denke nicht.").type, "answer");
   assert.equal(classifyConversationEvent("Ich denke nicht, dass das passt.").type, "answer");
   assert.equal(classifyConversationEvent("Ich habe kein Interesse, rufen Sie bitte nicht mehr an.").type, "clear_rejection");
   assert.equal(classifyConversationEvent("Danke, auf Wiederhören.").type, "clear_rejection");

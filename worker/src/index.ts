@@ -3,10 +3,55 @@ import { WebSocketServer } from "ws";
 import { dependenciesAreReady, getDependencyHealth } from "./health.js";
 import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
+import { preloadTopicPolicy } from "./topic-policy-prompt.js";
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
 const server = http.createServer(async (req, res) => {
+  const requestUrl = new URL(req.url || "/", "http://localhost");
+  if (requestUrl.pathname === "/prepare-call") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "method_not_allowed" }));
+      return;
+    }
+    const token = process.env.APP_INTERNAL_TOKEN?.trim();
+    const providedToken = req.headers["x-gloria-internal-token"];
+    if (!token || typeof providedToken !== "string" || providedToken !== token) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+
+    let bodyText = "";
+    for await (const chunk of req) {
+      bodyText += chunk.toString();
+      if (bodyText.length > 4096) {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "payload_too_large" }));
+        return;
+      }
+    }
+    let body: { preloadId?: unknown; userId?: unknown; topic?: unknown };
+    try {
+      body = JSON.parse(bodyText) as typeof body;
+    } catch {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid_json" }));
+      return;
+    }
+    if (typeof body.preloadId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.preloadId)
+      || typeof body.userId !== "string" || body.userId.length > 200
+      || typeof body.topic !== "string" || !body.topic.trim() || body.topic.length > 120) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid_request" }));
+      return;
+    }
+    const ready = await preloadTopicPolicy(body.preloadId, body.userId, body.topic);
+    res.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: ready }));
+    return;
+  }
   if (req.url === "/health" || req.url === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({

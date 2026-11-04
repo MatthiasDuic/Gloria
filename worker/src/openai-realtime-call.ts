@@ -50,6 +50,7 @@ type ClientState = {
   topic?: string;
   leadId?: string;
   userId?: string;
+  queueId?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
@@ -128,6 +129,12 @@ export function buildPkvCostIncreaseFollowup(previousAssistantText: string, user
   const reportedAnnualIncrease = /\b(?:steigen|steigt|erh[öo]hen sich|erh[öo]ht sich)\b.{0,32}\b(?:jedes jahr|j[aä]hrlich)\b/i.test(userText);
   if (!askedAboutCostDevelopment || !reportedAnnualIncrease) return undefined;
   return "Ja, das höre ich öfter: Die Gründe sind im Alltag nicht immer direkt nachvollziehbar. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr? Sie können die Angabe auch überspringen.";
+}
+
+export function shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText: string, userText: string): boolean {
+  const askedAboutAppointmentInterest = /\b(?:orientierung(?:sgespr[aä]ch)?|termin|gespr[aä]ch)\b.{0,100}\b(?:interessant|sinnvoll)\b/i.test(previousAssistantText);
+  const declinedAppointment = /^\s*(?:nein(?:[, ]+danke)?|ich denke (?:eher )?nicht|eher nicht)[.!?]*\s*$/i.test(userText);
+  return askedAboutAppointmentInterest && declinedAppointment;
 }
 
 export function isLikelyNoiseTranscript(text: string): boolean {
@@ -458,6 +465,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let preparationState: PreparationState = createPreparationStateForCall("other");
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
+  let basicInfoEmailOfferPending = false;
   let userIsSpeaking = false;
   let transferWaitingStartedAt: number | null = null;
   let transferTimeoutTimer: NodeJS.Timeout | null = null;
@@ -864,6 +872,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
       requestEventResponse("Der Kunde verlangt einen Menschen oder lehnt das Gespräch mit Gloria ausdrücklich ab. Keine weiteren Fach-, Termin- oder Vorbereitungsfragen. Kündige kurz die Weiterleitung an den Auftraggeber an und rufe transfer_to_human auf.");
       return;
     }
+    if (basicInfoEmailOfferPending) {
+      basicInfoEmailOfferPending = false;
+      const wantsBasicInfo = /\b(?:ja|gerne|gern|bitte|interessant)\b/i.test(transcript)
+        && !/\b(?:nein|nicht|doch nicht)\b/i.test(transcript);
+      requestDeterministicSpeech(
+        wantsBasicInfo
+          ? "Gerne. Ich notiere Ihren Wunsch nach kurzen Basisinformationen für Herrn Duic. Auf Wiederhören."
+          : FINAL_FAREWELL_TEXT,
+        { hangupAfterPlayback: true },
+      );
+      return;
+    }
     if (event.type === "unclear") {
       if (!unclearClarificationPending) {
         unclearClarificationPending = true;
@@ -873,13 +893,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
     unclearClarificationPending = false;
 
+    const previousAssistantText = [...currentContext.transcript.slice(0, -1)].reverse().find((turn) => turn.role === "assistant")?.text || "";
+    if (shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText, transcript)) {
+      basicInfoEmailOfferPending = true;
+      requestDeterministicSpeech("Verstehe, dann kein Termin. Wäre stattdessen eine kurze E-Mail mit ein paar Basisinformationen für Sie interessant, falls das Thema später einmal relevant wird?");
+      return;
+    }
+
     if (event.type === "clear_rejection") {
       requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
       return;
     }
 
     if (preparationState.stage === "inactive") {
-      const previousAssistantText = [...currentContext.transcript.slice(0, -1)].reverse().find((turn) => turn.role === "assistant")?.text || "";
       const pkvCostIncreaseFollowup = currentContext.topicKind === "pkv"
         ? buildPkvCostIncreaseFollowup(previousAssistantText, transcript)
         : undefined;
@@ -1435,7 +1461,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       });
       connectOpenAi();
 
-      const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic }).then((policy) => {
+      const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic, preloadId: state.queueId }).then((policy) => {
         if (!ctx) return;
         if (!hasUsableCallAssignment(policy)) {
           terminationInProgress = true;

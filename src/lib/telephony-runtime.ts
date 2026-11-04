@@ -272,68 +272,84 @@ export async function heartbeatOpenAi() {
   }
 }
 
-async function preflightWorkerAndCalendar(baseUrl: string, userId?: string): Promise<void> {
+function getWorkerPreflightUrl(pathname: string): string | undefined {
+  const healthUrl = process.env.WORKER_HEALTHCHECK_URL?.trim();
+  const explicitStreamUrl = process.env.TELNYX_MEDIA_STREAM_URL?.trim();
+  const raw = healthUrl
+    || (explicitStreamUrl && !/gloria-stream-worker\.onrender\.com/i.test(explicitStreamUrl) ? explicitStreamUrl : undefined)
+    || process.env.MEDIA_STREAM_WSS_URL?.trim()
+    || "wss://gloria-tebr.onrender.com/telnyx-stream";
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "wss:") url.protocol = "https:";
+    else if (url.protocol === "ws:") url.protocol = "http:";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    url.pathname = pathname;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+async function preflightWorkerAndCalendar(baseUrl: string, userId: string | undefined, topic: Topic, preloadId?: string): Promise<void> {
   const headers = buildInternalHeaders();
-  const tasks: Array<Promise<void>> = [];
-
-  // 1) Render-Worker /healthz (oder konfigurierte URL) warmpingen.
-  const workerUrl = process.env.WORKER_HEALTHCHECK_URL?.trim();
-  if (workerUrl) {
-    tasks.push(
-      (async () => {
-        const start = Date.now();
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 1500);
-        try {
-          await fetch(workerUrl, { method: "GET", signal: ctrl.signal, cache: "no-store" });
-          console.info("[preflight] worker.warm", { ms: Date.now() - start });
-        } catch (e) {
-          console.warn("[preflight] worker.cold_or_unreachable", {
-            ms: Date.now() - start,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        } finally {
-          clearTimeout(t);
-        }
-      })(),
-    );
+  const preloadUrl = getWorkerPreflightUrl(preloadId ? "/prepare-call" : "/health");
+  if (preloadUrl) {
+    const start = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    try {
+      const requestHeaders = new Headers(headers);
+      const init: RequestInit = { method: "GET", headers: requestHeaders, cache: "no-store", signal: controller.signal };
+      if (preloadId && userId) {
+        requestHeaders.set("content-type", "application/json");
+        init.method = "POST";
+        init.body = JSON.stringify({ preloadId, userId, topic });
+      }
+      const response = await fetch(preloadUrl, init);
+      const payload = preloadId ? await response.json().catch(() => null) as { ok?: boolean } | null : null;
+      if (!response.ok || (preloadId && payload?.ok !== true)) {
+        throw new Error(`worker_prepare_failed_${response.status}`);
+      }
+      console.info("[preflight] worker.prepared", { ms: Date.now() - start, assignmentLoaded: Boolean(payload?.ok) });
+    } catch (error) {
+      console.warn("[preflight] worker.prepare_failed", {
+        ms: Date.now() - start,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  // 2) Kalender-Busy vorab laden (warmt DB-Pool + erkennt Auth-Probleme früh).
+  // Calendar warmup stays best-effort so it does not delay the outbound call.
   if (userId) {
-    tasks.push(
-      (async () => {
-        const start = Date.now();
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 1200);
-        try {
-          await fetch(`${baseUrl}/api/calendar/busy?userId=${encodeURIComponent(userId)}`, {
-            method: "GET",
-            headers,
-            cache: "no-store",
-            signal: ctrl.signal,
-          });
-          console.info("[preflight] calendar.warm", { ms: Date.now() - start });
-        } catch (e) {
-          console.warn("[preflight] calendar.failed", {
-            ms: Date.now() - start,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        } finally {
-          clearTimeout(t);
-        }
-      })(),
-    );
+    const start = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    void fetch(`${baseUrl}/api/calendar/busy?userId=${encodeURIComponent(userId)}`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+    }).then(() => {
+      console.info("[preflight] calendar.warm", { ms: Date.now() - start });
+    }).catch((error: unknown) => {
+      console.warn("[preflight] calendar.failed", {
+        ms: Date.now() - start,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }).finally(() => clearTimeout(timeout));
   }
-
-  // Wir blockieren prepareCall NICHT auf diese Aufgaben (Twilio toleriert die
-  // erste halbe Sekunde Stille). Sie laufen parallel zur TwiML-Antwort.
-  void Promise.allSettled(tasks);
 }
 
 export async function prepareCall(params: {
   topic: Topic;
   userId?: string;
+  preloadId?: string;
   baseUrl?: string;
   request?: Request;
 }): Promise<{
@@ -354,11 +370,7 @@ export async function prepareCall(params: {
 
   void heartbeatOpenAi();
 
-  // Preflight: Worker (Render) und Kalender warm machen, bevor Twilio den
-  // Outbound-Call startet. Wir warten höchstens ein paar hundert ms – wenn der
-  // Worker gerade kalt ist, soll der Call trotzdem starten (Twilio puffert die
-  // erste Sekunde). Latenzen werden geloggt, damit wir kalte Starts erkennen.
-  void preflightWorkerAndCalendar(baseUrl, params.userId);
+  await preflightWorkerAndCalendar(baseUrl, params.userId, params.topic, params.preloadId);
 
   const activeScripts = scriptProfilesByUser[cacheKey] || {};
   const topicProfileLoaded = Boolean(activeScripts[params.topic]);

@@ -17,7 +17,6 @@ export function isUnclearConversationText(text: string): boolean {
 }
 
 export function isConversationEndingText(text: string): boolean {
-    if (/^\s*(?:nein[, ]+)?ich denke (?:eher )?nicht[.!?]*\s*$/i.test(text)) return true;
   return /\b(?:kein[e]?\s+interesse|nicht\s+interessiert|rufen\s+sie\s+(?:mich\s+)?(?:bitte\s+)?nicht\s+(?:mehr\s+)?an|nicht\s+mehr\s+anrufen|keine\s+(?:weiteren\s+)?(?:werbe)?anrufe|m[öo]chte\s+(?:kein|keinen)\s+termin|beende\s+(?:das\s+)?gespr[äa]ch|gespr[äa]ch\s+beenden|wir\s+k[öo]nnen\s+das\s+gespr[äa]ch\s+beenden|legen\s+sie\s+auf|auf\s+wiedersehen|auf\s+wiederh[öo]ren|tsch[üu]ss|streichen\s+mich|interessiert\s+mich\s+nicht|kommt\s+nicht\s+infrage)\b/i.test(text);
 }
 

@@ -366,6 +366,7 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
       preparation = await prepareCall({
         topic: payload.topic,
         userId: payload.userId,
+        preloadId: payload.queueId,
         baseUrl,
         request,
       });
