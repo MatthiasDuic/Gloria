@@ -8,8 +8,38 @@ import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
 test("global assignment inspection is denied to unauthenticated callers", async () => {
-  const { GET } = await import("../app/api/telnyx/topic-policies/route");
+  const { GET, POST } = await import("../app/api/telnyx/topic-policies/route");
   assert.equal((await GET(new Request("https://example.test/api/telnyx/topic-policies?scope=global"))).status, 403);
+  assert.equal((await POST(new Request("https://example.test/api/telnyx/topic-policies", { method: "POST", body: "{}" }))).status, 403);
+});
+
+test("master restoration copies an existing assignment without creating new conversation wording", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  const source = { id: "source", topic: "private Krankenversicherung", callObjective: "Unveränderter Originalauftrag zur Gesundheitsversorgung.", opener: "Originaler Einstieg", discovery: "Originale Bedarfsfrage", close: "Originaler Abschluss", objectionHandling: "Originale Einwände" };
+  const writes: unknown[][] = [];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    if (/^\s*SELECT topic, data\s+FROM gloria_playbooks/.test(sql)) return { rows: [{ topic: source.topic, data: source }], rowCount: 1 };
+    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/.test(sql)) return { rows: [{ topic: source.topic, content: JSON.stringify({ ...source, id: "current", callObjective: undefined }) }], rowCount: 1 };
+    if (sql.includes("INSERT INTO user_playbooks")) writes.push(values);
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { POST } = await import("../app/api/telnyx/topic-policies/route");
+    const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+    const token = createSessionToken({ id: "owner", username: "owner", role: "master", realName: "", companyName: "", gesellschaft: "" });
+    const request = (expectedCurrentId: string) => new Request("https://example.test/api/telnyx/topic-policies", {
+      method: "POST", headers: { cookie: `${SESSION_COOKIE_NAME}=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "restore_global_assignment", topic: source.topic, expectedCurrentId, expectedSourceObjective: source.callObjective }),
+    });
+    assert.equal((await POST(request("changed-id"))).status, 409);
+    assert.equal((await POST(request("current"))).status, 200);
+    assert.ok(writes.some((values) => values.some((value) => typeof value === "string" && value.includes(source.callObjective))));
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
 });
 
 test("a failed user-playbook read never bootstraps or overwrites conversation contents", async () => {
