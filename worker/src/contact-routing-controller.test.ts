@@ -1,6 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceContactRouting, createContactRoutingState, instructionForContactRouting } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, instructionForContactRouting, isGatekeeperReasonQuestion } from "./contact-routing-controller.js";
+
+test("uses the healthcare contribution reason at reception without disclosing a private insurance status", () => {
+  const reason = buildGatekeeperReason("private Krankenversicherung", "Herr Schneider");
+  assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung. Ist Herr Schneider gerade erreichbar?");
+  assert.doesNotMatch(reason, /privat|krankenversicherung/i);
+  assert.equal(buildGatekeeperReason("PKV"), "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
+  assert.equal(buildGatekeeperReason("Energie"), "Es geht um das Thema Energie.");
+});
+
+test("recognizes a gatekeeper's reason question without confusing availability or refusal", () => {
+  for (const text of ["Worum geht es?", "Um was geht es denn?", "Was ist der Anlass?", "Was ist denn Ihr Anliegen?", "Weshalb rufen Sie an?"]) {
+    assert.equal(isGatekeeperReasonQuestion(text), true, text);
+  }
+  for (const text of ["Herr Schneider ist nicht da.", "Kein Interesse.", "Einen Moment, ich verbinde."]) {
+    assert.equal(isGatekeeperReasonQuestion(text), false, text);
+  }
+});
+
+test("a reason question after the transfer request stays at reception without another identity check", () => {
+  const state = advanceContactRouting({
+    ...createContactRoutingState("Herr Schneider"),
+    stage: "gatekeeper",
+    gatekeeperRequestMade: true,
+  }, "Worum geht es denn?");
+  assert.equal(state.stage, "gatekeeper");
+  assert.equal(state.gatekeeperRequestMade, true);
+});
 
 test("keeps the fachgespraech behind the gatekeeper boundary", () => {
   let state = createContactRoutingState("Herr Neumann");

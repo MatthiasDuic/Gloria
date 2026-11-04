@@ -12,7 +12,21 @@ export type ContactRoutingState = {
   stage: ContactRoutingStage;
   targetName?: string;
   gatekeeperRequestMade?: boolean;
+  gatekeeperReasonGiven?: boolean;
 };
+
+export function isGatekeeperReasonQuestion(text: string): boolean {
+  return /\b(?:worum\s+geht|um\s+was\s+geht|was\s+ist\s+(?:denn\s+)?(?:der\s+)?(?:grund|anlass)|was\s+(?:ist|wäre)\s+(?:denn\s+)?(?:ihr\s+)?anliegen|weshalb\s+rufen|warum\s+rufen)\b/i.test(text);
+}
+
+export function buildGatekeeperReason(topic?: string, targetName?: string): string {
+  const reason = /privat.*krankenversicherung|\bpkv\b/i.test(topic || "")
+    ? "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung."
+    : topic?.trim()
+      ? `Es geht um das Thema ${topic.trim()}.`
+      : "Es geht um ein kurzes Anliegen für die zuständige Person.";
+  return targetName?.trim() ? `${reason} Ist ${targetName.trim()} gerade erreichbar?` : reason;
+}
 
 function targetNameTokens(targetName?: string): string[] {
   return (targetName || "")
@@ -91,6 +105,9 @@ export function advanceContactRouting(
   }
   if (identifiesDecisionMaker(userText, state.targetName)) {
     return { ...state, stage: "decision_maker" };
+  }
+  if (state.gatekeeperRequestMade && isGatekeeperReasonQuestion(userText)) {
+    return { ...state, stage: "gatekeeper" };
   }
   if (classification === "human") {
     return {

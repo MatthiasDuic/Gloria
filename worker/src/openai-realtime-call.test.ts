@@ -26,6 +26,14 @@ function buildPkvContext() {
   return ctx;
 }
 
+test("the healthcare reason takes precedence over private-insurance wording at reception", () => {
+  const instructions = buildRealtimeInstructions(buildPkvContext());
+  assert.match(instructions, /ANLASS AM EMPFANG/);
+  assert.match(instructions, /Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(instructions, /Sage dort nicht 'private Krankenversicherung'/);
+  assert.match(instructions, /Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden/);
+});
+
 test("keeps a warm contextual bridge after the introduction without skipping the assignment or consent", () => {
   const ctx = buildPkvContext();
   ctx.callObjective = "Ein Erstgespräch zur Beitragsentwicklung in der Gesundheitsversorgung führen.";

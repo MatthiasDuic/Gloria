@@ -4,7 +4,7 @@ import type { WebSocket as ServerWebSocket } from "ws";
 import { advanceAppointmentRouting, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
-import { advanceContactRouting, createContactRoutingState, type ContactRoutingState } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, isGatekeeperReasonQuestion, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
 import { parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
 import { log } from "./log.js";
@@ -287,6 +287,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
+  if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.topic || "")) {
+    parts.push("ANLASS AM EMPFANG: Bei Empfang, Gatekeeper oder digitaler Rezeption lautet die kurze thematische Einordnung ausschließlich: 'Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.' Sage dort nicht 'private Krankenversicherung' oder 'seine private Krankenversicherung' und behaupte keinen privaten Versicherungsstatus des Ansprechpartners. Diese Vorgabe hat am Empfang Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden. Noch kein Fachgespräch am Empfang.");
+  }
   if (target) {
     parts.push(
       `ERSTER SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, stelle dich transparent und kurz vor und nenne das tatsächliche Kampagnenthema. Wenn die Namenszuordnung unklar ist und kein Gatekeeper-Hinweis vorliegt, frage einmal höflich, ob ${addressedTarget} am Apparat ist. Wenn die Person Empfang oder Gatekeeper ist, bitte freundlich um Weiterleitung an ${addressedTarget}; nenne auf Nachfrage nur einen sachlichen Anlass aus dem Kampagnenkontext. Wiederhole eine bereits gestellte Weiterleitungsbitte nicht. Kein Pitch am Empfang.`,
@@ -818,6 +821,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       if (contactRouting.stage !== "decision_maker") {
         if (contactRouting.gatekeeperRequestMade) {
+          if (!contactRouting.gatekeeperReasonGiven && isGatekeeperReasonQuestion(transcript)) {
+            contactRouting.gatekeeperReasonGiven = true;
+            requestDeterministicSpeech(buildGatekeeperReason(currentContext.topic, currentContext.contactName));
+            return;
+          }
           requestDeterministicSpeech(
             "Vielen Dank für die Auskunft. Dann versuche ich es zu einem anderen Zeitpunkt erneut. Auf Wiederhören.",
             { hangupAfterPlayback: true },
