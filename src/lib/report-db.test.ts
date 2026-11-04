@@ -7,6 +7,31 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("queue recovery frees only calls explicitly confirmed finished by Telnyx", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  const previousApiKey = process.env.TELNYX_API_KEY;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  process.env.TELNYX_API_KEY = "fixture";
+  const completed: unknown[] = [];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    if (sql.includes("WITH finished")) completed.push(values[0]);
+    return { rows: sql.includes("SELECT id,call_sid FROM outbound_call_queue")
+      ? [{ id: "live", call_sid: "live-call" }, { id: "ended", call_sid: "ended-call" }] : [], rowCount: 0 };
+  });
+  mock.method(globalThis, "fetch", async (url: string | URL | Request) => new Response(JSON.stringify({ data: { is_alive: String(url).endsWith("live-call") } }), { status: 200 }));
+  try {
+    const { reconcileOutboundCallQueue } = await import("./outbound-call-queue");
+    await reconcileOutboundCallQueue();
+    assert.deepEqual(completed, ["ended-call"]);
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+    if (previousApiKey === undefined) delete process.env.TELNYX_API_KEY;
+    else process.env.TELNYX_API_KEY = previousApiKey;
+  }
+});
+
 test("text-only incremental transcripts authenticate before touching persistence", async () => {
   const previous = process.env.APP_INTERNAL_TOKEN;
   process.env.APP_INTERNAL_TOKEN = "fixture-transcript";

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { processOutboundCallQueue } from "@/lib/outbound-call-queue";
+import { processOutboundCallQueue, reconcileOutboundCallQueue } from "@/lib/outbound-call-queue";
 import { log } from "@/lib/log";
 
 export const runtime = "nodejs";
@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    await reconcileOutboundCallQueue();
     const result = await processOutboundCallQueue();
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
