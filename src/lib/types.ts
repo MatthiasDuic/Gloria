@@ -5,6 +5,15 @@ export const TOPICS = [
 
 // Default-Themen; zusätzliche Kampagnenthemen werden als Topic-Policies gespeichert.
 export type Topic = string;
+
+export function isSharedCampaignTopic(topic: string): boolean {
+  return TOPICS.some((entry) => entry.toLocaleLowerCase() === topic.trim().toLocaleLowerCase());
+}
+
+export function resolveCampaignPolicies<T extends { topic: string }>(shared: T[], personal: T[]): T[] {
+  return [...shared.filter((policy) => isSharedCampaignTopic(policy.topic)),
+    ...personal.filter((policy) => !isSharedCampaignTopic(policy.topic))];
+}
 export type LeadStatus = "neu" | "angerufen" | "termin" | "absage" | "wiedervorlage";
 export type LeadCustomerKind = "privat" | "firma";
 export type LeadCustomerOwner = "BarmeniaGothaer" | "Agentur-Duic";
@@ -164,6 +173,7 @@ export interface Lead {
 export interface TopicPolicyConfig {
   id: string;
   topic: Topic;
+  sourceTopic?: Topic;
   /**
    * Worum es im Thema fachlich geht, welchen Nutzen der Interessent davon hat
    * und wie Gloria das Thema inhaltlich einordnet.

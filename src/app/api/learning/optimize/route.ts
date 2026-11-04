@@ -3,6 +3,7 @@ import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { getDashboardData, saveScript } from "@/lib/storage";
 import { optimizeTopicPolicy } from "@/lib/topic-policy-optimizer";
 import type { Topic } from "@/lib/types";
+import { isSharedCampaignTopic } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,9 @@ export async function POST(request: Request) {
   if (!isTopic(body.topic)) {
     return NextResponse.json({ error: "Thema fehlt oder ungueltig." }, { status: 400 });
   }
+  if (isSharedCampaignTopic(body.topic) && sessionUser.role !== "master") {
+    return NextResponse.json({ error: "Gemeinsame Kampagnen kann nur der Master bearbeiten." }, { status: 403 });
+  }
 
   const data = await getDashboardData({ userId: resolvedUserId, role: "user" });
   const current = data.topicPolicies.find((p) => p.topic === body.topic);
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
       conversationGuardrails: result.conversationGuardrails,
       requiredQuestions: result.requiredQuestions,
     },
-    { userId: resolvedUserId },
+    { userId: isSharedCampaignTopic(body.topic) ? undefined : resolvedUserId },
   );
 
   return NextResponse.json({ ok: true, topic: body.topic, applied: true, saved, optimized: result });

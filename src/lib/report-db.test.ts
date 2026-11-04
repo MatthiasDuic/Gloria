@@ -7,6 +7,128 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("users save personal topics while master changes update the single shared source", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  const shared = [{ id: "shared-pkv", topic: "private Krankenversicherung", callObjective: "Gemeinsamer Auftrag", opener: "", discovery: "", objectionHandling: "", close: "" }];
+  const personal: Array<{ topic: string; content: string }> = [];
+  let personalWrites = 0;
+  let sharedWrites = 0;
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    if (/^\s*SELECT topic, data\s+FROM gloria_playbooks/.test(sql)) return { rows: shared.map((data) => ({ topic: data.topic, data })), rowCount: shared.length };
+    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/.test(sql)) return { rows: personal, rowCount: personal.length };
+    if (sql.includes("FROM users")) return { rows: [{ id: "owner", username: "owner", role: "user", allowed_playbook_topics: ["Anderes Thema"] }], rowCount: 1 };
+    if (sql.includes("INSERT INTO user_playbooks") && values.length >= 4) {
+      personalWrites++;
+      personal.push({ topic: String(values[2]), content: String(values[3]) });
+    }
+    if (/^\s*INSERT INTO gloria_playbooks/.test(sql) && values.length === 2) {
+      sharedWrites++;
+      shared[0] = JSON.parse(String(values[1]));
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { getDatabasePool } = await import("./report-db");
+    await getDatabasePool();
+    personalWrites = 0;
+    sharedWrites = 0;
+    const { POST } = await import("../app/api/topic-policies/route");
+    const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+    const request = (role: "master" | "user", topic: string, callObjective: string) => new Request("https://example.test/api/topic-policies", {
+      method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id: "owner", username: "owner", role, realName: "", companyName: "", gesellschaft: "" })}` },
+      body: JSON.stringify({ topic, callObjective, knowledgeSources: [] }),
+    });
+    assert.equal((await POST(request("user", "Mein persönliches Thema", "Mein eigener Auftrag"))).status, 200);
+    assert.equal(personalWrites, 1);
+    assert.equal(sharedWrites, 0);
+    assert.equal((await POST(request("master", "private Krankenversicherung", "Zentraler Masterauftrag"))).status, 200);
+    assert.equal(sharedWrites, 1);
+    assert.equal(personalWrites, 1);
+    const { getDashboardData } = await import("./storage");
+    const data = await getDashboardData({ userId: "owner", role: "user" });
+    assert.equal(data.topicPolicies.find((policy) => policy.topic === "private Krankenversicherung")?.callObjective, "Zentraler Masterauftrag");
+    assert.ok(data.topicPolicies.some((policy) => policy.topic === "Mein persönliches Thema"));
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("campaign copies preserve full content and never overwrite an existing personal name", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  let duplicate = false;
+  let saved: unknown[] | undefined;
+  mock.method(Pool.prototype, "query", async () => ({ rows: [], rowCount: 0 }));
+  mock.method(Pool.prototype, "connect", async () => ({
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("INSERT INTO user_playbooks")) { saved = values; return { rows: [{ id: values[0] }], rowCount: 1 }; }
+      return { rows: sql.includes("SELECT 1 FROM user_playbooks") && duplicate ? [{ exists: true }] : [], rowCount: 0 };
+    },
+    release: () => undefined,
+  }));
+  try {
+    const { createPersonalCampaignCopy } = await import("./report-db");
+    const source = { id: "original", topic: "private Krankenversicherung", callObjective: "Auftrag. ".repeat(300), knowledgeContent: "Vollständiges Wissen.", conversationGuardrails: "Verbindliche Regeln.", opener: "", discovery: "", objectionHandling: "", close: "" };
+    const copy = await createPersonalCampaignCopy("owner", source, "Meine persönliche Kampagne");
+    assert.ok(copy);
+    assert.notEqual(copy.id, source.id);
+    assert.equal(copy.callObjective, source.callObjective);
+    assert.equal(copy.knowledgeContent, source.knowledgeContent);
+    assert.equal(copy.conversationGuardrails, source.conversationGuardrails);
+    assert.equal(copy.sourceTopic, source.topic);
+    assert.equal(saved?.[1], "owner");
+    duplicate = true;
+    assert.equal(await createPersonalCampaignCopy("owner", source, "Meine persönliche Kampagne"), null);
+    await assert.rejects(createPersonalCampaignCopy("owner", source, "betriebliche Krankenversicherung"), /reserviert/);
+    const { POST } = await import("../app/api/topic-policies/copy/route");
+    assert.equal((await POST(new Request("https://example.test/api/topic-policies/copy", { method: "POST", body: "{}" }))).status, 401);
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("both shared campaigns remain callable regardless of a user's old allow list", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  mock.method(Pool.prototype, "query", async (sql: string) => ({
+    rows: sql.includes("FROM users") ? [{ id: "user", username: "user", role: "user", allowed_playbook_topics: ["Anderes Thema"] }] : [], rowCount: 0,
+  }));
+  try {
+    const { canUserAccessTopic } = await import("./report-db");
+    assert.equal(await canUserAccessTopic("user", "private Krankenversicherung"), true);
+    assert.equal(await canUserAccessTopic("user", "betriebliche Krankenversicherung"), true);
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("regular users cannot edit shared insurance campaigns but keep individually named topics", async () => {
+  const { POST, DELETE } = await import("../app/api/topic-policies/route");
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  const { isSharedCampaignTopic, resolveCampaignPolicies } = await import("./types");
+  const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({ id: "user", username: "user", role: "user", realName: "", companyName: "", gesellschaft: "" })}`;
+  for (const topic of ["private Krankenversicherung", "betriebliche Krankenversicherung"]) {
+    const request = (method: string) => new Request("https://example.test/api/topic-policies", { method, headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ topic, callObjective: "Unzulässige Änderung" }) });
+    assert.equal((await POST(request("POST"))).status, 403);
+    assert.equal((await DELETE(request("DELETE"))).status, 403);
+  }
+  assert.equal(isSharedCampaignTopic("PRIVATE KRANKENVERSICHERUNG"), true);
+  assert.equal(isSharedCampaignTopic("Individuelles Thema"), false);
+  const shared = [{ topic: "private Krankenversicherung", callObjective: "Gemeinsamer Originalauftrag" }];
+  const firstUser = resolveCampaignPolicies(shared, [{ topic: "private Krankenversicherung", callObjective: "Alte persönliche Kopie" }, { topic: "Persönlich A", callObjective: "Nur A" }]);
+  const secondUser = resolveCampaignPolicies(shared, [{ topic: "Persönlich B", callObjective: "Nur B" }]);
+  assert.equal(firstUser[0].callObjective, "Gemeinsamer Originalauftrag");
+  assert.equal(secondUser[0].callObjective, "Gemeinsamer Originalauftrag");
+  assert.equal(secondUser.some((policy) => policy.topic === "Persönlich A"), false);
+});
+
 test("global assignment inspection is denied to unauthenticated callers", async () => {
   const { GET, POST } = await import("../app/api/telnyx/topic-policies/route");
   assert.equal((await GET(new Request("https://example.test/api/telnyx/topic-policies?scope=global"))).status, 403);

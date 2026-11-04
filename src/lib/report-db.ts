@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { attachDatabasePool } from "@vercel/functions";
-import { TOPICS } from "./types";
+import { isSharedCampaignTopic, TOPICS } from "./types";
 import type { CallReport, ConversationEvent, CrmSavedView, CrmUiPreferences, Lead, LeadActivity, LeadNote, LeadTask, ReportOutcome, ScriptConfig, Topic } from "./types";
 import type { CalendarEvent, LeadEmailActivity } from "./types";
 import { hashPassword, verifyPassword, type UserRole } from "./session";
@@ -2852,6 +2852,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
       return {
         id: String(data.id || `playbook-${topic}`),
         topic,
+        sourceTopic: typeof data.sourceTopic === "string" ? data.sourceTopic : undefined,
         // Topic-Policy-Felder: explizite Werte aus PostgreSQL behalten,
         // alte Playbook-Inhalte nur als Rückwärtskompatibilitätsfallback nutzen.
         callObjective: typeof data.callObjective === "string" ? data.callObjective : undefined,
@@ -2976,6 +2977,31 @@ export async function deleteUserScriptFromPostgres(userId: string, topic: string
   return (result.rowCount || 0) > 0;
 }
 
+export async function createPersonalCampaignCopy(userId: string, source: ScriptConfig, topic: string): Promise<ScriptConfig | null> {
+  if (isSharedCampaignTopic(topic)) throw new Error("Der Name ist für eine gemeinsame Kampagne reserviert.");
+  const database = await getDatabasePool();
+  const script = { ...source, id: makeId("usr-playbook"), topic, sourceTopic: source.sourceTopic || source.topic };
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`user_playbooks:${userId}`]);
+    const existing = await client.query("SELECT 1 FROM user_playbooks WHERE user_id = $1 AND LOWER(TRIM(topic)) = LOWER(TRIM($2))", [userId, topic]);
+    if (existing.rows.length) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const saved = await client.query(`INSERT INTO user_playbooks (id,user_id,topic,content,created_from_default,updated_at)
+      VALUES ($1,$2,$3,$4,false,NOW()) ON CONFLICT (user_id,topic) DO NOTHING RETURNING id`, [script.id,userId,topic,JSON.stringify(script)]);
+    await client.query("COMMIT");
+    return saved.rows.length ? script : null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function bootstrapUserScriptsFromDefaults(
   userId: string,
   defaults: ScriptConfig[],
@@ -2991,7 +3017,7 @@ export async function bootstrapUserScriptsFromDefaults(
       return true;
     }
 
-    for (const script of defaults) {
+    for (const script of defaults.filter((entry) => !isSharedCampaignTopic(entry.topic))) {
       await writeUserScriptToPostgres(
         userId,
         {
@@ -3361,13 +3387,16 @@ export async function canUserAccessTopic(userId: string, topic: string): Promise
   if (!user) {
     return false;
   }
+  if (isSharedCampaignTopic(topic)) return true;
 
   const allowList = user.allowedPlaybookTopics || [];
   if (allowList.length === 0) {
     return true;
   }
 
-  return allowList.includes(topic);
+  if (allowList.includes(topic)) return true;
+  const personal = await readUserScriptsFromPostgres(userId);
+  return Boolean(personal?.some((policy) => policy.topic === topic));
 }
 
 export async function updateUserCrmUiPreferences(userId: string, prefs: CrmUiPreferences): Promise<void> {

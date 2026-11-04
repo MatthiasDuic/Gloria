@@ -7,7 +7,7 @@ import CRMDashboard from "./page-crm-new";
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
-import { TOPICS } from "@/lib/types";
+import { isSharedCampaignTopic, TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -969,6 +969,8 @@ export default function HomePage() {
   const [importListName, setImportListName] = useState("");
   const [importTopic, setImportTopic] = useState<Topic | "">(TOPICS[0]);
   const [detailTopic, setDetailTopic] = useState<Topic>(TOPICS[0]);
+  const [copyCampaignSource, setCopyCampaignSource] = useState<string | null>(null);
+  const [copyCampaignName, setCopyCampaignName] = useState("");
   const [playbookCategoryFilter, setPlaybookCategoryFilter] = useState<string>(PLAYBOOK_CATEGORY_ALL);
   const [voiceTopic, setVoiceTopic] = useState<Topic>(TOPICS[0]);
   const [voicePreview, setVoicePreview] = useState("");
@@ -1077,6 +1079,7 @@ export default function HomePage() {
   }
 
   const activeDraft = draftScripts[detailTopic];
+  const sharedCampaignReadOnly = isSharedCampaignTopic(detailTopic) && currentUser?.role !== "master";
   const playbookTopicOptions = useMemo(
     () => Array.from(new Set([...TOPICS, ...Object.keys(draftScripts)])),
     [draftScripts],
@@ -1901,6 +1904,28 @@ export default function HomePage() {
       const errorMessage = error instanceof Error ? error.message : "Kampagne speichern fehlgeschlagen.";
       setNotice(errorMessage);
       setSaveStatus({ type: "error", message: errorMessage });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyCampaign() {
+    if (!copyCampaignSource || !copyCampaignName.trim()) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/topic-policies/copy", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceTopic: copyCampaignSource, topic: copyCampaignName.trim() }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Kampagne konnte nicht kopiert werden.");
+      await loadDashboard();
+      setDetailTopic(payload.topicPolicy.topic);
+      setCopyCampaignSource(null);
+      setCopyCampaignName("");
+      setNotice(`Persönliche Kampagne „${payload.topicPolicy.topic}“ angelegt.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Kampagne konnte nicht kopiert werden.");
     } finally {
       setBusy(false);
     }
@@ -3084,6 +3109,12 @@ export default function HomePage() {
                       ))}
                     </select>
                     <button className="btn ghost" onClick={() => setShowNewTopicForm((v) => !v)} style={{ marginLeft: 8 }}>+ Neues Thema</button>
+                    <button className="btn ghost" type="button"
+                      disabled={busy || !data.topicPolicies.some((policy) => policy.topic === detailTopic)}
+                      title="Persönliche Kopie der gespeicherten Kampagne anlegen"
+                      onClick={() => { setCopyCampaignSource(detailTopic); setCopyCampaignName(`${detailTopic.slice(0, 100)} - Kopie`); }}>
+                      Kampagne kopieren
+                    </button>
                     <button
                       className="btn danger"
                       onClick={() => void deleteCampaignTopic(detailTopic)}
@@ -3133,6 +3164,15 @@ export default function HomePage() {
                 <p className="subtle top-gap">
                   Kategorie-Filter aktiv: <strong>{playbookCategoryFilter}</strong>
                 </p>
+                {copyCampaignSource ? (
+                  <div className="row top-gap">
+                    <input type="text" aria-label="Name der persönlichen Kampagnenkopie" maxLength={120}
+                      value={copyCampaignName} onChange={(event) => setCopyCampaignName(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") void copyCampaign(); }} style={{ flex: 1 }} />
+                    <button className="btn" type="button" onClick={() => void copyCampaign()} disabled={busy || !copyCampaignName.trim()}>Kopie anlegen</button>
+                    <button className="btn ghost" type="button" onClick={() => setCopyCampaignSource(null)} disabled={busy}>Abbrechen</button>
+                  </div>
+                ) : null}
                 {showNewTopicForm ? (
                   <div className="row top-gap">
                     <input
@@ -3153,6 +3193,7 @@ export default function HomePage() {
                   <>
                     <div className="mini-panel playbook-card top-gap">
                       <h3>Kampagne konfigurieren</h3>
+                      {isSharedCampaignTopic(detailTopic) ? <p className="subtle" role="status">Gemeinsame Kampagne · {sharedCampaignReadOnly ? "Nur vom Master bearbeitbar" : "Änderungen gelten für alle Nutzer"}</p> : null}
                       <p className="subtle">
                         Gib Gloria einen konkreten Auftrag. Sie nutzt das Fachwissen als Grundlage und führt das Gespräch passend zur Reaktion des Gegenübers – nicht als abgelesenes Skript.
                       </p>
@@ -3165,6 +3206,7 @@ export default function HomePage() {
                           Auftrag für Gloria
                           <textarea
                             value={activeDraft.callObjective ?? ""}
+                            readOnly={sharedCampaignReadOnly}
                             rows={5}
                             maxLength={3000}
                             placeholder={"Beispiel: Finde heraus, ob ein Beratungstermin zum Thema sinnvoll ist. Erkläre den passenden Nutzen mit dem Kampagnenwissen und vereinbare bei echtem Interesse einen Termin. Bei Ablehnung respektvoll beenden."}
@@ -3178,10 +3220,23 @@ export default function HomePage() {
                           </span>
                         </label>
                         <label className="full-row">
+                          Verbindliche Gesprächsregeln
+                          <textarea
+                            value={activeDraft.conversationGuardrails ?? ""}
+                            rows={5}
+                            readOnly={sharedCampaignReadOnly}
+                            onChange={(event) => setDraftScripts((current) => ({
+                              ...current,
+                              [detailTopic]: { ...current[detailTopic], conversationGuardrails: event.target.value },
+                            }))}
+                          />
+                        </label>
+                        <label className="full-row">
                           Fragen nach bestätigtem Termin
                           <span className="subtle">Eine Frage pro Zeile. Gloria fragt sie erst nach Terminbestätigung und Zustimmung ab.</span>
                           <textarea
                             value={activeDraft.preparationQuestions ?? activeDraft.pkvHealthQuestions ?? ""}
+                            readOnly={sharedCampaignReadOnly}
                             rows={6}
                             onChange={(event) => setDraftScripts((current) => ({
                               ...current,
@@ -3196,6 +3251,7 @@ export default function HomePage() {
                           </span>
                           <textarea
                             value={(activeDraft.knowledgeSources || []).join("\n")}
+                            readOnly={sharedCampaignReadOnly}
                             rows={4}
                             placeholder={"https://example.de/leistungen\nhttps://example.de/faq"}
                             onChange={(event) => setDraftScripts((current) => ({
@@ -3221,7 +3277,7 @@ export default function HomePage() {
                         </label>
                       </div>
                       <div className="row top-gap">
-                        <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>
+                        <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy || sharedCampaignReadOnly}>
                           Kampagne speichern
                         </button>
                         {saveStatus ? (
@@ -3554,7 +3610,7 @@ export default function HomePage() {
                     </details>
 
                     <div className="row top-gap">
-                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy}>Kampagnenleitfaden speichern</button>
+                      <button className="btn" onClick={() => void saveScript(detailTopic)} disabled={busy || sharedCampaignReadOnly}>Kampagnenleitfaden speichern</button>
                       <span className="subtle">Der Leitfaden wird gespeichert und für neue Gespräche dieses Themas verwendet.</span>
                     </div>
                     {saveStatus ? (

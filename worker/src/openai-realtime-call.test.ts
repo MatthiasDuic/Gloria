@@ -45,6 +45,13 @@ test("the healthcare reason takes precedence over private-insurance wording at r
   assert.match(instructions, /Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden/);
 });
 
+test("renamed personal campaign copies retain their source's healthcare rules", () => {
+  const context = newContext({ callSid: "copy", streamSid: "copy-stream", topic: "Meine persönliche Kampagne", policyTopic: "private Krankenversicherung" });
+  assert.equal(context.topicKind, "pkv");
+  assert.match(buildRealtimeInstructions(context), /ANLASS AM EMPFANG/);
+  assert.match(buildRealtimeInstructions(context), /langfristige Beitragsentwicklung in der Gesundheitsversorgung/);
+});
+
 test("keeps a warm contextual bridge after the introduction without skipping the assignment or consent", () => {
   const ctx = buildPkvContext();
   ctx.callObjective = "Ein Erstgespräch zur Beitragsentwicklung in der Gesundheitsversorgung führen.";

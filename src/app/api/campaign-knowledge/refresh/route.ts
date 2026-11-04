@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchCampaignKnowledge } from "@/lib/campaign-knowledge";
 import { getDashboardData, saveScript } from "@/lib/storage";
 import { listUsers } from "@/lib/report-db";
+import { isSharedCampaignTopic } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
     let skipped = 0;
     let failed = 0;
 
-    for (const user of users) {
+    for (const user of [{ id: undefined }, ...users]) {
       let dashboard;
       try {
         dashboard = await getDashboardData({ userId: user.id, role: "user" });
@@ -40,6 +41,7 @@ export async function GET(request: Request) {
       }
 
       for (const campaign of dashboard.topicPolicies) {
+        if (Boolean(user.id) === isSharedCampaignTopic(campaign.topic)) continue;
         const sources = campaign.knowledgeSources || [];
         if (!sources.length) {
           skipped += 1;
@@ -64,7 +66,7 @@ export async function GET(request: Request) {
               knowledgeFetchedAt: new Date().toISOString(),
               knowledgeFetchError: "",
             },
-            { userId: user.id },
+            { userId: isSharedCampaignTopic(campaign.topic) ? undefined : user.id },
           );
           updated += 1;
         } catch (error) {
@@ -79,7 +81,7 @@ export async function GET(request: Request) {
             await saveScript(
               campaign.topic,
               { knowledgeFetchError: message.slice(0, 500) },
-              { userId: user.id },
+              { userId: isSharedCampaignTopic(campaign.topic) ? undefined : user.id },
             );
           } catch (saveError) {
             console.error("[campaign_knowledge_cron] error_status_save_failed", {

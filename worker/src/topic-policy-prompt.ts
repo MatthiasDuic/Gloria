@@ -3,6 +3,7 @@ import { log } from "./log.js";
 
 export type TopicPolicyFields = {
   topic?: string;
+  sourceTopic?: string;
   callObjective?: string;
   opener?: string;
   discovery?: string;

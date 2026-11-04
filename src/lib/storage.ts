@@ -47,7 +47,7 @@ import type {
   ScriptConfig,
   Topic,
 } from "./types";
-import { TOPICS } from "./types";
+import { isSharedCampaignTopic, resolveCampaignPolicies, TOPICS } from "./types";
 import { CampaignContactSelectionError, getCompanyContactPersons, getCallSource, isDueGloriaTask, isLeadCustomer, normalizeLeadProductDetails, type CampaignContactSelection } from "./crm-helpers";
 import { getMissingCrmFields } from "./crm-enrichment";
 
@@ -353,12 +353,7 @@ async function filterScriptsByUserAccess(
     return [];
   }
 
-  if (!user.allowedPlaybookTopics || user.allowedPlaybookTopics.length === 0) {
-    return configuredScripts;
-  }
-
-  const allowed = new Set(user.allowedPlaybookTopics);
-  return configuredScripts.filter((script) => allowed.has(script.topic));
+  return configuredScripts;
 }
 
 async function persistTranscriptChunkEvent(payload: {
@@ -629,26 +624,15 @@ async function readScriptsWithMode(userId?: string): Promise<{
       throw new Error("Der gespeicherte Gesprächsleitfaden ist vorübergehend nicht verfügbar. Standardinhalte werden nicht übernommen.");
     }
 
-    if (userScripts && userScripts.length > 0) {
+    if (userScripts) {
+      const shared = await withPostgresRetry(() => readScriptsFromPostgres(), "readSharedScripts(global)");
+      if (shared === null && isDatabaseUrlConfigured()) throw new Error("Die gemeinsamen Gesprächsaufträge sind nicht verfügbar.");
       return {
-        data: await filterScriptsByUserAccess(normalizeTopicPolicies(userScripts), userId),
+        data: await filterScriptsByUserAccess(normalizeTopicPolicies(resolveCampaignPolicies(shared || [], userScripts)), userId),
         mode: "postgres",
       };
     }
 
-    const bootstrapped = await bootstrapUserScriptsFromDefaults(userId, defaultScripts);
-    if (bootstrapped) {
-      const afterBootstrap = await withPostgresRetry(
-        () => readUserScriptsFromPostgres(userId),
-        `readUserScripts(userId=${userId}) after bootstrap`,
-      );
-      if (afterBootstrap && afterBootstrap.length > 0) {
-        return {
-          data: await filterScriptsByUserAccess(normalizeTopicPolicies(afterBootstrap), userId),
-          mode: "postgres",
-        };
-      }
-    }
   }
 
   const postgresData = await withPostgresRetry(
@@ -1726,7 +1710,7 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
       throw new Error("Benutzer nicht gefunden.");
     }
 
-    if (user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(topic)) {
+    if (isSharedCampaignTopic(topic) && user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(topic)) {
       throw new Error(`Das Thema "${topic}" ist für diesen Benutzer nicht freigegeben.`);
     }
   }
@@ -1757,13 +1741,13 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
     ...activePolicy
   } = combined;
   const updatedScript: ScriptConfig = {
-    id: existing?.id || `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`,
-    topic,
     topicSummary: "",
     behavior: "",
     conversationGuardrails: "",
     requiredQuestions: "",
     ...activePolicy,
+    id: existing?.id || (options?.userId ? `usr-playbook-${randomUUID()}` : `playbook-${topic.toLowerCase().replace(/\s+/g, "-")}`),
+    topic,
   };
 
   const updated = existing
@@ -1771,6 +1755,7 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
     : [updatedScript, ...scripts];
 
   if (options?.userId) {
+    if (isSharedCampaignTopic(topic)) throw new Error("Gemeinsame Kampagnen müssen vom Master zentral gespeichert werden.");
     const wroteUserScript = await writeUserScriptToPostgres(options.userId, updatedScript, false);
 
     if (wroteUserScript) {
@@ -1786,6 +1771,7 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
         storageMode: "postgres" as const,
       };
     }
+    if (isDatabaseUrlConfigured()) throw new Error("Das persönliche Thema konnte nicht gespeichert werden; globale Inhalte bleiben unverändert.");
   }
 
   const wroteToPostgres = await writeScriptToPostgres(updatedScript);

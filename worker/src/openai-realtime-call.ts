@@ -14,6 +14,7 @@ import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAu
 import { advancePreparation, APPOINTMENT_FAREWELL_TEXT, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
+import { createVoiceProfile, detectTopicKind } from "./topic-policy.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
 import { hasUsableCallAssignment, loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { GLORIA_CORE_INSTRUCTIONS } from "./gloria-core-instructions.js";
@@ -298,7 +299,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
   ];
 
-  if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.topic || "")) {
+  if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.policyTopic || ctx.topic || "")) {
     parts.push("ANLASS AM EMPFANG: Bei Empfang, Gatekeeper oder digitaler Rezeption lautet die kurze thematische Einordnung ausschließlich: 'Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.' Sage dort nicht 'private Krankenversicherung' oder 'seine private Krankenversicherung' und behaupte keinen privaten Versicherungsstatus des Ansprechpartners. Diese Vorgabe hat am Empfang Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden. Noch kein Fachgespräch am Empfang.");
   }
   if (target) {
@@ -820,7 +821,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (contactRouting.gatekeeperRequestMade) {
           if (!contactRouting.gatekeeperReasonGiven && isGatekeeperReasonQuestion(transcript)) {
             contactRouting.gatekeeperReasonGiven = true;
-            requestDeterministicSpeech(buildGatekeeperReason(currentContext.topic, currentContext.contactName));
+            requestDeterministicSpeech(buildGatekeeperReason(currentContext.policyTopic || currentContext.topic, currentContext.contactName));
             return;
           }
           requestDeterministicSpeech(
@@ -1387,6 +1388,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
         if (!policy) return;
+        ctx.policyTopic = policy.sourceTopic || ctx.topic;
+        ctx.topicKind = detectTopicKind(ctx.policyTopic);
+        ctx.voiceProfile = createVoiceProfile(ctx.policyTopic);
         ctx.callObjective = policy.callObjective?.trim();
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteUserCampaignTopic, getDashboardData, saveScript } from "@/lib/storage";
 import type { TopicPolicyConfig } from "@/lib/types";
+import { isSharedCampaignTopic } from "@/lib/types";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
 import { TopicPolicyPayloadSchema } from "@/lib/topic-policy-schema";
 import { CampaignKnowledgeError, fetchCampaignKnowledge, normalizeKnowledgeSources } from "@/lib/campaign-knowledge";
@@ -64,6 +65,9 @@ export async function POST(request: Request) {
   if (!parsed.data.topic) {
     return NextResponse.json({ error: "Thema fehlt." }, { status: 400 });
   }
+  if (isSharedCampaignTopic(parsed.data.topic) && sessionUser.role !== "master") {
+    return NextResponse.json({ error: "Diese gemeinsame Kampagne kann nur der Master bearbeiten." }, { status: 403 });
+  }
 
   try {
     const existing = (await getDashboardData({ userId: resolvedUserId, role: "user" }))
@@ -81,7 +85,7 @@ export async function POST(request: Request) {
         knowledgeFetchedAt: knowledgeSources.length ? new Date().toISOString() : undefined,
         knowledgeFetchError: "",
       },
-      { userId: resolvedUserId },
+      { userId: isSharedCampaignTopic(parsed.data.topic) ? undefined : resolvedUserId },
     );
     return NextResponse.json({
       ok: true,
@@ -115,6 +119,9 @@ export async function DELETE(request: Request) {
   const topic = typeof payload?.topic === "string" ? payload.topic.trim() : "";
   if (!topic) {
     return NextResponse.json({ error: "Kampagnenname ist erforderlich." }, { status: 400 });
+  }
+  if (isSharedCampaignTopic(topic)) {
+    return NextResponse.json({ error: "Gemeinsame Standardkampagnen können nicht gelöscht werden." }, { status: 403 });
   }
 
   try {

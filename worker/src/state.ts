@@ -36,6 +36,7 @@ export type CallContext = {
   contactName?: string;
   leadNote?: string;
   topic?: string;
+  policyTopic?: string;
   callObjective?: string;
   ownerRealName?: string;
   ownerCompanyName?: string;
@@ -95,7 +96,7 @@ export function newContext(initial: Partial<CallContext> & { callSid: string; st
     transcript: [],
     startedAt: Date.now(),
     ...initial,
-    topicKind: initial.topicKind || detectTopicKind(topic),
-    voiceProfile: initial.voiceProfile || createVoiceProfile(topic),
+    topicKind: initial.topicKind || detectTopicKind(initial.policyTopic || topic),
+    voiceProfile: initial.voiceProfile || createVoiceProfile(initial.policyTopic || topic),
   };
 }
