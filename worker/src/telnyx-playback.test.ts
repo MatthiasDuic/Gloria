@@ -44,6 +44,47 @@ test("splits realtime audio into paced Telnyx frames", () => {
   assert.equal(idleCount, 1);
 });
 
+test("prebuffers six phone frames before starting playback", () => {
+  const scheduler = manualScheduler();
+  const frames: Buffer[] = [];
+  const playback = new TelnyxPlayback({
+    sendFrame: (frame) => { frames.push(frame); return true; },
+    prebufferFrames: 6,
+    schedule: scheduler.schedule,
+    cancelSchedule: scheduler.cancelSchedule,
+  });
+
+  playback.startResponse();
+  playback.appendBase64Audio(Buffer.alloc(5 * 160).toString("base64"));
+  assert.equal(frames.length, 0);
+  playback.appendBase64Audio(Buffer.alloc(160).toString("base64"));
+  assert.equal(frames.length, 1);
+});
+
+test("reports a temporary TTS playback underrun but stays pending", () => {
+  const scheduler = manualScheduler();
+  const frames: Buffer[] = [];
+  let underrunCount = 0;
+  const playback = new TelnyxPlayback({
+    sendFrame: (frame) => { frames.push(frame); return true; },
+    onUnderrun: () => { underrunCount += 1; },
+    schedule: scheduler.schedule,
+    cancelSchedule: scheduler.cancelSchedule,
+  });
+
+  playback.startResponse();
+  playback.appendBase64Audio(Buffer.alloc(320).toString("base64"));
+  scheduler.runNext();
+  scheduler.runNext();
+  assert.equal(underrunCount, 1);
+  assert.equal(playback.isPending(), true);
+  playback.appendBase64Audio(Buffer.alloc(320).toString("base64"));
+  playback.finishAudio(0xd5);
+  scheduler.runNext();
+  scheduler.runNext();
+  assert.equal(underrunCount, 1);
+});
+
 test("pads the final partial frame with the codec silence byte", () => {
   const frames: Buffer[] = [];
   const playback = new TelnyxPlayback({ sendFrame: (frame) => { frames.push(frame); return true; } });

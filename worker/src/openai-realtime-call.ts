@@ -123,6 +123,13 @@ export function openAiAudioFormat(encoding?: string): "audio/pcma" | "audio/pcmu
 
 export const OPENAI_REALTIME_INPUT_NOISE_REDUCTION = { type: "near_field", strength: 1 } as const;
 
+export function buildPkvCostIncreaseFollowup(previousAssistantText: string, userText: string): string | undefined {
+  const askedAboutCostDevelopment = /(?:kosten|beitr[aä]ge).{0,80}(?:wahrgenommen|erlebt)|(?:wahrgenommen|erlebt).{0,80}(?:kosten|beitr[aä]ge)/i.test(previousAssistantText);
+  const reportedAnnualIncrease = /\b(?:steigen|steigt|erh[öo]hen sich|erh[öo]ht sich)\b.{0,32}\b(?:jedes jahr|j[aä]hrlich)\b/i.test(userText);
+  if (!askedAboutCostDevelopment || !reportedAnnualIncrease) return undefined;
+  return "Ja, das höre ich öfter: Die Gründe sind im Alltag nicht immer direkt nachvollziehbar. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr? Sie können die Angabe auch überspringen.";
+}
+
 export function isLikelyNoiseTranscript(text: string): boolean {
   return isUnclearConversationText(text);
 }
@@ -486,7 +493,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const playback = new TelnyxPlayback({
-    prebufferFrames: 2,
+    prebufferFrames: 6,
+    onUnderrun: () => log.warn("realtime.playback_underrun", { callSid: ctx?.callSid, bytesSent: playback.bytesSent() }),
     sendFrame: (frame) => sendTelnyx({
       event: "media",
       stream_id: streamId,
@@ -871,6 +879,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (preparationState.stage === "inactive") {
+      const previousAssistantText = [...currentContext.transcript.slice(0, -1)].reverse().find((turn) => turn.role === "assistant")?.text || "";
+      const pkvCostIncreaseFollowup = currentContext.topicKind === "pkv"
+        ? buildPkvCostIncreaseFollowup(previousAssistantText, transcript)
+        : undefined;
+      if (pkvCostIncreaseFollowup) {
+        requestDeterministicSpeech(pkvCostIncreaseFollowup);
+        return;
+      }
       const requiredStep = getRequiredContributionStep(currentContext);
       const lastAssistant = [...currentContext.transcript].reverse().find((turn) => turn.role === "assistant")?.text || "";
       if (event.type === "answer" && requiredStep

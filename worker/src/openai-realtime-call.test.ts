@@ -40,7 +40,7 @@ import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -114,6 +114,16 @@ test("maps the configured bidirectional codec to Realtime audio", () => {
 
 test("enables full near-field noise reduction before speech detection", () => {
   assert.deepEqual(OPENAI_REALTIME_INPUT_NOISE_REDUCTION, { type: "near_field", strength: 1 });
+});
+
+test("acknowledges annual PKV cost increases before asking for the monthly contribution", () => {
+  const followup = buildPkvCostIncreaseFollowup(
+    "Wie haben Sie die Entwicklung Ihrer Gesundheitskosten in den letzten Jahren wahrgenommen?",
+    "Wir steigen jedes Jahr.",
+  );
+  assert.match(followup || "", /^Ja, das höre ich öfter:/);
+  assert.match(followup || "", /Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr/);
+  assert.equal(buildPkvCostIncreaseFollowup("Was kostet das?", "Die steigen jedes Jahr."), undefined);
 });
 
 test("asks for a callback instead of continuing the pitch when the contact has no time", () => {

@@ -3,6 +3,7 @@ export type PlaybackTimer = ReturnType<typeof setTimeout>;
 export type TelnyxPlaybackOptions = {
   sendFrame: (frame: Buffer) => boolean;
   onIdle?: () => void;
+  onUnderrun?: () => void;
   frameBytes?: number;
   frameIntervalMs?: number;
   prebufferFrames?: number;
@@ -13,6 +14,7 @@ export type TelnyxPlaybackOptions = {
 export class TelnyxPlayback {
   private readonly sendFrame: (frame: Buffer) => boolean;
   private readonly onIdle?: () => void;
+  private readonly onUnderrun?: () => void;
   private readonly frameBytes: number;
   private readonly frameIntervalMs: number;
   private readonly prebufferFrames: number;
@@ -29,6 +31,7 @@ export class TelnyxPlayback {
   constructor(options: TelnyxPlaybackOptions) {
     this.sendFrame = options.sendFrame;
     this.onIdle = options.onIdle;
+    this.onUnderrun = options.onUnderrun;
     this.frameBytes = options.frameBytes ?? 160;
     this.frameIntervalMs = options.frameIntervalMs ?? 20;
     this.prebufferFrames = Math.max(1, options.prebufferFrames ?? 1);
@@ -107,6 +110,8 @@ export class TelnyxPlayback {
       if (!this.stopped && this.audioFinished) {
         this.responsePending = false;
         this.onIdle?.();
+      } else if (!this.stopped && this.responsePending) {
+        this.onUnderrun?.();
       }
       return;
     }
