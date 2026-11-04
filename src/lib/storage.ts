@@ -625,6 +625,9 @@ async function readScriptsWithMode(userId?: string): Promise<{
       () => readUserScriptsFromPostgres(userId),
       `readUserScripts(userId=${userId})`,
     );
+    if (userScripts === null && isDatabaseUrlConfigured()) {
+      throw new Error("Der gespeicherte Gesprächsleitfaden ist vorübergehend nicht verfügbar. Standardinhalte werden nicht übernommen.");
+    }
 
     if (userScripts && userScripts.length > 0) {
       return {
@@ -652,6 +655,9 @@ async function readScriptsWithMode(userId?: string): Promise<{
     () => readScriptsFromPostgres(),
     "readScripts(global)",
   );
+  if (postgresData === null && isDatabaseUrlConfigured()) {
+    throw new Error("Der gespeicherte Gesprächsleitfaden ist vorübergehend nicht verfügbar. Standardinhalte werden nicht übernommen.");
+  }
 
   if (postgresData) {
     return {

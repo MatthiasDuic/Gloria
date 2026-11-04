@@ -1877,7 +1877,7 @@ export async function readScriptsFromPostgres(): Promise<ScriptConfig[] | null> 
     `);
 
     if (!result.rows.length) {
-      return null;
+      return [];
     }
 
     return result.rows.map((row) => {
@@ -2841,7 +2841,7 @@ export async function readUserScriptsFromPostgres(userId: string): Promise<Scrip
     );
 
     if (!result.rows.length) {
-      return null;
+      return [];
     }
 
     return result.rows.map((row) => {

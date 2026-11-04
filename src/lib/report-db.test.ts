@@ -7,6 +7,31 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("global assignment inspection is denied to unauthenticated callers", async () => {
+  const { GET } = await import("../app/api/telnyx/topic-policies/route");
+  assert.equal((await GET(new Request("https://example.test/api/telnyx/topic-policies?scope=global"))).status, 403);
+});
+
+test("a failed user-playbook read never bootstraps or overwrites conversation contents", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  const writes: string[] = [];
+  mock.method(Pool.prototype, "query", async (sql: string) => {
+    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/i.test(sql)) throw new Error("fixture database unavailable");
+    if (/INSERT INTO (?:user_playbooks|gloria_playbooks)/.test(sql)) writes.push(sql);
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { getDashboardData } = await import("./storage");
+    await assert.rejects(getDashboardData({ userId: "fixture-owner", role: "user" }), /Gesprächsleitfaden.*nicht verfügbar/);
+    assert.deepEqual(writes, []);
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
 test("queue recovery frees only calls explicitly confirmed finished by Telnyx", async () => {
   const previousUrl = process.env.DATABASE_URL;
   const previousApiKey = process.env.TELNYX_API_KEY;

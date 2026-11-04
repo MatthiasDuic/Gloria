@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDashboardData } from "@/lib/storage";
+import { getSessionUserFromRequest } from "@/lib/request-auth";
+import { readScriptsFromPostgres } from "@/lib/report-db";
 
 export const runtime = "nodejs";
 
@@ -40,11 +42,18 @@ function isInternalTokenAuthorized(request: Request): boolean {
 
 export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    if (url.searchParams.get("scope") === "global") {
+      const sessionUser = getSessionUserFromRequest(request);
+      if (sessionUser?.role !== "master") return NextResponse.json({ error: "Nicht autorisiert." }, { status: 403 });
+      const policies = await readScriptsFromPostgres();
+      if (policies === null) return NextResponse.json({ error: "Gespeicherte Leitfäden sind nicht verfügbar." }, { status: 503 });
+      return NextResponse.json({ topicPolicies: policies, topicPoliciesStorageMode: "postgres" }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (!isInternalAuthorized(request) && !isInternalTokenAuthorized(request)) {
       return NextResponse.json({ error: "Nicht autorisiert." }, { status: 401 });
     }
 
-    const url = new URL(request.url);
     const userId = url.searchParams.get("userId")?.trim() || undefined;
     const data = await getDashboardData({ userId, role: userId ? "user" : "master" });
     return NextResponse.json(
