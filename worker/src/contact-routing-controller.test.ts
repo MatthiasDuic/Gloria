@@ -92,6 +92,12 @@ test("stays silent throughout queue announcements until a person answers", () =>
   assert.equal(state.stage, "decision_maker");
 });
 
+test("treats common short German phone greetings as a human contact", () => {
+  for (const text of ["Ja, Müller?", "Müller, ja?", "Hallo, Schmidt.", "Ja bitte?"]) {
+    assert.equal(advanceContactRouting(createContactRoutingState("Herr Neumann"), text).stage, "confirming_decision_maker", text);
+  }
+});
+
 test("recognizes a self-identified decision maker without repeating the pitch", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Frau Wagner"),

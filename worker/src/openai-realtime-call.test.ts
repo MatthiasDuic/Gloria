@@ -306,6 +306,42 @@ test("the actual stream stays silent before a human and caps repeated queues at 
   });
 });
 
+test("a short first greeting starts the identity before ASR and only appends the routing question", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "hello" });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "hello" });
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 1);
+    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater/);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "hello", transcript: "Ja, Müller?" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(ttsRequests.length, 2);
+    assert.match(ttsRequests[1], /Spreche ich mit Herrn Neumann\?/);
+    assert.doesNotMatch(ttsRequests[1], /Gloria|Entschuldigung/);
+    assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+    assert.equal(hangups.length, 0);
+  });
+});
+
+test("an early identity is withdrawn when the first short segment turns out to be a queue", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "queue" });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "queue" });
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "queue", transcript: "Bitte warten Sie." });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "human" });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "human" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "human", transcript: "Hallo?" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(ttsRequests.length, 2);
+    assert.match(ttsRequests[1], /Entschuldigung, habe ich Herrn Neumann am Apparat\?/);
+    assert.equal(hangups.length, 0);
+  });
+});
+
 test("a human greeting immediately releases the queue and cancels its timeout", { timeout: 10_000 }, async (t) => {
   await withRealtimeStream(async (socket, hangups) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });

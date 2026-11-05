@@ -49,7 +49,9 @@ export function isHumanContactAfterQueue(text: string): boolean {
   return classifyInboundSpeech(text) === "human"
     && (/\b(?:hallo|guten\s+(?:tag|morgen|abend)|am\s+apparat|hier\s+(?:ist|spricht)|mein\s+name\s+ist|ich\s+bin|das\s+bin\s+ich|wie\s+kann\s+ich|was\s+kann\s+ich|was\s+ist\s+ihr\s+anliegen|sie\s+sprechen\s+mit|wer\s+(?:ist\s+da|spricht)|worum\s+geht|was\s+(?:wollen|möchten)\s+sie)\b/i.test(text)
       || /\b(?:ich\s+(?:habe|möchte|will|kann|muss)|wir\s+(?:haben|möchten)|kein\s+interesse|nicht\s+(?:mehr\s+)?anrufen|rufen\s+sie\s+(?:bitte\s+)?nicht)\b/i.test(text)
-      || /^(?:ja(?:\s+bitte)?|bitte|[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?),?\s*[.!?]*$/i.test(text.trim()));
+      || /^(?:ja(?:\s+bitte)?|bitte|[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?),?\s*[.!?]*$/i.test(text.trim())
+      || /^(?:ja|hallo|moin)\s*,?\s*[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*[,.!?]*\s*(?:ja)?[.!?]*$/i.test(text.trim())
+      || /^[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*,\s*(?:ja|hallo)[.!?]*$/i.test(text.trim()));
 }
 
 export function classifyInboundSpeech(text: string): CallClassification {
