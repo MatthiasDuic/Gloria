@@ -894,34 +894,6 @@ async function initializeSchema() {
     );
   `);
 
-  await db.query(
-    `DELETE FROM gloria_playbooks WHERE topic <> ALL($1::text[])`,
-    [TOPICS],
-  );
-  await db.query(
-    `DELETE FROM user_playbooks WHERE topic <> ALL($1::text[])`,
-    [TOPICS],
-  );
-  await db.query(
-    `
-    UPDATE users
-    SET allowed_playbook_topics = COALESCE(
-      (
-        SELECT jsonb_agg(allowed_topic.topic)
-        FROM jsonb_array_elements_text(users.allowed_playbook_topics) AS allowed_topic(topic)
-        WHERE allowed_topic.topic = ANY($1::text[])
-      ),
-      '[]'::jsonb
-    )
-    WHERE EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(users.allowed_playbook_topics) AS allowed_topic(topic)
-      WHERE allowed_topic.topic <> ALL($1::text[])
-    )
-    `,
-    [TOPICS],
-  );
-
   await db.query(`
     CREATE TABLE IF NOT EXISTS gloria_leads (
       id TEXT PRIMARY KEY,
@@ -2444,7 +2416,7 @@ export async function writeScriptToPostgres(script: ScriptConfig): Promise<boole
     );
     return true;
   } catch (error) {
-    console.error("Postgres single script write failed, fallback to file storage", error);
+    console.error("Postgres single script write failed", error);
     return false;
   }
 }

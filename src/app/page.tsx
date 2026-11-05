@@ -1119,22 +1119,6 @@ export default function HomePage() {
     () => ensureStringArray(currentUser?.allowedPlaybookTopics),
     [currentUser?.allowedPlaybookTopics],
   );
-  const voiceTopicOptions = useMemo(
-    () => Array.from(
-      new Set(
-        (currentUserAllowedTopics.length
-          ? currentUserAllowedTopics
-          : playbookTopicOptions)
-          .map((topic) => String(topic).trim())
-          .filter(Boolean),
-      ),
-    ),
-    [currentUserAllowedTopics, playbookTopicOptions],
-  );
-  const voiceTopicGroups = useMemo(
-    () => buildTopicGroups(voiceTopicOptions),
-    [voiceTopicOptions],
-  );
 
   useEffect(() => {
     if (playbookCategoryFilter === PLAYBOOK_CATEGORY_ALL) {
@@ -3066,7 +3050,7 @@ export default function HomePage() {
                         </select>
                       ) : null}
                       <select value={voiceTopic} onChange={(event) => setVoiceTopic(event.target.value as Topic)}>
-                        {voiceTopicGroups.map((group) => (
+                        {playbookTopicGroups.map((group) => (
                           <optgroup key={group.label} label={group.label}>
                             {group.topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
                           </optgroup>

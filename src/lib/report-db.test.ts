@@ -7,6 +7,58 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("cold database initialization preserves custom topics and topic grants for master and user accounts", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  const topics = ["Recruiting", "Mitarbeitergewinnung"];
+  const accounts = ["master-owner", "regular-owner"];
+  let personal = accounts.flatMap((userId) => topics.map((topic) => ({
+    userId, topic, content: JSON.stringify({ id: `${userId}-${topic}`, topic, callObjective: `${userId}: ${topic}` }),
+  })));
+  let shared = [{ topic: "private Krankenversicherung", data: { topic: "private Krankenversicherung" } },
+    { topic: "Bestehendes eigenes Thema", data: { topic: "Bestehendes eigenes Thema" } }];
+  let grants = [...topics];
+  const statements: string[] = [];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    statements.push(sql);
+    const retainedTopics = Array.isArray(values[0]) ? values[0] : [];
+    if (/DELETE FROM user_playbooks WHERE topic <> ALL/.test(sql)) {
+      personal = personal.filter((entry) => retainedTopics.includes(entry.topic));
+    }
+    if (/DELETE FROM gloria_playbooks WHERE topic <> ALL/.test(sql)) {
+      shared = shared.filter((entry) => retainedTopics.includes(entry.topic));
+    }
+    if (/UPDATE users\s+SET allowed_playbook_topics/.test(sql)) {
+      grants = grants.filter((topic) => retainedTopics.includes(topic));
+    }
+    if (/^\s*SELECT topic, data\s+FROM gloria_playbooks/.test(sql)) return { rows: shared, rowCount: shared.length };
+    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/.test(sql)) {
+      const rows = personal.filter((entry) => entry.userId === values[0]);
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.includes("FROM users")) return { rows: [{ id: values[0], username: values[0], role: values[0] === accounts[0] ? "master" : "user", allowed_playbook_topics: grants }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { getTelephonyTopicPolicies } = await import("./storage");
+    const { findUserById, readScriptsFromPostgres } = await import("./report-db");
+    for (const userId of accounts) {
+      const loaded = await getTelephonyTopicPolicies(userId);
+      assert.equal(loaded.topicPoliciesStorageMode, "postgres");
+      for (const topic of topics) {
+        assert.equal(loaded.topicPolicies.find((policy) => policy.topic === topic)?.callObjective, `${userId}: ${topic}`);
+      }
+      assert.deepEqual((await findUserById(userId))?.allowedPlaybookTopics, topics);
+    }
+    assert.ok(statements.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_playbooks")));
+    assert.ok((await readScriptsFromPostgres())?.some((policy) => policy.topic === "Bestehendes eigenes Thema"));
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+  }
+});
+
 test("the transcript endpoint stores batch fields in the PostgreSQL record format", async () => {
   const previousUrl = process.env.DATABASE_URL;
   const previousToken = process.env.APP_INTERNAL_TOKEN;
@@ -110,7 +162,7 @@ test("users save personal topics while master changes update the single shared s
       const rows = personal.filter((entry) => entry.userId === values[0]);
       return { rows, rowCount: rows.length };
     }
-    if (sql.includes("FROM users")) return { rows: [{ id: "owner", username: "owner", role: "user", allowed_playbook_topics: ["Anderes Thema"] }], rowCount: 1 };
+    if (sql.includes("FROM users")) return { rows: [{ id: values[0], username: values[0], role: values[0] === "master-owner" ? "master" : "user", allowed_playbook_topics: ["Anderes Thema"] }], rowCount: 1 };
     if (sql.includes("INSERT INTO user_playbooks") && values.length >= 4) {
       personalWrites++;
       const stored = { userId: String(values[1]), topic: String(values[2]), content: String(values[3]) };
@@ -131,8 +183,8 @@ test("users save personal topics while master changes update the single shared s
     sharedWrites = 0;
     const { GET, POST } = await import("../app/api/topic-policies/route");
     const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
-    const request = (role: "master" | "user", topic: string, callObjective: string) => new Request("https://example.test/api/topic-policies", {
-      method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id: "owner", username: "owner", role, realName: "", companyName: "", gesellschaft: "" })}` },
+    const request = (role: "master" | "user", topic: string, callObjective: string, userId = "owner") => new Request("https://example.test/api/topic-policies", {
+      method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id: userId, username: userId, role, realName: "", companyName: "", gesellschaft: "" })}` },
       body: JSON.stringify({ topic, callObjective, knowledgeSources: [] }),
     });
     assert.equal((await POST(request("user", "Mein persönliches Thema", "Mein eigener Auftrag"))).status, 200);
@@ -146,8 +198,8 @@ test("users save personal topics while master changes update the single shared s
     assert.equal(data.topicPolicies.find((policy) => policy.topic === "private Krankenversicherung")?.callObjective, "Zentraler Masterauftrag");
     assert.ok(data.topicPolicies.some((policy) => policy.topic === "Mein persönliches Thema"));
     assert.equal((await POST(request("user", "Neues Thema ohne Auftrag", ""))).status, 200);
-    const freshSessionRequest = (id: string) => new Request("https://example.test/api/topic-policies", {
-      headers: { cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id, username: id, role: "user", realName: "", companyName: "", gesellschaft: "" })}` },
+    const freshSessionRequest = (id: string, role: "master" | "user" = "user") => new Request("https://example.test/api/topic-policies", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id, username: id, role, realName: "", companyName: "", gesellschaft: "" })}` },
     });
     const freshLogin = await GET(freshSessionRequest("owner"));
     assert.equal(freshLogin.status, 200);
@@ -158,10 +210,68 @@ test("users save personal topics while master changes update the single shared s
     assert.equal(afterEdit.topicPolicies.find((policy: { topic: string }) => policy.topic === "Neues Thema ohne Auftrag")?.callObjective, "Dauerhaft geänderter Auftrag");
     const otherLogin = await (await GET(freshSessionRequest("other-owner"))).json();
     assert.equal(otherLogin.topicPolicies.some((policy: { topic: string }) => policy.topic === "Neues Thema ohne Auftrag"), false);
+    const { getTelephonyTopicPolicies } = await import("./storage");
+    const { canUserAccessTopic } = await import("./report-db");
+    for (const role of ["master", "user"] as const) {
+      for (const topic of ["Recruiting", "Mitarbeitergewinnung"]) {
+        const response = await POST(request(role, topic, "", `${role}-owner`));
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).storageMode, "postgres");
+        assert.equal((await POST(request(role, topic, `${role}: ${topic}`, `${role}-owner`))).status, 200);
+      }
+    }
+    for (const role of ["master", "user"] as const) {
+      const ownerId = `${role}-owner`;
+      const login = await (await GET(freshSessionRequest(ownerId, role))).json();
+      const assignment = await getTelephonyTopicPolicies(ownerId);
+      assert.equal(login.topicPoliciesStorageMode, "postgres");
+      for (const topic of ["Recruiting", "Mitarbeitergewinnung"]) {
+        assert.equal(login.topicPolicies.find((policy: { topic: string }) => policy.topic === topic)?.callObjective, `${role}: ${topic}`);
+        assert.equal(assignment.topicPolicies.find((policy) => policy.topic === topic)?.callObjective, `${role}: ${topic}`);
+        assert.equal(await canUserAccessTopic(ownerId, topic), true);
+      }
+    }
+    const unrelatedLogin = await (await GET(freshSessionRequest("unrelated-owner"))).json();
+    assert.equal(unrelatedLogin.topicPolicies.some((policy: { topic: string }) => ["Recruiting", "Mitarbeitergewinnung"].includes(policy.topic)), false);
   } finally {
     mock.restoreAll();
     if (previous === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("configured database write failures never confirm a topic using a file fallback", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  mock.method(Pool.prototype, "query", async (sql: string) => {
+    if (/INSERT INTO (?:user_playbooks|gloria_playbooks)/.test(sql)) throw new Error("fixture write unavailable");
+    if (sql.includes("FROM users")) return { rows: [{ id: "owner", username: "owner", role: "user", allowed_playbook_topics: [] }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { saveScript } = await import("./storage");
+    await assert.rejects(saveScript("Recruiting", { callObjective: "Test" }, { userId: "owner" }), /konnte nicht gespeichert werden/);
+    await assert.rejects(saveScript("private Krankenversicherung", { callObjective: "Test" }), /nicht dauerhaft in PostgreSQL gespeichert/);
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+  }
+});
+
+test("Vercel requires a database before confirming durable topic storage", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  const previousVercel = process.env.VERCEL;
+  delete process.env.DATABASE_URL;
+  process.env.VERCEL = "1";
+  try {
+    const { saveScript } = await import("./storage");
+    await assert.rejects(saveScript("Recruiting", { callObjective: "Test" }), /PostgreSQL-Datenbank konfiguriert/);
+  } finally {
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+    if (previousVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = previousVercel;
   }
 });
 

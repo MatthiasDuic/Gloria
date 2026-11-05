@@ -1709,6 +1709,9 @@ export async function importLeadsFromCrm(
 }
 
 export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, options?: { userId?: string }) {
+  if (process.env.VERCEL && !isDatabaseUrlConfigured()) {
+    throw new Error("Zum dauerhaften Speichern von Themen muss eine PostgreSQL-Datenbank konfiguriert sein.");
+  }
   if (options?.userId) {
     const user = await findUserById(options.userId);
     if (!user) {
@@ -1795,6 +1798,10 @@ export async function saveScript(topic: Topic, payload: Partial<ScriptConfig>, o
     };
   }
 
+  if (isDatabaseUrlConfigured()) {
+    throw new Error("Das Thema konnte nicht dauerhaft in PostgreSQL gespeichert werden. Bitte erneut versuchen.");
+  }
+
   await writeJsonStrict(SCRIPTS_FILE, updated);
 
   return {
@@ -1816,7 +1823,7 @@ export async function deleteUserCampaignTopic(topic: Topic, userId: string): Pro
   if (!user) {
     throw new Error("Benutzer nicht gefunden.");
   }
-  if (user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(normalizedTopic)) {
+  if (isSharedCampaignTopic(normalizedTopic) && user.allowedPlaybookTopics.length > 0 && !user.allowedPlaybookTopics.includes(normalizedTopic)) {
     throw new Error(`Die Kampagne "${normalizedTopic}" ist für diesen Benutzer nicht freigegeben.`);
   }
 
