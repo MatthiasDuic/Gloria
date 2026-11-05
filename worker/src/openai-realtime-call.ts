@@ -256,7 +256,14 @@ export function buildDecisionMakerIntro(
   return `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerTopicQuestion(ctx)}`;
 }
 
-export function buildDecisionMakerTopicQuestion(ctx: Pick<CallContext, "topic">): string {
+export function buildDecisionMakerTopicQuestion(
+  ctx: Pick<CallContext, "topic"> & Partial<Pick<CallContext, "callObjective">>,
+): string {
+  const firstObjectiveSentence = ctx.callObjective?.trim().match(/^[^.!?]{8,220}[.!?]/)?.[0]?.trim();
+  if (firstObjectiveSentence
+    && /^(?:es geht um|ich rufe (?:zum|wegen)|der anlass (?:meines|des) anrufs ist|wir sprechen über)\b/i.test(firstObjectiveSentence)) {
+    return `${firstObjectiveSentence.replace(/[.!?]+$/, "")}. Passt es gerade für ein kurzes Gespräch?`;
+  }
   const topic = ctx.topic?.trim() || "ein kurzes Anliegen";
   return `Ich rufe zum Thema ${topic} an. Passt es gerade kurz?`;
 }
@@ -517,10 +524,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let speechSegmentStartedAt: number | null = null;
   let identityPrefetch: PrefetchedSpeech | null = null;
   let identityPrefetchController: AbortController | null = null;
+  let topicPrefetch: PrefetchedSpeech | null = null;
+  let topicPrefetchController: AbortController | null = null;
   const userTurns = new UserTurnBuffer();
   const handledToolCalls = new Set<string>();
   let bookingInProgress = false;
-  let pendingDeterministicSpeech: { text: string; hangupAfterPlayback?: boolean } | null = null;
+  let pendingDeterministicSpeech: { text: string; hangupAfterPlayback?: boolean; prefetchedSpeech?: PrefetchedSpeech } | null = null;
   let flushDeterministicSpeech = () => undefined;
   let flushUserTranscript = () => undefined;
 
@@ -830,7 +839,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return responses.request(responseInstructions);
   };
 
-  const requestDeterministicSpeech = (text: string, options: { hangupAfterPlayback?: boolean } = {}) => {
+  const requestDeterministicSpeech = (
+    text: string,
+    options: { hangupAfterPlayback?: boolean; prefetchedSpeech?: PrefetchedSpeech } = {},
+  ) => {
     interruptedAssistantContext = "";
     const speechText = convertNumbersForSpeech(text.replace(/\s+/g, " ").trim());
     if (!speechText || pendingDeterministicSpeech) return false;
@@ -864,7 +876,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
     recordAssistantContext(pending.text);
     if (pending.hangupAfterPlayback) hangupAfterPlayback = true;
     responseInterrupted = false;
-    void speakWithElevenLabs(pending.text);
+    if (!pending.prefetchedSpeech || !playPrefetchedSpeech(pending.prefetchedSpeech, pending.text)) {
+      void speakWithElevenLabs(pending.text);
+    }
   };
 
   const clearBargeInRecovery = () => {
@@ -895,43 +909,53 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const prefetchIdentityAudio = () => {
     if (!ctx || identityPrefetch || terminationInProgress || process.env.ELEVENLABS_IDENTITY_PREFETCH?.trim() === "false") return;
     if (!isElevenLabsConfigured() || contactRouting?.stage !== "awaiting_contact" || ctx.transcript.length > 0) return;
-    const entry = new PrefetchedSpeech(buildDecisionMakerIdentity(ctx));
-    const controller = new AbortController();
-    identityPrefetch = entry;
-    identityPrefetchController = controller;
+    const identityEntry = new PrefetchedSpeech(buildDecisionMakerIdentity(ctx));
+    const topicEntry = new PrefetchedSpeech(convertNumbersForSpeech(buildDecisionMakerTopicQuestion(ctx)));
+    const identityController = new AbortController();
+    const topicController = new AbortController();
+    identityPrefetch = identityEntry;
+    topicPrefetch = topicEntry;
+    identityPrefetchController = identityController;
+    topicPrefetchController = topicController;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
-    const startedAt = Date.now();
-    const onChunk = (chunk: Buffer) => entry.push(chunk);
-    void (async () => {
-      try {
-        if (isElevenLabsDialogueModel()) {
-          const dialogue = new ElevenLabsDialogueStream({ outputFormat, signal: controller.signal, onChunk, voiceProfile: ctx?.voiceProfile });
-          await dialogue.append(entry.text);
-          const result = await dialogue.finish();
-          logDialogueResult(result);
-          entry.complete(result.audioBytes > 0);
-        } else {
-          await streamElevenLabsAudio(entry.text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
-          entry.complete(true);
+    const prefetch = (entry: PrefetchedSpeech, controller: AbortController, label: "identity" | "topic") => {
+      const startedAt = Date.now();
+      const onChunk = (chunk: Buffer) => entry.push(chunk);
+      void (async () => {
+        try {
+          if (isElevenLabsDialogueModel()) {
+            const dialogue = new ElevenLabsDialogueStream({ outputFormat, signal: controller.signal, onChunk, voiceProfile: ctx?.voiceProfile });
+            await dialogue.append(entry.text);
+            const result = await dialogue.finish();
+            logDialogueResult(result);
+            entry.complete(result.audioBytes > 0);
+          } else {
+            await streamElevenLabsAudio(entry.text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
+            entry.complete(true);
+          }
+          if (entry.isReady()) log.info(`realtime.${label}_prefetched`, { callSid: ctx?.callSid, prefetchMs: Date.now() - startedAt });
+        } catch (error) {
+          entry.complete(false);
+          if (!controller.signal.aborted) {
+            log.warn(`realtime.${label}_prefetch_failed`, { callSid: ctx?.callSid, error: error instanceof Error ? error.message : String(error) });
+          }
         }
-        if (entry.isReady()) log.info("realtime.identity_prefetched", { callSid: ctx?.callSid, prefetchMs: Date.now() - startedAt });
-      } catch (error) {
-        entry.complete(false);
-        if (!controller.signal.aborted) {
-          log.warn("realtime.identity_prefetch_failed", { callSid: ctx?.callSid, error: error instanceof Error ? error.message : String(error) });
-        }
-      }
-    })();
+      })();
+    };
+    prefetch(identityEntry, identityController, "identity");
+    prefetch(topicEntry, topicController, "topic");
   };
 
   const discardIdentityPrefetch = () => {
     identityPrefetch?.detach();
     identityPrefetchController?.abort();
     identityPrefetchController = null;
+    topicPrefetch?.detach();
+    topicPrefetchController?.abort();
+    topicPrefetchController = null;
   };
 
-  const playIdentity = (text: string): boolean => {
-    const cached = identityPrefetch;
+  const playPrefetchedSpeech = (cached: PrefetchedSpeech | null, text: string): boolean => {
     if (!cached || cached.text !== text || !cached.isUsable()) return false;
     const turn = ++ttsTurn;
     ttsAbortController?.abort();
@@ -952,6 +976,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     });
     return true;
   };
+
+  const playIdentity = (text: string): boolean => playPrefetchedSpeech(identityPrefetch, text);
 
   const startSpeculativeIdentity = (turnMs: number) => {
     if (!ctx || terminationInProgress || !topicPolicyReady || identityAnnounced) return;
@@ -1155,10 +1181,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (previousStage !== "decision_maker") {
-        if (currentContext.callObjective?.trim()) {
+        if (identityAnnounced) {
+          const topicText = convertNumbersForSpeech(buildDecisionMakerTopicQuestion(currentContext));
+          requestDeterministicSpeech(topicText, { prefetchedSpeech: topicPrefetch || undefined });
+        } else if (currentContext.callObjective?.trim()) {
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, identityAnnounced));
-        } else if (identityAnnounced) {
-          requestDeterministicSpeech(buildDecisionMakerTopicQuestion(currentContext));
         } else {
           speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
         }

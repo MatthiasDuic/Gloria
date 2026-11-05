@@ -40,7 +40,7 @@ import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
@@ -76,6 +76,7 @@ async function withRealtimeStream(
   policyDelayMs = 0,
   ttsAudioBytes = 160,
   identityPrefetch = false,
+  callObjective = "Beratung zu Energiekosten.",
 ) {
   const previous = {
     APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
@@ -101,7 +102,7 @@ async function withRealtimeStream(
   const finalized = new Promise<void>((resolve) => { finalPosted = resolve; });
   const api = agent.get("https://stream.test");
   const policyReply = api.intercept({ path: "/api/telnyx/topic-policies?userId=owner", method: "GET" }).reply(200, {
-    topicPolicies: [{ topic: "Energie", callObjective: "Beratung zu Energiekosten." }],
+    topicPolicies: [{ topic: "Energie", callObjective }],
   });
   if (policyDelayMs) policyReply.delay(policyDelayMs);
   policyReply.persist();
@@ -139,7 +140,7 @@ async function withRealtimeStream(
   const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
   try {
     await once(client, "open");
-    if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", { topic: "Energie", callObjective: "Beratung zu Energiekosten." });
+    if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", { topic: "Energie", callObjective });
     const unsigned = {
       queueId: "fixture-queue", userId: "owner", ownerRole: "user", ownerRealName: "Testberater",
       company: "Testfirma", topic: "Energie", contactName: "Herr Neumann", calledPhone: "+492339555100",
@@ -330,16 +331,49 @@ test("a short first greeting starts the identity before ASR and only appends the
 test("a pre-synthesized identity plays right after a long greeting and only the routing follow-up is requested", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
-    for (let attempt = 0; attempt < 50 && ttsRequests.length < 1; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(ttsRequests.length, 1);
-    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria/);
-    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(ttsRequests.length, 2);
-    assert.match(ttsRequests[1], /Spreche ich mit Herrn Neumann\?/);
-    assert.doesNotMatch(ttsRequests[1], /Gloria/);
+    const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
+    assert.match(prefetchedTexts.join(" "), /Guten Tag, hier ist Gloria/);
+    assert.match(prefetchedTexts.join(" "), /Ich rufe zum Thema Energie an/);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")));
     assert.equal(hangups.length, 0);
   }, 0, 160, true);
+});
+
+test("the first topic sentence is prefetched from a natural campaign objective and is not requested after identity playback", { timeout: 10_000 }, async () => {
+  const topicSentence = "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Passt es gerade für ein kurzes Gespräch?";
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
+    assert.ok(prefetchedTexts.some((text) => text.startsWith("Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater")));
+    assert.ok(prefetchedTexts.includes(topicSentence));
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(ttsRequests.length, 2);
+    assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+    assert.equal(hangups.length, 0);
+  }, 0, 160, true,
+  "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Den passenden Einstieg für Unternehmen erläutern.");
+});
+
+test("uses a spoken campaign objective as the topic opener and safely falls back to the topic otherwise", () => {
+  assert.equal(
+    buildDecisionMakerTopicQuestion({
+      topic: "private Krankenversicherung",
+      callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
+    }),
+    "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Passt es gerade für ein kurzes Gespräch?",
+  );
+  assert.equal(
+    buildDecisionMakerTopicQuestion({
+      topic: "Recruiting",
+      callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
+    }),
+    "Ich rufe zum Thema Recruiting an. Passt es gerade kurz?",
+  );
 });
 
 test("an early identity is withdrawn when the first short segment turns out to be a queue", { timeout: 10_000 }, async () => {

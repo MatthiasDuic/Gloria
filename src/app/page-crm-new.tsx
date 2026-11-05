@@ -2727,17 +2727,35 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
     }
   }
 
+  async function deleteAllCrmReports() {
+    if (!confirm("Wirklich alle CRM-Gesprächsreports aus allen Kampagnen unwiderruflich löschen? Manuelle Einzelanrufe bleiben erhalten.")) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/reports?all=1&source=crm", { method: "DELETE", credentials: "include" });
+      const payload = await response.json() as { error?: string; deletedReports?: number };
+      if (!response.ok) throw new Error(payload.error || "CRM-Gesprächsreports konnten nicht gelöscht werden.");
+      setSelectedReport(null);
+      await reloadLiveData();
+      setNotice(`✓ ${payload.deletedReports || 0} CRM-Gesprächsreports aus allen Kampagnen gelöscht.`);
+    } catch (error) {
+      setNotice(`✗ ${error instanceof Error ? error.message : "CRM-Gesprächsreports konnten nicht gelöscht werden."}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function renderCrmReports() {
     const listLeadIds = new Set(data.leads.filter((lead) => (lead.listId || "legacy") === filterCampaignListId).map((lead) => lead.id));
     const query = searchQuery.trim().toLowerCase();
     const reports = data.reports.filter((report) => {
+      if (getCallSource(report, data.leads) !== "crm") return false;
       if (isPrivateCustomerReport(report)) return false;
       if (filterCampaignListId && (!report.leadId || !listLeadIds.has(report.leadId))) return false;
       return !query || `${report.company} ${report.contactName || ""} ${report.topic} ${report.summary}`.toLowerCase().includes(query);
     }).sort((a, b) => Date.parse(b.conversationDate) - Date.parse(a.conversationDate));
     return (
       <section className="surface">
-        <div className="section-heading"><div><h3>CRM-Gesprächsreports</h3><p className="subtle">Anrufe aus Kampagnen, CRM-Wiedervorlagen und Gloria-Aufgaben. Manuelle Einzelanrufe bleiben im Bereich „Anrufe“.</p></div><span className="subtle">{reports.length} Anrufe</span></div>
+        <div className="section-heading"><div><h3>CRM-Gesprächsreports</h3><p className="subtle">Anrufe aus Kampagnen, CRM-Wiedervorlagen und Gloria-Aufgaben. Manuelle Einzelanrufe bleiben im Bereich „Anrufe“.</p></div><div className="bulk-actions-row"><span className="subtle">{reports.length} Anrufe</span><button type="button" className="btn-small danger" disabled={busy || !data.reports.some((report) => getCallSource(report, calendarData.leads) === "crm" && !isPrivateCustomerReport(report))} onClick={() => void deleteAllCrmReports()}>Alle CRM-Reports löschen</button></div></div>
         <div className="contacts-toolbar">
           <input className="input" aria-label="CRM-Anrufe durchsuchen" placeholder="Kontakt, Thema oder Gespräch durchsuchen" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
           <select className="filter-select" aria-label="Anrufe nach Liste filtern" value={filterCampaignListId} onChange={(event) => setFilterCampaignListId(event.target.value)}>
@@ -2751,7 +2769,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
             <td><strong>{report.company}</strong><div className="subtle">{report.contactName || "Kein Ansprechpartner"}</div><div className="subtle">{report.topic}</div></td>
             <td>{formatOutcomeLabel(report.outcome)}</td><td>{formatDate(report.conversationDate)}</td>
             <td>{report.summary.replace(/---\s*GESPRAECHSPROTOKOLL[\s\S]*$/i, "").slice(0, 220) || "Noch keine Zusammenfassung"}</td>
-            <td><button className="btn-small" onClick={() => openReportDetail(report)}>Anrufdetails</button></td>
+            <td><div className="task-actions"><button className="btn-small" onClick={() => openReportDetail(report)}>Anrufdetails</button><button type="button" className="btn-small danger" disabled={busy} onClick={() => void deleteCrmReport(report)}>Löschen</button></div></td>
           </tr>)}</tbody>
         </table></div>}
       </section>
