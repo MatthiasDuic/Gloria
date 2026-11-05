@@ -75,7 +75,8 @@ LLM_MAX_TOKENS=115
 LLM_TIMEOUT_MS=7600
 LLM_EARLY_FLUSH_CHARS=70
 
-ELEVENLABS_MODEL=eleven_multilingual_v2
+ELEVENLABS_MODEL=eleven_v4_turbo
+ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2
 ELEVENLABS_STABILITY=0.27
 ELEVENLABS_SIMILARITY=0.86
 ELEVENLABS_STYLE=0.62
@@ -89,6 +90,8 @@ OPENAI_ASR_SILENCE_MS=520
 ASR_FINAL_COALESCE_MS=520
 ASR_UTTERANCE_END_GRACE_MS=320
 ```
+
+Der Worker streamt v4 Turbo per Text-to-Dialogue-WebSocket und sendet vollständige Sätze bereits während die KI-Antwort entsteht. Bei einem Fehler, bevor Audio empfangen wurde, wird der Fallback verwendet. `ELEVENLABS_STYLE`, `ELEVENLABS_SPEED` und `ELEVENLABS_SPEAKER_BOOST` werden nur vom Fallback unterstützt.
 
 Notes:
 - This profile is tuned for fast first audio while preserving a natural premium sales tone.

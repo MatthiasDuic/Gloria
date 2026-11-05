@@ -13,7 +13,7 @@ import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
-import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
+import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -458,8 +458,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
-  let streamNextOpening = false;
   let openingSpeech: OpeningSpeechStream | null = null;
+  let responseDialogueStream: ElevenLabsDialogueStream | null = null;
+  let responseDialogueController: AbortController | null = null;
   let responseVersion = 0;
   let assistantContinuationRequested = false;
   let ttsAbortController: AbortController | null = null;
@@ -595,6 +596,36 @@ export async function handleOpenAiRealtimeTelnyxStream(
     });
   };
 
+  const appendTtsAudioChunk = (
+    chunk: Buffer,
+    isCurrent: () => boolean,
+    audioBytes: { value: number },
+    finishAudio: boolean,
+  ) => {
+    if (!isCurrent()) return;
+    if (audioBytes.value === 0) {
+      const now = Date.now();
+      if (!firstAudioLogged) {
+        firstAudioLogged = true;
+        log.info("realtime.start_latency", { callSid: ctx?.callSid, streamToFirstTtsChunkMs: now - callStartedAt });
+      }
+      if (finishAudio || !ttsPlaybackStartedAt) ttsPlaybackStartedAt = now;
+      if (!firstTtsChunkAt) firstTtsChunkAt = now;
+      const userFinalAt = ctx?.lastUserFinalAt;
+      if (ctx && userFinalAt) {
+        log.info("realtime.turn_latency", {
+          callSid: ctx.callSid,
+          asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - userFinalAt : undefined,
+          asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - userFinalAt : undefined,
+          asrFinalToFirstTtsChunkMs: now - userFinalAt,
+          responseCreatedToFirstTtsChunkMs: responseCreatedAt ? now - responseCreatedAt : undefined,
+        });
+      }
+    }
+    audioBytes.value += chunk.length;
+    playback.appendBase64Audio(chunk.toString("base64"));
+  };
+
   const speakWithElevenLabs = async (text: string, finishAudio = true): Promise<void> => {
     if (!isElevenLabsConfigured()) {
       log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
@@ -607,39 +638,60 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ttsAbortController?.abort();
     ttsAbortController = controller;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
-    let audioBytes = 0;
+    const audioBytes = { value: 0 };
     let retryCount = 0;
 
     try {
+      if (isElevenLabsDialogueModel()) {
+        const dialogue = new ElevenLabsDialogueStream({
+          outputFormat,
+          signal: controller.signal,
+          onChunk: (chunk) => appendTtsAudioChunk(
+            chunk,
+            () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && !userTurns.isBlocked(),
+            audioBytes,
+            finishAudio,
+          ),
+          voiceProfile: ctx?.voiceProfile,
+        });
+        await dialogue.append(text);
+        const result = await dialogue.finish();
+        if (result.usedFallback) {
+          log.warn("realtime.elevenlabs_dialogue_fallback", {
+            callSid: ctx?.callSid,
+            error: result.error,
+            audioBytes: result.audioBytes,
+          });
+        } else if (result.error) {
+          log.error("realtime.elevenlabs_dialogue_failed_after_audio", {
+            callSid: ctx?.callSid,
+            error: result.error,
+            audioBytes: result.audioBytes,
+          });
+        }
+        if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
+          if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
+          if (result.audioBytes === 0) {
+            log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
+            playback.interrupt();
+          }
+        }
+        return;
+      }
+
       while (true) {
         try {
           await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
-            if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted || userTurns.isBlocked()) return;
-            if (audioBytes === 0) {
-              const now = Date.now();
-              if (!firstAudioLogged) {
-                firstAudioLogged = true;
-                log.info("realtime.start_latency", { callSid: ctx?.callSid, streamToFirstTtsChunkMs: now - callStartedAt });
-              }
-              if (finishAudio || !ttsPlaybackStartedAt) ttsPlaybackStartedAt = now;
-              if (!firstTtsChunkAt) firstTtsChunkAt = now;
-              const userFinalAt = ctx?.lastUserFinalAt;
-              if (ctx && userFinalAt) {
-                log.info("realtime.turn_latency", {
-                  callSid: ctx.callSid,
-                  asrFinalToResponseCreatedMs: responseCreatedAt ? responseCreatedAt - userFinalAt : undefined,
-                  asrFinalToFirstModelTokenMs: firstModelTokenAt ? firstModelTokenAt - userFinalAt : undefined,
-                  asrFinalToFirstTtsChunkMs: now - userFinalAt,
-                  responseCreatedToFirstTtsChunkMs: responseCreatedAt ? now - responseCreatedAt : undefined,
-                });
-              }
-            }
-            audioBytes += chunk.length;
-            playback.appendBase64Audio(chunk.toString("base64"));
-          }, ctx?.voiceProfile);
+            appendTtsAudioChunk(
+              chunk,
+              () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && !userTurns.isBlocked(),
+              audioBytes,
+              finishAudio,
+            );
+          }, ctx?.voiceProfile, getElevenLabsModel());
           break;
         } catch (error) {
-          if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, audioBytes, retryCount)) {
+          if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, audioBytes.value, retryCount)) {
             retryCount += 1;
             log.warn("realtime.elevenlabs_retry", { callSid: ctx?.callSid, retryCount, error: error instanceof Error ? error.message : String(error) });
             continue;
@@ -649,7 +701,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
         if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
-        if (audioBytes === 0) {
+        if (audioBytes.value === 0) {
           log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
           playback.interrupt();
         }
@@ -659,13 +711,50 @@ export async function handleOpenAiRealtimeTelnyxStream(
         log.error("realtime.elevenlabs_failed", {
           callSid: ctx?.callSid,
           error: error instanceof Error ? error.message : String(error),
-          audioBytes,
+          audioBytes: audioBytes.value,
           retryCount,
         });
         playback.interrupt();
       }
     } finally {
       if (ttsAbortController === controller) ttsAbortController = null;
+    }
+  };
+
+  const finishResponseDialogueStream = async () => {
+    const stream = responseDialogueStream;
+    const controller = responseDialogueController;
+    responseDialogueStream = null;
+    responseDialogueController = null;
+    if (!stream) return;
+    try {
+      const result = await stream.finish();
+      if (result.usedFallback) {
+        log.warn("realtime.elevenlabs_dialogue_fallback", {
+          callSid: ctx?.callSid,
+          error: result.error,
+          audioBytes: result.audioBytes,
+        });
+      } else if (result.error) {
+        log.error("realtime.elevenlabs_dialogue_failed_after_audio", {
+          callSid: ctx?.callSid,
+          error: result.error,
+          audioBytes: result.audioBytes,
+        });
+      }
+      if (result.audioBytes === 0 && !controller?.signal.aborted) {
+        log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid });
+      }
+    } catch (error) {
+      if (!controller?.signal.aborted) {
+        log.error("realtime.elevenlabs_failed", {
+          callSid: ctx?.callSid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        playback.interrupt();
+      }
+    } finally {
+      if (controller && ttsAbortController === controller) ttsAbortController = null;
     }
   };
 
@@ -889,7 +978,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       if (previousStage !== "decision_maker") {
         if (currentContext.callObjective?.trim()) {
-          streamNextOpening = true;
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext));
         } else {
           speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
@@ -1306,8 +1394,33 @@ export async function handleOpenAiRealtimeTelnyxStream(
         responseVersion += 1;
         ttsPlaybackStartedAt = null;
         openingSpeech?.stop();
-        openingSpeech = streamNextOpening ? new OpeningSpeechStream((text) => speakWithElevenLabs(text, false)) : null;
-        streamNextOpening = false;
+        responseDialogueStream?.cancel();
+        responseDialogueStream = null;
+        responseDialogueController?.abort();
+        responseDialogueController = null;
+        if (isElevenLabsDialogueModel() && isElevenLabsConfigured()) {
+          const turn = ++ttsTurn;
+          const controller = new AbortController();
+          ttsAbortController?.abort();
+          ttsAbortController = controller;
+          responseDialogueController = controller;
+          const audioBytes = { value: 0 };
+          responseDialogueStream = new ElevenLabsDialogueStream({
+            outputFormat: outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000",
+            signal: controller.signal,
+            onChunk: (chunk) => appendTtsAudioChunk(
+              chunk,
+              () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && !userTurns.isBlocked(),
+              audioBytes,
+              false,
+            ),
+            voiceProfile: ctx?.voiceProfile,
+          });
+        }
+        const dialogueStream = responseDialogueStream;
+        openingSpeech = new OpeningSpeechStream((text) => dialogueStream
+          ? dialogueStream.append(text)
+          : speakWithElevenLabs(text, false));
         playback.startResponse();
         responseCreatedAt = Date.now();
         firstModelTokenAt = null;
@@ -1357,6 +1470,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
           responseVersion += 1;
           currentOpening?.stop();
+          responseDialogueStream?.cancel();
+          responseDialogueStream = null;
+          responseDialogueController = null;
           ttsAbortController?.abort();
           playback.interrupt();
           responses.markCancelled();
@@ -1396,17 +1512,39 @@ export async function handleOpenAiRealtimeTelnyxStream(
           currentAssistantTurnIndex = ctx.transcript.length - 1;
           log.info("realtime.gloria_said", { callSid: ctx.callSid, text: transcript, latencyMs });
         }
-        if (!transcript) playback.interrupt();
-        responses.markFinished();
-        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested && !currentOpening?.hasStarted()) {
+        if (!transcript) {
           currentOpening?.stop();
+          responseDialogueStream?.cancel();
+          responseDialogueStream = null;
+          responseDialogueController = null;
+          ttsAbortController?.abort();
           playback.interrupt();
+        }
+        responses.markFinished();
+        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
+          const alreadyStarted = currentOpening?.hasStarted() ?? false;
+          currentOpening?.stop();
+          await currentOpening?.finish();
+          if (alreadyStarted) {
+            await finishResponseDialogueStream();
+            if (responseVersion !== currentVersion || responseInterrupted) return;
+            playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
+          } else {
+            responseDialogueStream?.cancel();
+            responseDialogueStream = null;
+            responseDialogueController = null;
+            ttsAbortController?.abort();
+            playback.interrupt();
+          }
           assistantContinuationRequested = true;
           log.warn("realtime.incomplete_response_recovery", {
             callSid: ctx?.callSid,
             text: transcript,
+            alreadyStarted,
           });
-          requestResponse("Deine letzte Antwort wurde technisch vor der Audioausgabe abgeschnitten. Formuliere die vollständige, fachlich korrekte Antwort jetzt neu in höchstens zwei kurzen Sätzen. Beginne mit einem vollständigen Satz, nie mit einer Satzfortsetzung. Stelle danach höchstens eine kurze Frage und warte auf den Kunden.");
+          requestResponse(alreadyStarted
+            ? "Deine letzte Antwort wurde nach einem bereits gesprochenen Teil technisch abgeschnitten. Fahre in höchstens zwei kurzen Sätzen genau an der gesprochenen Stelle fort, wiederhole keinen bereits gesprochenen Inhalt, vervollständige den Gedanken und stelle danach höchstens eine kurze Frage."
+            : "Deine letzte Antwort wurde technisch vor der Audioausgabe abgeschnitten. Formuliere die vollständige, fachlich korrekte Antwort jetzt neu in höchstens zwei kurzen Sätzen. Beginne mit einem vollständigen Satz, nie mit einer Satzfortsetzung. Stelle danach höchstens eine kurze Frage und warte auf den Kunden.");
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
           return;
@@ -1414,6 +1552,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (transcript) {
           if (currentOpening) {
             await currentOpening.finish();
+            await finishResponseDialogueStream();
             if (responseVersion !== currentVersion || responseInterrupted) return;
             playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
           } else {

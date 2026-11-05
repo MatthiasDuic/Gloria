@@ -1,5 +1,5 @@
 import { AI_CONFIG } from "./ai-config";
-import { isElevenLabsConfigured } from "./elevenlabs-tts";
+import { getElevenLabsPreviewModel, isElevenLabsConfigured } from "./elevenlabs-tts";
 import { diagnosePostgresConnection, isDatabaseUrlConfigured } from "./report-db";
 import { getTelnyxApiBaseUrl, isTelnyxConfigured } from "./telnyx";
 
@@ -109,7 +109,7 @@ async function checkElevenLabs(timeoutMs: number): Promise<PreflightCheck> {
         "xi-api-key": apiKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text: "Hi.", model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2" }),
+      body: JSON.stringify({ text: "Hi.", model_id: getElevenLabsPreviewModel() }),
     },
     timeoutMs,
   );

@@ -1,9 +1,40 @@
 import { fetch } from "undici";
+import WebSocket from "ws";
 import type { VoiceProfile } from "./topic-policy.js";
 
 export type ElevenLabsOutputFormat = "alaw_8000" | "ulaw_8000";
 
 const DEFAULT_VOICE_ID = "Ywa4Py8gVz5ugeNVy6iC";
+const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
+const DEFAULT_FALLBACK_MODEL_ID = "eleven_multilingual_v2";
+
+type DialogueStreamOptions = {
+  outputFormat: ElevenLabsOutputFormat;
+  signal: AbortSignal;
+  onChunk: (chunk: Buffer) => void;
+  voiceProfile?: Pick<VoiceProfile, "stability" | "similarity" | "style" | "speed" | "speakerBoost">;
+  socketFactory?: (url: string, options: { headers: Record<string, string> }) => WebSocket;
+};
+
+type DialogueStreamResult = {
+  audioBytes: number;
+  usedFallback: boolean;
+  error?: string;
+};
+
+type DialogueServerMessage = {
+  audio?: string;
+  error?: string | { message?: string };
+  is_final?: boolean;
+};
+
+export function getElevenLabsModel(): string {
+  return process.env.ELEVENLABS_MODEL?.trim() || DEFAULT_MODEL_ID;
+}
+
+export function isElevenLabsDialogueModel(modelId = getElevenLabsModel()): boolean {
+  return modelId.startsWith("eleven_v4");
+}
 
 function getApiKey(): string {
   return process.env.ELEVENLABS_API_KEY?.trim() || "";
@@ -30,6 +61,7 @@ export async function streamElevenLabsAudio(
   signal: AbortSignal,
   onChunk: (chunk: Buffer) => void,
   voiceProfile?: Pick<VoiceProfile, "stability" | "similarity" | "style" | "speed" | "speakerBoost">,
+  modelId = getElevenLabsModel(),
 ): Promise<void> {
   const apiKey = getApiKey();
   const voiceId = getVoiceId();
@@ -47,7 +79,7 @@ export async function streamElevenLabsAudio(
       },
       body: JSON.stringify({
         text,
-        model_id: process.env.ELEVENLABS_MODEL?.trim() || "eleven_multilingual_v2",
+        model_id: modelId,
         voice_settings: {
           stability: Number.parseFloat(process.env.ELEVENLABS_STABILITY?.trim() || String(voiceProfile?.stability ?? 0.27)),
           similarity_boost: Number.parseFloat(process.env.ELEVENLABS_SIMILARITY?.trim() || String(voiceProfile?.similarity ?? 0.86)),
@@ -101,5 +133,231 @@ export async function streamElevenLabsAudio(
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+export class ElevenLabsDialogueStream {
+  private readonly apiKey = getApiKey();
+  private readonly voiceId = getVoiceId();
+  private readonly modelId = getElevenLabsModel();
+  private readonly textParts: string[] = [];
+  private socket: WebSocket | null = null;
+  private opened: Promise<void> | null = null;
+  private resolveOpened: (() => void) | null = null;
+  private resolveFinal: (() => void) | null = null;
+  private readonly finalReceived = new Promise<void>((resolve) => { this.resolveFinal = resolve; });
+  private connectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private audioBytes = 0;
+  private failure: Error | null = null;
+  private finalSeen = false;
+  private finished = false;
+  private cancelled = false;
+
+  constructor(private readonly options: DialogueStreamOptions) {
+    options.signal.addEventListener("abort", this.onAbort, { once: true });
+  }
+
+  async append(text: string): Promise<void> {
+    const segment = text.trim();
+    if (!segment || this.cancelled || this.options.signal.aborted) return;
+    if (this.finished) throw new Error("ElevenLabs-Dialogstream ist bereits beendet");
+    this.textParts.push(segment);
+    this.connect();
+    await this.opened;
+    if (this.failure || this.options.signal.aborted || !this.socket) return;
+
+    this.send({
+      inputs: [{ text: segment, voice_id: this.voiceId, new_turn: false }],
+    });
+    this.send({ flush: true });
+  }
+
+  async finish(): Promise<DialogueStreamResult> {
+    if (this.finished) return { audioBytes: this.audioBytes, usedFallback: false };
+    this.finished = true;
+    this.clearTimers();
+    try {
+      if (this.cancelled || this.options.signal.aborted) {
+        return { audioBytes: this.audioBytes, usedFallback: false };
+      }
+
+      if (!this.socket || !this.opened) return await this.runFallback();
+      await this.opened;
+      if (!this.failure && !this.options.signal.aborted) {
+        this.send({ close_socket: true });
+        if (!this.failure) {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            this.finalReceived,
+            new Promise<void>((resolve) => {
+              timeout = setTimeout(() => {
+                this.recordFailure(new Error("ElevenLabs-Dialogstream wurde nicht final abgeschlossen"));
+                resolve();
+              }, 12_000);
+            }),
+          ]);
+          if (timeout) clearTimeout(timeout);
+        }
+      }
+
+      if (this.cancelled || this.options.signal.aborted) {
+        return { audioBytes: this.audioBytes, usedFallback: false };
+      }
+      if (this.failure && this.audioBytes > 0) {
+        return { audioBytes: this.audioBytes, usedFallback: false, error: this.failure.message };
+      }
+      if (this.audioBytes === 0) return await this.runFallback(this.failure?.message);
+      return { audioBytes: this.audioBytes, usedFallback: false };
+    } finally {
+      this.cleanup();
+    }
+  }
+
+  cancel(): void {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    this.cleanup();
+    this.resolveOpened?.();
+    this.resolveFinal?.();
+    if (this.socket && this.socket.readyState < WebSocket.CLOSING) this.socket.close(1000, "cancelled");
+  }
+
+  private readonly onAbort = () => this.cancel();
+
+  private connect(): void {
+    if (this.opened) return;
+    const socketFactory = this.options.socketFactory
+      ?? ((url, options) => new WebSocket(url, options));
+    const query = new URLSearchParams({
+      model_id: this.modelId,
+      output_format: this.options.outputFormat,
+      language_code: "de",
+    });
+    const socket = socketFactory(
+      `wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input?${query.toString()}`,
+      { headers: { "xi-api-key": this.apiKey } },
+    );
+    this.socket = socket;
+    this.opened = new Promise<void>((resolve) => { this.resolveOpened = resolve; });
+    this.connectTimeout = setTimeout(() => {
+      this.recordFailure(new Error("Verbindung zum ElevenLabs-Dialogstream hat das Zeitlimit überschritten"));
+    }, 6_000);
+    socket.once("open", () => {
+      this.clearConnectTimeout();
+      if (this.cancelled || this.options.signal.aborted) {
+        this.resolveOpened?.();
+        return;
+      }
+      this.send({
+        voices: [this.voiceId],
+        voice_settings: {
+          stability: Number.parseFloat(process.env.ELEVENLABS_STABILITY?.trim() || String(this.options.voiceProfile?.stability ?? 0.38)),
+          similarity_boost: Number.parseFloat(process.env.ELEVENLABS_SIMILARITY?.trim() || String(this.options.voiceProfile?.similarity ?? 0.84)),
+        },
+      });
+      this.resolveOpened?.();
+      this.keepAliveTimer = setInterval(() => {
+        if (!this.finished && !this.failure) this.send({ keep_alive: true });
+      }, 15_000);
+    });
+    socket.on("message", (raw) => this.handleMessage(raw.toString()));
+    socket.once("error", (error) => {
+      this.clearConnectTimeout();
+      this.recordFailure(error);
+      this.resolveOpened?.();
+    });
+    socket.once("close", (code, reason) => {
+      this.clearTimers();
+      if (!this.cancelled && !this.options.signal.aborted && !this.failure && !this.finalSeen) {
+        this.recordFailure(new Error(`ElevenLabs-Dialogstream geschlossen (${code}): ${reason.toString()}`));
+      }
+      this.resolveOpened?.();
+      this.resolveFinal?.();
+    });
+  }
+
+  private send(message: Record<string, unknown>): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.recordFailure(new Error("ElevenLabs-Dialogstream ist nicht verbunden"));
+      return;
+    }
+    this.socket.send(JSON.stringify(message), (error) => {
+      if (error) this.recordFailure(error);
+    });
+  }
+
+  private handleMessage(raw: string): void {
+    let message: DialogueServerMessage;
+    try {
+      message = JSON.parse(raw) as DialogueServerMessage;
+    } catch (error) {
+      this.recordFailure(new Error(`ElevenLabs-Dialogstream lieferte eine ungültige Nachricht: ${String(error)}`));
+      return;
+    }
+
+    if (message.error) {
+      const error = typeof message.error === "string" ? message.error : message.error.message || "unbekannter Fehler";
+      this.recordFailure(new Error(`ElevenLabs-Dialogstream: ${error}`));
+    }
+    if (message.audio) {
+      const chunk = Buffer.from(message.audio, "base64");
+      if (chunk.length) {
+        this.audioBytes += chunk.length;
+        this.options.onChunk(chunk);
+      }
+    }
+    if (message.is_final) {
+      this.finalSeen = true;
+      this.resolveFinal?.();
+    }
+  }
+
+  private recordFailure(error: Error): void {
+    this.failure ??= error;
+    this.clearTimers();
+    this.resolveOpened?.();
+    this.resolveFinal?.();
+    if (this.socket && this.socket.readyState < WebSocket.CLOSING) this.socket.close(1011, "generation_failed");
+  }
+
+  private clearConnectTimeout(): void {
+    if (this.connectTimeout) clearTimeout(this.connectTimeout);
+    this.connectTimeout = null;
+  }
+
+  private clearTimers(): void {
+    this.clearConnectTimeout();
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+    this.keepAliveTimer = null;
+  }
+
+  private cleanup(): void {
+    this.clearTimers();
+    this.options.signal.removeEventListener("abort", this.onAbort);
+  }
+
+  private async runFallback(error?: string): Promise<DialogueStreamResult> {
+    if (!this.textParts.length || this.options.signal.aborted) {
+      return { audioBytes: this.audioBytes, usedFallback: false, ...(error ? { error } : {}) };
+    }
+    const fallbackModel = process.env.ELEVENLABS_FALLBACK_MODEL?.trim() || DEFAULT_FALLBACK_MODEL_ID;
+    const safeFallbackModel = isElevenLabsDialogueModel(fallbackModel) ? DEFAULT_FALLBACK_MODEL_ID : fallbackModel;
+    await streamElevenLabsAudio(
+      this.textParts.join(" "),
+      this.options.outputFormat,
+      this.options.signal,
+      (chunk) => {
+        this.audioBytes += chunk.length;
+        this.options.onChunk(chunk);
+      },
+      this.options.voiceProfile,
+      safeFallbackModel,
+    );
+    return {
+      audioBytes: this.audioBytes,
+      usedFallback: true,
+      ...(error ? { error } : {}),
+    };
   }
 }

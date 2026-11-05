@@ -103,8 +103,9 @@ ElevenLabs-Secrets werden nur für diesen Rückfallpfad benötigt.
       - `OPENAI_REALTIME_PREFIX_PADDING_MS=300`
       - `OPENAI_RESPONSE_COOLDOWN_MS=40`
       - `TELNYX_SILENCE_OPENER_MS=4500`
-      - `ELEVENLABS_MODEL=eleven_flash_v2_5`
-      - `ELEVENLABS_STREAMING_LATENCY=2`
+      - `ELEVENLABS_MODEL=eleven_v4_turbo`
+      - `ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2`
+      - `ELEVENLABS_STREAMING_LATENCY=2` (nur für den HTTP-Fallback)
 
 2. Terminologie verifizieren:
       - In PKV-Calls soll konsistent `Beitragsentwicklung in der Gesundheitsversorgung` verwendet werden.

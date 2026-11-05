@@ -155,7 +155,8 @@ Trage zusätzlich in `.env` deine ElevenLabs-Daten ein:
 ```env
 ELEVENLABS_API_KEY=dein_api_key
 ELEVENLABS_VOICE_ID=deine_voice_id
-ELEVENLABS_MODEL=eleven_flash_v2_5
+ELEVENLABS_MODEL=eleven_v4_turbo
+ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2
 ELEVENLABS_STABILITY=0.4
 ELEVENLABS_SIMILARITY=0.88
 ELEVENLABS_STYLE=0.3
@@ -164,7 +165,7 @@ ELEVENLABS_SPEAKER_BOOST=true
 ELEVENLABS_LATENCY_MODE=3
 ```
 
-Danach nutzt der Button **„Stimme testen“** im Dashboard direkt deine echte ElevenLabs-Stimme für Gloria. Ohne diese Werte greift automatisch die Browser-Stimme als Fallback.
+Telefonanrufe verwenden v4 Turbo über die Text-to-Dialogue-WebSocket. Normale KI-Antworten werden satzweise gesprochen, sobald ein Satz vollständig ist. Bei einem Fehler vor dem ersten Audiopaket nutzt der Worker `ELEVENLABS_FALLBACK_MODEL`. Der Dashboard-Button **„Stimme testen“** und die Preflight-Prüfung verwenden weiterhin den HTTP-kompatiblen Fallback (standardmäßig Multilingual v2). Style, Speed und Speaker Boost gelten nur für diesen Fallback; v4 Turbo nutzt Stability und Similarity.
 
 ## Telnyx direkt anbinden
 
@@ -274,6 +275,8 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 | `ELEVENLABS_API_KEY` | echte ElevenLabs-Stimme genutzt werden soll |
 | `ELEVENLABS_VOICE_ID` | echte ElevenLabs-Stimme genutzt werden soll |
 | `ELEVENLABS_MODEL` | ElevenLabs-Modell überschrieben werden soll |
+| `ELEVENLABS_FALLBACK_MODEL` | bei einem v4-Turbo-Fehler der kompatible HTTP-Fallback genutzt wird |
+| `ELEVENLABS_PREVIEW_MODEL` | ein abweichendes HTTP-Modell für den Dashboard-Stimmtest gesetzt werden soll |
 | `ELEVENLABS_STABILITY` | ElevenLabs-Voice-Tuning genutzt wird |
 | `ELEVENLABS_SIMILARITY` | ElevenLabs-Voice-Tuning genutzt wird |
 | `ELEVENLABS_STYLE` | ElevenLabs-Voice-Tuning genutzt wird |

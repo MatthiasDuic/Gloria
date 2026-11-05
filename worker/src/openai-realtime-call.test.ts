@@ -71,23 +71,29 @@ async function settleStreamEvents() {
   for (let index = 0; index < 10; index++) await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-async function withRealtimeStream(run: (socket: StreamTestSocket, hangups: object[]) => Promise<void>, policyDelayMs = 0) {
+async function withRealtimeStream(
+  run: (socket: StreamTestSocket, hangups: object[], ttsRequests: string[]) => Promise<void>,
+  policyDelayMs = 0,
+  ttsAudioBytes = 160,
+) {
   const previous = {
     APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
-    ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL: process.env.ELEVENLABS_MODEL,
   };
   process.env.APP_BASE_URL = "https://stream.test";
   process.env.APP_INTERNAL_TOKEN = "fixture-token";
   process.env.OPENAI_API_KEY = "fixture-key";
   process.env.ELEVENLABS_API_KEY = "fixture-key";
   process.env.ELEVENLABS_VOICE_ID = "fixture-voice";
+  process.env.ELEVENLABS_MODEL = "eleven_multilingual_v2";
   const dispatcher = getGlobalDispatcher();
   const agent = new MockAgent();
   agent.disableNetConnect();
   setGlobalDispatcher(agent);
   const requests: Array<Record<string, unknown>> = [];
   const hangups: object[] = [];
+  const ttsRequests: string[] = [];
   let finalPosted: (() => void) | undefined;
   const finalized = new Promise<void>((resolve) => { finalPosted = resolve; });
   const api = agent.get("https://stream.test");
@@ -110,7 +116,10 @@ async function withRealtimeStream(run: (socket: StreamTestSocket, hangups: objec
   }).persist();
   agent.get("https://api.elevenlabs.io").intercept({
     path: /\/v1\/text-to-speech\/fixture-voice\/stream/, method: "POST",
-  }).reply(200, Buffer.alloc(160)).persist();
+  }).reply((options) => {
+    ttsRequests.push(String(options.body));
+    return { statusCode: 200, data: Buffer.alloc(ttsAudioBytes) };
+  }).persist();
   const upstream = new StreamTestSocket();
   let connected: (() => void) | undefined;
   const sessionCreated = new Promise<void>((resolve) => { connected = resolve; });
@@ -146,7 +155,7 @@ async function withRealtimeStream(run: (socket: StreamTestSocket, hangups: objec
     ]);
     upstream.open();
     await settleStreamEvents();
-    await run(upstream, hangups);
+    await run(upstream, hangups, ttsRequests);
   } finally {
     client.terminate();
     let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -338,6 +347,26 @@ test("the stream cancels an early assistant response and waits for the complete 
   const final = requests.find((request) => request.summary && request.outcome);
   assert.ok(Array.isArray(final?.transcript));
   assert.ok(final.transcript.some((turn: { text: string }) => turn.text === "Unsere Kosten steigen. Aber ich möchte die Konditionen genau vergleichen."));
+});
+
+test("normal assistant answers start TTS at the first complete sentence before response.done", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, _hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "response.created" });
+    socket.message({ type: "response.output_text.delta", delta: "Das kann ich nachvollziehen. " });
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 0);
+
+    socket.message({ type: "response.output_text.delta", delta: "Wie hoch ist Ihr aktueller Monatsbeitrag?" });
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 1);
+    assert.equal(JSON.parse(ttsRequests[0] || "{}").text, "Das kann ich nachvollziehen.");
+
+    socket.message({ type: "response.done", response: { status: "completed", output: [] } });
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 2);
+    assert.equal(JSON.parse(ttsRequests[1] || "{}").text, "Wie hoch ist Ihr aktueller Monatsbeitrag?");
+  });
 });
 
 function buildPkvContext() {

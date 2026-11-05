@@ -23,6 +23,16 @@ export function getDefaultElevenLabsVoiceId(): string {
   return process.env.ELEVENLABS_VOICE_ID?.trim() || "";
 }
 
+export function getElevenLabsPreviewModel(): string {
+  const configuredModel = process.env.ELEVENLABS_PREVIEW_MODEL?.trim()
+    || process.env.ELEVENLABS_MODEL?.trim()
+    || "eleven_multilingual_v2";
+  if (!configuredModel.startsWith("eleven_v4")) return configuredModel;
+
+  const fallbackModel = process.env.ELEVENLABS_FALLBACK_MODEL?.trim() || "eleven_multilingual_v2";
+  return fallbackModel.startsWith("eleven_v4") ? "eleven_multilingual_v2" : fallbackModel;
+}
+
 export function getProjectVoicePresets(): ElevenLabsVoiceOption[] {
   const voiceId = getDefaultElevenLabsVoiceId();
   return voiceId
@@ -51,7 +61,7 @@ export async function generateElevenLabsPreview(text: string, overrideVoiceId?: 
       headers: { "xi-api-key": apiKey, "content-type": "application/json", accept: "audio/mpeg" },
       body: JSON.stringify({
         text,
-        model_id: process.env.ELEVENLABS_MODEL?.trim() || "eleven_multilingual_v2",
+        model_id: getElevenLabsPreviewModel(),
         output_format: "mp3_44100_128",
         voice_settings: { stability: 0.42, similarity_boost: 0.9, style: 0.38, use_speaker_boost: true },
       }),

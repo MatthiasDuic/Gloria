@@ -31,6 +31,8 @@ services:
       - key: ELEVENLABS_VOICE_ID
         value: Ywa4Py8gVz5ugeNVy6iC
       - key: ELEVENLABS_MODEL
+        value: eleven_v4_turbo
+      - key: ELEVENLABS_FALLBACK_MODEL
         value: eleven_multilingual_v2
       - key: ELEVENLABS_STABILITY
         value: "0.38"
