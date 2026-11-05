@@ -1,6 +1,7 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { dependenciesAreReady, getDependencyHealth } from "./health.js";
+import { getElevenLabsModel } from "./elevenlabs-tts.js";
 import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
 import { preloadTopicPolicy } from "./topic-policy-prompt.js";
@@ -58,6 +59,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       service: "gloria-stream-worker",
       revision: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || "local",
+      ttsModel: getElevenLabsModel(),
       timestamp: new Date().toISOString(),
     }));
     return;

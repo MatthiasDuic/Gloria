@@ -16,8 +16,9 @@ type DialogueStreamOptions = {
   socketFactory?: (url: string, options: { headers: Record<string, string> }) => WebSocket;
 };
 
-type DialogueStreamResult = {
+export type DialogueStreamResult = {
   audioBytes: number;
+  model: string;
   usedFallback: boolean;
   error?: string;
 };
@@ -174,12 +175,12 @@ export class ElevenLabsDialogueStream {
   }
 
   async finish(): Promise<DialogueStreamResult> {
-    if (this.finished) return { audioBytes: this.audioBytes, usedFallback: false };
+    if (this.finished) return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false };
     this.finished = true;
     this.clearTimers();
     try {
       if (this.cancelled || this.options.signal.aborted) {
-        return { audioBytes: this.audioBytes, usedFallback: false };
+        return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false };
       }
 
       if (!this.socket || !this.opened) return await this.runFallback();
@@ -202,13 +203,13 @@ export class ElevenLabsDialogueStream {
       }
 
       if (this.cancelled || this.options.signal.aborted) {
-        return { audioBytes: this.audioBytes, usedFallback: false };
+        return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false };
       }
       if (this.failure && this.audioBytes > 0) {
-        return { audioBytes: this.audioBytes, usedFallback: false, error: this.failure.message };
+        return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false, error: this.failure.message };
       }
       if (this.audioBytes === 0) return await this.runFallback(this.failure?.message);
-      return { audioBytes: this.audioBytes, usedFallback: false };
+      return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false };
     } finally {
       this.cleanup();
     }
@@ -339,7 +340,7 @@ export class ElevenLabsDialogueStream {
 
   private async runFallback(error?: string): Promise<DialogueStreamResult> {
     if (!this.textParts.length || this.options.signal.aborted) {
-      return { audioBytes: this.audioBytes, usedFallback: false, ...(error ? { error } : {}) };
+      return { audioBytes: this.audioBytes, model: this.modelId, usedFallback: false, ...(error ? { error } : {}) };
     }
     const fallbackModel = process.env.ELEVENLABS_FALLBACK_MODEL?.trim() || DEFAULT_FALLBACK_MODEL_ID;
     const safeFallbackModel = isElevenLabsDialogueModel(fallbackModel) ? DEFAULT_FALLBACK_MODEL_ID : fallbackModel;
@@ -356,6 +357,7 @@ export class ElevenLabsDialogueStream {
     );
     return {
       audioBytes: this.audioBytes,
+      model: safeFallbackModel,
       usedFallback: true,
       ...(error ? { error } : {}),
     };

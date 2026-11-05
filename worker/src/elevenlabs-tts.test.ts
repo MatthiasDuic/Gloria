@@ -62,7 +62,7 @@ test("v4 Turbo streams complete sentences through TTD and applies only supported
       });
       await stream.append("Guten Tag. Haben Sie kurz Zeit?");
       const result = await stream.finish();
-      assert.deepEqual(result, { audioBytes: 3, usedFallback: false });
+      assert.deepEqual(result, { audioBytes: 3, model: "eleven_v4_turbo", usedFallback: false });
     });
 
     assert.deepEqual(Buffer.concat(chunks), Buffer.from([1, 2, 3]));
@@ -108,6 +108,7 @@ test("v4 Turbo falls back to HTTP Multilingual v2 only when no dialogue audio ar
         const result = await stream.finish();
         assert.equal(result.audioBytes, 320);
         assert.equal(result.usedFallback, true);
+        assert.equal(result.model, "eleven_multilingual_v2");
         assert.match(result.error || "", /dialogue model unavailable/);
       });
       assert.equal(requestedModel, "eleven_multilingual_v2");

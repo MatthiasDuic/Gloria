@@ -13,7 +13,7 @@ import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
-import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
+import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio, type DialogueStreamResult } from "./elevenlabs-tts.js";
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -626,6 +626,41 @@ export async function handleOpenAiRealtimeTelnyxStream(
     playback.appendBase64Audio(chunk.toString("base64"));
   };
 
+  const loggedTtsModels = new Set<string>();
+  const logTtsModelInUse = (model: string, transport: "text_to_dialogue_ws" | "http_stream", usedFallback: boolean) => {
+    const key = `${transport}:${model}`;
+    if (loggedTtsModels.has(key)) return;
+    loggedTtsModels.add(key);
+    log.info("realtime.elevenlabs_tts_model", {
+      callSid: ctx?.callSid,
+      configuredModel: getElevenLabsModel(),
+      model,
+      transport,
+      usedFallback,
+    });
+  };
+
+  const logDialogueResult = (result: DialogueStreamResult) => {
+    if (result.audioBytes > 0) {
+      logTtsModelInUse(result.model, result.usedFallback ? "http_stream" : "text_to_dialogue_ws", result.usedFallback);
+    }
+    if (result.usedFallback) {
+      log.warn("realtime.elevenlabs_dialogue_fallback", {
+        callSid: ctx?.callSid,
+        model: result.model,
+        error: result.error,
+        audioBytes: result.audioBytes,
+      });
+    } else if (result.error) {
+      log.error("realtime.elevenlabs_dialogue_failed_after_audio", {
+        callSid: ctx?.callSid,
+        model: result.model,
+        error: result.error,
+        audioBytes: result.audioBytes,
+      });
+    }
+  };
+
   const speakWithElevenLabs = async (text: string, finishAudio = true): Promise<void> => {
     if (!isElevenLabsConfigured()) {
       log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
@@ -656,19 +691,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         });
         await dialogue.append(text);
         const result = await dialogue.finish();
-        if (result.usedFallback) {
-          log.warn("realtime.elevenlabs_dialogue_fallback", {
-            callSid: ctx?.callSid,
-            error: result.error,
-            audioBytes: result.audioBytes,
-          });
-        } else if (result.error) {
-          log.error("realtime.elevenlabs_dialogue_failed_after_audio", {
-            callSid: ctx?.callSid,
-            error: result.error,
-            audioBytes: result.audioBytes,
-          });
-        }
+        logDialogueResult(result);
         if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
           if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
           if (result.audioBytes === 0) {
@@ -689,6 +712,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
               finishAudio,
             );
           }, ctx?.voiceProfile, getElevenLabsModel());
+          if (audioBytes.value > 0) logTtsModelInUse(getElevenLabsModel(), "http_stream", false);
           break;
         } catch (error) {
           if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, audioBytes.value, retryCount)) {
@@ -729,19 +753,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (!stream) return;
     try {
       const result = await stream.finish();
-      if (result.usedFallback) {
-        log.warn("realtime.elevenlabs_dialogue_fallback", {
-          callSid: ctx?.callSid,
-          error: result.error,
-          audioBytes: result.audioBytes,
-        });
-      } else if (result.error) {
-        log.error("realtime.elevenlabs_dialogue_failed_after_audio", {
-          callSid: ctx?.callSid,
-          error: result.error,
-          audioBytes: result.audioBytes,
-        });
-      }
+      logDialogueResult(result);
       if (result.audioBytes === 0 && !controller?.signal.aborted) {
         log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid });
       }
