@@ -45,6 +45,24 @@ const QUEUE_PATTERNS: RegExp[] = [
   /(?:dr[üu]cken|w[äa]hlen)\s+sie\s+(?:bitte\s+)?(?:die\s+)?(?:\d|eins|eins\s+bis\s+neun)\b/i,
 ];
 
+// Digital receptionists greet like a queue but expect an answer ("Wie lautet Ihr Name und wie kann ich Ihnen helfen?").
+const INTERACTIVE_ASSISTANT_PATTERNS: RegExp[] = [
+  /wie\s+lautet\s+ihr\s+(?:name|anliegen)/i,
+  /wie\s+kann\s+ich\s+ihnen\s+(?:weiter)?helfen/i,
+  /was\s+kann\s+ich\s+f[üu]r\s+sie\s+tun/i,
+  /(?:was\s+ist|worum\s+geht\s+es\s+bei)\s+ihr(?:em)?\s+anliegen/i,
+  /(?:nennen|sagen)\s+sie\s+(?:mir\s+)?(?:bitte\s+)?(?:kurz\s+)?(?:ihren\s+namen|ihr\s+anliegen)/i,
+  /mit\s+wem\s+(?:m[öo]chten|wollen)\s+sie\s+sprechen/i,
+];
+
+const HARD_QUEUE_PATTERNS: RegExp[] = [
+  /bitte\s+warten\s+sie/i,
+  /warteschleife/i,
+  /(?:dr[üu]cken|w[äa]hlen)\s+sie\s+(?:bitte\s+)?(?:die\s+)?(?:\d|eins|zwei|drei)/i,
+  /bleiben\s+sie\s+(?:bitte\s+)?(?:in\s+der\s+leitung|am\s+apparat)/i,
+  /(?:alle|unsere)\s+(?:mitarbeiter|leitungen)[\s\S]{0,70}(?:besetzt|im\s+gespr[äa]ch)/i,
+];
+
 export function isHumanContactAfterQueue(text: string): boolean {
   return classifyInboundSpeech(text) === "human"
     && (/\b(?:hallo|guten\s+(?:tag|morgen|abend)|am\s+apparat|hier\s+(?:ist|spricht)|mein\s+name\s+ist|ich\s+bin|das\s+bin\s+ich|wie\s+kann\s+ich|was\s+kann\s+ich|was\s+ist\s+ihr\s+anliegen|sie\s+sprechen\s+mit|wer\s+(?:ist\s+da|spricht)|worum\s+geht|was\s+(?:wollen|möchten)\s+sie)\b/i.test(text)
@@ -58,6 +76,8 @@ export function classifyInboundSpeech(text: string): CallClassification {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return "unknown";
   if (VOICEMAIL_PATTERNS.some((pattern) => pattern.test(normalized))) return "voicemail";
+  if (INTERACTIVE_ASSISTANT_PATTERNS.some((pattern) => pattern.test(normalized))
+    && !HARD_QUEUE_PATTERNS.some((pattern) => pattern.test(normalized))) return "human";
   if (QUEUE_PATTERNS.some((pattern) => pattern.test(normalized))) return "queue";
   if (normalized.length >= 2) return "human";
   return "unknown";

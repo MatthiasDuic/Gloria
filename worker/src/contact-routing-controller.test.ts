@@ -92,6 +92,15 @@ test("stays silent throughout queue announcements until a person answers", () =>
   assert.equal(state.stage, "decision_maker");
 });
 
+test("answers a digital receptionist that asks for the caller's name instead of waiting as in a queue", () => {
+  const state = advanceContactRouting(
+    createContactRoutingState("Herr Schwab"),
+    "Herzlich willkommen und Glück auf! Mein Name ist Rosi Ruhrpott. Ich bin die digitale Assistentin von RAVES Immobilien und Schwab Hausverwaltung und helfe Ihnen dabei, Sie schnell mit dem richtigen Ansprechpartner zu verbinden. Wie lautet Ihr Name und wie kann ich Ihnen weiterhelfen?",
+  );
+  assert.equal(state.stage, "gatekeeper");
+  assert.equal(advanceContactRouting(createContactRoutingState("Herr Schwab"), "Herzlich willkommen. Bitte warten Sie, wie kann ich Ihnen helfen?").stage, "waiting_for_transfer");
+});
+
 test("treats common short German phone greetings as a human contact", () => {
   for (const text of ["Ja, Müller?", "Müller, ja?", "Hallo, Schmidt.", "Ja bitte?"]) {
     assert.equal(advanceContactRouting(createContactRoutingState("Herr Neumann"), text).stage, "confirming_decision_maker", text);

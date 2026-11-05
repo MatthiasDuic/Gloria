@@ -12,6 +12,7 @@ import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
+import { PrefetchedSpeech } from "./prefetched-speech.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
 import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio, type DialogueStreamResult } from "./elevenlabs-tts.js";
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
@@ -76,8 +77,10 @@ type RealtimeToolCall = {
   argumentsJson: string;
 };
 
-// A short first segment ("Hallo?", "Ja, Müller?") starts the neutral identity sentence before ASR finishes.
-const OPENING_SPECULATION_MAX_TURN_MS = Number.parseInt(process.env.OPENING_SPECULATION_MAX_TURN_MS?.trim() || "2600", 10);
+// A first segment up to this length ("Hallo?", "Müller GmbH, Schmidt am Apparat") starts the neutral identity sentence before ASR finishes.
+const OPENING_SPECULATION_MAX_TURN_MS = Number.parseInt(process.env.OPENING_SPECULATION_MAX_TURN_MS?.trim() || "4500", 10);
+// Shorter end-of-speech pause while waiting for the first contact; later turns keep OPENAI_REALTIME_SILENCE_MS.
+const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "350", 10);
 
 const REALTIME_TOOLS = [
   {
@@ -507,6 +510,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let speculativeIdentityIndex: number | undefined;
   let openingSpeculationTried = false;
   let speechSegmentStartedAt: number | null = null;
+  let identityPrefetch: PrefetchedSpeech | null = null;
+  let identityPrefetchController: AbortController | null = null;
   const userTurns = new UserTurnBuffer();
   const handledToolCalls = new Set<string>();
   let bookingInProgress = false;
@@ -613,7 +618,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             } : {
               type: "server_vad",
               threshold: vadThreshold,
-              silence_duration_ms: silenceDurationMs,
+              silence_duration_ms: contactRouting?.stage === "awaiting_contact" && OPENING_SILENCE_MS > 0
+                ? Math.min(OPENING_SILENCE_MS, silenceDurationMs)
+                : silenceDurationMs,
               prefix_padding_ms: prefixPaddingMs,
               create_response: false,
               interrupt_response: false,
@@ -880,6 +887,67 @@ export async function handleOpenAiRealtimeTelnyxStream(
     void speakWithElevenLabs(text);
   };
 
+  const prefetchIdentityAudio = () => {
+    if (!ctx || identityPrefetch || terminationInProgress || process.env.ELEVENLABS_IDENTITY_PREFETCH?.trim() === "false") return;
+    if (!isElevenLabsConfigured() || contactRouting?.stage !== "awaiting_contact" || ctx.transcript.length > 0) return;
+    const entry = new PrefetchedSpeech(buildDecisionMakerIdentity(ctx));
+    const controller = new AbortController();
+    identityPrefetch = entry;
+    identityPrefetchController = controller;
+    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
+    const startedAt = Date.now();
+    const onChunk = (chunk: Buffer) => entry.push(chunk);
+    void (async () => {
+      try {
+        if (isElevenLabsDialogueModel()) {
+          const dialogue = new ElevenLabsDialogueStream({ outputFormat, signal: controller.signal, onChunk, voiceProfile: ctx?.voiceProfile });
+          await dialogue.append(entry.text);
+          const result = await dialogue.finish();
+          logDialogueResult(result);
+          entry.complete(result.audioBytes > 0);
+        } else {
+          await streamElevenLabsAudio(entry.text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
+          entry.complete(true);
+        }
+        if (entry.isReady()) log.info("realtime.identity_prefetched", { callSid: ctx?.callSid, prefetchMs: Date.now() - startedAt });
+      } catch (error) {
+        entry.complete(false);
+        if (!controller.signal.aborted) {
+          log.warn("realtime.identity_prefetch_failed", { callSid: ctx?.callSid, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    })();
+  };
+
+  const discardIdentityPrefetch = () => {
+    identityPrefetch?.detach();
+    identityPrefetchController?.abort();
+    identityPrefetchController = null;
+  };
+
+  const playIdentity = (text: string): boolean => {
+    const cached = identityPrefetch;
+    if (!cached || cached.text !== text || !cached.isUsable()) return false;
+    const turn = ++ttsTurn;
+    ttsAbortController?.abort();
+    ttsAbortController = null;
+    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
+    const audioBytes = { value: 0 };
+    const isCurrent = () => turn === ttsTurn && !responseInterrupted;
+    cached.play({
+      onChunk: (chunk) => appendTtsAudioChunk(chunk, isCurrent, audioBytes, true),
+      onEnd: (ok) => {
+        if (!isCurrent()) return;
+        if (audioBytes.value > 0) {
+          playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
+          return;
+        }
+        if (!ok) void speakWithElevenLabs(text, true, true);
+      },
+    });
+    return true;
+  };
+
   const startSpeculativeIdentity = (turnMs: number) => {
     if (!ctx || terminationInProgress || !topicPolicyReady || identityAnnounced) return;
     if (contactRouting?.stage !== "awaiting_contact" || ctx.transcript.length > 0) return;
@@ -891,9 +959,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     speculativeIdentityIndex = ctx.transcript.length - 1;
     currentAssistantTurnIndex = speculativeIdentityIndex;
     identityAnnounced = true;
-    log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route: "opening_identity", speculative: true, turnMs });
+    const cached = Boolean(identityPrefetch?.isReady() && identityPrefetch.text === text);
+    log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route: "opening_identity", speculative: true, cached, turnMs });
     recordAssistantContext(text);
-    void speakWithElevenLabs(text, true, true);
+    if (!playIdentity(text)) void speakWithElevenLabs(text, true, true);
   };
 
   const withdrawSpeculativeIdentity = (index: number, reason: string) => {
@@ -924,6 +993,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (!ctx || terminationInProgress) return;
     terminationInProgress = true;
     openingSpeech?.stop();
+    discardIdentityPrefetch();
     ttsTurn += 1;
     ttsAbortController?.abort();
     if (responses.isActive()) sendOpenAi({ type: "response.cancel" });
@@ -1043,6 +1113,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (previousStage !== "decision_maker" && event.type === "clear_rejection") {
         requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
         return;
+      }
+      if (!identityAnnounced && previousStage !== "decision_maker" && previousStage !== "gatekeeper"
+        && identityPrefetch?.isUsable() && !currentContext.transcript.some((turn) => turn.role === "assistant")) {
+        const text = buildDecisionMakerIdentity(currentContext);
+        playback.startResponse();
+        responseInterrupted = false;
+        currentContext.transcript.push({ role: "assistant", text, at: Date.now(), phase: currentContext.dialogState.phase });
+        currentAssistantTurnIndex = currentContext.transcript.length - 1;
+        identityAnnounced = true;
+        log.info("realtime.gloria_said", { callSid: currentContext.callSid, text, route: "opening_identity", cached: identityPrefetch.isReady() });
+        recordAssistantContext(text);
+        if (!playIdentity(text)) void speakWithElevenLabs(text);
       }
       if (contactRouting.stage === "confirming_decision_maker") {
         if (identityAnnounced) requestDeterministicSpeech(buildDecisionMakerIdentityQuestion(currentContext));
@@ -1412,7 +1494,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (plan.interrupted) {
           responseVersion += 1;
           openingSpeech?.stop();
-          if (speculativeIdentityIndex !== undefined) identityAnnounced = false;
+          if (speculativeIdentityIndex !== undefined) {
+            // The caller was still talking: drop the early identity so it is announced again after the turn.
+            identityAnnounced = false;
+            if (ctx && ctx.transcript[speculativeIdentityIndex]?.role === "assistant") ctx.transcript.splice(speculativeIdentityIndex, 1);
+            if (currentAssistantTurnIndex === speculativeIdentityIndex) currentAssistantTurnIndex = undefined;
+            speculativeIdentityIndex = undefined;
+          }
           bargeInAwaitingTranscript = true;
           clearBargeInRecovery();
           ttsTurn += 1;
@@ -1785,6 +1873,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }).finally(() => {
         topicPolicyReady = !terminationInProgress;
         if (ctx) updateSession();
+        prefetchIdentityAudio();
         flushUserTranscript();
       });
 
@@ -1841,6 +1930,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (closed) return;
     closed = true;
     openingSpeech?.stop();
+    discardIdentityPrefetch();
     if (callDeadline) clearTimeout(callDeadline);
     responses.stop();
     playback.stop();

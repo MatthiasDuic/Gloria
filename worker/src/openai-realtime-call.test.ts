@@ -75,12 +75,15 @@ async function withRealtimeStream(
   run: (socket: StreamTestSocket, hangups: object[], ttsRequests: string[]) => Promise<void>,
   policyDelayMs = 0,
   ttsAudioBytes = 160,
+  identityPrefetch = false,
 ) {
   const previous = {
     APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
     ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL: process.env.ELEVENLABS_MODEL,
+    ELEVENLABS_IDENTITY_PREFETCH: process.env.ELEVENLABS_IDENTITY_PREFETCH,
   };
+  process.env.ELEVENLABS_IDENTITY_PREFETCH = identityPrefetch ? "true" : "false";
   process.env.APP_BASE_URL = "https://stream.test";
   process.env.APP_INTERNAL_TOKEN = "fixture-token";
   process.env.OPENAI_API_KEY = "fixture-key";
@@ -322,6 +325,21 @@ test("a short first greeting starts the identity before ASR and only appends the
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     assert.equal(hangups.length, 0);
   });
+});
+
+test("a pre-synthesized identity plays right after a long greeting and only the routing follow-up is requested", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 1; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(ttsRequests.length, 1);
+    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria/);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(ttsRequests.length, 2);
+    assert.match(ttsRequests[1], /Spreche ich mit Herrn Neumann\?/);
+    assert.doesNotMatch(ttsRequests[1], /Gloria/);
+    assert.equal(hangups.length, 0);
+  }, 0, 160, true);
 });
 
 test("an early identity is withdrawn when the first short segment turns out to be a queue", { timeout: 10_000 }, async () => {
