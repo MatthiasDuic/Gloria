@@ -1,5 +1,8 @@
 import PDFDocument from "pdfkit";
 import { parseReportTranscriptFallback } from "./transcript-utils";
+import { shouldGenerateAppointmentPdf } from "./types";
+
+export const APPOINTMENT_PDF_DISABLED_MESSAGE = "Termin-PDFs werden vorerst nur für private Krankenversicherung erstellt.";
 
 export interface AppointmentFormInput {
   title?: string;
@@ -167,6 +170,9 @@ function formatAppointmentDate(value?: string) {
 }
 
 export async function buildAppointmentFormPdf(input: AppointmentFormInput): Promise<Buffer> {
+  if (!shouldGenerateAppointmentPdf(input.topic)) {
+    throw new Error(APPOINTMENT_PDF_DISABLED_MESSAGE);
+  }
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",

@@ -64,6 +64,79 @@ test("repeated final reports do not count one physical call as multiple attempts
   assert.equal(lead?.status, "wiedervorlage");
 });
 
+test("mailbox reports schedule one-day then three-day callbacks and stop at the third attempt", async () => {
+  for (const attempts of [1, 2, 3]) {
+    await seed([{ ...sampleLead, attempts, status: "angerufen" }]);
+    const payload = {
+      callSid: `mailbox-${attempts}`, userId: sampleLead.userId, leadId: sampleLead.id,
+      company: sampleLead.company, topic: sampleLead.topic,
+      summary: "Anrufbeantworter: Sprechen Sie nach dem Ton.",
+      outcome: "Nicht erreicht / kein Kontakt" as const, callDisposition: "Anrufbeantworter",
+    };
+    const before = new Date();
+    const expected = new Date(before);
+    expected.setHours(9, 0, 0, 0);
+    expected.setDate(expected.getDate() + (attempts === 2 ? 3 : 1));
+    const report = await storage.storeCallReport(payload);
+    const lead = await storage.getLeadById(sampleLead.id, sampleLead.userId);
+    assert.equal(lead?.attempts, attempts);
+    assert.equal(lead?.status, attempts === 3 ? "absage" : "wiedervorlage");
+    assert.equal(lead?.nextCallAt, attempts === 3 ? undefined : expected.toISOString());
+    assert.equal(report.nextCallAt, lead?.nextCallAt);
+    const repeated = await storage.storeCallReport(payload);
+    assert.equal(repeated.nextCallAt, report.nextCallAt);
+    assert.equal((await storage.getLeadById(sampleLead.id, sampleLead.userId))?.attempts, attempts);
+  }
+});
+
+test("a manual mailbox call creates a durable callback lead and honors the same attempt cap", async () => {
+  await seed([]);
+  const call = {
+    callSource: "manual" as const, callSid: "manual-mailbox", userId: sampleLead.userId,
+    company: "Manueller Kontakt", topic: "Eigenes Thema", calledPhone: sampleLead.phone,
+  };
+  await storage.storeCallReport({ ...call, summaryChunk: "Anruf gestartet." });
+  const report = await storage.storeCallReport({
+    ...call, summary: "Anrufbeantworter erkannt.", outcome: "Nicht erreicht / kein Kontakt", callDisposition: "Anrufbeantworter",
+  });
+  assert.ok(report.leadId);
+  const lead = await storage.getLeadById(report.leadId, sampleLead.userId);
+  assert.equal(lead?.callSource, "manual");
+  assert.equal(lead?.phone, sampleLead.phone);
+  assert.equal(lead?.status, "wiedervorlage");
+  assert.equal(lead?.nextCallAt, report.nextCallAt);
+  const third = await storage.storeCallReport({
+    ...call, callSid: "manual-mailbox-third", leadId: report.leadId, attempts: 3,
+    summary: "Anrufbeantworter erkannt.", outcome: "Nicht erreicht / kein Kontakt", callDisposition: "Anrufbeantworter",
+  });
+  assert.equal(third.nextCallAt, undefined);
+  assert.equal((await storage.getLeadById(report.leadId, sampleLead.userId))?.status, "absage");
+});
+
+test("the complete webhook persists mailbox follow-up planning instead of dropping the disposition", async () => {
+  await seed([{ ...sampleLead, status: "angerufen", attempts: 1 }]);
+  const previous = process.env.APP_INTERNAL_TOKEN;
+  process.env.APP_INTERNAL_TOKEN = "mailbox-fixture";
+  try {
+    const { POST } = await import("../app/api/calls/webhook/route");
+    const response = await POST(new Request("http://localhost/api/calls/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "x-gloria-internal-token": "mailbox-fixture" },
+      body: JSON.stringify({
+        callSid: "mailbox-webhook", leadId: sampleLead.id, userId: sampleLead.userId,
+        company: sampleLead.company, topic: sampleLead.topic,
+        summary: "Bitte sprechen Sie nach dem Ton.", outcome: "Nicht erreicht / kein Kontakt", callDisposition: "Anrufbeantworter",
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.ok(payload.report.nextCallAt);
+    assert.equal((await storage.getLeadById(sampleLead.id, sampleLead.userId))?.status, "wiedervorlage");
+  } finally {
+    if (previous === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = previous;
+  }
+});
+
 test("own calendar API validates intervals, reserves 90 minutes, persists updates and isolates users", async () => {
   const { POST, GET, DELETE } = await import("../app/api/calendar/events/route");
   const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");

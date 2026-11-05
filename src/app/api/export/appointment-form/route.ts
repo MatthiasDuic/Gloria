@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { APPOINTMENT_PDF_DISABLED_MESSAGE, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { shouldGenerateAppointmentPdf } from "@/lib/types";
 import { getConversationEventsForCallSid, getDashboardData } from "@/lib/storage";
 import { listCallTranscriptEventsFromPostgres, listUsers } from "@/lib/report-db";
 
@@ -19,6 +20,9 @@ export async function GET(request: Request) {
   const report = data.reports.find((entry) => entry.callSid === callSid);
   if (!report) {
     return NextResponse.json({ error: "Report nicht gefunden." }, { status: 404 });
+  }
+  if (!shouldGenerateAppointmentPdf(report.topic)) {
+    return NextResponse.json({ error: APPOINTMENT_PDF_DISABLED_MESSAGE }, { status: 400 });
   }
 
   try {
@@ -72,6 +76,9 @@ export async function POST(request: Request) {
 
   try {
     const payload = (await request.json()) as Record<string, unknown>;
+    if (!shouldGenerateAppointmentPdf(typeof payload.topic === "string" ? payload.topic : undefined)) {
+      return NextResponse.json({ error: APPOINTMENT_PDF_DISABLED_MESSAGE }, { status: 400 });
+    }
     const pdf = await buildAppointmentFormPdf({
       title: typeof payload.title === "string" ? payload.title : "Kundenterminbogen",
       topic: typeof payload.topic === "string" ? payload.topic : undefined,

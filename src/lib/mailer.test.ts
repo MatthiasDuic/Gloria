@@ -28,6 +28,7 @@ async function withMailFixture(
     leadWrites: unknown[][],
     rejectRecipient: (address: string) => void,
     setMasterLookupRoles: (roles: Array<"master" | "user">) => void,
+    transcriptReads: string[],
   ) => Promise<void>,
 ) {
   const previous = {
@@ -47,7 +48,9 @@ async function withMailFixture(
   process.env.CRON_SECRET = "test-cron";
   process.env.APP_INTERNAL_TOKEN = "test-internal";
   let masterLookupRoles: Array<"master" | "user"> = [];
+  const transcriptReads: string[] = [];
   mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    if (/FROM\s+call_transcript_events\b/.test(sql)) transcriptReads.push(sql);
     if (/FROM users\s+WHERE id = \$1/.test(sql)) {
       const id = String(values[0]);
       const role = id === "master" ? masterLookupRoles.shift() || "master" : id === "normal" ? "user" : undefined;
@@ -82,7 +85,9 @@ async function withMailFixture(
   const transport = nodemailer.createTransport({ jsonTransport: true });
   const sendMail = transport.sendMail.bind(transport);
   const rejectedRecipients = new Set<string>();
-  const send = mock.method(transport, "sendMail", async (message: SendMailOptions) => {
+  const sentMessages: SendMailOptions[] = [];
+  mock.method(transport, "sendMail", async (message: SendMailOptions) => {
+    sentMessages.push({ ...message, attachments: message.attachments?.map((attachment) => ({ ...attachment })) });
     const info = await sendMail(message);
     return {
       ...info,
@@ -93,10 +98,11 @@ async function withMailFixture(
   mock.method(nodemailer, "createTransport", () => transport);
   try {
     await run(
-      () => send.mock.calls.map((call) => call.arguments[0] as SendMailOptions),
+      () => sentMessages,
       leadWrites,
       (address) => rejectedRecipients.add(address.toLowerCase()),
       (roles) => { masterLookupRoles = [...roles]; },
+      transcriptReads,
     );
   } finally {
     mock.restoreAll();
@@ -342,5 +348,71 @@ test("booking a report never claims a confirmation was already sent", async () =
     assert.equal(sent().length, 0);
     assert.equal(leadWrites.length, 1);
     assert.deepEqual(JSON.parse(String(leadWrites[0][21])), []);
+  });
+});
+
+test("non-PKV confirmations send their calendar without a PDF, including stale queued attachments", async () => {
+  await withMailFixture(async (sent) => {
+    for (const topic of ["betriebliche Krankenversicherung", "Meine PKV-Kampagne"]) {
+      for (const appointmentPdf of [undefined, Buffer.alloc(1001)]) {
+        const result = await sendAppointmentInvite({
+          report: { ...report, topic, userId: "master" }, attendeeEmail: "customer@example.test", appointmentPdf,
+        });
+        assert.equal(result.delivered, true);
+        const mail = sent().at(-1)!;
+        assert.equal(mail.attachments?.length, 1);
+        assert.equal(mail.attachments?.[0].contentType, "text/calendar; method=REQUEST; charset=UTF-8");
+        assert.doesNotMatch(String(mail.text), /Kundenterminbogen/);
+      }
+    }
+  });
+});
+
+test("PKV confirmations still require a complete PDF", async () => {
+  await withMailFixture(async (sent) => {
+    for (const appointmentPdf of [undefined, Buffer.alloc(999), Buffer.alloc(1001)]) {
+      const result = await sendAppointmentInvite({
+        report: { ...report, topic: "private Krankenversicherung", userId: "master" },
+        attendeeEmail: "customer@example.test", appointmentPdf,
+      });
+      assert.equal(result.delivered, Boolean(appointmentPdf && appointmentPdf.length >= 1000));
+    }
+    assert.equal(sent().length, 1);
+    assert.equal(sent()[0].attachments?.length, 2);
+  });
+});
+
+test("queued non-PKV invitations never load transcripts or generate a PDF", async () => {
+  await withMailFixture(async (sent, _leadWrites, _rejectRecipient, _setMasterLookupRoles, transcriptReads) => {
+    const job: Job = {
+      id: "no-pdf", type: "send_invite", callSid: "call",
+      payload: { report: { ...report, userId: "master", topic: "betriebliche Krankenversicherung" }, attendeeEmail: "customer@example.test" },
+      createdAt: Date.now(), attempts: 1, status: "processing",
+    };
+    const { success, failure } = mockJobProcessing(job);
+    await processOneJob();
+    assert.equal(success.mock.callCount(), 1);
+    assert.equal(failure.mock.callCount(), 0);
+    assert.equal(sent()[0].attachments?.length, 1);
+    assert.equal(transcriptReads.length, 0);
+  });
+});
+
+test("queued PKV invitations load the transcript and attach a complete PDF", async () => {
+  await withMailFixture(async (sent, _leadWrites, _rejectRecipient, _setMasterLookupRoles, transcriptReads) => {
+    const job: Job = {
+      id: "pkv-pdf", type: "send_invite", callSid: "call",
+      payload: { report: { ...report, userId: "master", topic: "private Krankenversicherung" }, attendeeEmail: "customer@example.test" },
+      createdAt: Date.now(), attempts: 1, status: "processing",
+    };
+    const { success, failure } = mockJobProcessing(job);
+    await processOneJob();
+    assert.equal(success.mock.callCount(), 1);
+    assert.equal(failure.mock.callCount(), 0);
+    assert.equal(transcriptReads.length, 1);
+    const pdf = sent()[0].attachments?.find((entry) => entry.contentType === "application/pdf")?.content;
+    assert.ok(Buffer.isBuffer(pdf));
+    assert.ok(pdf.length >= 1000);
+    assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   });
 });

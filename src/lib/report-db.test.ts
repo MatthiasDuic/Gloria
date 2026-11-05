@@ -101,16 +101,22 @@ test("users save personal topics while master changes update the single shared s
   const previous = process.env.DATABASE_URL;
   process.env.DATABASE_URL = "postgres://localhost/gloria-test";
   const shared = [{ id: "shared-pkv", topic: "private Krankenversicherung", callObjective: "Gemeinsamer Auftrag", opener: "", discovery: "", objectionHandling: "", close: "" }];
-  const personal: Array<{ topic: string; content: string }> = [];
+  const personal: Array<{ userId: string; topic: string; content: string }> = [];
   let personalWrites = 0;
   let sharedWrites = 0;
   mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
     if (/^\s*SELECT topic, data\s+FROM gloria_playbooks/.test(sql)) return { rows: shared.map((data) => ({ topic: data.topic, data })), rowCount: shared.length };
-    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/.test(sql)) return { rows: personal, rowCount: personal.length };
+    if (/^\s*SELECT\s+topic,\s*content\s+FROM user_playbooks/.test(sql)) {
+      const rows = personal.filter((entry) => entry.userId === values[0]);
+      return { rows, rowCount: rows.length };
+    }
     if (sql.includes("FROM users")) return { rows: [{ id: "owner", username: "owner", role: "user", allowed_playbook_topics: ["Anderes Thema"] }], rowCount: 1 };
     if (sql.includes("INSERT INTO user_playbooks") && values.length >= 4) {
       personalWrites++;
-      personal.push({ topic: String(values[2]), content: String(values[3]) });
+      const stored = { userId: String(values[1]), topic: String(values[2]), content: String(values[3]) };
+      const index = personal.findIndex((entry) => entry.userId === stored.userId && entry.topic === stored.topic);
+      if (index >= 0) personal[index] = stored;
+      else personal.push(stored);
     }
     if (/^\s*INSERT INTO gloria_playbooks/.test(sql) && values.length === 2) {
       sharedWrites++;
@@ -123,7 +129,7 @@ test("users save personal topics while master changes update the single shared s
     await getDatabasePool();
     personalWrites = 0;
     sharedWrites = 0;
-    const { POST } = await import("../app/api/topic-policies/route");
+    const { GET, POST } = await import("../app/api/topic-policies/route");
     const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
     const request = (role: "master" | "user", topic: string, callObjective: string) => new Request("https://example.test/api/topic-policies", {
       method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id: "owner", username: "owner", role, realName: "", companyName: "", gesellschaft: "" })}` },
@@ -139,6 +145,19 @@ test("users save personal topics while master changes update the single shared s
     const data = await getDashboardData({ userId: "owner", role: "user" });
     assert.equal(data.topicPolicies.find((policy) => policy.topic === "private Krankenversicherung")?.callObjective, "Zentraler Masterauftrag");
     assert.ok(data.topicPolicies.some((policy) => policy.topic === "Mein persönliches Thema"));
+    assert.equal((await POST(request("user", "Neues Thema ohne Auftrag", ""))).status, 200);
+    const freshSessionRequest = (id: string) => new Request("https://example.test/api/topic-policies", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${createSessionToken({ id, username: id, role: "user", realName: "", companyName: "", gesellschaft: "" })}` },
+    });
+    const freshLogin = await GET(freshSessionRequest("owner"));
+    assert.equal(freshLogin.status, 200);
+    const reloaded = await freshLogin.json();
+    assert.equal(reloaded.topicPolicies.find((policy: { topic: string }) => policy.topic === "Neues Thema ohne Auftrag")?.callObjective, "");
+    assert.equal((await POST(request("user", "Neues Thema ohne Auftrag", "Dauerhaft geänderter Auftrag"))).status, 200);
+    const afterEdit = await (await GET(freshSessionRequest("owner"))).json();
+    assert.equal(afterEdit.topicPolicies.find((policy: { topic: string }) => policy.topic === "Neues Thema ohne Auftrag")?.callObjective, "Dauerhaft geänderter Auftrag");
+    const otherLogin = await (await GET(freshSessionRequest("other-owner"))).json();
+    assert.equal(otherLogin.topicPolicies.some((policy: { topic: string }) => policy.topic === "Neues Thema ohne Auftrag"), false);
   } finally {
     mock.restoreAll();
     if (previous === undefined) delete process.env.DATABASE_URL;

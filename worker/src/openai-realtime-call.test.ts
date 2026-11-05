@@ -44,6 +44,301 @@ import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildPkvC
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
+import { cachePreloadedTopicPolicy } from "./topic-policy-prompt.js";
+import { EventEmitter, once } from "node:events";
+import WebSocket, { WebSocketServer } from "ws";
+import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
+import type { RealtimeServerEvent, RealtimeSocket } from "./openai-realtime-session.js";
+import { UserTurnBuffer } from "./user-turn-buffer.js";
+
+class StreamTestSocket extends EventEmitter implements RealtimeSocket {
+  readyState = 0;
+  sent: Array<Record<string, unknown>> = [];
+  send(data: string): void {
+    const event = JSON.parse(data);
+    this.sent.push(event);
+    this.emit("sent", event);
+  }
+  close(code = 1000, reason = ""): void {
+    this.readyState = 3;
+    this.emit("close", code, Buffer.from(reason));
+  }
+  open(): void { this.readyState = 1; this.emit("open"); }
+  message(event: RealtimeServerEvent): void { this.emit("message", Buffer.from(JSON.stringify(event))); }
+}
+
+async function settleStreamEvents() {
+  for (let index = 0; index < 10; index++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function withRealtimeStream(run: (socket: StreamTestSocket, hangups: object[]) => Promise<void>, policyDelayMs = 0) {
+  const previous = {
+    APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID,
+  };
+  process.env.APP_BASE_URL = "https://stream.test";
+  process.env.APP_INTERNAL_TOKEN = "fixture-token";
+  process.env.OPENAI_API_KEY = "fixture-key";
+  process.env.ELEVENLABS_API_KEY = "fixture-key";
+  process.env.ELEVENLABS_VOICE_ID = "fixture-voice";
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  setGlobalDispatcher(agent);
+  const requests: Array<Record<string, unknown>> = [];
+  const hangups: object[] = [];
+  let finalPosted: (() => void) | undefined;
+  const finalized = new Promise<void>((resolve) => { finalPosted = resolve; });
+  const api = agent.get("https://stream.test");
+  const policyReply = api.intercept({ path: "/api/telnyx/topic-policies?userId=owner", method: "GET" }).reply(200, {
+    topicPolicies: [{ topic: "Energie", callObjective: "Beratung zu Energiekosten." }],
+  });
+  if (policyDelayMs) policyReply.delay(policyDelayMs);
+  policyReply.persist();
+  api.intercept({ path: "/api/calls/transcript", method: "POST" }).reply(200, { ok: true }).persist();
+  api.intercept({ path: "/api/calendar/busy?userId=owner", method: "GET" }).reply(200, { slots: [] }).persist();
+  api.intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
+    const payload = JSON.parse(String(options.body));
+    requests.push(payload);
+    if (payload.summary && payload.outcome) finalPosted?.();
+    return { statusCode: 200, data: { ok: true } };
+  }).persist();
+  api.intercept({ path: "/api/telnyx/hangup", method: "POST" }).reply((options) => {
+    hangups.push(JSON.parse(String(options.body)));
+    return { statusCode: 200, data: { ok: true } };
+  }).persist();
+  agent.get("https://api.elevenlabs.io").intercept({
+    path: /\/v1\/text-to-speech\/fixture-voice\/stream/, method: "POST",
+  }).reply(200, Buffer.alloc(160)).persist();
+  const upstream = new StreamTestSocket();
+  let connected: (() => void) | undefined;
+  const sessionCreated = new Promise<void>((resolve) => { connected = resolve; });
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  server.on("connection", (socket, request) => {
+    void handleOpenAiRealtimeTelnyxStream(socket, request, () => {
+      connected?.();
+      return upstream;
+    });
+  });
+  const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  try {
+    await once(client, "open");
+    if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", { topic: "Energie", callObjective: "Beratung zu Energiekosten." });
+    const unsigned = {
+      queueId: "fixture-queue", userId: "owner", ownerRole: "user", ownerRealName: "Testberater",
+      company: "Testfirma", topic: "Energie", contactName: "Herr Neumann", calledPhone: "+492339555100",
+      streamExpiresAt: Date.now() + 60_000,
+    };
+    const state = { ...unsigned, streamSignature: createHmac("sha256", "fixture-token").update(JSON.stringify(unsigned)).digest("hex") };
+    client.send(JSON.stringify({
+      event: "start", stream_id: "fixture-stream",
+      start: { call_control_id: "fixture-call", client_state: Buffer.from(JSON.stringify(state)).toString("base64"), media_format: { encoding: "PCMA" } },
+    }));
+    await Promise.race([
+      sessionCreated,
+      once(client, "close").then(([code, reason]) => {
+        throw new Error(`Fixture stream closed before session creation: ${code} ${reason}`);
+      }),
+    ]);
+    upstream.open();
+    await settleStreamEvents();
+    await run(upstream, hangups);
+  } finally {
+    client.terminate();
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        finalized,
+        new Promise<never>((_resolve, reject) => {
+          cleanupTimer = setTimeout(() => reject(new Error("Fixture report was not finalized")), 3000);
+        }),
+      ]);
+    } finally {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      setGlobalDispatcher(dispatcher);
+      await agent.close();
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+  return requests;
+}
+
+test("a split customer sentence retains every part and waits for ongoing speech and late ASR", () => {
+  const turns = new UserTurnBuffer();
+  turns.speechStarted("first");
+  turns.speechStopped("first");
+  turns.speechStarted("second");
+  turns.complete("Die Beiträge steigen.", "first");
+  assert.equal(turns.take(), undefined);
+  turns.speechStopped("second");
+  assert.equal(turns.take(), undefined);
+  turns.complete("Aber ich möchte erst die Leistungen vergleichen.", "second");
+  assert.equal(turns.take(), "Die Beiträge steigen. Aber ich möchte erst die Leistungen vergleichen.");
+  assert.equal(turns.take(), undefined);
+});
+
+test("audio recognition is initialized before a slow policy load, but the opening waits for that policy", { timeout: 10_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await withRealtimeStream(async (socket) => {
+      assert.ok(socket.sent.some((event) => event.type === "session.update"));
+      socket.message({ type: "session.updated" });
+      const opening = new Promise<void>((resolve) => {
+        const listener = (event: { type: string }) => {
+          if (event.type === "response.create") {
+            socket.off("sent", listener);
+            resolve();
+          }
+        };
+        socket.on("sent", listener);
+      });
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Bitte warten Sie." });
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+      assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+      t.mock.timers.tick(200);
+      await opening;
+      assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 1);
+    }, 200);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test("a mailbox detected after a human-like greeting ends silently and is documented as a machine", { timeout: 10_000 }, async () => {
+  const requests = await withRealtimeStream(async (socket, hangups) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+    socket.message({ type: "response.created" });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "mailbox" });
+    socket.message({ type: "response.done", response: { status: "cancelled" } });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "mailbox" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "mailbox", transcript: "Bitte sprechen Sie nach dem Ton." });
+    await settleStreamEvents();
+    assert.equal(hangups.length, 1);
+    assert.equal(socket.sent.filter((event) => event.type === "conversation.item.create").length, 0);
+  });
+  const final = requests.find((request) => request.summary && request.outcome);
+  assert.equal(final?.outcome, "Nicht erreicht / kein Kontakt");
+  assert.equal(final?.callDisposition, "Anrufbeantworter");
+});
+
+test("an immediate human refusal is honored without an identity question or another pitch", { timeout: 10_000 }, async () => {
+  const requests = await withRealtimeStream(async (socket) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ich habe kein Interesse, bitte nicht mehr anrufen." });
+    assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+    const message = socket.sent.find((event) => event.type === "conversation.item.create") as { item: { content: Array<{ text: string }> } };
+    assert.match(message.item.content[0].text, /Auf Wiederhören/);
+    assert.doesNotMatch(message.item.content[0].text, /Neumann|Am Apparat/i);
+  });
+  assert.equal(requests.find((request) => request.summary && request.outcome)?.outcome, "Absage");
+});
+
+test("out-of-order ASR preserves speech order and failed chunks do not block the turn", () => {
+  const turns = new UserTurnBuffer();
+  turns.speechStarted("first");
+  turns.speechStopped("first");
+  turns.speechStarted("second");
+  turns.speechStopped("second");
+  turns.complete("Zweiter Teil.", "second");
+  assert.equal(turns.take(), undefined);
+  turns.complete("Erster Teil.", "first");
+  assert.equal(turns.take(), "Erster Teil. Zweiter Teil.");
+  turns.speechStarted("failed");
+  turns.speechStopped("failed");
+  turns.complete("", "failed");
+  assert.equal(turns.isBlocked(), false);
+});
+
+test("reconnecting cannot leave old ASR item IDs blocking every subsequent customer turn", () => {
+  const turns = new UserTurnBuffer();
+  turns.speechStarted("completed");
+  turns.speechStopped("completed");
+  turns.complete("Bereits erkannt.", "completed");
+  turns.speechStarted("lost-on-disconnect");
+  assert.equal(turns.resetAfterReconnect(), "Bereits erkannt.");
+  assert.equal(turns.isBlocked(), false);
+  turns.speechStarted("new-session");
+  turns.speechStopped("new-session");
+  turns.complete("Vollständiger Satz nach Wiederverbindung.", "new-session");
+  assert.equal(turns.take(), "Vollständiger Satz nach Wiederverbindung.");
+});
+
+test("the actual stream stays silent before a human and caps repeated queues at exactly three minutes", { timeout: 10_000 }, async (t) => {
+  await withRealtimeStream(async (socket, hangups) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      socket.message({ type: "session.updated" });
+      t.mock.timers.tick(1201);
+      assert.equal(socket.sent.some((event) => event.type === "conversation.item.create" || event.type === "response.create"), false);
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Willkommen bei unserer Firma." });
+      t.mock.timers.tick(45_000);
+      await settleStreamEvents();
+      assert.equal(hangups.length, 0);
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Alle Mitarbeiter sind im Gespräch. Bitte warten Sie." });
+      t.mock.timers.tick(133_798);
+      await settleStreamEvents();
+      assert.equal(hangups.length, 0);
+      assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+      t.mock.timers.tick(1);
+      await settleStreamEvents();
+      assert.equal(hangups.length, 1);
+    } finally {
+      t.mock.timers.reset();
+    }
+  });
+});
+
+test("a human greeting immediately releases the queue and cancels its timeout", { timeout: 10_000 }, async (t) => {
+  await withRealtimeStream(async (socket, hangups) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      socket.message({ type: "session.updated" });
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Bitte warten Sie." });
+      t.mock.timers.tick(179_000);
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+      assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 1);
+      const updates = socket.sent.filter((event) => event.type === "session.update");
+      const last = updates.at(-1) as { session: { audio: { input: { turn_detection: object } } } };
+      assert.deepEqual(last.session.audio.input.turn_detection, { type: "semantic_vad", eagerness: "low", create_response: false, interrupt_response: false });
+      t.mock.timers.tick(2000);
+      await settleStreamEvents();
+      assert.equal(hangups.length, 0);
+    } finally {
+      t.mock.timers.reset();
+    }
+  });
+});
+
+test("the stream cancels an early assistant response and waits for the complete long customer turn", { timeout: 10_000 }, async () => {
+  const requests = await withRealtimeStream(async (socket) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+    socket.message({ type: "response.created" });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "part-one" });
+    assert.equal(socket.sent.some((event) => event.type === "response.cancel"), true);
+    socket.message({ type: "response.done", response: { status: "cancelled" } });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "part-one" });
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "part-two" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "part-one", transcript: "Unsere Kosten steigen." });
+    assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 1);
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "part-two" });
+    assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "part-two", transcript: "Aber ich möchte die Konditionen genau vergleichen." });
+    assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 2);
+  });
+  const final = requests.find((request) => request.summary && request.outcome);
+  assert.ok(Array.isArray(final?.transcript));
+  assert.ok(final.transcript.some((turn: { text: string }) => turn.text === "Unsere Kosten steigen. Aber ich möchte die Konditionen genau vergleichen."));
+});
 
 function buildPkvContext() {
   const ctx = newContext({

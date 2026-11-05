@@ -82,6 +82,7 @@ export type CallContext = {
   lastUserFinalAt?: number;
   // Runtime-Klassifikation fuer Spezialfaelle im Call.
   detectedVoicemail?: boolean;
+  humanContactDetected?: boolean;
   waitingForDecisionMaker?: boolean;
   queueDetected?: boolean;
 };

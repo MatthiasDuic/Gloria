@@ -6,6 +6,10 @@ export const TOPICS = [
 // Default-Themen; zusätzliche Kampagnenthemen werden als Topic-Policies gespeichert.
 export type Topic = string;
 
+export function shouldGenerateAppointmentPdf(topic?: string): boolean {
+  return topic?.trim().toLowerCase() === "private krankenversicherung";
+}
+
 export function isSharedCampaignTopic(topic: string): boolean {
   return TOPICS.some((entry) => entry.toLocaleLowerCase() === topic.trim().toLocaleLowerCase());
 }

@@ -2,6 +2,40 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, instructionForContactRouting, isGatekeeperReasonQuestion } from "./contact-routing-controller.js";
 
+test("recognizes initial recorded welcomes, hold music and advertising without starting a conversation", () => {
+  let state = createContactRoutingState("Herr Neumann");
+  for (const text of [
+    "Herzlich willkommen bei Beispiel.",
+    "Vielen Dank für Ihren Anruf.",
+    "[Musik]",
+    "Informieren Sie sich inzwischen über unsere günstigen Angebote.",
+    "Ihr Anruf ist uns wichtig.",
+  ]) {
+    state = advanceContactRouting(state, text);
+    assert.equal(state.stage, "waiting_for_transfer", text);
+  }
+  state = advanceContactRouting(state, "Neumann am Apparat, guten Tag.");
+  assert.equal(state.stage, "decision_maker");
+});
+
+test("machine detection remains active after an apparent human greeting or confirmed decision maker", () => {
+  for (const stage of ["confirming_decision_maker", "decision_maker"] as const) {
+    const state = { ...createContactRoutingState("Herr Neumann"), stage };
+    assert.equal(advanceContactRouting(state, "Bitte sprechen Sie nach dem Ton.").stage, "voicemail");
+    assert.equal(advanceContactRouting(state, "Alle Mitarbeiter sind im Gespräch. Bitte warten Sie.").stage, "waiting_for_transfer");
+  }
+});
+
+test("a new receptionist after a transfer is not dismissed for the previous receptionist's request", () => {
+  const state = advanceContactRouting({
+    ...createContactRoutingState("Herr Neumann"), stage: "waiting_for_transfer",
+    gatekeeperRequestMade: true, gatekeeperReasonGiven: true,
+  }, "Empfang, hier ist Frau Müller. Guten Tag.");
+  assert.equal(state.stage, "gatekeeper");
+  assert.equal(state.gatekeeperRequestMade, false);
+  assert.equal(state.gatekeeperReasonGiven, false);
+});
+
 test("uses the healthcare contribution reason at reception without disclosing a private insurance status", () => {
   const reason = buildGatekeeperReason("private Krankenversicherung", "Herr Schneider");
   assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung. Ist Herr Schneider gerade erreichbar?");

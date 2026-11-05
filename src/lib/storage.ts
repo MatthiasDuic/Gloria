@@ -1842,6 +1842,7 @@ export async function storeCallReport(payload: {
   appointmentMode?: string;
   calledPhone?: string;
   nextCallAt?: string;
+  callDisposition?: string;
   directDial?: string;
   attempts?: number;
   recordingConsent?: boolean;
@@ -1887,15 +1888,30 @@ export async function storeCallReport(payload: {
   const manualLead = callSource === "manual"
     ? leads.find((lead) => lead.callSource === "manual" && lead.id === (existingReport?.leadId || payload.leadId))
     : undefined;
-  const createManualCallback = callSource === "manual" && !manualLead
-    && payload.outcome === "Wiedervorlage" && payload.nextCallAt;
+  const isMailboxRetry = payload.outcome === "Nicht erreicht / kein Kontakt"
+    && payload.callDisposition === "Anrufbeantworter";
+  const manualAttempts = Math.max(manualLead?.attempts || 0, payload.attempts ?? existingReport?.attempts ?? 1);
+  const automaticNextCallAt = (attempts: number) => {
+    if (attempts >= 3) return undefined;
+    if (existingReport?.nextCallAt) return existingReport.nextCallAt;
+    const next = new Date();
+    next.setHours(9, 0, 0, 0);
+    next.setDate(next.getDate() + (attempts >= 2 ? 3 : 1));
+    return next.toISOString();
+  };
+  const manualNextCallAt = payload.nextCallAt || (isMailboxRetry ? automaticNextCallAt(manualAttempts) : undefined);
+  const createManualCallback = callSource === "manual" && !manualLead && manualNextCallAt
+    && (payload.outcome === "Wiedervorlage" || isMailboxRetry);
+  if (createManualCallback && (!resolvedUserId || !(payload.calledPhone || existingReport?.calledPhone || payload.directDial || existingReport?.directDial)?.trim())) {
+    throw new Error("Mailbox-Wiedervorlage benötigt einen Benutzer und eine Telefonnummer.");
+  }
   const manualCallbackLead: Lead | undefined = createManualCallback ? {
     id: `manual-callback-${callSid || existingReport?.id || Date.now()}`,
     callSource: "manual", userId: resolvedUserId, company: payload.company,
     contactName: payload.contactName || "", topic: payload.topic,
     phone: payload.calledPhone || existingReport?.calledPhone || payload.directDial || existingReport?.directDial || "",
     directDial: payload.directDial, status: "wiedervorlage",
-    nextCallAt: payload.nextCallAt, attempts: payload.attempts ?? 1,
+    nextCallAt: manualNextCallAt, attempts: manualAttempts,
   } : undefined;
   if (manualCallbackLead) leads.push(manualCallbackLead);
   const resolvedLeadId = callSource === "manual"
@@ -2008,7 +2024,7 @@ export async function storeCallReport(payload: {
     // den Initial-Platzhalter beim Kampagnen-Start nicht zu ueberschreiben.
     const isRetryable =
       payload.outcome === "Nicht erreicht / kein Kontakt" &&
-      existingIndex >= 0 &&
+      (existingIndex >= 0 || isMailboxRetry) &&
       !payload.nextCallAt;
 
     let resolvedStatus: Lead["status"];
@@ -2018,11 +2034,7 @@ export async function storeCallReport(payload: {
       resolvedStatus = "absage";
       resolvedNextCallAt = undefined;
     } else if (isRetryable) {
-      const delayDays = nextAttempts >= 2 ? 3 : 1;
-      const next = new Date();
-      next.setHours(9, 0, 0, 0);
-      next.setDate(next.getDate() + delayDays);
-      resolvedNextCallAt = next.toISOString();
+      resolvedNextCallAt = automaticNextCallAt(nextAttempts);
       resolvedStatus = "wiedervorlage";
     } else if (payload.outcome === "Termin") {
       resolvedStatus = "termin";
@@ -2034,6 +2046,11 @@ export async function storeCallReport(payload: {
       resolvedStatus = "angerufen";
     } else {
       resolvedStatus = "angerufen";
+    }
+
+    if (isRetryable) {
+      report.nextCallAt = resolvedNextCallAt;
+      report.attempts = nextAttempts;
     }
 
     return {

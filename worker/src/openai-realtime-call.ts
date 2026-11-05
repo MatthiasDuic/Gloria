@@ -4,13 +4,15 @@ import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
 import { advanceAppointmentRouting, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
+import { classifyInboundSpeech } from "./call-classification.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
-import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, isGatekeeperReasonQuestion, type ContactRoutingState } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, isGatekeeperReasonQuestion, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
 import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
 import { log } from "./log.js";
-import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
+import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
+import { UserTurnBuffer } from "./user-turn-buffer.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
@@ -437,9 +439,12 @@ function rotateTranscriptIfNeeded(ctx: CallContext): void {
 export async function handleOpenAiRealtimeTelnyxStream(
   telnyx: ServerWebSocket,
   _req: IncomingMessage,
+  socketFactory?: OpenAiRealtimeSessionOptions["socketFactory"],
 ): Promise<void> {
   let ctx: CallContext | null = null;
   let topicPolicyReady = false;
+  let connectedOnce = false;
+  let reconnectNoticePending = false;
   let openaiSession: OpenAiRealtimeSession | null = null;
   let streamId = "";
   let inputAudioFormat: "audio/pcma" | "audio/pcmu" = "audio/pcma";
@@ -449,7 +454,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let callStartedAt = 0;
   let firstAudioLogged = false;
   let callDeadline: NodeJS.Timeout | null = null;
-  let silenceOpenerTimer: NodeJS.Timeout | null = null;
   let bargeInAwaitingTranscript = false;
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
@@ -462,7 +466,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let ttsTurn = 0;
   let responseInterrupted = false;
   let currentAssistantTurnIndex: number | undefined;
-  let decisionMakerIntroWasLastResponse = false;
   let responseCreatedAt: number | null = null;
   let firstModelTokenAt: number | null = null;
   let firstTtsChunkAt: number | null = null;
@@ -470,18 +473,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let contactRouting: ContactRoutingState | null = null;
   let unclearClarificationPending = false;
   let basicInfoEmailOfferPending = false;
-  let userIsSpeaking = false;
-  let transferWaitingStartedAt: number | null = null;
   let transferTimeoutTimer: NodeJS.Timeout | null = null;
   let ttsPlaybackStartedAt: number | null = null; // timestamp when current TTS started playing
   let terminationInProgress = false;
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
-  const pendingUserTranscripts: string[] = [];
+  const userTurns = new UserTurnBuffer();
   const handledToolCalls = new Set<string>();
   let bookingInProgress = false;
   let pendingDeterministicSpeech: { text: string; hangupAfterPlayback?: boolean } | null = null;
   let flushDeterministicSpeech = () => undefined;
+  let flushUserTranscript = () => undefined;
 
   const sendOpenAi = (event: Record<string, unknown>): boolean => {
     return openaiSession?.send(event) ?? false;
@@ -515,7 +517,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     onIdle: () => {
       flushDeterministicSpeech();
       responses.flush();
-      if (hangupAfterPlayback && ctx && !responses.isActive()) {
+      if (hangupAfterPlayback && ctx && !responses.isActive() && !userTurns.isBlocked()) {
         hangupAfterPlayback = false;
         setTimeout(() => {
           if (!ctx || terminationInProgress) return;
@@ -532,7 +534,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       type: "response.create",
       ...(instructions ? { response: { instructions } } : {}),
     }),
-    isPlaybackPending: () => playback.isPending(),
+    isPlaybackPending: () => playback.isPending() || userTurns.isBlocked(),
     onDeferred: ({ instructions, playbackPending }) => {
       log.info("realtime.response_queued", {
         callSid: ctx?.callSid,
@@ -544,7 +546,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   });
 
   const updateSession = () => {
-    if (!ctx || !topicPolicyReady || !openaiSession?.isConnected()) return;
+    if (!ctx || !openaiSession?.isConnected()) return;
     const vadThreshold = Number.parseFloat(process.env.OPENAI_REALTIME_VAD_THRESHOLD?.trim() || "0.7");
     const silenceDurationMs = Number.parseInt(
       process.env.OPENAI_REALTIME_SILENCE_MS?.trim()
@@ -560,7 +562,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         type: "realtime",
         output_modalities: ["text"],
         max_output_tokens: maxOutputTokens,
-        instructions: buildRealtimeInstructions(ctx),
+        instructions: topicPolicyReady ? buildRealtimeInstructions(ctx) : "Warte stumm, bis der Gesprächsauftrag geladen ist.",
         reasoning: { effort: process.env.OPENAI_REALTIME_REASONING_EFFORT?.trim() || "low" },
         tools: REALTIME_TOOLS,
         tool_choice: "auto",
@@ -574,7 +576,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
               prompt: process.env.OPENAI_TRANSCRIBE_PROMPT?.trim()
                 || "Deutsches Geschaeftstelefonat. Zahlen und Eigennamen exakt transkribieren. Ansagen von Warteschleifen, Weiterleitungen, Mailboxen und Anrufbeantwortern vollstaendig transkribieren.",
             },
-            turn_detection: {
+            turn_detection: contactRouting?.stage === "decision_maker" ? {
+              type: "semantic_vad",
+              eagerness: "low",
+              create_response: false,
+              interrupt_response: false,
+            } : {
               type: "server_vad",
               threshold: vadThreshold,
               silence_duration_ms: silenceDurationMs,
@@ -607,7 +614,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       while (true) {
         try {
           await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
-            if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+            if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted || userTurns.isBlocked()) return;
             if (audioBytes === 0) {
               const now = Date.now();
               if (!firstAudioLogged) {
@@ -692,7 +699,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   flushDeterministicSpeech = () => {
-    if (!ctx || !pendingDeterministicSpeech || responses.isActive() || playback.isPending() || terminationInProgress) return;
+    if (!ctx || !pendingDeterministicSpeech || userTurns.isBlocked() || responses.isActive() || playback.isPending() || terminationInProgress) return;
     const pending = pendingDeterministicSpeech;
     pendingDeterministicSpeech = null;
     playback.startResponse();
@@ -739,7 +746,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
     void persistTranscriptDelta(ctx);
     currentAssistantTurnIndex = ctx.transcript.length - 1;
-    decisionMakerIntroWasLastResponse = route === "decision_maker";
     log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
     recordAssistantContext(text);
     void speakWithElevenLabs(text);
@@ -747,7 +753,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
   const requestHangupAfterPlayback = () => {
     hangupAfterPlayback = true;
-    if (!playback.isPending() && !responses.isActive() && ctx) {
+    if (!playback.isPending() && !responses.isActive() && !userTurns.isBlocked() && ctx) {
       hangupAfterPlayback = false;
       terminationInProgress = true;
       log.info("realtime.hangup_after_farewell", { callSid: ctx.callSid });
@@ -758,16 +764,28 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const hangupImmediately = (reason: "voicemail_detected" | "transfer_timeout") => {
     if (!ctx || terminationInProgress) return;
     terminationInProgress = true;
+    openingSpeech?.stop();
+    ttsTurn += 1;
+    ttsAbortController?.abort();
+    if (responses.isActive()) sendOpenAi({ type: "response.cancel" });
     if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
     transferTimeoutTimer = null;
-    transferWaitingStartedAt = null;
     pendingDeterministicSpeech = null;
-    pendingUserTranscripts.splice(0);
+    userTurns.clear();
     responses.stop();
     playback.stop();
     sendTelnyx({ event: "clear" });
     log.info(`realtime.${reason}`, { callSid: ctx.callSid });
     void notifyCallAction(ctx, "hangup");
+  };
+
+  const waitForContact = () => {
+    if (transferTimeoutTimer) return;
+    transferTimeoutTimer = setTimeout(() => {
+      if (contactRouting?.stage === "waiting_for_transfer" || contactRouting?.stage === "awaiting_contact") {
+        hangupImmediately("transfer_timeout");
+      }
+    }, CONTACT_WAIT_TIMEOUT_MS);
   };
 
   const sendToolResult = (callId: string, result: Record<string, unknown>) => {
@@ -800,8 +818,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
     pendingDeterministicSpeech = null;
     const currentContext = ctx;
     assistantContinuationRequested = false;
-    currentContext.lastUserFinalAt = Date.now();
-    currentContext.transcript.push({ role: "user", text: transcript, at: Date.now(), phase: currentContext.dialogState.phase });
+    const userFinalAt = currentContext.lastUserFinalAt || Date.now();
+    log.info("realtime.user_turn_processing", { callSid: currentContext.callSid, asrFinalToProcessingMs: Date.now() - userFinalAt });
+    currentContext.transcript.push({ role: "user", text: transcript, at: userFinalAt, phase: currentContext.dialogState.phase });
     rotateTranscriptIfNeeded(currentContext);
 
     updateDialogPhase(currentContext);
@@ -810,7 +829,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
-    if (contactRouting && contactRouting.stage !== "decision_maker") {
+    const event = classifyConversationEvent(transcript);
+    if (contactRouting) {
+      const previousStage = contactRouting.stage;
       contactRouting = advanceContactRouting(contactRouting, transcript);
       currentContext.detectedVoicemail = contactRouting.stage === "voicemail";
       currentContext.queueDetected = contactRouting.stage === "waiting_for_transfer";
@@ -820,9 +841,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
         callSid: currentContext.callSid,
         stage: contactRouting.stage,
       });
+      if (contactRouting.stage !== previousStage) updateSession();
+      if (contactRouting.stage === "awaiting_contact") {
+        waitForContact();
+        return;
+      }
+      if (contactRouting.stage === "gatekeeper" || contactRouting.stage === "confirming_decision_maker" || contactRouting.stage === "decision_maker") {
+        currentContext.humanContactDetected = true;
+      }
 
       if (contactRouting.stage !== "waiting_for_transfer") {
-        transferWaitingStartedAt = null;
         if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
         transferTimeoutTimer = null;
       }
@@ -831,14 +859,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (contactRouting.stage === "waiting_for_transfer") {
-        if (!transferWaitingStartedAt) {
-          transferWaitingStartedAt = Date.now();
-          transferTimeoutTimer = setTimeout(() => {
-            if (contactRouting?.stage === "waiting_for_transfer") {
-              hangupImmediately("transfer_timeout");
-            }
-          }, 45000);
-        }
+        waitForContact();
+        return;
+      }
+      if (previousStage !== "decision_maker" && event.type === "clear_rejection") {
+        requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
         return;
       }
       if (contactRouting.stage === "confirming_decision_maker") {
@@ -862,16 +887,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
         contactRouting.gatekeeperRequestMade = true;
         return;
       }
-      if (currentContext.callObjective?.trim()) {
-        streamNextOpening = true;
-        requestEventResponse(buildDecisionMakerIntroInstructions(currentContext));
-      } else {
-        speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+      if (previousStage !== "decision_maker") {
+        if (currentContext.callObjective?.trim()) {
+          streamNextOpening = true;
+          requestEventResponse(buildDecisionMakerIntroInstructions(currentContext));
+        } else {
+          speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+        }
+        return;
       }
-      return;
     }
 
-    const event = classifyConversationEvent(transcript);
     if (hasRequestedHumanTransfer(transcript)) {
       requestEventResponse("Der Kunde verlangt einen Menschen oder lehnt das Gespräch mit Gloria ausdrücklich ab. Keine weiteren Fach-, Termin- oder Vorbereitungsfragen. Kündige kurz die Weiterleitung an den Auftraggeber an und rufe transfer_to_human auf.");
       return;
@@ -1082,9 +1108,27 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse(instruction);
         return;
       }
-      pendingUserTranscripts.splice(0);
+      userTurns.clear();
       sendToolResult(tool.callId, { ok: true });
       requestHangupAfterPlayback();
+    }
+  };
+
+  flushUserTranscript = () => {
+    if (!ctx || !topicPolicyReady || terminationInProgress || responses.isActive()) return;
+    const parts = userTurns.takeParts();
+    if (!parts?.length) return;
+    const lastMachineIndex = parts.map((part) => {
+      const classification = classifyInboundSpeech(part);
+      return classification === "queue" || classification === "voicemail";
+    }).lastIndexOf(true);
+    if (lastMachineIndex >= 0) {
+      processUserTranscript(parts.slice(0, lastMachineIndex + 1).join(" "));
+      if (parts.length > lastMachineIndex + 1 && !terminationInProgress) {
+        processUserTranscript(parts.slice(lastMachineIndex + 1).join(" "));
+      }
+    } else {
+      processUserTranscript(parts.join(" "));
     }
   };
 
@@ -1098,7 +1142,31 @@ export async function handleOpenAiRealtimeTelnyxStream(
     openaiSession = new OpenAiRealtimeSession({
       apiKey,
       model,
+      socketFactory,
       onOpen: () => {
+        if (connectedOnce) {
+          const interrupted = userTurns.isBlocked() || responses.isActive() || playback.isPending();
+          const retainedText = userTurns.resetAfterReconnect();
+          if (ctx && retainedText) {
+            ctx.transcript.push({ role: "user", text: retainedText, at: ctx.lastUserFinalAt || Date.now(), phase: ctx.dialogState.phase });
+            void persistTranscriptDelta(ctx);
+          }
+          openingSpeech?.stop();
+          ttsTurn += 1;
+          ttsAbortController?.abort();
+          playback.interrupt();
+          sendTelnyx({ event: "clear" });
+          responses.markInterruptRequested();
+          responses.markCancelled();
+          responseInterrupted = false;
+          bargeInAwaitingTranscript = false;
+          clearBargeInRecovery();
+          pendingDeterministicSpeech = null;
+          hangupAfterPlayback = false;
+          reconnectNoticePending = interrupted && contactRouting?.stage === "decision_maker";
+          log.warn("realtime.reconnected", { callSid: ctx?.callSid, interrupted, retainedTranscript: Boolean(retainedText) });
+        }
+        connectedOnce = true;
         updateSession();
         if (ctx) {
           for (const turn of ctx.transcript.slice(-80)) {
@@ -1112,16 +1180,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
       },
       onReady: () => {
         log.info("realtime.session_ready", { callSid: ctx?.callSid, streamToReadyMs: Date.now() - callStartedAt });
-        if (silenceOpenerTimer || !ctx || ctx.transcript.length > 0) return;
-        silenceOpenerTimer = setTimeout(() => {
-          silenceOpenerTimer = null;
-          if (!ctx || userIsSpeaking || ctx.transcript.length > 0 || terminationInProgress) return;
-          speakDeterministicIntro(buildGatekeeperIntro(ctx), "gatekeeper");
-          if (contactRouting) {
-            contactRouting.stage = "gatekeeper";
-            contactRouting.gatekeeperRequestMade = true;
-          }
-        }, 1200);
+        if (contactRouting?.stage === "awaiting_contact") waitForContact();
+        if (reconnectNoticePending) {
+          reconnectNoticePending = false;
+          requestDeterministicSpeech("Entschuldigung, die Verbindung war kurz gestört. Können Sie Ihren letzten Satz bitte wiederholen?");
+        }
+        flushUserTranscript();
       },
       onEvent: (message) => handleRealtimeEvent(message),
       onClose: (code, reason) => {
@@ -1152,21 +1216,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "input_audio_buffer.speech_started") {
-        userIsSpeaking = true;
-        // Check transfer timeout: if waiting for transfer >45 seconds, auto-hangup
-        if (contactRouting?.stage === "waiting_for_transfer" && transferWaitingStartedAt) {
-          const waitingMs = Date.now() - transferWaitingStartedAt;
-          const TRANSFER_TIMEOUT_MS = 45000; // 45 seconds
-          if (waitingMs > TRANSFER_TIMEOUT_MS) {
-            hangupImmediately("transfer_timeout");
-            return;
-          }
-        }
-        if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
-        silenceOpenerTimer = null;
-
-        // Greeting gets longer protection (2500ms) — it's ~4s long and must not be cut off
-        const MIN_TTS_PLAY_MS = decisionMakerIntroWasLastResponse ? 2500 : 900;
+        userTurns.speechStarted(message.item_id);
+        hangupAfterPlayback = false;
+        responses.markInterruptRequested();
         const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
         const playbackPending = playback.isPending();
 
@@ -1175,8 +1227,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           playbackPending,
         });
 
-        // Only actually interrupt if: plan says to AND TTS has played long enough
-        if (plan.interrupted && ttsAge >= MIN_TTS_PLAY_MS) {
+        if (plan.interrupted) {
           responseVersion += 1;
           openingSpeech?.stop();
           bargeInAwaitingTranscript = true;
@@ -1199,28 +1250,25 @@ export async function handleOpenAiRealtimeTelnyxStream(
             playbackCleared: plan.clearTelnyxPlayback,
             ttsAgeMs: Math.round(ttsAge),
           });
-        } else if (plan.interrupted && ttsAge < MIN_TTS_PLAY_MS) {
-          log.info("realtime.barge_in_suppressed", {
-            callSid: ctx?.callSid,
-            ttsAgeMs: Math.round(ttsAge),
-            reason: "tts_too_new",
-          });
         }
         return;
       }
 
       if (message.type === "input_audio_buffer.speech_stopped") {
-        userIsSpeaking = false;
+        userTurns.speechStopped(message.item_id);
         if (bargeInAwaitingTranscript && !bargeInRecoveryTimer) {
           bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 2200);
         }
+        flushUserTranscript();
         return;
       }
 
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
+        userTurns.complete(transcript && !isSyntheticTranscriptionPrompt(transcript) ? transcript : "", message.item_id);
         if (ctx && transcript) {
           if (terminationInProgress) return;
+          ctx.lastUserFinalAt = Date.now();
           if (shouldRecoverInterruptedBargeIn(bargeInAwaitingTranscript, transcript)) {
             log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
             recoverInterruptedBargeIn("synthetic_transcript");
@@ -1233,17 +1281,28 @@ export async function handleOpenAiRealtimeTelnyxStream(
           if (isLikelyNoiseTranscript(transcript)) {
             log.info("realtime.unclear_transcript", { callSid: ctx.callSid, text: transcript });
           }
-          if (responses.isActive()) {
-            pendingUserTranscripts.push(transcript);
-            log.info("realtime.user_queued_until_response_done", { callSid: ctx.callSid, text: transcript });
-          } else {
-            processUserTranscript(transcript);
-          }
         }
+        flushUserTranscript();
+        flushDeterministicSpeech();
+        responses.flush();
+        return;
+      }
+
+      if (message.type === "conversation.item.input_audio_transcription.failed") {
+        log.error("realtime.transcription_failed", { callSid: ctx?.callSid, itemId: message.item_id, error: message.error?.message });
+        userTurns.complete("", message.item_id);
+        flushUserTranscript();
+        if (bargeInAwaitingTranscript && !userTurns.isBlocked()) recoverInterruptedBargeIn("transcript_timeout");
         return;
       }
 
       if (message.type === "response.created") {
+        if (userTurns.isBlocked()) {
+          responses.markCreated();
+          responseInterrupted = true;
+          sendOpenAi({ type: "response.cancel" });
+          return;
+        }
         responseVersion += 1;
         ttsPlaybackStartedAt = null;
         openingSpeech?.stop();
@@ -1255,7 +1314,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         firstTtsChunkAt = null;
         responses.markCreated();
         responseInterrupted = false;
-        decisionMakerIntroWasLastResponse = false;
         currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
@@ -1308,8 +1366,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           firstTtsChunkAt = null;
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
-          const next = pendingUserTranscripts.splice(0).at(-1);
-          if (next && !terminationInProgress) processUserTranscript(next);
+          flushUserTranscript();
           return;
         }
         const rawTranscript = assistantTranscript.replace(/\s+/g, " ").trim();
@@ -1376,14 +1433,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
           }
         }
         if (!terminationInProgress) {
-          // Only the latest queued utterance carries the user's current intent.
-          const pending = pendingUserTranscripts.splice(0);
-          const nextUserTranscript = pending.at(-1)?.trim() ?? "";
-          if (nextUserTranscript) processUserTranscript(nextUserTranscript);
+          flushUserTranscript();
           flushDeterministicSpeech();
           responses.flush();
         } else {
-          pendingUserTranscripts.splice(0);
+          userTurns.clear();
         }
         responseCreatedAt = null;
         firstModelTokenAt = null;
@@ -1405,8 +1459,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         firstTtsChunkAt = null;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
-        const next = pendingUserTranscripts.splice(0).at(-1);
-        if (next && !terminationInProgress) processUserTranscript(next);
+        flushUserTranscript();
       }
     };
 
@@ -1448,6 +1501,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         previousSummary: state.previousSummary,
         isCallback: state.isCallback === 1,
         isTestCall: state.isTestCall === true,
+        humanContactDetected: false,
       });
       if (!ctx.ownerRole || !ctx.ownerRealName?.trim()) {
         log.warn("realtime.owner_identity_missing", { callSid: ctx.callSid });
@@ -1487,10 +1541,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
           preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic, policy);
         }
-        log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic });
+        log.info("realtime.topic_policy_applied", { callSid: ctx.callSid, topic: policy.topic, streamToPolicyMs: Date.now() - callStartedAt });
       }).finally(() => {
         topicPolicyReady = !terminationInProgress;
         if (ctx) updateSession();
+        flushUserTranscript();
       });
 
       const calendarTask = loadBusySlots({ userId: ctx.userId }).then((slots) => {
@@ -1549,10 +1604,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (callDeadline) clearTimeout(callDeadline);
     responses.stop();
     playback.stop();
-    if (silenceOpenerTimer) clearTimeout(silenceOpenerTimer);
     clearBargeInRecovery();
     if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
-    transferWaitingStartedAt = null;
+    userTurns.clear();
     try {
       openaiSession?.close(1000, "telnyx_closed");
     } catch {

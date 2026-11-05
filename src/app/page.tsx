@@ -7,7 +7,7 @@ import CRMDashboard from "./page-crm-new";
 import Image from "next/image";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DashboardData, LearningResponse, TopicPolicyConfig, Topic } from "@/lib/types";
-import { isSharedCampaignTopic, TOPICS } from "@/lib/types";
+import { isSharedCampaignTopic, shouldGenerateAppointmentPdf, TOPICS } from "@/lib/types";
 import topicPolicyDefaults from "../../data/topic-policies.json";
 
 const SAMPLE_CSV = `company,contactName,phone,email,topic,note,nextCallAt
@@ -2023,9 +2023,9 @@ export default function HomePage() {
     }
   }
 
-  function handleAddNewTopic() {
+  async function handleAddNewTopic() {
     const topic = newTopicInput.trim();
-    if (!topic) return;
+    if (!topic || busy) return;
     const existingTopic = Object.keys(draftScripts).find(
       (entry) => normalizeTopicKey(entry) === normalizeTopicKey(topic),
     );
@@ -2035,14 +2035,26 @@ export default function HomePage() {
       setShowNewTopicForm(false);
       return;
     }
-    setDraftScripts((c) => ({
-      ...c,
-      [topic]: buildNewCampaignDraft(topic),
-    }));
+    const draft = buildNewCampaignDraft(topic);
+    setBusy(true);
     setSaveStatus(null);
-    setDetailTopic(topic);
-    setNewTopicInput("");
-    setShowNewTopicForm(false);
+    try {
+      const payload = await persistPlaybookDraft(draft);
+      setDraftScripts((current) => ({ ...current, [topic]: draft }));
+      await loadDashboard();
+      setDetailTopic(topic);
+      setNewTopicInput("");
+      setShowNewTopicForm(false);
+      const message = `Kampagne "${topic}" dauerhaft angelegt (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}). Bitte ergänzen Sie den Gesprächsauftrag und speichern Sie den Leitfaden.`;
+      setNotice(message);
+      setSaveStatus({ type: "success", message });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Kampagne konnte nicht angelegt werden.";
+      setNotice(message);
+      setSaveStatus({ type: "error", message });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function testVoice() {
@@ -3181,10 +3193,15 @@ export default function HomePage() {
                       placeholder="Kampagnenname, z. B. Krankenversicherung"
                       value={newTopicInput}
                       onChange={(e) => setNewTopicInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAddNewTopic(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (!busy) void handleAddNewTopic();
+                        }
+                      }}
                       style={{ flex: 1 }}
                     />
-                    <button className="btn" onClick={handleAddNewTopic} disabled={!newTopicInput.trim()} style={{ marginLeft: 8 }}>Anlegen</button>
+                    <button className="btn" onClick={() => void handleAddNewTopic()} disabled={busy || !newTopicInput.trim()} style={{ marginLeft: 8 }}>Anlegen</button>
                     <button className="btn ghost" onClick={() => { setShowNewTopicForm(false); setNewTopicInput(""); }} style={{ marginLeft: 4 }}>Abbrechen</button>
                   </div>
                 ) : null}
@@ -4273,7 +4290,7 @@ export default function HomePage() {
                     <p style={{ fontFamily: "monospace", fontSize: "0.82rem", color: "#4f6588" }}>{selectedReport.callSid}</p>
                   </div>
                 )}
-                {selectedReport.outcome === "Termin" && selectedReport.callSid && (
+                {selectedReport.outcome === "Termin" && selectedReport.callSid && shouldGenerateAppointmentPdf(selectedReport.topic) && (
                   <div className="report-detail-field">
                     <label>Kundenterminbogen</label>
                     <a

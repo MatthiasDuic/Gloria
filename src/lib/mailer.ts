@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import { APPOINTMENT_EMAIL_PATTERN, appointmentConfirmationDelivery } from "./appointment-confirmation";
-import type { CallReport } from "./types";
+import { shouldGenerateAppointmentPdf, type CallReport } from "./types";
 
 const fallbackRecipient = "Matthias.duic@agentur-duic-sprockhoevel.de";
 
@@ -206,7 +206,8 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
   if (!ics) {
     return { delivered: false, reason: "Kein gueltiger Termin im Report." };
   }
-  if (!options.appointmentPdf || options.appointmentPdf.length < 1000) {
+  const includePdf = shouldGenerateAppointmentPdf(report.topic);
+  if (includePdf && (!options.appointmentPdf || options.appointmentPdf.length < 1000)) {
     return { delivered: false, reason: "Kundenterminbogen fehlt oder ist unvollständig." };
   }
 
@@ -251,7 +252,7 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
       : []),
     ...questionBlock,
     "",
-    "Die Kalendereinladung und der Kundenterminbogen sind angehängt.",
+    includePdf ? "Die Kalendereinladung und der Kundenterminbogen sind angehängt." : "Die Kalendereinladung ist angehängt.",
     "",
     "Freundliche Grüße",
     organizerName,
@@ -273,11 +274,11 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
         content: ics,
         contentType: "text/calendar; method=REQUEST; charset=UTF-8",
       },
-      {
+      ...(includePdf ? [{
         filename: options.appointmentPdfFilename || "Kundenterminbogen.pdf",
         content: options.appointmentPdf,
         contentType: "application/pdf",
-      },
+      }] : []),
     ],
   });
 

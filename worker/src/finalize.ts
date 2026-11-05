@@ -287,7 +287,9 @@ export async function postReport(ctx: CallContext): Promise<void> {
   log.info("finalize.preliminary_posted", { callSid: ctx.callSid });
 
   // Phase 2: LLM-Auswertung; updated existierenden Report per callSid.
-  const extracted = await extractReport(ctx);
+  const hasVoicemail = ctx.detectedVoicemail
+    || ctx.transcript.some((turn) => turn.role === "user" && classifyInboundSpeech(turn.text) === "voicemail");
+  const extracted = hasVoicemail || ctx.humanContactDetected === false ? null : await extractReport(ctx);
   const resolvedExtraction = extracted || buildFallbackExtraction(ctx);
 
   if (!extracted) {
@@ -391,8 +393,8 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
   const hasVoicemailCue = Boolean(ctx.detectedVoicemail)
     || userTurns.some((turn) => classifyInboundSpeech(turn.text) === "voicemail");
   const humanTurns = userTurns.filter((turn) => classifyInboundSpeech(turn.text) === "human");
-  const hadConversation = !hasVoicemailCue && humanTurns.some((turn) => turn.text.trim().length > 1);
-  const rejected = !hasVoicemailCue && humanTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
+  const hadConversation = ctx.humanContactDetected !== false && !hasVoicemailCue && humanTurns.some((turn) => turn.text.trim().length > 1);
+  const rejected = ctx.humanContactDetected !== false && !hasVoicemailCue && humanTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
 
   const appointmentAt = ctx.confirmedSlotPhrase ? parseSlotPhraseToIso(ctx.confirmedSlotPhrase) : undefined;
   const outcome: Outcome = appointmentAt
@@ -444,7 +446,7 @@ function deriveReportDocumentation(
     .map((entry) => entry.text.trim())
     .filter(Boolean);
 
-  const hasMeaningfulHumanTurn = userTurns.some((text) => looksLikeMeaningfulHumanTurn(text));
+  const hasMeaningfulHumanTurn = ctx.humanContactDetected !== false && userTurns.some((text) => looksLikeMeaningfulHumanTurn(text));
   const hasVoicemailCue = Boolean(ctx.detectedVoicemail) || userTurns.some((text) => classifyInboundSpeech(text) === "voicemail");
   const hasQueueCue = Boolean(ctx.queueDetected) || userTurns.some((text) => classifyInboundSpeech(text) === "queue");
 

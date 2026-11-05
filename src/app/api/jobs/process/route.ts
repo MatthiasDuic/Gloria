@@ -5,7 +5,7 @@ import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppoin
 import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
 import { appointmentConfirmationDelivery } from "@/lib/appointment-confirmation";
 import { appendLeadEmailHistory, getLeadById } from "@/lib/storage";
-import type { CallReport } from "@/lib/types";
+import { shouldGenerateAppointmentPdf, type CallReport } from "@/lib/types";
 
 export const maxDuration = 300; // 5 minutes for job processing
 
@@ -44,13 +44,18 @@ async function processInviteJob(job: Job): Promise<void> {
 
   try {
     const report = payload.report;
-    const transcriptEvents = report.callSid
-      ? await listCallTranscriptEventsFromPostgres(report.callSid)
-      : [];
-    const appointmentForm = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
-    const appointmentPdf = await buildAppointmentFormPdf(appointmentForm);
-    if (appointmentPdf.length < 1000) {
-      throw new Error("Kundenterminbogen konnte nicht erzeugt werden.");
+    let appointmentPdf: Buffer | undefined;
+    let appointmentPdfFilename: string | undefined;
+    if (shouldGenerateAppointmentPdf(report.topic)) {
+      const transcriptEvents = report.callSid
+        ? await listCallTranscriptEventsFromPostgres(report.callSid)
+        : [];
+      const appointmentForm = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
+      appointmentPdf = await buildAppointmentFormPdf(appointmentForm);
+      if (appointmentPdf.length < 1000) {
+        throw new Error("Kundenterminbogen konnte nicht erzeugt werden.");
+      }
+      appointmentPdfFilename = getAppointmentFormFilename(appointmentForm);
     }
     const result = await sendAppointmentInvite({
       report,
@@ -58,7 +63,7 @@ async function processInviteJob(job: Job): Promise<void> {
       organizerName: "Gloria Consultant",
       missingBasisQuestions: payload.missingBasisQuestions || [],
       appointmentPdf,
-      appointmentPdfFilename: getAppointmentFormFilename(appointmentForm),
+      appointmentPdfFilename,
     });
 
     if (!result.delivered && "skipped" in result && result.skipped) {

@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { APPOINTMENT_FORM_MODES, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
+import { shouldGenerateAppointmentPdf } from "./types";
+
+test("appointment PDFs are enabled only for the shared private health insurance topic", async () => {
+  assert.equal(shouldGenerateAppointmentPdf("private Krankenversicherung"), true);
+  assert.equal(shouldGenerateAppointmentPdf(" PRIVATE Krankenversicherung "), true);
+  for (const topic of [undefined, "", "betriebliche Krankenversicherung", "Meine PKV-Kampagne", "Beratung"]) {
+    assert.equal(shouldGenerateAppointmentPdf(topic), false, topic);
+    await assert.rejects(buildAppointmentFormPdf({ topic }), /nur.*private Krankenversicherung/i);
+  }
+});
+
+test("manual PDF exports reject other topics before generating a document", async () => {
+  const { POST } = await import("../app/api/export/appointment-form/route");
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import("./session");
+  const cookie = `${SESSION_COOKIE_NAME}=${createSessionToken({ id: "pdf-owner", username: "fixture", role: "user", realName: "", companyName: "", gesellschaft: "" })}`;
+  for (const topic of ["betriebliche Krankenversicherung", "Mein eigenes Thema", undefined]) {
+    const response = await POST(new Request("http://localhost/api/export/appointment-form", {
+      method: "POST", headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ topic }),
+    }));
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /nur.*private Krankenversicherung/i);
+  }
+});
 
 test("getAppointmentFormFilename uses the KTB contact naming convention", () => {
   assert.equal(getAppointmentFormFilename({ contactName: "Herr Neumann" }), "KTB_Herr_Neumann.pdf");
@@ -165,21 +189,8 @@ test("buildAppointmentFormPdf keeps long notes across clean page breaks", async 
   assert.ok(pageCount >= 2);
 });
 
-test("buildAppointmentFormPdf hides health questions for commercial and retirement topics", async () => {
-  const pdf = await buildAppointmentFormPdf({
-    title: "Kundenterminbogen",
-    topic: "betriebliche Altersvorsorge",
-    createdAt: "2026-09-03T10:42:00.000Z",
-    appointmentDate: "2026-09-10T15:30:00.000Z",
-    appointmentMode: "Beim Kunden vor Ort",
-    location: "Musterstraße 12, 45525 Musterstadt",
-    advisor: "Herr Matthias Duic",
-    contactName: "Max Mustermann",
-    company: "Muster GmbH",
-    notes: "Thema erfordert keine Gesundheitsdaten.",
-  });
-
-  assert.ok(Buffer.isBuffer(pdf));
+test("commercial and retirement topics have no PDF or health section", async () => {
+  await assert.rejects(buildAppointmentFormPdf({ topic: "betriebliche Altersvorsorge" }), /nur.*private Krankenversicherung/i);
   assert.equal(shouldIncludeHealthSection("betriebliche Altersvorsorge"), false);
   assert.equal(shouldIncludeHealthSection("gewerbliche Versicherungen"), false);
 });

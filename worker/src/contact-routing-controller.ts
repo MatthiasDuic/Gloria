@@ -1,4 +1,6 @@
-import { classifyInboundSpeech } from "./call-classification.js";
+import { classifyInboundSpeech, isHumanContactAfterQueue } from "./call-classification.js";
+
+export const CONTACT_WAIT_TIMEOUT_MS = 3 * 60_000;
 
 export type ContactRoutingStage =
   | "awaiting_contact"
@@ -93,11 +95,19 @@ export function advanceContactRouting(
   state: ContactRoutingState,
   userText: string,
 ): ContactRoutingState {
-  if (state.stage === "decision_maker" || state.stage === "voicemail") return state;
+  if (state.stage === "voicemail") return state;
 
   const classification = classifyInboundSpeech(userText);
   if (classification === "voicemail") return { ...state, stage: "voicemail" };
   if (classification === "queue") return { ...state, stage: "waiting_for_transfer" };
+  if (state.stage === "decision_maker") return state;
+  if (state.stage === "waiting_for_transfer" && !identifiesDecisionMaker(userText, state.targetName) && !isHumanContactAfterQueue(userText)) {
+    return state;
+  }
+  if (state.stage === "awaiting_contact" && !identifiesDecisionMaker(userText, state.targetName)
+    && !isClearlyGatekeeper(userText, state.targetName) && !isHumanContactAfterQueue(userText)) {
+    return state;
+  }
   if (state.stage === "confirming_decision_maker") {
     return confirmsDecisionMaker(userText)
       ? { ...state, stage: "decision_maker" }
@@ -112,6 +122,8 @@ export function advanceContactRouting(
   if (classification === "human") {
     return {
       ...state,
+      gatekeeperRequestMade: state.stage === "waiting_for_transfer" ? false : state.gatekeeperRequestMade,
+      gatekeeperReasonGiven: state.stage === "waiting_for_transfer" ? false : state.gatekeeperReasonGiven,
       stage: isClearlyGatekeeper(userText, state.targetName) ? "gatekeeper" : "confirming_decision_maker",
     };
   }

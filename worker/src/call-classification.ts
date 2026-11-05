@@ -22,7 +22,11 @@ const VOICEMAIL_PATTERNS: RegExp[] = [
 ];
 
 const QUEUE_PATTERNS: RegExp[] = [
-  /ich\s+verbinde\s+sie/i,
+  /^\s*(?:herzlich\s+)?willkommen\b/i,
+  /(?:vielen\s+)?dank(?:e)?\s+f[üu]r\s+ihren\s+anruf/i,
+  /ihr\s+anruf\s+ist\s+uns\s+wichtig/i,
+  /^\s*[\[(]?\s*(?:musik|music|wartemusik|hold\s+music)\s*[\])]*[.!?\s]*$/i,
+  /ich\s+verbinde(?:\s+sie\b|[.!?,\s]*$)/i,
   /sie\s+werden\s+(?:jetzt\s+)?(?:weiter)?verbunden/i,
   /ihre\s+verbindung\s+wird\s+(?:gehalten|hergestellt|weitergeleitet)/i,
   /ihr\s+anruf\s+wird\s+(?:weitergeleitet|verbunden|entgegengenommen)/i,
@@ -40,6 +44,13 @@ const QUEUE_PATTERNS: RegExp[] = [
   /(?:to\s+)?(?:continue|hold|remain)\s+(?:please\s+)?(?:press\s+\d|on\s+the\s+line)/i,
   /(?:dr[üu]cken|w[äa]hlen)\s+sie\s+(?:bitte\s+)?(?:die\s+)?(?:\d|eins|eins\s+bis\s+neun)\b/i,
 ];
+
+export function isHumanContactAfterQueue(text: string): boolean {
+  return classifyInboundSpeech(text) === "human"
+    && (/\b(?:hallo|guten\s+(?:tag|morgen|abend)|am\s+apparat|hier\s+(?:ist|spricht)|mein\s+name\s+ist|ich\s+bin|das\s+bin\s+ich|wie\s+kann\s+ich|was\s+kann\s+ich|was\s+ist\s+ihr\s+anliegen|sie\s+sprechen\s+mit|wer\s+(?:ist\s+da|spricht)|worum\s+geht|was\s+(?:wollen|möchten)\s+sie)\b/i.test(text)
+      || /\b(?:ich\s+(?:habe|möchte|will|kann|muss)|wir\s+(?:haben|möchten)|kein\s+interesse|nicht\s+(?:mehr\s+)?anrufen|rufen\s+sie\s+(?:bitte\s+)?nicht)\b/i.test(text)
+      || /^(?:ja(?:\s+bitte)?|bitte|[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?),?\s*[.!?]*$/i.test(text.trim()));
+}
 
 export function classifyInboundSpeech(text: string): CallClassification {
   const normalized = text.trim().toLowerCase();
