@@ -403,6 +403,37 @@ test("the stream cancels an early assistant response and waits for the complete 
   assert.ok(final.transcript.some((turn: { text: string }) => turn.text === "Unsere Kosten steigen. Aber ich möchte die Konditionen genau vergleichen."));
 });
 
+test("no time: Gloria asks once for a better time, takes it over and says goodbye without further questions", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    const waitForTts = async (count: number) => {
+      for (let attempt = 0; attempt < 100 && ttsRequests.length < count; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(ttsRequests.length, count);
+    };
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+    socket.message({ type: "response.created" });
+    socket.message({ type: "response.output_text.delta", delta: "Es geht um steigende Gesundheitskosten. Passt es gerade für ein kurzes Gespräch?" });
+    socket.message({ type: "response.done", response: { status: "completed", output: [] } });
+    await settleStreamEvents();
+    const before = ttsRequests.length;
+    const responsesBefore = socket.sent.filter((event) => event.type === "response.create").length;
+
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "In gerade ist es schlecht." });
+    await waitForTts(before + 1);
+    assert.equal(JSON.parse(ttsRequests[before] || "{}").text, "Kein Problem. Wann passt es Ihnen besser?");
+
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Sie können gerne morgen Vormittag anrufen." });
+    await waitForTts(before + 2);
+    assert.equal(
+      JSON.parse(ttsRequests[before + 1] || "{}").text,
+      "Vielen Dank für das Gespräch. Dann melde ich mich wie besprochen morgen Vormittag noch einmal bei Ihnen. Einen schönen Tag noch und auf Wiederhören.",
+    );
+    assert.equal(socket.sent.filter((event) => event.type === "response.create").length, responsesBefore);
+    for (let attempt = 0; attempt < 100 && hangups.length < 1; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(hangups.length, 1);
+  });
+});
+
 test("normal assistant answers start TTS at the first complete sentence before response.done", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, _hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
@@ -523,7 +554,7 @@ test("asks for a callback instead of continuing the pitch when the contact has n
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /KEINE ZEIT \/ RÜCKRUF/);
   assert.match(instructions, /führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort/);
-  assert.match(instructions, /akzeptiere auch relative Angaben wie 'in zehn Minuten'/);
+  assert.match(instructions, /Übernimm den genannten Zeitpunkt so, wie er genannt wurde, ohne Rückfrage/);
   assert.match(instructions, /rufe end_call auf/);
 });
 
