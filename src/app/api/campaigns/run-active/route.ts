@@ -169,6 +169,7 @@ async function handle(request: Request) {
           },
           request,
           campaignLockToken: userId ? lockToken : undefined,
+          reservedCampaignLead: true,
           report: {
             leadId: lead.id,
             company: lead.company,

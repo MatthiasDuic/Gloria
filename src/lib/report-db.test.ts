@@ -7,6 +7,66 @@ import { reserveCallAppointment } from "./report-db";
 import { globalJobQueue } from "./job-queue";
 import { isDoNotCallRequest, isPhoneNumberSuppressed, suppressPhoneNumber } from "./call-safety";
 
+test("the transcript endpoint stores batch fields in the PostgreSQL record format", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  const previousToken = process.env.APP_INTERNAL_TOKEN;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  process.env.APP_INTERNAL_TOKEN = "test-internal-token";
+  const inserted: Array<Record<string, unknown>> = [];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    if (sql.includes("INSERT INTO call_transcript_events") && sql.includes("jsonb_to_recordset")) {
+      const rows = JSON.parse(String(values[0])) as Array<Record<string, unknown>>;
+      inserted.push(...rows);
+      if (rows.some((row) => row.call_sid == null || row.text_value == null)) {
+        throw new Error("null value in required transcript column");
+      }
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { POST } = await import("../app/api/calls/transcript/route");
+    const spokenAt = Date.parse("2026-11-05T07:04:32.000Z");
+    const response = await POST(new Request("https://example.test/api/calls/transcript", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-gloria-internal-token": "test-internal-token" },
+      body: JSON.stringify({
+        callSid: "test-call",
+        userId: "test-user",
+        turns: [
+          { role: "user", text: "Guten Tag", at: spokenAt, phase: "opener" },
+          { role: "assistant", text: "Hallo", at: spokenAt + 1000, phase: "opener", latencyMs: 1204.6 },
+        ],
+      }),
+    }));
+
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).ok, true);
+    assert.equal(inserted.length, 2);
+    assert.ok(inserted.every((row) => typeof row.id === "string" && row.id.length > 0));
+    assert.deepEqual(
+      inserted.map(({ call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at }) => ({
+        call_sid, user_id, speaker, text_value, phase, latency_ms, spoken_at,
+      })),
+      [
+        {
+          call_sid: "test-call", user_id: "test-user", speaker: "Interessent", text_value: "Guten Tag",
+          phase: "opener", latency_ms: null, spoken_at: new Date(spokenAt).toISOString(),
+        },
+        {
+          call_sid: "test-call", user_id: "test-user", speaker: "Gloria", text_value: "Hallo",
+          phase: "opener", latency_ms: 1205, spoken_at: new Date(spokenAt + 1000).toISOString(),
+        },
+      ],
+    );
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = previousToken;
+  }
+});
+
 test("the telephony assignment endpoint never loads contacts or call reports", async () => {
   const previousUrl = process.env.DATABASE_URL;
   const previousToken = process.env.APP_INTERNAL_TOKEN;
@@ -375,6 +435,121 @@ test("the shared queue starts a fifth call but blocks a sixth call", async () =>
     mock.restoreAll();
     if (previousUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousUrl;
+  }
+});
+
+test("missing call identities restore reserved campaign leads before queueing", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    statements.push({ sql, values });
+    if (/FROM users\s+WHERE id = \$1/.test(sql)) {
+      return {
+        rows: [{ id: "normal", username: "normal", real_name: "", company_name: "Test", password_hash: "test", role: "user" }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  try {
+    const { queueOutboundCall } = await import("./outbound-call-queue");
+    const request = new Request("https://example.test/api/campaigns/lists");
+    const report = { company: "Testfirma", topic: "Beratung" };
+    const payload = { to: "+492339555200", company: "Testfirma", topic: "Beratung" };
+    await assert.rejects(queueOutboundCall({
+      request, report, payload: { ...payload, userId: "normal", leadId: "normal-lead" },
+      reservedCampaignLead: true,
+    }), /vollständigen Namen/);
+    await assert.rejects(queueOutboundCall({
+      request, report, payload: { ...payload, leadId: "global-lead" },
+      reservedCampaignLead: true,
+    }), /keinen zugeordneten Benutzer/);
+    await assert.rejects(queueOutboundCall({
+      request, report, payload: { ...payload, userId: "normal", leadId: "callback-lead", isCallback: true },
+    }), /vollständigen Namen/);
+
+    const restored = statements.filter(({ sql }) => sql.includes("UPDATE gloria_leads SET status = 'neu'"));
+    assert.deepEqual(restored.map(({ values }) => values), [
+      ["normal-lead", "normal"], ["global-lead", null],
+    ]);
+    assert.ok(restored.every(({ sql }) => sql.includes("user_id IS NOT DISTINCT FROM $2")));
+    assert.equal(statements.some(({ sql }) => sql.includes("INSERT INTO outbound_call_queue")), false);
+  } finally {
+    mock.restoreAll();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+  }
+});
+
+test("identity failures while starting queued calls restore only reserved campaign leads", async () => {
+  const previousUrl = process.env.DATABASE_URL;
+  const previousSlots = process.env.CAMPAIGN_SLOTS;
+  const previousTimezone = process.env.CAMPAIGN_TIMEZONE;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  delete process.env.CAMPAIGN_SLOTS;
+  delete process.env.CAMPAIGN_TIMEZONE;
+  mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-03T10:00:00Z") });
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  const rows = [
+    { id: "new-global", user_id: null, leadId: "global-lead", reservedCampaignLead: true },
+    { id: "old-global", user_id: null, leadId: "old-lead", reservedCampaignLead: undefined },
+    { id: "changed-user", user_id: "normal", leadId: "normal-lead", reservedCampaignLead: true },
+    { id: "callback", user_id: "normal", leadId: "callback-lead", reservedCampaignLead: false, callSource: "crm" },
+  ];
+  mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
+    statements.push({ sql, values });
+    if (/FROM users\s+WHERE id = \$1/.test(sql)) {
+      return {
+        rows: [{ id: "normal", username: "normal", real_name: "", company_name: "Test", password_hash: "test", role: "user" }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  mock.method(Pool.prototype, "connect", async () => ({
+    query: async (sql: string) => {
+      if (sql.includes("COUNT(*)::text AS count FROM outbound_call_queue")) {
+        return { rows: [{ count: "0" }], rowCount: 1 };
+      }
+      if (sql.includes("FOR UPDATE SKIP LOCKED")) {
+        const row = rows.shift();
+        return {
+          rows: row ? [{
+            id: row.id, user_id: row.user_id,
+            payload: {
+              to: "+492339555200", company: "Testfirma", topic: "Beratung", leadId: row.leadId,
+              userId: row.user_id || undefined, reservedCampaignLead: row.reservedCampaignLead,
+              callSource: row.callSource,
+            },
+            report_payload: {}, request_url: "https://example.test/api/campaigns/lists",
+            campaign_lock_token: null, status: "queued", created_at: new Date(), started_at: null,
+          }] : [],
+          rowCount: row ? 1 : 0,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => undefined,
+  }));
+  try {
+    const { processOutboundCallQueue } = await import("./outbound-call-queue");
+    assert.deepEqual(await processOutboundCallQueue(), { started: 0 });
+    const restored = statements
+      .filter(({ sql }) => sql.includes("UPDATE gloria_leads SET status = 'neu'"))
+      .map(({ values }) => values)
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    assert.deepEqual(restored, [["global-lead", null], ["normal-lead", "normal"], ["old-lead", null]]);
+    assert.equal(statements.filter(({ sql }) => sql.includes("SET status = 'failed', error = $2")).length, 4);
+  } finally {
+    mock.restoreAll();
+    mock.timers.reset();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+    if (previousSlots === undefined) delete process.env.CAMPAIGN_SLOTS;
+    else process.env.CAMPAIGN_SLOTS = previousSlots;
+    if (previousTimezone === undefined) delete process.env.CAMPAIGN_TIMEZONE;
+    else process.env.CAMPAIGN_TIMEZONE = previousTimezone;
   }
 });
 

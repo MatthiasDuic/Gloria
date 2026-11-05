@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test, { mock } from "node:test";
+import { Pool } from "pg";
 import { createTelnyxCall, encodeTelnyxClientState } from "./telnyx";
 import { CampaignOutsideHoursError } from "./campaign-schedule";
 import { extractTelnyxPublicKey, verifyTelnyxWebhook } from "./telnyx-webhook-auth";
@@ -107,6 +108,124 @@ test("passes the actually called phone number to the media worker", () => {
     calledPhone?: string;
   };
   assert.equal(decoded.calledPhone, "+49 170 1234567");
+});
+
+test("passes the call owner's role and full name in the signed media context", () => {
+  const encoded = encodeTelnyxClientState({
+    to: "+492339555100",
+    company: "Fixture",
+    topic: "Test",
+    userId: "normal",
+    ownerRole: "user",
+    ownerRealName: "Erika Mustermann",
+  });
+  const decoded = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as {
+    ownerRole?: string;
+    ownerRealName?: string;
+  };
+  assert.equal(decoded.ownerRole, "user");
+  assert.equal(decoded.ownerRealName, "Erika Mustermann");
+});
+
+test("call dispatch refreshes the owner's role and name from the database", async () => {
+  const previous = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    TELNYX_API_KEY: process.env.TELNYX_API_KEY,
+    TELNYX_CONNECTION_ID: process.env.TELNYX_CONNECTION_ID,
+    TELNYX_PHONE_NUMBER: process.env.TELNYX_PHONE_NUMBER,
+    APP_BASE_URL: process.env.APP_BASE_URL,
+    APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    WORKER_HEALTHCHECK_URL: process.env.WORKER_HEALTHCHECK_URL,
+  };
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  process.env.TELNYX_API_KEY = "test-key";
+  process.env.TELNYX_CONNECTION_ID = "test-connection";
+  process.env.TELNYX_PHONE_NUMBER = "+492339555100";
+  process.env.APP_BASE_URL = "https://app.example.test";
+  process.env.APP_INTERNAL_TOKEN = "test-token";
+  process.env.OPENAI_API_KEY = "test-key";
+  process.env.WORKER_HEALTHCHECK_URL = "https://worker.example.test/health";
+  mock.method(Pool.prototype, "query", async (sql: string) => {
+    if (/FROM users\s+WHERE id = \$1/.test(sql)) {
+      return {
+        rows: [{
+          id: "normal", username: "normal", real_name: "Erika Mustermann", company_name: "Testagentur",
+          password_hash: "test", role: "user", created_at: "2026-01-01T00:00:00.000Z",
+        }],
+        rowCount: 1,
+      };
+    }
+    if (/FROM phone_numbers\s+WHERE user_id = \$1/.test(sql)) {
+      return {
+        rows: [{ id: "phone", user_id: "normal", phone_number: "+492339555100", label: "Test", active: true }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  let state: { ownerRole?: string; ownerRealName?: string; userId?: string } | undefined;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/telnyx/topic-policies")) {
+      return Response.json({ topicPolicies: [{ topic: "Test", opener: "", discovery: "", objectionHandling: "", close: "" }] });
+    }
+    if (url.includes("/phone_numbers?")) return Response.json({ data: [{ phone_number: "+492339555100" }] });
+    if (url.endsWith("/calls") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as { client_state: string };
+      state = JSON.parse(Buffer.from(body.client_state, "base64").toString("utf8"));
+      return Response.json({ data: { call_control_id: "test-call" } });
+    }
+    if (url.includes("/health") || url.includes("/api/calendar/busy") || url.includes("/v1/models")) {
+      return Response.json({ ok: true });
+    }
+    throw new Error(`Unexpected test request: ${url}`);
+  });
+  try {
+    const result = await createTelnyxCall({
+      to: "+492339555200",
+      company: "Testfirma",
+      topic: "Test",
+      userId: "normal",
+      ownerRole: "master",
+      ownerRealName: "Veralteter Name",
+      callSource: "manual",
+    });
+    assert.equal(result.sid, "test-call");
+    assert.deepEqual(state && {
+      userId: state.userId, ownerRole: state.ownerRole, ownerRealName: state.ownerRealName,
+    }, { userId: "normal", ownerRole: "user", ownerRealName: "Erika Mustermann" });
+  } finally {
+    mock.restoreAll();
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("a call without an identifiable owner or configured full name is not started", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  mock.method(Pool.prototype, "query", async (sql: string) => ({
+    rows: /FROM users\s+WHERE id = \$1/.test(sql)
+      ? [{ id: "normal", username: "normal", real_name: "", company_name: "Testagentur", password_hash: "test", role: "user" }]
+      : [],
+    rowCount: 0,
+  }));
+  const fetch = mock.method(globalThis, "fetch", async () => {
+    throw new Error("Unexpected network request");
+  });
+  try {
+    const base = { to: "+492339555200", company: "Testfirma", topic: "Test", callSource: "manual" as const };
+    await assert.rejects(createTelnyxCall(base), /keinen zugeordneten Benutzer/);
+    await assert.rejects(createTelnyxCall({ ...base, userId: "normal" }), /vollständigen Namen/);
+    assert.equal(fetch.mock.callCount(), 0);
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
 });
 
 test("preserves the call origin for campaigns, manual calls and automatic manual callbacks", () => {

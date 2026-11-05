@@ -15,7 +15,7 @@ import {
 } from "@/lib/report-db";
 import { getLeadById, isCampaignListActive, storeCallReport } from "@/lib/storage";
 import { isPhoneNumberSuppressed } from "@/lib/call-safety";
-import { createTelnyxCall, type TelnyxCallRequest } from "@/lib/telnyx";
+import { CallOwnerIdentityError, createTelnyxCall, resolveCallOwnerIdentity, type TelnyxCallRequest } from "@/lib/telnyx";
 import { log } from "@/lib/log";
 import { CampaignOutsideHoursError, isWithinCampaignHours } from "@/lib/campaign-schedule";
 
@@ -55,6 +55,7 @@ export async function queueOutboundCall(params: {
   report: CallReportPayload;
   request: Request;
   campaignLockToken?: string;
+  reservedCampaignLead?: boolean;
 }): Promise<{
   queueId: string;
   status: OutboundCallQueueJob["status"];
@@ -62,11 +63,19 @@ export async function queueOutboundCall(params: {
   error?: string;
   position: number;
 }> {
+  try {
+    await resolveCallOwnerIdentity(params.payload.userId);
+  } catch (error) {
+    if (params.reservedCampaignLead && params.payload.leadId) {
+      await restoreUnstartedCampaignLead(params.payload.leadId, params.payload.userId);
+    }
+    throw error;
+  }
   const queueId = randomUUID();
   await enqueueOutboundCall({
     id: queueId,
     userId: params.payload.userId,
-    payload: params.payload as unknown as Record<string, unknown>,
+    payload: { ...params.payload, reservedCampaignLead: params.reservedCampaignLead === true },
     reportPayload: params.report as unknown as Record<string, unknown>,
     requestUrl: params.request.url,
     campaignLockToken: params.campaignLockToken,
@@ -131,6 +140,15 @@ async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
     }
     const reason = error instanceof Error ? error.message : String(error);
     await markOutboundCallFailed(job.id, reason);
+    const reservedCampaignLead = job.payload.reservedCampaignLead === true
+      || Boolean(job.campaignLockToken)
+      || (job.payload.reservedCampaignLead === undefined && !job.userId
+        && job.payload.callSource === undefined && job.reportPayload.callSource === undefined
+        && job.payload.isTestCall !== true);
+    if (error instanceof CallOwnerIdentityError && reservedCampaignLead
+      && typeof job.payload.leadId === "string") {
+      await restoreUnstartedCampaignLead(job.payload.leadId, job.userId);
+    }
     if (job.campaignLockToken) {
       await releaseCampaignCallLockByToken(job.campaignLockToken);
     }

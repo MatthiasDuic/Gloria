@@ -388,8 +388,11 @@ function inferContactEmailFromTranscript(transcript: TranscriptEntry[]): string 
 
 function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
   const userTurns = ctx.transcript.filter((turn) => turn.role === "user");
-  const hadConversation = userTurns.some((turn) => turn.text.trim().length > 1);
-  const rejected = userTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
+  const hasVoicemailCue = Boolean(ctx.detectedVoicemail)
+    || userTurns.some((turn) => classifyInboundSpeech(turn.text) === "voicemail");
+  const humanTurns = userTurns.filter((turn) => classifyInboundSpeech(turn.text) === "human");
+  const hadConversation = !hasVoicemailCue && humanTurns.some((turn) => turn.text.trim().length > 1);
+  const rejected = !hasVoicemailCue && humanTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
 
   const appointmentAt = ctx.confirmedSlotPhrase ? parseSlotPhraseToIso(ctx.confirmedSlotPhrase) : undefined;
   const outcome: Outcome = appointmentAt
@@ -408,7 +411,7 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
   } else if (outcome === "Gespräch abgebrochen") {
     summaryParts.push("Es fand ein Gespräch statt, wurde jedoch ohne abschließende Vereinbarung beendet.");
   } else {
-    summaryParts.push("Es kam zu keinem belastbaren Gesprächsabschluss.");
+    summaryParts.push("Es kam zu keinem Gespräch mit einem Ansprechpartner.");
   }
 
   const lastUserSignals = userTurns
@@ -417,7 +420,7 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
     .slice(-3)
     .join(" | ");
   if (lastUserSignals) {
-    summaryParts.push(`Letzte relevante Kundenaussagen: ${lastUserSignals}.`);
+    summaryParts.push(`${hadConversation ? "Letzte relevante Kundenaussagen" : "Erkannte Ansage"}: ${lastUserSignals}.`);
   }
 
   summaryParts.push("Automatisch erzeugte Fallback-Zusammenfassung, da die LLM-Auswertung nicht rechtzeitig verfügbar war.");

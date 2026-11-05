@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking } from "./finalize.js";
+import { parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { newContext } from "./state.js";
 
@@ -43,6 +43,106 @@ test("persists booking before confirmation and rejects a success response withou
     else process.env.APP_BASE_URL = oldBase;
     if (oldToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
     else process.env.APP_INTERNAL_TOKEN = oldToken;
+    await agent.close();
+  }
+});
+
+test("fallback outcomes distinguish voicemail and queues from human conversations", async () => {
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  const oldBase = process.env.APP_BASE_URL;
+  const oldToken = process.env.APP_INTERNAL_TOKEN;
+  const oldOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.APP_BASE_URL = "https://finalize.test";
+  process.env.APP_INTERNAL_TOKEN = "test-token";
+  process.env.OPENAI_API_KEY = "test-key";
+  setGlobalDispatcher(agent);
+
+  const scenarios = [
+    {
+      name: "voicemail",
+      text: "Bitte hinterlassen Sie eine Nachricht nach dem Ton.",
+      voicemail: true,
+      queue: false,
+      outcome: "Nicht erreicht / kein Kontakt",
+      disposition: "Anrufbeantworter",
+      conversation: false,
+    },
+    {
+      name: "voicemail-split",
+      intro: "Guten Tag, hier ist der Anschluss von Frau Beispiel.",
+      text: "Bitte hinterlassen Sie eine Nachricht nach dem Ton.",
+      voicemail: true,
+      queue: false,
+      outcome: "Nicht erreicht / kein Kontakt",
+      disposition: "Anrufbeantworter",
+      conversation: false,
+    },
+    {
+      name: "queue",
+      text: "Einen Moment bitte, ich verbinde Sie.",
+      voicemail: false,
+      queue: true,
+      outcome: "Nicht erreicht / kein Kontakt",
+      disposition: "Warteschleife ohne Gespraech",
+      conversation: false,
+    },
+    {
+      name: "human",
+      text: "Guten Tag, hier ist eine Mitarbeiterin.",
+      voicemail: false,
+      queue: false,
+      outcome: "Gespräch abgebrochen",
+      disposition: "Gespraech",
+      conversation: true,
+    },
+    {
+      name: "rejection",
+      text: "Nein danke, ich habe kein Interesse.",
+      voicemail: false,
+      queue: false,
+      outcome: "Absage",
+      disposition: "Gespraech",
+      conversation: true,
+    },
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      const finalReports: Array<Record<string, unknown>> = [];
+      const pool = agent.get("https://finalize.test");
+      pool.intercept({ path: "/api/calls/webhook", method: "POST" }).reply(200, { ok: true });
+      pool.intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
+        finalReports.push(JSON.parse(String(options.body)) as Record<string, unknown>);
+        return { statusCode: 200, data: { ok: true } };
+      });
+
+      const ctx = newContext({
+        callSid: scenario.name, streamSid: "test", userId: "test-user", company: "Testfirma", topic: "Test",
+      });
+      ctx.detectedVoicemail = scenario.voicemail;
+      ctx.queueDetected = scenario.queue;
+      if (scenario.intro) {
+        ctx.transcript.push({ role: "user", text: scenario.intro, at: Date.now() - 1000 });
+      }
+      ctx.transcript.push({ role: "user", text: scenario.text, at: Date.now() });
+      await postReport(ctx);
+
+      assert.equal(finalReports.length, 1, scenario.name);
+      assert.equal(finalReports[0].outcome, scenario.outcome, scenario.name);
+      assert.equal(finalReports[0].callDisposition, scenario.disposition, scenario.name);
+      assert.equal(finalReports[0].conversationOccurred, scenario.conversation, scenario.name);
+    }
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    if (oldBase === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = oldBase;
+    if (oldToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = oldToken;
+    if (oldOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = oldOpenAiKey;
     await agent.close();
   }
 });

@@ -4,6 +4,27 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
 export const APPOINTMENT_FAREWELL_TEXT = "Vielen Dank für das Gespräch, ich lasse Ihnen die Terminbestätigung zukommen. Sollten Sie vorab Fragen haben, können Sie gerne auf die Mail antworten. Auf Wiederhören.";
 
+export type AppointmentConfirmationOwner = {
+  ownerRole?: "master" | "user";
+  ownerRealName?: string;
+};
+
+function appointmentAdvisor(owner: AppointmentConfirmationOwner): string {
+  return owner.ownerRealName?.trim() || "Ihre Ansprechperson";
+}
+
+function appointmentEmailQuestion(owner: AppointmentConfirmationOwner, complete = false): string {
+  const address = `${complete ? "vollständige " : ""}E-Mail-Adresse`;
+  return owner.ownerRole === "master"
+    ? `Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre ${address}.`
+    : `Damit ${appointmentAdvisor(owner)} Ihnen die Terminbestätigung zusenden kann, brauche ich noch Ihre ${address}.`;
+}
+
+export function appointmentFarewellText(owner: AppointmentConfirmationOwner = {}): string {
+  if (owner.ownerRole === "master") return APPOINTMENT_FAREWELL_TEXT;
+  return `Vielen Dank für das Gespräch. ${appointmentAdvisor(owner)} wird Ihnen die Terminbestätigung per E-Mail zusenden. Auf Wiederhören.`;
+}
+
 export function formatTimeForSpeech(timeStr: string): string {
   // Re-export for use in other modules (delegates to formatTimeGerman)
   const [hourStr, minuteStr] = timeStr.split(":") || [];
@@ -195,21 +216,23 @@ export function beginPreparation(
   confirmedSlotPhrase: string,
   turns: ConversationTurn[],
   appointmentMode?: import("./appointment-controller.js").AppointmentMode,
+  owner: AppointmentConfirmationOwner = {},
 ): PreparationTransition {
-  const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.${appointmentMode === "Microsoft Teams" ? " Den Link zum Meeting erhalten Sie in der Bestätigungsmail." : ""}`;
+  const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.${appointmentMode === "Microsoft Teams" ? " Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit." : ""}`;
+  const emailQuestion = appointmentEmailQuestion(owner);
   if (state.questions.length === 0) {
     return {
       state: { ...state, stage: "awaiting_email" },
-      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
-      speechText: `${confirmation} Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
+      instruction: `Sage exakt: "${confirmation} ${emailQuestion}"`,
+      speechText: `${confirmation} ${emailQuestion}`,
     };
   }
   const firstQuestion = nextUnansweredQuestion(state, turns, 0);
   if (!firstQuestion) {
     return {
       state: { ...state, stage: "awaiting_email" },
-      instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Die bereits geklärten Angaben reichen für die Vorbereitung. Sage danach exakt: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse."`,
-      speechText: `${confirmation} Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.`,
+      instruction: `Sage exakt: "${confirmation} Die bereits geklärten Angaben reichen für die Vorbereitung. ${emailQuestion}"`,
+      speechText: `${confirmation} Die bereits geklärten Angaben reichen für die Vorbereitung. ${emailQuestion}`,
     };
   }
   return {
@@ -220,7 +243,7 @@ export function beginPreparation(
       consentRetryCount: 0,
       questionRetryCount: 0,
     },
-    instruction: `Bestätige nur den Termin ${confirmedSlotPhrase}. Frage danach exakt: "${preparationConsentQuestion(state)}"`,
+    instruction: `Sage exakt: "${confirmation} ${preparationConsentQuestion(state)}"`,
     speechText: `${confirmation} ${preparationConsentQuestion(state)}`,
   };
 }
@@ -229,14 +252,17 @@ export function advancePreparation(
   state: PreparationState,
   userText: string,
   turns: ConversationTurn[],
+  owner: AppointmentConfirmationOwner = {},
 ): PreparationTransition {
+  const emailQuestion = appointmentEmailQuestion(owner);
+  const advisor = appointmentAdvisor(owner);
   if (state.stage === "awaiting_consent") {
     const consent = preparationConsent(userText);
     if (consent === "declined") {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
-        speechText: "In Ordnung, Herr Duic klärt die offenen Punkte mit Ihnen im Termin. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+        instruction: `Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage exakt: 'In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}'`,
+        speechText: `In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}`,
       };
     }
     if (consent === "unknown") {
@@ -258,8 +284,8 @@ export function advancePreparation(
     if (!next) {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Die bereits geklärten Angaben reichen für die Vorbereitung. Sage exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
-        speechText: "Die bereits geklärten Angaben reichen für die Vorbereitung. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+        instruction: `Die bereits geklärten Angaben reichen für die Vorbereitung. Sage exakt: '${emailQuestion}'`,
+        speechText: `Die bereits geklärten Angaben reichen für die Vorbereitung. ${emailQuestion}`,
       };
     }
     return {
@@ -287,8 +313,8 @@ export function advancePreparation(
       }
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: "Akzeptiere das Nein ohne Nachfassen. Sage kurz, dass Herr Duic die offenen Punkte im Termin klärt. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.'",
-        speechText: "In Ordnung, Herr Duic klärt die offenen Punkte mit Ihnen im Termin. Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+        instruction: `Akzeptiere das Nein ohne Nachfassen. Sage exakt: 'In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}'`,
+        speechText: `In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}`,
       };
     }
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];
@@ -306,7 +332,7 @@ export function advancePreparation(
         return {
           state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined, questionRetryCount: 0 },
           instruction: "Die letzte Angabe blieb unklar. Frage jetzt nach der E-Mail-Adresse für die Terminbestätigung.",
-          speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+          speechText: emailQuestion,
         };
       }
       if (retries >= 2) {
@@ -332,8 +358,8 @@ export function advancePreparation(
     }
     return {
       state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-      instruction: "Die Vorbereitungsfragen sind vollständig. Sage danach exakt: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.' Stelle keine weitere Frage.",
-      speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre E-Mail-Adresse.",
+      instruction: `Die Vorbereitungsfragen sind vollständig. Sage danach exakt: '${emailQuestion}' Stelle keine weitere Frage.`,
+      speechText: emailQuestion,
     };
   }
 
@@ -342,16 +368,18 @@ export function advancePreparation(
     const hasAtIndicator = /@|\bat\b/i.test(userText);
     const hasDotIndicator = /\.|\bpunkt\b|\bdot\b/i.test(userText);
     if (!hasAtIndicator || !hasDotIndicator) {
+      const completeEmailQuestion = appointmentEmailQuestion(owner, true);
       return {
         state,
-        instruction: "Sage ausschließlich: 'Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.'",
-        speechText: "Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre vollständige E-Mail-Adresse.",
+        instruction: `Sage ausschließlich: '${completeEmailQuestion}'`,
+        speechText: completeEmailQuestion,
       };
     }
+    const farewell = appointmentFarewellText(owner);
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
-      instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${APPOINTMENT_FAREWELL_TEXT}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
-      speechText: APPOINTMENT_FAREWELL_TEXT,
+      instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${farewell}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
+      speechText: farewell,
     };
   }
 

@@ -2,7 +2,9 @@ import type { CallSource, Topic } from "./types";
 import { createHmac } from "node:crypto";
 import { CampaignOutsideHoursError, isWithinCampaignHours } from "./campaign-schedule";
 import { prepareCall } from "./telephony-runtime";
-import { listPhoneNumbersByUser } from "./report-db";
+import { findUserById, listPhoneNumbersByUser } from "./report-db";
+import { log } from "./log";
+import type { UserRole } from "./session";
 
 export interface TelnyxCallerIdOption {
   number: string;
@@ -19,6 +21,7 @@ export interface TelnyxCallRequest {
   userId?: string;
   phoneNumberId?: string;
   ownerRealName?: string;
+  ownerRole?: UserRole;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
   voiceId?: string;
@@ -155,6 +158,7 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     userId: payload.userId,
     phoneNumberId: payload.phoneNumberId,
     ownerRealName: payload.ownerRealName,
+    ownerRole: payload.ownerRole,
     ownerCompanyName: payload.ownerCompanyName,
     ownerGesellschaft: payload.ownerGesellschaft,
     voiceId: payload.voiceId,
@@ -302,11 +306,41 @@ async function listOwnedTelnyxNumbers(): Promise<string[]> {
     .filter(Boolean);
 }
 
+export class CallOwnerIdentityError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CallOwnerIdentityError";
+  }
+}
+
+export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realName: string; role: UserRole }> {
+  const resolvedUserId = userId?.trim();
+  if (!resolvedUserId) {
+    throw new CallOwnerIdentityError("Der Anruf hat keinen zugeordneten Benutzer. Bitte den Kontakt einem Benutzer zuweisen.");
+  }
+  let owner: Awaited<ReturnType<typeof findUserById>>;
+  try {
+    owner = await findUserById(resolvedUserId);
+  } catch (error) {
+    log.error("telnyx.call_owner_lookup_failed", { userId: resolvedUserId, error });
+    throw new CallOwnerIdentityError("Der Benutzer für diesen Anruf konnte nicht geladen werden.", { cause: error });
+  }
+  if (!owner) {
+    throw new CallOwnerIdentityError("Der Benutzer für diesen Anruf wurde nicht gefunden.");
+  }
+  const realName = owner.realName.trim();
+  if (!realName) {
+    throw new CallOwnerIdentityError("Bitte den vollständigen Namen des Benutzers hinterlegen, bevor ein Anruf gestartet wird.");
+  }
+  return { realName, role: owner.role };
+}
+
 export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
   const isCampaign = (payload.callSource || (payload.isTestCall || !payload.leadId ? "manual" : "crm")) === "crm";
   if (isCampaign && !isWithinCampaignHours()) {
     throw new CampaignOutsideHoursError();
   }
+  const owner = await resolveCallOwnerIdentity(payload.userId);
   const apiKey = readEnv("TELNYX_API_KEY");
   const connectionId = readEnv("TELNYX_CONNECTION_ID");
   const defaultFrom = readEnv("TELNYX_PHONE_NUMBER");
@@ -409,7 +443,7 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     ...(payload.queueId ? { command_id: payload.queueId } : {}),
     to: payload.to,
     from,
-    client_state: encodeTelnyxClientState(payload),
+    client_state: encodeTelnyxClientState({ ...payload, ownerRealName: owner.realName, ownerRole: owner.role }),
   };
 
   let response: Response;

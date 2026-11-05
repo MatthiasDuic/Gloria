@@ -10,6 +10,7 @@ import {
   type TranscriptEvent,
 } from "@/lib/report-db";
 import { globalJobQueue } from "@/lib/job-queue";
+import { APPOINTMENT_EMAIL_PATTERN, enqueueAppointmentConfirmation } from "@/lib/appointment-confirmation";
 import { buildReportTranscriptFallback } from "@/lib/transcript-utils";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 import { isDoNotCallRequest, suppressPhoneNumber } from "@/lib/call-safety";
@@ -172,18 +173,18 @@ function collectMissingBasisQuestions(events: TranscriptSpeakerEntry[]): string[
 
 function normalizePotentialEmail(raw: string): string {
   return normalizeText(raw)
-    .replace(/\b(klammeraffe|at|aett?)\b/g, "@")
-    .replace(/\b(punkt|dot)\b/g, ".")
-    .replace(/\b(bindestrich|minus|dash)\b/g, "-")
-    .replace(/\b(unterstrich|underscore)\b/g, "_")
-    .replace(/[<>()[\],;:"']/g, "")
-    .replace(/\s+/g, "")
-    .replace(/\.+/g, ".")
-    .replace(/@+/g, "@");
+    .replace(/\s*\b(klammeraffe|at|aett?)\b\s*/g, "@")
+    .replace(/\s*\b(punkt|dot)\b\s*/g, ".")
+    .replace(/\s*\b(bindestrich|minus|dash)\b\s*/g, "-")
+    .replace(/\s*\b(unterstrich|underscore)\b\s*/g, "_")
+    .replace(/[<>()[\],;:"']/g, " ")
+    .replace(/\s+([@._+-])\s+/g, "$1")
+    .replace(/\s*@\s*/g, "@")
+    .replace(/\b(?:[a-z0-9]\s+)+[a-z0-9]\b/g, (letters) => letters.replace(/\s+/g, ""));
 }
 
 function inferAttendeeEmailFromTranscript(events: TranscriptSpeakerEntry[]): string | undefined {
-  const emailRegex = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+  const emailRegex = APPOINTMENT_EMAIL_PATTERN;
 
   // 1) Bevorzugt: Antwort auf konkrete E-Mail-Frage von Gloria.
   for (let index = 0; index < events.length; index += 1) {
@@ -202,7 +203,10 @@ function inferAttendeeEmailFromTranscript(events: TranscriptSpeakerEntry[]): str
     }
 
     if (userParts.length > 0) {
-      const normalized = normalizePotentialEmail(userParts.join(" "));
+      const answer = userParts.join(" ");
+      const directMatch = answer.match(emailRegex);
+      if (directMatch?.[0]) return directMatch[0].toLowerCase();
+      const normalized = normalizePotentialEmail(answer);
       const match = normalized.match(emailRegex);
       if (match?.[0]) return match[0].toLowerCase();
     }
@@ -556,19 +560,11 @@ export async function POST(request: Request) {
     | undefined;
 
   if (report.outcome === "Termin" && report.appointmentAt) {
-    // Enqueue appointment invite job asynchronously
-    const jobId = await globalJobQueue.enqueue("send_invite", report.callSid || "unknown", {
-      reportId: report.id,
+    inviteResult = await enqueueAppointmentConfirmation(
       report,
-      leadId: report.leadId,
-      userId: report.userId,
-      attendeeEmail: inferAttendeeEmailFromTranscript(transcriptPersist.events),
-      missingBasisQuestions: collectMissingBasisQuestions(transcriptPersist.events),
-    });
-    inviteResult = {
-      delivered: false,
-      reason: `Appointment invite queued for delivery (jobId: ${jobId})`,
-    };
+      inferAttendeeEmailFromTranscript(transcriptPersist.events),
+      collectMissingBasisQuestions(transcriptPersist.events),
+    );
   }
 
   return NextResponse.json({

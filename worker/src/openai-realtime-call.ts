@@ -12,7 +12,7 @@ import { log } from "./log.js";
 import { OpenAiRealtimeSession, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { isElevenLabsConfigured, shouldRetryElevenLabsStream, streamElevenLabsAudio } from "./elevenlabs-tts.js";
-import { advancePreparation, APPOINTMENT_FAREWELL_TEXT, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
+import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
 import { createVoiceProfile, detectTopicKind } from "./topic-policy.js";
@@ -52,6 +52,7 @@ type ClientState = {
   userId?: string;
   queueId?: string;
   ownerRealName?: string;
+  ownerRole?: "master" | "user";
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
   previousSummary?: string;
@@ -306,11 +307,14 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
+    ctx.ownerRole === "master"
+      ? "TERMINBESTÄTIGUNG: Gloria versendet die Bestätigung für den Master-Benutzer."
+      : `TERMINBESTÄTIGUNG: Gloria versendet keine Bestätigung. ${ctx.ownerRealName?.trim() || "Die zuständige Ansprechperson"} wird dem Interessenten die Terminbestätigung per E-Mail zusenden.`,
     ctx.confirmedSlotPhrase
-      ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${APPOINTMENT_FAREWELL_TEXT}' Beende danach das Gespräch ohne weitere Frage.`
+      ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${appointmentFarewellText(ctx)}' Beende danach das Gespräch ohne weitere Frage.`
       : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin persönlich oder digital stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Bei digitaler Durchführung ergänzt der Worker nach erfolgreicher Buchung kurz: 'Den Link zum Meeting erhalten Sie in der Bestätigungsmail.' Bei persönlicher Durchführung fahre ohne zusätzlichen Hinweis normal fort. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich: 'Herr Duic klärt Ihre Fragen dazu im Termin.' Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach ausschließlich: 'Soll der Termin persönlich oder digital stattfinden?' Biete keinen Termin in der Agentur an. Erst nach der Auswahl rufst du confirm_appointment für den vollständig zugehörigen angebotenen Slot auf. Bei digitaler Durchführung ergänzt der Worker nach erfolgreicher Buchung kurz: 'Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit.' Bei persönlicher Durchführung fahre ohne zusätzlichen Hinweis normal fort. Erkläre den Ablauf nicht aus; bei Fragen dazu sage freundlich, dass die zuständige Ansprechperson die Fragen im Termin klärt. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -948,11 +952,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     const previousPreparationStage = preparationState.stage;
-    const transition = advancePreparation(preparationState, transcript, currentContext.transcript);
+    const transition = advancePreparation(preparationState, transcript, currentContext.transcript, currentContext);
     preparationState = transition.state;
 
     if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
-      requestDeterministicSpeech(transition.speechText || APPOINTMENT_FAREWELL_TEXT, { hangupAfterPlayback: true });
+      requestDeterministicSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
       return;
     }
 
@@ -1038,7 +1042,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           log.info("realtime.slot_locked",{ callSid: ctx.callSid,slot: decision.slotPhrase,speechSlot: speechSlotPhrase,preference: decision.preference,appointmentMode });
           sendToolResult(tool.callId,{ ok: true,confirmed_slot: speechSlotPhrase,appointment_mode: appointmentMode });
           updateSession();
-          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode);
+          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode,ctx);
           preparationState=transition.state;
           if(transition.speechText) requestDeterministicSpeech(transition.speechText);
           else requestResponse(transition.instruction);
@@ -1438,12 +1442,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
         leadNote: state.leadNote,
         topic: state.topic,
         ownerRealName: state.ownerRealName,
+        ownerRole: state.ownerRole === "master" || state.ownerRole === "user" ? state.ownerRole : undefined,
         ownerCompanyName: state.ownerCompanyName,
         ownerGesellschaft: state.ownerGesellschaft,
         previousSummary: state.previousSummary,
         isCallback: state.isCallback === 1,
         isTestCall: state.isTestCall === true,
       });
+      if (!ctx.ownerRole || !ctx.ownerRealName?.trim()) {
+        log.warn("realtime.owner_identity_missing", { callSid: ctx.callSid });
+      }
       preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", ctx.topic);
       contactRouting = createContactRoutingState(state.contactName);
       callDeadline = setTimeout(() => {

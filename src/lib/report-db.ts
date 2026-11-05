@@ -1227,11 +1227,11 @@ export async function deferOutboundCall(id: string): Promise<void> {
   );
 }
 
-export async function restoreUnstartedCampaignLead(leadId: string, userId: string): Promise<void> {
+export async function restoreUnstartedCampaignLead(leadId: string, userId?: string): Promise<void> {
   if (!shouldUsePostgres()) return;
   await ensureSchema();
   await getPool().query(`UPDATE gloria_leads SET status = 'neu', attempts = GREATEST(0,attempts - 1), updated_at = NOW()
-    WHERE id = $1 AND user_id = $2 AND status = 'angerufen'`, [leadId,userId]);
+    WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 AND status = 'angerufen'`, [leadId, userId || null]);
 }
 
 export async function markOutboundCallActive(id: string, callSid: string): Promise<void> {
@@ -3181,16 +3181,16 @@ export async function appendCallTranscriptEventsToPostgres(
     const db = getPool();
     const rows = payloads.map((payload, index) => ({
       id: `tx-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 10)}`,
-      callSid: payload.callSid,
-      userId: payload.userId || null,
+      call_sid: payload.callSid,
+      user_id: payload.userId || null,
       speaker: payload.speaker,
-      text: payload.text,
+      text_value: payload.text,
       phase: payload.phase || null,
-      latencyMs:
+      latency_ms:
         typeof payload.latencyMs === "number" && Number.isFinite(payload.latencyMs)
           ? Math.round(payload.latencyMs)
           : null,
-      spokenAt:
+      spoken_at:
         typeof payload.spokenAt === "number" && Number.isFinite(payload.spokenAt)
           ? new Date(payload.spokenAt).toISOString()
           : null,

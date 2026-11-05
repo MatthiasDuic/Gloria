@@ -2045,35 +2045,8 @@ export async function storeCallReport(payload: {
     };
   });
 
-  const leadsWithEmailHistory: Lead[] = payload.outcome === "Termin" && payload.leadId
-    ? updatedLeads.map((lead) => {
-      if (lead.id !== payload.leadId) return lead;
-      const sentAt = new Date().toISOString();
-      const subject = payload.appointmentAt
-        ? `Terminbestaetigung versendet (${payload.appointmentAt})`
-        : "Terminbestaetigung versendet";
-      const alreadyLogged = (lead.emailHistory || []).some((entry) => entry.source === "gloria" && entry.subject === subject);
-      if (alreadyLogged) return lead;
-      return {
-        ...lead,
-        emailHistory: [
-          {
-            id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            source: "gloria" as const,
-            subject,
-            body: "Automatische Terminbestaetigung durch Gloria.",
-            to: lead.email,
-            sentAt,
-            createdAt: sentAt,
-          },
-          ...(lead.emailHistory || []),
-        ].slice(0, 50),
-      };
-    })
-    : updatedLeads;
-
   if (isDatabaseUrlConfigured()) {
-    const changedLeads = leadsWithEmailHistory.filter((lead, index) => lead !== leads[index] || lead === manualCallbackLead);
+    const changedLeads = updatedLeads.filter((lead, index) => lead !== leads[index] || lead === manualCallbackLead);
     const saved = await writeReportDatabaseToPostgres({
       reports: [report],
       recordings: updatedRecordings.filter((entry) => entry.callSid === (report.callSid || report.id)),
@@ -2084,7 +2057,7 @@ export async function storeCallReport(payload: {
   } else {
     await Promise.all([
       writeReportDatabase({ reports: updatedReports, recordings: updatedRecordings }),
-      writeLeads(leadsWithEmailHistory, resolvedUserId),
+      writeLeads(updatedLeads, resolvedUserId),
     ]);
   }
 

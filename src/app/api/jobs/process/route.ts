@@ -3,6 +3,8 @@ import { globalJobQueue, type Job } from "@/lib/job-queue";
 import { sendReportEmail, sendAppointmentInvite } from "@/lib/mailer";
 import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
 import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
+import { appointmentConfirmationDelivery } from "@/lib/appointment-confirmation";
+import { appendLeadEmailHistory, getLeadById } from "@/lib/storage";
 import type { CallReport } from "@/lib/types";
 
 export const maxDuration = 300; // 5 minutes for job processing
@@ -32,6 +34,10 @@ async function processInviteJob(job: Job): Promise<void> {
   if (!payload.report) {
     throw new Error("No report in invite job payload");
   }
+  if (await appointmentConfirmationDelivery(payload.report.userId) === "manual") {
+    console.info("appointment_confirmation.skipped", { jobId: job.id, reason: "non_master" });
+    return;
+  }
   if (!payload.attendeeEmail) {
     throw new Error("Kunden-E-Mail-Adresse fehlt; Terminbestätigung wurde nicht an den Kunden versendet.");
   }
@@ -55,8 +61,34 @@ async function processInviteJob(job: Job): Promise<void> {
       appointmentPdfFilename: getAppointmentFormFilename(appointmentForm),
     });
 
+    if (!result.delivered && "skipped" in result && result.skipped) {
+      console.info("appointment_confirmation.skipped", { jobId: job.id, reason: "non_master" });
+      return;
+    }
     if (!result.delivered) {
       throw new Error(`Invite delivery failed: ${result.reason}`);
+    }
+
+    if (report.leadId && report.userId) {
+      try {
+        const subject = report.appointmentAt
+          ? `Terminbestaetigung versendet (${report.appointmentAt})`
+          : "Terminbestaetigung versendet";
+        const lead = await getLeadById(report.leadId, report.userId);
+        if (!lead) {
+          console.error("appointment_confirmation.history_lead_missing", { jobId: job.id, leadId: report.leadId });
+        } else if (!(lead.emailHistory || []).some((entry) => entry.source === "gloria" && entry.subject === subject)) {
+          const updated = await appendLeadEmailHistory(report.leadId, {
+            source: "gloria",
+            subject,
+            body: "Automatische Terminbestaetigung durch Gloria.",
+            to: payload.attendeeEmail,
+          }, report.userId);
+          if (!updated) console.error("appointment_confirmation.history_lead_missing", { jobId: job.id, leadId: report.leadId });
+        }
+      } catch (error) {
+        console.error("appointment_confirmation.history_failed_after_send", { jobId: job.id, error });
+      }
     }
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));

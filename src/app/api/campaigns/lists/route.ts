@@ -455,6 +455,7 @@ export async function POST(request: Request) {
         },
         request,
         campaignLockToken: lockToken,
+        reservedCampaignLead: true,
         report: {
           leadId: lead.id,
           company: lead.company,

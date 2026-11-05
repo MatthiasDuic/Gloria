@@ -16,8 +16,8 @@ test("digital bookings mention the meeting link once while personal bookings con
     const unchanged = beginPreparation(state, "Montag um zehn Uhr", []);
     assert.deepEqual(personal, unchanged);
     assert.equal(digital.state.stage, personal.state.stage);
-    assert.match(digital.speechText || "", /ist bestätigt\. Den Link zum Meeting erhalten Sie in der Bestätigungsmail\./);
-    assert.equal(digital.speechText?.replace(" Den Link zum Meeting erhalten Sie in der Bestätigungsmail.", ""), personal.speechText);
+    assert.match(digital.speechText || "", /ist bestätigt\. Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit\./);
+    assert.equal(digital.speechText?.replace(" Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit.", ""), personal.speechText);
     assert.doesNotMatch(personal.speechText || "", /Meeting|Link/);
   }
   const state = createPreparationState({
@@ -25,7 +25,23 @@ test("digital bookings mention the meeting link once while personal bookings con
   });
   const digital = beginPreparation(state, "Montag um zehn Uhr", knownStatusTurns, "Microsoft Teams");
   assert.equal(digital.state.stage, "awaiting_email");
-  assert.match(digital.speechText || "", /Link zum Meeting.*bereits geklärten Angaben/);
+  assert.match(digital.speechText || "", /Link zur digitalen Beratung.*bereits geklärten Angaben/);
+});
+
+test("normal users are named as the sender of the confirmation", () => {
+  const owner = { ownerRole: "user" as const, ownerRealName: "Erika Mustermann" };
+  const state = createPreparationState({ topic: "Test" });
+  const started = beginPreparation(state, "Montag um zehn Uhr", [], "Microsoft Teams", owner);
+  assert.match(started.speechText || "", /Erika Mustermann.*Terminbestätigung zusenden/);
+  const finished = advancePreparation(started.state, "kunde@example.org", [], owner);
+  assert.match(finished.speechText || "", /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
+  assert.doesNotMatch(finished.speechText || "", /ich lasse Ihnen|Herr Duic/i);
+
+  const questions = createPreparationState({ topic: "Test", preparationQuestions: "Welche Fragen sind Ihnen wichtig?" });
+  const consent = beginPreparation(questions, "Montag um zehn Uhr", [], "Beim Kunden vor Ort", owner);
+  const declined = advancePreparation(consent.state, "Nein.", [], owner);
+  assert.match(declined.speechText || "", /Erika Mustermann klärt/);
+  assert.doesNotMatch(declined.speechText || "", /Herr Duic/);
 });
 
 test("completes configured closing questions after booking without reasking the known 480 Euro contribution", () => {
@@ -58,7 +74,7 @@ test("completes configured closing questions after booking without reasking the 
   assert.match(questions.join("\n"), /Behandlungen/);
   assert.match(questions.join("\n"), /Diagnosen/);
   assert.doesNotMatch(questions.join("\n"), /Monatsbeitrag/);
-  transition = advancePreparation(transition.state, "neumann@example.org", turns);
+  transition = advancePreparation(transition.state, "neumann@example.org", turns, { ownerRole: "master" });
   assert.equal(transition.state.stage, "completed");
   assert.equal(transition.speechText, APPOINTMENT_FAREWELL_TEXT);
 });
@@ -238,7 +254,7 @@ test("completes all required PKV preparation questions before email", () => {
   assert.equal(transition.state.stage, "awaiting_email");
   assert.match(transition.instruction, /E-Mail-Adresse/);
 
-  transition = advancePreparation(transition.state, "kunde@example.de", []);
+  transition = advancePreparation(transition.state, "kunde@example.de", [], { ownerRole: "master" });
   assert.equal(transition.state.stage, "completed");
   assert.match(transition.instruction, /Terminbestätigung zukommen/);
   assert.equal(

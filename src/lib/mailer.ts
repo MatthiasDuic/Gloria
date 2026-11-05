@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { APPOINTMENT_EMAIL_PATTERN, appointmentConfirmationDelivery } from "./appointment-confirmation";
 import type { CallReport } from "./types";
 
 const fallbackRecipient = "Matthias.duic@agentur-duic-sprockhoevel.de";
@@ -178,6 +179,13 @@ export async function sendOperationalEmail(options: {
 
 export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
   const { report, attendeeEmail } = options;
+  if (await appointmentConfirmationDelivery(report.userId) === "manual") {
+    return { delivered: false, skipped: true, reason: "Terminbestätigungen werden für diesen Benutzer nicht automatisch versendet." };
+  }
+  const customerEmail = attendeeEmail?.trim();
+  if (!customerEmail || customerEmail.match(APPOINTMENT_EMAIL_PATTERN)?.[0] !== customerEmail) {
+    return { delivered: false, reason: "Eine gültige Kunden-E-Mail-Adresse für die Terminbestätigung fehlt." };
+  }
   const brokerEmail = process.env.REPORT_TO_EMAIL || fallbackRecipient;
   const organizerEmail =
     options.organizerEmail || process.env.SMTP_FROM_ADDRESS || brokerEmail;
@@ -190,6 +198,7 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
 
   const ics = buildAppointmentIcs({
     ...options,
+    attendeeEmail: customerEmail,
     organizerEmail,
     organizerName,
   });
@@ -201,7 +210,7 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     return { delivered: false, reason: "Kundenterminbogen fehlt oder ist unvollständig." };
   }
 
-  const recipients = [brokerEmail, attendeeEmail].filter(
+  const recipients = [brokerEmail, customerEmail].filter(
     (entry): entry is string => Boolean(entry && entry.includes("@")),
   );
 
@@ -231,16 +240,20 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
   const body = [
     `Hallo ${report.contactName || ""},`,
     "",
-    `vielen Dank fuer das Gespraech mit Gloria. Ihr Termin wurde bestaetigt:`,
+    `vielen Dank für das Gespräch mit Gloria. Ihr Termin wurde bestätigt:`,
     "",
     `Thema: ${report.topic}`,
     `Firma: ${report.company}`,
     `Zeitpunkt: ${when}`,
+    ...(report.appointmentMode ? [`Terminart: ${report.appointmentMode}`] : []),
+    ...(report.appointmentMode === "Microsoft Teams"
+      ? ["", "Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit."]
+      : []),
     ...questionBlock,
     "",
-    "Die Kalendereinladung und der Kundenterminbogen sind angehaengt.",
+    "Die Kalendereinladung und der Kundenterminbogen sind angehängt.",
     "",
-    "Freundliche Gruesse",
+    "Freundliche Grüße",
     organizerName,
   ].join("\n");
 
@@ -267,6 +280,14 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
       },
     ],
   });
+
+  const customerAccepted = Array.isArray(info.accepted) && info.accepted.some((entry) => {
+    const address = typeof entry === "string" ? entry : entry.address;
+    return address.toLowerCase() === customerEmail.toLowerCase();
+  });
+  if (!customerAccepted) {
+    return { delivered: false, reason: "Die Kunden-E-Mail-Adresse wurde vom Mailserver nicht bestätigt." };
+  }
 
   return {
     delivered: true,

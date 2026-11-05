@@ -66,10 +66,11 @@ function buildPkvContext() {
 }
 
 test("worker refuses unsigned, tampered and expired stream contexts", () => {
-  const unsigned = { company: "Fixture", userId: "owner", streamExpiresAt: Date.now() + 60_000 };
+  const unsigned = { company: "Fixture", userId: "owner", ownerRole: "user" as const, ownerRealName: "Erika Mustermann", streamExpiresAt: Date.now() + 60_000 };
   const state = { ...unsigned, streamSignature: createHmac("sha256", "fixture").update(JSON.stringify(unsigned)).digest("hex") };
   assert.equal(isTrustedStreamState(state, "fixture"), true);
   assert.equal(isTrustedStreamState({ ...state, userId: "another-owner" }, "fixture"), false);
+  assert.equal(isTrustedStreamState({ ...state, ownerRole: "master" }, "fixture"), false);
   assert.equal(isTrustedStreamState(state, "fixture", unsigned.streamExpiresAt + 1), false);
   assert.equal(isTrustedStreamState(unsigned, "fixture"), false);
 });
@@ -405,10 +406,25 @@ test("passes real free calendar slots through both session and response instruct
 
 test("uses the appointment-specific farewell after a slot is confirmed", () => {
   const ctx = buildPkvContext();
+  ctx.ownerRole = "master";
   ctx.confirmedSlotPhrase = "Donnerstag, 22. Oktober um dreizehn Uhr";
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /ich lasse Ihnen die Terminbestätigung zukommen/);
   assert.match(instructions, /können Sie gerne auf die Mail antworten/);
+});
+
+test("normal-user appointment instructions name the owner, not Gloria, as email sender", () => {
+  const ctx = newContext({
+    callSid: "test-user-confirmation",
+    streamSid: "test-stream",
+    topic: "Test",
+    ownerRole: "user",
+    ownerRealName: "Erika Mustermann",
+    confirmedSlotPhrase: "Donnerstag um zehn Uhr",
+  });
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
+  assert.doesNotMatch(instructions, /ich lasse Ihnen die Terminbestätigung zukommen/);
 });
 
 test("formats times and Euro amounts in dynamic response instructions", () => {
@@ -599,7 +615,7 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
   assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
   assert.match(instructions, /Soll der Termin persönlich oder digital stattfinden/);
-  assert.match(instructions, /Den Link zum Meeting erhalten Sie in der Bestätigungsmail/);
+  assert.match(instructions, /Link zur digitalen Beratung.*einen Tag vor dem Termin/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /höchstens eine klare Hauptfrage pro Antwort/);
 });
