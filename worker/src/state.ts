@@ -39,6 +39,7 @@ export type CallContext = {
   policyTopic?: string;
   callObjective?: string;
   ownerRealName?: string;
+  ownerRealPhone?: string;
   ownerRole?: "master" | "user";
   ownerCompanyName?: string;
   ownerGesellschaft?: string;

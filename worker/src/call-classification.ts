@@ -26,18 +26,18 @@ const QUEUE_PATTERNS: RegExp[] = [
   /(?:vielen\s+)?dank(?:e)?\s+f[üu]r\s+ihren\s+anruf/i,
   /ihr\s+anruf\s+ist\s+uns\s+wichtig/i,
   /^\s*[\[(]?\s*(?:musik|music|wartemusik|hold\s+music)\s*[\])]*[.!?\s]*$/i,
-  /ich\s+verbinde(?:\s+sie\b|[.!?,\s]*$)/i,
+  /ich\s+verbinde(?:\s+sie\b(?![^.!?,;]{0,40}\b(?:nicht|nie)\b)|[.!?,\s]*$)/i,
   /sie\s+werden\s+(?:jetzt\s+)?(?:weiter)?verbunden/i,
   /ihre\s+verbindung\s+wird\s+(?:gehalten|hergestellt|weitergeleitet)/i,
   /ihr\s+anruf\s+wird\s+(?:weitergeleitet|verbunden|entgegengenommen)/i,
   /bleiben\s+sie\s+(?:bitte\s+)?(?:in\s+der\s+leitung|am\s+apparat)/i,
-  /einen\s+moment\s+bitte/i,
   /bitte\s+warten\s+sie/i,
+  /einen\s+moment(?:\s+bitte)?/i,
+  /einen\s+augenblick(?:\s+bitte)?/i,
   /warteschleife/i,
   /(?:alle|unsere)\s+(?:mitarbeiter|leitungen|gespr[äa]che)[\s\S]{0,70}(?:besetzt|im\s+gespr[äa]ch)/i,
   /(?:alle\s+)?mitarbeiter\s+sind\s+(?:zurzeit\s+)?(?:besetzt|belegt|im\s+gespr[äa]ch)/i,
   /(?:der|die)\s+n[äa]chste\s+freie\s+(?:mitarbeiter|ansprechpartner)/i,
-  /einen\s+augenblick\s+(?:geduld|bitte)/i,
   /bitte\s+haben\s+sie\s+(?:einen\s+)?(?:moment|augenblick)\s+geduld/i,
   /sie\s+befinden\s+sich\s+in\s+(?:unserer\s+)?warteschleife/i,
   /(?:vielen\s+dank|willkommen)\s+bei\b[\s\S]{0,90}\b(?:bitte\s+warten|moment\s+geduld|sie\s+werden\s+verbunden|ihren\s+anruf)\b/i,
@@ -53,6 +53,8 @@ const INTERACTIVE_ASSISTANT_PATTERNS: RegExp[] = [
   /(?:was\s+ist|worum\s+geht\s+es\s+bei)\s+ihr(?:em)?\s+anliegen/i,
   /(?:nennen|sagen)\s+sie\s+(?:mir\s+)?(?:bitte\s+)?(?:kurz\s+)?(?:ihren\s+namen|ihr\s+anliegen)/i,
   /mit\s+wem\s+(?:m[öo]chten|wollen)\s+sie\s+sprechen/i,
+  /wer\s+(?:ruft|spricht|ist\s+am\s+apparat)\b/i,
+  /wer\s+sind\s+sie\b|mit\s+wem\s+spreche\s+ich\b/i,
 ];
 
 const HARD_QUEUE_PATTERNS: RegExp[] = [
@@ -63,9 +65,22 @@ const HARD_QUEUE_PATTERNS: RegExp[] = [
   /(?:alle|unsere)\s+(?:mitarbeiter|leitungen)[\s\S]{0,70}(?:besetzt|im\s+gespr[äa]ch)/i,
 ];
 
+export function hasExplicitQueueInstruction(text: string): boolean {
+  return HARD_QUEUE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function hasInteractiveReceptionQuestion(text: string): boolean {
+  return INTERACTIVE_ASSISTANT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function hasTransferWaitInstruction(text: string): boolean {
+  return hasExplicitQueueInstruction(text) || /\beinen\s+(?:moment|augenblick)\b/i.test(text);
+}
+
 export function isHumanContactAfterQueue(text: string): boolean {
   return classifyInboundSpeech(text) === "human"
-    && (/\b(?:hallo|guten\s+(?:tag|morgen|abend)|am\s+apparat|hier\s+(?:ist|spricht)|mein\s+name\s+ist|ich\s+bin|das\s+bin\s+ich|wie\s+kann\s+ich|was\s+kann\s+ich|was\s+ist\s+ihr\s+anliegen|sie\s+sprechen\s+mit|wer\s+(?:ist\s+da|spricht)|worum\s+geht|was\s+(?:wollen|möchten)\s+sie)\b/i.test(text)
+    && (hasInteractiveReceptionQuestion(text)
+      || /\b(?:hallo|guten\s+(?:tag|morgen|abend)|am\s+apparat|hier\s+(?:ist|spricht)|mein\s+name\s+ist|ich\s+bin|das\s+bin\s+ich|wie\s+kann\s+ich|was\s+kann\s+ich|was\s+ist\s+ihr\s+anliegen|sie\s+sprechen\s+mit|wer\s+(?:ist\s+da|spricht)|worum\s+geht|was\s+(?:wollen|möchten)\s+sie)\b/i.test(text)
       || /\b(?:ich\s+(?:habe|möchte|will|kann|muss)|wir\s+(?:haben|möchten)|kein\s+interesse|nicht\s+(?:mehr\s+)?anrufen|rufen\s+sie\s+(?:bitte\s+)?nicht)\b/i.test(text)
       || /^(?:ja(?:\s+bitte)?|bitte|[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?),?\s*[.!?]*$/i.test(text.trim())
       || /^(?:ja|hallo|moin)\s*,?\s*[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*[,.!?]*\s*(?:ja)?[.!?]*$/i.test(text.trim())
@@ -76,8 +91,8 @@ export function classifyInboundSpeech(text: string): CallClassification {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return "unknown";
   if (VOICEMAIL_PATTERNS.some((pattern) => pattern.test(normalized))) return "voicemail";
-  if (INTERACTIVE_ASSISTANT_PATTERNS.some((pattern) => pattern.test(normalized))
-    && !HARD_QUEUE_PATTERNS.some((pattern) => pattern.test(normalized))) return "human";
+  if (hasInteractiveReceptionQuestion(normalized)
+    && !hasExplicitQueueInstruction(normalized)) return "human";
   if (QUEUE_PATTERNS.some((pattern) => pattern.test(normalized))) return "queue";
   if (normalized.length >= 2) return "human";
   return "unknown";

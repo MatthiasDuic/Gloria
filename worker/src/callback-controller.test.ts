@@ -1,6 +1,62 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceCallback, extractCallbackTimePhrase, isNoTimeRequest } from "./callback-controller.js";
+import { advanceCallback, classifyCallbackDirection, classifyCallbackNumberReply, extractCallbackTimePhrase, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber } from "./callback-controller.js";
+
+test("recognizes requests to leave the caller's number without confusing them with the recipient's number", () => {
+  for (const text of [
+    "Nein, Herr Lichtenberg ist gerade nicht da, aber wenn Sie mir eine Nummer hinterlassen, die ich mir aufschreiben kann, dann wird er Sie gleich zurückrufen, sobald er wieder da ist.",
+    "Wie lautet Ihre Telefonnummer?",
+    "Unter welcher Nummer kann er Sie erreichen?",
+    "Geben Sie mir bitte Ihre Rückrufnummer.",
+    "Ich kann Ihre Nummer gerne an ihn weitergeben.",
+    "Welche Nummer soll ich ihm für den Rückruf notieren?",
+  ]) {
+    assert.equal(isCallbackNumberRequest(text), true, text);
+  }
+  for (const text of [
+    "Darf ich Ihnen meine Telefonnummer geben?",
+    "Ich kann Ihnen eine Nummer hinterlassen.",
+    "Ich gebe Ihnen die Nummer von Herrn Lichtenberg.",
+    "Ich habe eine neue Rufnummer.",
+    "Bitte hinterlassen Sie keine Nummer.",
+    "Ich verbinde Sie mit der Nummer eins.",
+  ]) {
+    assert.equal(isCallbackNumberRequest(text), false, text);
+  }
+});
+
+test("distinguishes an incoming callback offer from a request for Gloria to call again", () => {
+  for (const text of [
+    "Dann wird er Sie gleich zurückrufen.",
+    "Er ruft Sie in zehn Minuten zurück.",
+    "Herr Lichtenberg wird Sie zurückrufen.",
+    "Ich rufe Sie zurück.",
+    "Wir rufen Sie zurück.",
+  ]) assert.equal(classifyCallbackDirection(text), "incoming", text);
+  for (const text of [
+    "Rufen Sie mich stattdessen morgen zurück.",
+    "Könnten Sie mich in zehn Minuten zurückrufen?",
+    "Sie können mich morgen anrufen.",
+  ]) assert.equal(classifyCallbackDirection(text), "outgoing", text);
+  assert.equal(classifyCallbackDirection("Wann haben Sie Zeit?"), undefined);
+});
+
+test("waits for the listener to be ready and distinguishes repetition from confirmation", () => {
+  assert.equal(needsTimeToWriteCallbackNumber("Einen Moment, ich muss einen Stift holen."), true);
+  assert.equal(needsTimeToWriteCallbackNumber("Ich kann die Nummer aufschreiben."), false);
+  assert.equal(classifyCallbackNumberReply("Ja, ich bin bereit.", "waiting_for_ready"), "repeat");
+  assert.equal(classifyCallbackNumberReply("Nein, bitte noch einmal.", "waiting_for_confirmation"), "repeat");
+  assert.equal(classifyCallbackNumberReply("Ja, danke, ich gebe es weiter.", "waiting_for_confirmation"), "finish");
+  assert.equal(classifyCallbackNumberReply("Ja.", "waiting_for_repeat_confirmation"), "repeat");
+  assert.equal(classifyCallbackNumberReply("Nein.", "waiting_for_repeat_confirmation"), "finish");
+});
+
+test("speaks a validated callback number digit by digit", () => {
+  assert.equal(formatCallbackPhoneForSpeech("+491701234567"), "plus vier neun, eins sieben null, eins zwei drei, vier fünf sechs, sieben");
+  assert.equal(formatCallbackPhoneForSpeech(""), undefined);
+  assert.equal(formatCallbackPhoneForSpeech("sip:test@example.test"), undefined);
+  assert.equal(formatCallbackPhoneForSpeech("+123"), undefined);
+});
 
 test("recognizes typical 'no time right now' answers", () => {
   for (const text of ["In gerade ist es schlecht.", "Ich habe gerade keine Zeit.", "Passt gerade nicht.", "Ich bin gerade in einem Termin.", "Rufen Sie mich morgen nochmal an.", "Im Moment ist es ungünstig."]) {

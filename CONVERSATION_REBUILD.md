@@ -12,6 +12,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 
 ## Auftragstreue im Live-Gespräch
 
+- Bietet der Empfang das Verbinden an, bestätigt Gloria das Angebot kurz, statt erneut darum zu bitten. Eine bereits laufende Weiterleitung oder Warteschleife bleibt stumm; erst nach einer neuen menschlichen Äußerung stellt Gloria sich bei Bedarf erneut vor und prüft eine unklare Identität. Ein einfaches „Ja“ auf Glorias Weiterleitungsbitte startet die Wartephase. Bei Rückfragen nennt sie den tatsächlichen Kampagnenanlass knapp, ohne die Weiterleitungsfrage zu wiederholen. Die bestehende Sicherheitsgrenze für unbeantwortete Warteschleifen beträgt weiterhin drei Minuten.
+
 - Bei ausdrücklichem Wunsch nach einem Menschen oder Ablehnung des Gesprächs mit Gloria/KI wird an die reale Rufnummer des jeweiligen Auftraggebers weitergeleitet. Der Worker übergibt die Benutzer-ID; die authentifizierte Transfer-API liest und validiert die Rufnummer aus dem Benutzerkonto. Es gibt kein globales oder fest codiertes Ersatzziel. Fehlende Rufnummern und Telnyx-Fehler werden nicht als erfolgreiche Weiterleitung gemeldet; Gloria bietet stattdessen einen Rückruf an. Allgemeine Ablehnung und fehlendes Interesse führen weiterhin nicht zur Weiterleitung.
 
 - Eigene Kampagnen lassen sich auch als noch nicht gespeicherte Entwürfe löschen. Entwürfe werden lokal entfernt, gespeicherte Kampagnen erst nach erfolgreicher API-Bestätigung. Andere offene Entwürfe, Kontakte und Anrufreports bleiben erhalten; Standardthemen sind weiterhin vor dem Löschen geschützt.

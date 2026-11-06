@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { CampaignOutsideHoursError, isWithinCampaignHours } from "./campaign-schedule";
 import { prepareCall } from "./telephony-runtime";
 import { findUserById, listPhoneNumbersByUser } from "./report-db";
+import { normalizePhoneForDial } from "./phone-utils";
 import { log } from "./log";
 import type { UserRole } from "./session";
 
@@ -21,6 +22,7 @@ export interface TelnyxCallRequest {
   userId?: string;
   phoneNumberId?: string;
   ownerRealName?: string;
+  ownerRealPhone?: string;
   ownerRole?: UserRole;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
@@ -158,6 +160,7 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     userId: payload.userId,
     phoneNumberId: payload.phoneNumberId,
     ownerRealName: payload.ownerRealName,
+    ownerRealPhone: payload.ownerRealPhone,
     ownerRole: payload.ownerRole,
     ownerCompanyName: payload.ownerCompanyName,
     ownerGesellschaft: payload.ownerGesellschaft,
@@ -313,7 +316,7 @@ export class CallOwnerIdentityError extends Error {
   }
 }
 
-export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realName: string; role: UserRole }> {
+export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realName: string; realPhone?: string; role: UserRole }> {
   const resolvedUserId = userId?.trim();
   if (!resolvedUserId) {
     throw new CallOwnerIdentityError("Der Anruf hat keinen zugeordneten Benutzer. Bitte den Kontakt einem Benutzer zuweisen.");
@@ -332,7 +335,11 @@ export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realN
   if (!realName) {
     throw new CallOwnerIdentityError("Bitte den vollständigen Namen des Benutzers hinterlegen, bevor ein Anruf gestartet wird.");
   }
-  return { realName, role: owner.role };
+  const rawPhone = owner.realPhone.trim();
+  const normalizedPhone = /^\+?[\d\s()./-]+$/.test(rawPhone) ? normalizePhoneForDial(rawPhone) : undefined;
+  const realPhone = normalizedPhone && /^\+[1-9]\d{7,14}$/.test(normalizedPhone) ? normalizedPhone : undefined;
+  if (rawPhone && !realPhone) log.warn("telnyx.call_owner_invalid_phone", { userId: resolvedUserId });
+  return { realName, realPhone, role: owner.role };
 }
 
 export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
@@ -443,7 +450,7 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     ...(payload.queueId ? { command_id: payload.queueId } : {}),
     to: payload.to,
     from,
-    client_state: encodeTelnyxClientState({ ...payload, ownerRealName: owner.realName, ownerRole: owner.role }),
+    client_state: encodeTelnyxClientState({ ...payload, ownerRealName: owner.realName, ownerRealPhone: owner.realPhone, ownerRole: owner.role }),
   };
 
   let response: Response;

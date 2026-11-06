@@ -1,5 +1,79 @@
 export type CallbackStage = "inactive" | "asking_time" | "asked_again" | "done";
 
+export type CallbackNumberStage = "waiting_for_ready" | "waiting_for_confirmation" | "waiting_for_repeat_confirmation";
+export type CallbackNumberReply = "wait" | "repeat" | "finish" | "other";
+
+const CALLBACK_NUMBER = "(?:telefonnummer|telefon-?nummer|rufnummer|rückrufnummer|rueckrufnummer|mobilnummer|handynummer|durchwahl|nummer)";
+
+export function isCallbackNumberRequest(text: string): boolean {
+  if (!new RegExp(`\\b${CALLBACK_NUMBER}\\b`, "i").test(text)
+    || new RegExp(`\\b(?:keine|keinen)\\s+${CALLBACK_NUMBER}\\b`, "i").test(text)) return false;
+
+  const mentionsTheirNumber = new RegExp(`\\b(?:meine|meinen|unsere|unseren)\\s+${CALLBACK_NUMBER}\\b`, "i").test(text);
+  const mentionsOurNumber = new RegExp(`\\b(?:ihre|ihren|ihrer|eure|euren)\\s+${CALLBACK_NUMBER}\\b`, "i").test(text);
+  const offersTheirNumber = new RegExp(`\\b(?:ich|wir)\\s+(?:(?:kann|können|möchte|möchten|würde|würden)\\s+)?(?:(?:gebe|geben|nenne|nennen|sage|sagen)\\s+)?(?:ihnen|euch)\\s+(?:(?:eine?|die|meine|unsere)\\s+)?${CALLBACK_NUMBER}\\b`, "i").test(text);
+  if ((mentionsTheirNumber || offersTheirNumber) && !mentionsOurNumber) return false;
+
+  return new RegExp(`\\b(?:unter\\s+welcher|welche[rmn]?)\\s+${CALLBACK_NUMBER}\\b`, "i").test(text)
+    || new RegExp(`\\b${CALLBACK_NUMBER}\\b[\\s\\S]{0,100}\\b(?:hinterlassen|geben|durchgeben|nennen|sagen|mitteilen|aufschreiben|notieren|weitergeben|erreichen|wiederholen)\\b`, "i").test(text)
+    || new RegExp(`\\b(?:hinterlassen|geben|durchgeben|nennen|sagen|mitteilen|aufschreiben|notieren|weitergeben|bekommen|haben)\\b[\\s\\S]{0,100}\\b${CALLBACK_NUMBER}\\b`, "i").test(text)
+    || (mentionsOurNumber && /\b(?:wie|bitte|kann|können|könnte|könnten|darf|dürfen|hätte|hätten|lautet)\b|\?/i.test(text));
+}
+
+export function classifyCallbackDirection(text: string): "incoming" | "outgoing" | undefined {
+  const outgoing = [
+    /\b(?:rufen|melden)\s+sie\b[\s\S]{0,100}\b(?:zurück|nochmal|erneut|an|später|morgen)\b/gi,
+    /\b(?:können|könnten|würden|werden|sollen)\s+sie\b[\s\S]{0,100}\b(?:zurückrufen|anrufen|melden)\b/gi,
+    /\bsie\s+(?:können|könnten|sollen)\b[\s\S]{0,100}\b(?:zurückrufen|anrufen|melden)\b/gi,
+  ];
+  if (outgoing.some((pattern) => [...text.matchAll(pattern)]
+    .some((match) => !/\b(?:ich|wir|er|sie)\s*$/i.test(text.slice(0, match.index))))) return "outgoing";
+
+  const subject = "(?:ich|wir|er|sie|(?:herr|frau)\\s+[\\p{L}-]+)";
+  const incoming = new RegExp(
+    `\\b(?:(?:ich\\s+rufe|wir\\s+rufen|(?:er|sie|(?:herr|frau)\\s+[\\p{L}-]+)\\s+ruft)|(?:wird|werde|werden)\\s+${subject}|${subject}\\s+(?:wird|werde|werden))\\b[\\s\\S]{0,100}\\b(?:zurück|zurückrufen)\\b`,
+    "iu",
+  );
+  return incoming.test(text) ? "incoming" : undefined;
+}
+
+export function formatCallbackPhoneForSpeech(phone?: string): string | undefined {
+  const normalized = phone?.trim();
+  if (!normalized || !/^\+[1-9]\d{7,14}$/.test(normalized)) return undefined;
+  const digitWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"];
+  const digits = [...normalized.slice(1)].map((digit) => digitWords[Number(digit)]);
+  const groups = [digits.slice(0, 2).join(" ")];
+  for (let index = 2; index < digits.length; index += 3) {
+    groups.push(digits.slice(index, index + 3).join(" "));
+  }
+  return `plus ${groups.join(", ")}`;
+}
+
+export function needsTimeToWriteCallbackNumber(text: string): boolean {
+  return /\b(?:einen\s+(?:moment|augenblick)|warten\s+sie|ich\s+(?:(?:muss|möchte|will)\s+)?(?:erst\s+)?(?:einen\s+)?(?:stift|zettel)\s+(?:holen|suchen)|(?:noch\s+)?nicht\s+bereit)\b/i.test(text);
+}
+
+export function classifyCallbackNumberReply(text: string, stage: CallbackNumberStage): CallbackNumberReply {
+  const normalized = text.trim();
+  if (needsTimeToWriteCallbackNumber(normalized)) return "wait";
+  if (/\b(?:wiederholen|wiederhole|noch\s+einmal|nochmal|noch\s+mal|wie\s+bitte|langsamer|nicht\s+verstanden|nicht\s+mitbekommen|nicht\s+vollständig)\b/i.test(normalized)) return "repeat";
+  const yes = /^(?:ja|genau|richtig|klar|okay|ok|gerne|bitte|bereit)(?:[.!?,\s]|$)/i.test(normalized);
+  const no = /^(?:nein|ne|nö)(?:[.!?,\s]|$)/i.test(normalized);
+  if (stage === "waiting_for_ready") {
+    return yes || /\b(?:ich\s+bin|bin\s+jetzt|jetzt\s+bin\s+ich)\s+bereit\b/i.test(normalized) ? "repeat" : "other";
+  }
+  if (stage === "waiting_for_repeat_confirmation") {
+    if (yes) return "repeat";
+    if (no) return "finish";
+  } else if (no) {
+    return "repeat";
+  }
+  if (yes || /\b(?:danke|vielen\s+dank|notiert|aufgeschrieben|habe\s+(?:ich|sie)|gebe\s+(?:ich|es|sie|das)|ruft\s+(?:sie\s+)?zurück)\b/i.test(normalized)) {
+    return "finish";
+  }
+  return "other";
+}
+
 const NO_TIME_PATTERNS: RegExp[] = [
   /\bkeine\s+zeit\b/i,
   /\b(?:gerade|grade|jetzt|im\s+moment|momentan|aktuell|heute)\s+(?:ist\s+es\s+|passt\s+es\s+|ist'?s\s+|passt'?s\s+|wird\s+es\s+)?(?:leider\s+|eher\s+|ganz\s+|sehr\s+|echt\s+)?(?:schlecht|ungünstig|unpassend|stressig)\b/i,

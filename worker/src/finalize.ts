@@ -2,6 +2,7 @@ import { fetch } from "undici";
 import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
+import { classifyCallbackDirection } from "./callback-controller.js";
 
 const transcriptProgress = new WeakMap<CallContext, { saved: number; pending: Promise<void> }>();
 
@@ -92,17 +93,17 @@ const EXTRACT_PROMPT = `Du bist ein Auswerter für Akquise-Telefonate. Lies das 
   "appointmentAt": "ISO-8601 mit Zeitzone (z. B. 2026-04-30T15:00:00+02:00) oder null",
   "contactEmail": "vom Kunden bestätigte Mailadresse oder null",
   "nextCallAt": "ISO-8601 mit Zeitzone für den vereinbarten Rückruf-Zeitpunkt (NUR bei Wiedervorlage), sonst null",
-  "directDial": "vom Anrufenden ausdrücklich genannte alternative Direkt-Durchwahl/Mobilnummer als reine E.164- oder Klar-Ziffern-Zeichenkette, sonst null",
+  "directDial": "vom Interessenten ausdrücklich genannte alternative Direkt-Durchwahl/Mobilnummer als reine E.164- oder Klar-Ziffern-Zeichenkette, sonst null; niemals die von Gloria genannte Rückrufnummer",
   "summary": "5–10 Sätze Deutsch, fasse Verlauf, Bedarf, vereinbarten Termin und ggf. erfasste Basisdaten zusammen"
 }
 Regeln:
 - "Termin" nur, wenn ein konkreter Termin (Datum + Uhrzeit) bestätigt wurde.
 - "Absage" wenn der Anrufende ablehnt.
-- "Wiedervorlage" wenn die Person gerade keine Zeit hat und einen späteren Rückruf vereinbart, auch bei relativen Angaben wie "in zehn Minuten". Die für diesen Anruf verwendete Telefonnummer genügt; eine alternative Direktdurchwahl ist nicht erforderlich.
+- "Wiedervorlage" wenn vereinbart wurde, dass Gloria oder der Auftraggeber die Person später anruft, auch bei relativen Angaben wie "in zehn Minuten". Die für diesen Anruf verwendete Telefonnummer genügt; eine alternative Direktdurchwahl ist nicht erforderlich. Wenn die Zielperson selbst den Auftraggeber zurückrufen will, dokumentiere dies in der Zusammenfassung und erfinde keinen ausgehenden Rückrufzeitpunkt.
 - "Nicht erreicht / kein Kontakt" wenn kein Kontakt zustande kam.
 - "Gespräch abgebrochen" wenn jemand kurz angerufen wurde, aber das Gespräch nach dem Einstieg abgebrochen wurde.
 - appointmentAt: nutze die LETZTE im Transkript bestätigte Termin-Aussage. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" sagt, nimm das Datum exakt so.
-- nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. directDial nur füllen, wenn ausdrücklich eine alternative Nummer genannt wurde.
+- nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt für einen ausgehenden Rückruf aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. directDial nur füllen, wenn der Interessent ausdrücklich eine alternative Nummer genannt hat.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
 
 export async function extractReport(ctx: CallContext): Promise<ExtractedReport | null> {
@@ -167,12 +168,22 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
       directDial?: string | null;
     };
 
-    const outcome: Outcome =
+    const callbackDirection = ctx.transcript
+      .filter((turn) => turn.role === "user")
+      .map((turn) => classifyCallbackDirection(turn.text))
+      .reverse()
+      .find((direction) => direction !== undefined);
+    const incomingCallback = callbackDirection === "incoming";
+    let outcome: Outcome =
       parsed.outcome === "Termin" || parsed.outcome === "Absage" || parsed.outcome === "Wiedervorlage"
         ? parsed.outcome
         : parsed.outcome === "Gespräch abgebrochen"
           ? "Gespräch abgebrochen"
           : "Nicht erreicht / kein Kontakt";
+    if (incomingCallback && outcome === "Nicht erreicht / kein Kontakt") {
+      log.warn("finalize.incoming_callback_contact_misclassified", { callSid: ctx.callSid });
+      outcome = "Gespräch abgebrochen";
+    }
 
     const appointmentAt =
       typeof parsed.appointmentAt === "string"
@@ -185,19 +196,26 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
         : undefined;
 
     const relativeCallbackAt =
-      outcome === "Wiedervorlage" ? parseRelativeCallbackAt(ctx.transcript) : undefined;
+      outcome === "Wiedervorlage" && !incomingCallback ? parseRelativeCallbackAt(ctx.transcript) : undefined;
     const nextCallAt =
-      outcome === "Wiedervorlage"
+      outcome === "Wiedervorlage" && !incomingCallback
         ? relativeCallbackAt ||
           (typeof parsed.nextCallAt === "string"
             ? parsePossiblyZonelessDateTime(parsed.nextCallAt)
             : undefined)
         : undefined;
 
-    const directDial =
+    let directDial =
       outcome === "Wiedervorlage" && typeof parsed.directDial === "string"
         ? parsed.directDial.replace(/[^\d+]/g, "").trim() || undefined
         : undefined;
+    if (directDial && ctx.ownerRealPhone && phoneNumbersMatch(directDial, ctx.ownerRealPhone)) {
+      log.warn("finalize.owner_number_rejected_as_direct_dial", { callSid: ctx.callSid });
+      directDial = undefined;
+    }
+    if (incomingCallback && parsed.nextCallAt) {
+      log.warn("finalize.incoming_callback_not_scheduled", { callSid: ctx.callSid });
+    }
 
     const summary = (parsed.summary || "").trim() || "Kein Gesprächsinhalt erfasst.";
 
@@ -210,6 +228,17 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function phoneNumbersMatch(first: string, second: string): boolean {
+  const normalize = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    if (digits.startsWith("00")) return digits.slice(2);
+    if (digits.startsWith("0")) return `49${digits.slice(1)}`;
+    return digits;
+  };
+  const firstDigits = normalize(first);
+  return Boolean(firstDigits) && firstDigits === normalize(second);
 }
 
 export async function postReport(ctx: CallContext): Promise<void> {
@@ -712,7 +741,7 @@ export function parseRelativeCallbackAt(
 
   for (const { turn, index } of turns.reverse()) {
     const match = timePattern.exec(turn.text);
-    if (!match) continue;
+    if (!match || classifyCallbackDirection(turn.text) === "incoming") continue;
 
     const precedingAssistant = transcript
       .slice(0, index)

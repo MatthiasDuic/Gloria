@@ -37,15 +37,29 @@ test("a new receptionist after a transfer is not dismissed for the previous rece
 });
 
 test("uses the healthcare contribution reason at reception without disclosing a private insurance status", () => {
-  const reason = buildGatekeeperReason("private Krankenversicherung", "Herr Schneider");
-  assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung. Ist Herr Schneider gerade erreichbar?");
+  const reason = buildGatekeeperReason("private Krankenversicherung");
+  assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
   assert.doesNotMatch(reason, /privat|krankenversicherung/i);
   assert.equal(buildGatekeeperReason("PKV"), "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
   assert.equal(buildGatekeeperReason("Energie"), "Es geht um das Thema Energie.");
 });
 
+test("uses a speakable campaign objective as the reception reason instead of an internal campaign name", () => {
+  const objective = "Es geht um ein Kennenlernen zur Zukunft des Versicherungsvertriebs. Vereinbare einen Termin.";
+  assert.equal(
+    buildGatekeeperReason("Recruiting", objective),
+    "Es geht um ein Kennenlernen zur Zukunft des Versicherungsvertriebs.",
+  );
+  assert.equal(buildGatekeeperReason("Recruiting", "Erfrage den Personalbedarf und vereinbare einen Termin."), null);
+  assert.equal(buildGatekeeperReason("Recruiting", "Es geht um die Zusammenarbeit mit Herrn Dr. Neumann im Vertrieb."), null);
+});
+
 test("recognizes a gatekeeper's reason question without confusing availability or refusal", () => {
-  for (const text of ["Worum geht es?", "Um was geht es denn?", "Was ist der Anlass?", "Was ist denn Ihr Anliegen?", "Weshalb rufen Sie an?"]) {
+  for (const text of [
+    "Worum geht es?", "Um was geht es denn?", "Was ist der Anlass?", "Was ist denn Ihr Anliegen?",
+    "Weshalb rufen Sie an?", "Darf ich fragen, worum es geht?", "Um was handelt es sich?",
+    "Was genau ist der Grund Ihres Anrufs?",
+  ]) {
     assert.equal(isGatekeeperReasonQuestion(text), true, text);
   }
   for (const text of ["Herr Schneider ist nicht da.", "Kein Interesse.", "Einen Moment, ich verbinde."]) {
@@ -61,6 +75,98 @@ test("a reason question after the transfer request stays at reception without an
   }, "Worum geht es denn?");
   assert.equal(state.stage, "gatekeeper");
   assert.equal(state.gatekeeperRequestMade, true);
+});
+
+test("recognizes a reason question even before a transfer has been requested", () => {
+  const state = advanceContactRouting({
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "confirming_decision_maker",
+  }, "Darf ich fragen, worum es geht?");
+  assert.equal(state.stage, "gatekeeper");
+});
+
+test("does not mistake an explicit identity denial for the decision maker", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "confirming_decision_maker" as const,
+  };
+  for (const text of [
+    "Nein, das bin ich nicht.",
+    "Ich bin es leider nicht.",
+    "Ja, ich bin nicht zuständig.",
+  ]) {
+    assert.equal(advanceContactRouting(state, text).stage, "gatekeeper", text);
+  }
+});
+
+test("answers a reason question even when a short pause or a transfer offer is mentioned", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "gatekeeper" as const,
+  };
+  for (const text of [
+    "Einen Moment, worum geht es?",
+    "Ich kann Sie gerne verbinden. Worum geht es?",
+  ]) {
+    assert.equal(advanceContactRouting(state, text).stage, "gatekeeper", text);
+  }
+});
+
+test("answers an interactive receptionist before waiting for an offered transfer", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "gatekeeper" as const,
+  };
+  for (const text of [
+    "Ich kann Sie gerne verbinden. Wie lautet Ihr Name?",
+    "Ich verbinde Sie gleich, wie kann ich Ihnen helfen?",
+  ]) {
+    assert.equal(advanceContactRouting(state, text).stage, "gatekeeper", text);
+  }
+});
+
+test("recognizes offered and active transfers without confusing a refusal or a message", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "confirming_decision_maker" as const,
+  };
+  for (const text of [
+    "Nein, aber ich kann Sie gerne weiterleiten.",
+    "Soll ich Sie mit ihm verbinden?",
+    "Ich stelle Sie zu Herrn Neumann durch.",
+    "Ich stelle Ihnen Herrn Neumann durch.",
+    "Ich leite Sie gleich weiter.",
+    "Ich werde Sie gleich weiterleiten.",
+    "Ich gebe Sie an Herrn Neumann weiter.",
+  ]) {
+    assert.equal(advanceContactRouting(state, text).stage, "waiting_for_transfer", text);
+  }
+  for (const text of [
+    "Nein, ich kann Sie leider nicht weiterleiten.",
+    "Ich verbinde Sie leider nicht.",
+    "Ich leite Ihre Nachricht an Herrn Neumann weiter.",
+  ]) {
+    assert.equal(advanceContactRouting(state, text).stage, "gatekeeper", text);
+  }
+});
+
+test("a yes to a transfer request starts waiting, not a second identity check", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "gatekeeper" as const,
+    gatekeeperRequestMade: true,
+  };
+  assert.equal(advanceContactRouting(state, "Ja.").stage, "waiting_for_transfer");
+  assert.equal(advanceContactRouting(state, "Ja, aber Herr Neumann ist nicht da.").stage, "gatekeeper");
+});
+
+test("a confirmed contact can also hand the call on to someone else", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "decision_maker" as const,
+  };
+  assert.equal(advanceContactRouting(state, "Ich leite Sie gleich weiter.").stage, "waiting_for_transfer");
+  assert.equal(advanceContactRouting(state, "Ich kann Sie gerne verbinden. Worum geht es?").stage, "decision_maker");
 });
 
 test("keeps the fachgespraech behind the gatekeeper boundary", () => {
@@ -92,6 +198,15 @@ test("stays silent throughout queue announcements until a person answers", () =>
   assert.equal(state.stage, "decision_maker");
 });
 
+test("a caller identity question after a transfer is a new human contact", () => {
+  const state = advanceContactRouting({
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "waiting_for_transfer",
+    gatekeeperRequestMade: true,
+  }, "Wer ruft an?");
+  assert.equal(state.stage, "confirming_decision_maker");
+});
+
 test("answers a digital receptionist that asks for the caller's name instead of waiting as in a queue", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Herr Schwab"),
@@ -115,12 +230,12 @@ test("recognizes a self-identified decision maker without repeating the pitch", 
   assert.equal(state.stage, "decision_maker");
 });
 
-test("does not treat a bare target-name mention as self-identification", () => {
+test("a transfer announcement mentioning the target starts waiting rather than identifying the speaker", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Herr Neumann"),
     "Ich stelle Sie zu Herrn Neumann durch.",
   );
-  assert.equal(state.stage, "gatekeeper");
+  assert.equal(state.stage, "waiting_for_transfer");
 });
 
 test("confirms an unclear name match once and accepts a clear yes", () => {
@@ -153,7 +268,8 @@ test("does not repeat an already made transfer request", () => {
     gatekeeperRequestMade: true,
   };
 
-  assert.match(instructionForContactRouting(state), /Wiederhole die Bitte nicht wortgleich/);
+  assert.match(instructionForContactRouting(state), /Wiederhole die Bitte nicht/);
+  assert.match(instructionForContactRouting({ ...state, targetName: undefined }), /Wiederhole die Bitte nicht/);
 });
 
 test("does not identify a target who is mentioned as unavailable", () => {

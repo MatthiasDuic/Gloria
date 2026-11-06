@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
+import { extractReport, parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { newContext } from "./state.js";
 
@@ -171,4 +171,51 @@ test("does not turn an unrelated relative time into a callback", () => {
   ]);
 
   assert.equal(parsed, undefined);
+});
+
+test("an offered incoming callback neither schedules an outgoing call nor uses the owner's number as direct dial", async () => {
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  const oldOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "test-key";
+  setGlobalDispatcher(agent);
+  const nextCallAt = "2026-11-10T09:00:00.000Z";
+  const pool = agent.get("https://api.openai.com");
+  pool.intercept({ path: "/v1/chat/completions", method: "POST" }).reply(200, {
+    choices: [{ message: { content: JSON.stringify({
+      outcome: "Wiedervorlage", nextCallAt, directDial: "01701234567", summary: "Die Zielperson ruft zurück.",
+    }) } }],
+  }).times(2);
+  pool.intercept({ path: "/v1/chat/completions", method: "POST" }).reply(200, {
+    choices: [{ message: { content: JSON.stringify({
+      outcome: "Nicht erreicht / kein Kontakt", summary: "Die Zielperson ruft zurück.",
+    }) } }],
+  });
+  try {
+    const ctx = newContext({ callSid: "incoming-callback", streamSid: "test", ownerRealPhone: "+491701234567" });
+    ctx.transcript.push(
+      { role: "user", text: "Wenn Sie Ihre Nummer hinterlassen, wird er Sie in zehn Minuten zurückrufen.", at: 1_000 },
+      { role: "assistant", text: "Die Nummer lautet plus vier neun, eins sieben null, eins zwei drei, vier fünf sechs, sieben.", at: 2_000 },
+    );
+    const incoming = await extractReport(ctx);
+    assert.equal(incoming?.nextCallAt, undefined);
+    assert.equal(incoming?.directDial, undefined);
+
+    ctx.transcript.push({ role: "user", text: "Rufen Sie mich stattdessen morgen zurück.", at: 3_000 });
+    const outgoing = await extractReport(ctx);
+    assert.equal(outgoing?.nextCallAt, nextCallAt);
+    assert.equal(outgoing?.directDial, undefined);
+
+    ctx.transcript.pop();
+    const misclassified = await extractReport(ctx);
+    assert.equal(misclassified?.outcome, "Gespräch abgebrochen");
+    assert.equal(misclassified?.nextCallAt, undefined);
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    if (oldOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = oldOpenAiKey;
+    await agent.close();
+  }
 });

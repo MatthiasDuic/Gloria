@@ -138,7 +138,7 @@ export function buildDecisionMakerTransitionToAppointment(topic: Topic): string 
 }
 
 function isGatekeeperReasonQuestion(text: string): boolean {
-  return /\b(worum\s+geht\s+es|um\s+was\s+geht\s+es|worum\s+gehts|was\s+ist\s+der\s+grund|weshalb|warum\s+rufen\s+sie\s+an)\b/i.test(
+  return /\b(worum\s+(?:es\s+)?geht|um\s+was\s+geht|(?:worum|um\s+was)\s+handelt\s+es\s+sich|worum\s+gehts|was\s+(?:genau\s+)?ist\s+(?:denn\s+)?(?:der\s+)?(?:grund|anlass)|was\s+(?:ist|wäre)\s+(?:denn\s+)?(?:ihr\s+)?anliegen|weshalb\s+rufen|warum\s+rufen)\b/i.test(
     text,
   );
 }
@@ -161,7 +161,7 @@ export function buildGatekeeperObjectionReply(state: TokenizedCallState, heardTe
   const topicReason = getTopicReasonLine(state.topic);
 
   if (isGatekeeperIdentityQuestion(heardText)) {
-    return `Gern: Gloria von der Agentur Duic, im Auftrag von Herrn Matthias Duic. Verbinden Sie mich bitte kurz mit ${transferTarget}.`;
+    return "Gern: Gloria von der Agentur Duic, im Auftrag von Herrn Matthias Duic.";
   }
 
   if (isGatekeeperTargetPersonQuestion(heardText)) {
@@ -169,7 +169,7 @@ export function buildGatekeeperObjectionReply(state: TokenizedCallState, heardTe
   }
 
   if (isGatekeeperReasonQuestion(heardText)) {
-    return `Gern, in einem Satz: ${topicReason}. Ich stimme das kurz direkt mit ${transferTarget} ab. Können Sie mich bitte verbinden?`;
+    return `Gern, in einem Satz: ${topicReason}.`;
   }
 
   return null;

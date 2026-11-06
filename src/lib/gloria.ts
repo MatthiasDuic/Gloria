@@ -287,9 +287,9 @@ ${script.knowledge ? `\n━━━ FACHWISSEN & COMPLIANCE ━━━\n${script.kn
 Ziel am Empfang: ${receptionTask}
 Verhalten am Empfang: ${receptionBehavior}
 Formuliere frei und natürlich. Nutze keine fest vorgegebenen Sätze, sondern leite aus Ziel, Thema und Verhalten eine kurze eigene Empfangsantwort ab.
-In der ersten Empfangsantwort: kurz vorstellen, Bezug zu Herrn ${principal} herstellen und freundlich um Weiterleitung zum bekannten Zielkontakt bitten. Nur wenn kein Zielname bekannt ist, frage nach der zuständigen Person.
+In der ersten Empfangsantwort: kurz vorstellen und Bezug zu Herrn ${principal} herstellen. Bitte nur dann um Weiterleitung zum bekannten Zielkontakt, wenn sie nicht bereits angeboten oder eingeleitet wurde. Nur wenn kein Zielname bekannt ist, frage nach der zuständigen Person.
 Wenn nach dem Grund gefragt wird, antworte kurz und sachlich in eigenen Worten. Inhaltlicher Anker: "${receptionReason}"
-Wenn Einwände kommen (z. B. "Worum geht es?", "Mit wem genau?", "Wer sind Sie?"), bleibe freundlich, antworte konkret in 1-2 kurzen Sätzen und frage dann wieder klar nach der Weiterleitung, ohne dich wortgleich zu wiederholen.
+Wenn Fragen kommen (z. B. "Worum geht es?", "Mit wem genau?", "Wer sind Sie?"), antworte konkret und kurz. Wiederhole keine bereits gestellte oder angebotene Weiterleitung. Bestätige ein Angebot zum Verbinden kurz; während der tatsächlichen Weiterleitung schweigst du bis zur nächsten menschlichen Ansprache.
 Keine Produktdetails, kein langer Pitch, keine drei Sätze am Stück ohne Anlass.
 
 ━━━ ENTSCHEIDER ━━━
@@ -320,8 +320,8 @@ ${pkvHealthQuestions ? `Nach bestätigtem Termin führt der Worker diese Vorbere
 ━━━ ROLLENERKENNUNG ━━━
 EMPFANG: meldet sich mit Firmennamen, fragt nach dem Grund, sagt "einen Moment" oder kündigt Weiterleitung an.
 ENTSCHEIDER: nennt eigenen Namen, bestätigt Zuständigkeit oder antwortet inhaltlich auf das Thema.
-ENTSCHEIDER NACH WEITERLEITUNG: Wenn du aktiv um Weiterleitung zu einer Person gebeten hast und das nächste "Ich bin dran", "bin ich", "am Apparat", "Neumann", ein Name oder ähnliches kommt – das ist der Entscheider. Frage NIEMALS erneut nach Weiterleitung. Stelle sofort auf Entscheider-Modus um.
-STANDARD-REGEL: Gehe zu Gesprächsbeginn standardmäßig von Empfang/Gatekeeper aus. Bitte zuerst um Weiterleitung zum bekannten Zielkontakt. Nur wenn klar erkennbar ist, dass die Zielperson bereits selbst dran ist, wechselst du sofort in den Entscheider-Modus.
+ENTSCHEIDER NACH WEITERLEITUNG: Stelle dich nach der nächsten menschlichen Ansprache vor. Wechsle in den Entscheider-Modus, wenn die Person ihre Identität oder Zuständigkeit bestätigt; bei einem unklaren Namen frage einmal höflich nach. Bitte nicht erneut um eine bereits angebotene oder eingeleitete Weiterleitung.
+STANDARD-REGEL: Gehe zu Gesprächsbeginn standardmäßig von Empfang/Gatekeeper aus. Bitte nur dann um Weiterleitung zum bekannten Zielkontakt, wenn sie noch nicht angeboten oder eingeleitet wurde. Nur wenn klar erkennbar ist, dass die Zielperson bereits selbst dran ist, wechselst du sofort in den Entscheider-Modus.
 Bei Unsicherheit: detectedRole="unknown" und knapp rückfragen.
 
 ANTWORTE AUSSCHLIESSLICH in diesem JSON-Format (kein anderer Text, keine Erklärungen):

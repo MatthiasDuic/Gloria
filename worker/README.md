@@ -10,6 +10,17 @@ Worker separat auf Render. Vercel liefert weiterhin Dashboard, REST-API,
 Reports und die Call-Control-Konfiguration, die den Anruf via WebSocket-Stream an diesen Worker
 übergibt.
 
+Bei Empfang und Weiterleitung bestätigt Gloria ein angebotenes Verbinden einmal
+kurz. Während des tatsächlichen Durchstellens und in Warteschleifen spricht sie
+nicht; nach einer menschlichen Ansprache stellt sie sich bei der neuen Person
+vor und klärt bei Bedarf deren Identität. Fragen nach dem Anrufgrund beantwortet
+sie kurz anhand des Kampagnenauftrags, ohne erneut um die Verbindung zu bitten.
+Die bestehende Wartegrenze ohne menschlichen Kontakt beträgt drei Minuten.
+Fragt der Empfang bei abwesender Zielperson nach einer Rückrufnummer, nennt
+Gloria die im Benutzerkonto hinterlegte reale Rufnummer einzeln und wartet auf
+eine Bestätigung. Sie wiederholt die Nummer auf Wunsch und meldet ehrlich, wenn
+keine gültige reale Rufnummer hinterlegt ist.
+
 ## Architektur
 
 ```

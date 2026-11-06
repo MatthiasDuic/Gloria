@@ -11,6 +11,7 @@ type TelnyxEventPayload = {
   call_control_id?: string;
   call_leg_id?: string;
   call_session_id?: string;
+  direction?: unknown;
   client_state?: string;
   stream_url?: string;
   recording_id?: string;
@@ -183,9 +184,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (clientState.queueId) {
         await markOutboundCallActive(clientState.queueId, callControlId);
       }
-      await sendTelnyxCommand(callControlId, "answer", {
-        ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
-      });
+      const direction = typeof event.payload?.direction === "string" ? event.payload.direction.toLowerCase() : undefined;
+      const isOutbound = direction === "outgoing"
+        || (direction !== "incoming" && Boolean(clientState.userId || clientState.queueId));
+      if (!isOutbound) {
+        if (direction !== "incoming") log.warn("telnyx.events.unknown_call_direction", { callControlId, direction });
+        await sendTelnyxCommand(callControlId, "answer", {
+          ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
+        });
+      }
     } else if (eventType === "call.answered") {
       const streamBidirectionalCodec = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim();
       await sendTelnyxCommand(callControlId, "streaming_start", {

@@ -1,3 +1,5 @@
+import { endsWithSentenceAbbreviation } from "./german-sentence.js";
+
 export class OpeningSpeechStream {
   private readonly segmenter = new Intl.Segmenter("de", { granularity: "sentence" });
   private buffer = "";
@@ -17,7 +19,7 @@ export class OpeningSpeechStream {
     let complete = "";
     for (let index = 0; index < segments.length - 1; index++) {
       complete += segments[index].segment;
-      if (/\b(?:Dr|Prof|bzw|ca|Nr|etc|z|B)\.\s*$/i.test(complete)) continue;
+      if (endsWithSentenceAbbreviation(complete)) continue;
       consumed += complete.length;
       this.enqueue(complete);
       complete = "";

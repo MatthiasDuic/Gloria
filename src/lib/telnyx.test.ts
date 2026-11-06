@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test, { mock } from "node:test";
 import { Pool } from "pg";
-import { createTelnyxCall, encodeTelnyxClientState } from "./telnyx";
+import { createTelnyxCall, encodeTelnyxClientState, resolveCallOwnerIdentity } from "./telnyx";
 import { CampaignOutsideHoursError } from "./campaign-schedule";
 import { extractTelnyxPublicKey, verifyTelnyxWebhook } from "./telnyx-webhook-auth";
 import { POST as receiveTelnyxEvent } from "../app/api/telnyx/events/route";
@@ -72,6 +72,49 @@ test("signed Telnyx events start only the live stream, never an audio recording"
   }
 });
 
+test("answers inbound call.initiated events and handles missing direction compatibly", async () => {
+  const previousKey = process.env.TELNYX_PUBLIC_KEY;
+  const previousApiKey = process.env.TELNYX_API_KEY;
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  process.env.TELNYX_PUBLIC_KEY = publicKey.export({ format: "pem", type: "spki" }).toString();
+  process.env.TELNYX_API_KEY = "fixture";
+  const commands: string[] = [];
+  mock.method(globalThis, "fetch", async (url: string | URL | Request) => {
+    commands.push(String(url));
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    const cases = [
+      { name: "outgoing", direction: "outgoing", answer: false },
+      { name: "incoming", direction: "incoming", answer: true },
+      { name: "incoming-with-state", direction: "incoming", clientState: { userId: "owner" }, answer: true },
+      { name: "unknown-outgoing", clientState: { userId: "owner" }, answer: false },
+      { name: "unknown-incoming", answer: true },
+      { name: "malformed-direction", direction: 42, clientState: { queueId: "queue" }, answer: false },
+    ];
+    for (const scenario of cases) {
+      const payload = {
+        call_control_id: `call-${scenario.name}`,
+        direction: scenario.direction,
+        client_state: scenario.clientState ? Buffer.from(JSON.stringify(scenario.clientState)).toString("base64") : undefined,
+      };
+      const body = JSON.stringify({ data: { event_type: "call.initiated", payload } });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const headers = new Headers({ "telnyx-timestamp": timestamp, "telnyx-signature-ed25519": sign(null, Buffer.from(`${timestamp}|${body}`), privateKey).toString("base64") });
+      const previousCommands = commands.length;
+      assert.equal((await receiveTelnyxEvent(new Request("https://example.test/api/telnyx/events", { method: "POST", headers, body }))).status, 200);
+      assert.equal(commands.length - previousCommands, scenario.answer ? 1 : 0, scenario.name);
+      if (scenario.answer) assert.match(commands.at(-1) || "", new RegExp(`call-${scenario.name}/actions/answer$`));
+    }
+  } finally {
+    mock.restoreAll();
+    if (previousKey === undefined) delete process.env.TELNYX_PUBLIC_KEY;
+    else process.env.TELNYX_PUBLIC_KEY = previousKey;
+    if (previousApiKey === undefined) delete process.env.TELNYX_API_KEY;
+    else process.env.TELNYX_API_KEY = previousApiKey;
+  }
+});
+
 test("campaign calls cannot contact Telnyx at or after 17:30 Berlin time", async () => {
   const previousSlots = process.env.CAMPAIGN_SLOTS;
   const previousTimezone = process.env.CAMPAIGN_TIMEZONE;
@@ -110,7 +153,7 @@ test("passes the actually called phone number to the media worker", () => {
   assert.equal(decoded.calledPhone, "+49 170 1234567");
 });
 
-test("passes the call owner's role and full name in the signed media context", () => {
+test("passes the call owner's role, full name and callback number in the signed media context", () => {
   const encoded = encodeTelnyxClientState({
     to: "+492339555100",
     company: "Fixture",
@@ -118,16 +161,40 @@ test("passes the call owner's role and full name in the signed media context", (
     userId: "normal",
     ownerRole: "user",
     ownerRealName: "Erika Mustermann",
+    ownerRealPhone: "+491701234567",
   });
   const decoded = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as {
     ownerRole?: string;
     ownerRealName?: string;
+    ownerRealPhone?: string;
   };
   assert.equal(decoded.ownerRole, "user");
   assert.equal(decoded.ownerRealName, "Erika Mustermann");
+  assert.equal(decoded.ownerRealPhone, "+491701234567");
 });
 
-test("call dispatch refreshes the owner's role and name from the database", async () => {
+test("rejects malformed owner phone values instead of making up a number from embedded digits", async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  let realPhone = "+49 (0)170 1234567";
+  mock.method(Pool.prototype, "query", async (sql: string) => ({
+    rows: /FROM users\s+WHERE id = \$1/.test(sql)
+      ? [{ id: "normal", username: "normal", real_name: "Erika Mustermann", real_phone: realPhone, role: "user" }]
+      : [],
+    rowCount: 1,
+  }));
+  try {
+    assert.equal((await resolveCallOwnerIdentity("normal")).realPhone, "+491701234567");
+    realPhone = "Telefon: 0170 1234567";
+    assert.equal((await resolveCallOwnerIdentity("normal")).realPhone, undefined);
+  } finally {
+    mock.restoreAll();
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("call dispatch refreshes the owner's role, name and callback number from the database", async () => {
   const previous = {
     DATABASE_URL: process.env.DATABASE_URL,
     TELNYX_API_KEY: process.env.TELNYX_API_KEY,
@@ -151,7 +218,7 @@ test("call dispatch refreshes the owner's role and name from the database", asyn
       return {
         rows: [{
           id: "normal", username: "normal", real_name: "Erika Mustermann", company_name: "Testagentur",
-          password_hash: "test", role: "user", created_at: "2026-01-01T00:00:00.000Z",
+          real_phone: "0170 1234567", password_hash: "test", role: "user", created_at: "2026-01-01T00:00:00.000Z",
         }],
         rowCount: 1,
       };
@@ -164,7 +231,7 @@ test("call dispatch refreshes the owner's role and name from the database", asyn
     }
     return { rows: [], rowCount: 0 };
   });
-  let state: { ownerRole?: string; ownerRealName?: string; userId?: string } | undefined;
+  let state: { ownerRole?: string; ownerRealName?: string; ownerRealPhone?: string; userId?: string } | undefined;
   mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/telnyx/topic-policies")) {
@@ -189,12 +256,13 @@ test("call dispatch refreshes the owner's role and name from the database", asyn
       userId: "normal",
       ownerRole: "master",
       ownerRealName: "Veralteter Name",
+      ownerRealPhone: "+491111111111",
       callSource: "manual",
     });
     assert.equal(result.sid, "test-call");
     assert.deepEqual(state && {
-      userId: state.userId, ownerRole: state.ownerRole, ownerRealName: state.ownerRealName,
-    }, { userId: "normal", ownerRole: "user", ownerRealName: "Erika Mustermann" });
+      userId: state.userId, ownerRole: state.ownerRole, ownerRealName: state.ownerRealName, ownerRealPhone: state.ownerRealPhone,
+    }, { userId: "normal", ownerRole: "user", ownerRealName: "Erika Mustermann", ownerRealPhone: "+491701234567" });
   } finally {
     mock.restoreAll();
     for (const [name, value] of Object.entries(previous)) {
