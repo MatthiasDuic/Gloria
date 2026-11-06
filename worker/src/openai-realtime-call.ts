@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { fetch } from "undici";
 import type { WebSocket as ServerWebSocket } from "ws";
-import { advanceAppointmentRouting, appointmentModeFollowUp, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode, isSuppliedAppointmentSlot } from "./appointment-controller.js";
+import { advanceAppointmentRouting, appointmentModeFollowUp, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction } from "./call-classification.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
@@ -326,10 +326,6 @@ export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "conta
   return `Spreche ich mit ${addressedTarget}?`;
 }
 
-export function isOfferedSlotPhrase(ctx: CallContext, phrase: string): boolean {
-  return isSuppliedAppointmentSlot(ctx.freeSlotsPrompt, phrase);
-}
-
 export function buildRealtimeInstructions(ctx: CallContext): string {
   const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
   const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
@@ -362,12 +358,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Bei Unsicherheit korrigierst du dich diskret mit einer klaren, konkreten Formulierung. Erfinde keine Fakten und übe keinen Druck aus.",
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
-    "TERMINBESTÄTIGUNG: Ein Termin ist erst nach erfolgreichem confirm_appointment eingetragen. Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde; Gloria erhält dafür keinen Zustellstatus. Sage nur, dass die genannte Adresse für die Terminbestätigung aufgenommen wurde. Versprich keinen digitalen Zugangslink und keinen Versandzeitpunkt.",
+    "TERMINBESTÄTIGUNG: Ein Termin ist erst nach erfolgreichem confirm_appointment eingetragen. Gloria versendet selbst keine E-Mails; sie nimmt nur die E-Mail-Adresse auf, damit der Berater die Terminbestätigung versenden kann. Kündige an, dass der Kunde die Terminbestätigung per E-Mail erhält, bei einem digitalen Termin einschließlich des Links zum Teams-Meeting. Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde, und nenne keinen Versandzeitpunkt.",
     ctx.confirmedSlotPhrase
       ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${appointmentFarewellText(ctx)}' Beende danach das Gespräch ohne weitere Frage.`
       : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
-    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach nur, ob der Termin persönlich oder digital stattfinden soll. Frage niemals nach einem Ort oder einer Adresse: 'persönlich' bedeutet immer beim Kunden vor Ort, die Adresse kommt aus den Kundendaten. Eine Frage zu einer Terminart, eine Verneinung oder ein unklarer Laut ist keine Auswahl und darf keine Buchung auslösen. Erkläre 'digital' bei Nachfrage als Beratung per Microsoft Teams. Versprich weder einen Zugangslink noch einen Versandzeitpunkt, solange diese Angaben nicht im System bestätigt sind. Erst nach eindeutiger Auswahl rufst du confirm_appointment für den vollständigen angebotenen Slot auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
+    "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach nur, ob der Termin persönlich oder digital stattfinden soll. Frage niemals nach einem Ort oder einer Adresse: 'persönlich' bedeutet immer beim Kunden vor Ort, die Adresse kommt aus den Kundendaten. Eine Frage zu einer Terminart, eine Verneinung oder ein unklarer Laut ist keine Auswahl und darf keine Buchung auslösen. Erkläre 'digital' bei Nachfrage als Beratung per Microsoft Teams; der Link zum Meeting kommt mit der Terminbestätigung per E-Mail. Nenne keinen Versandzeitpunkt. Erst nach eindeutiger Auswahl rufst du confirm_appointment für den vollständigen angebotenen Slot auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -1552,7 +1548,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           log.info("realtime.slot_locked",{ callSid: ctx.callSid,slot: decision.slotPhrase,speechSlot: speechSlotPhrase,preference: decision.preference,appointmentMode });
           sendToolResult(tool.callId,{ ok: true,confirmed_slot: speechSlotPhrase,appointment_mode: appointmentMode });
           updateSession();
-          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode,ctx);
+          const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode);
           preparationState=transition.state;
           if(transition.speechText) requestDeterministicSpeech(transition.speechText);
           else requestResponse(transition.instruction);

@@ -7,11 +7,6 @@ import { normalizePhoneForDial } from "./phone-utils";
 import { log } from "./log";
 import type { UserRole } from "./session";
 
-export interface TelnyxCallerIdOption {
-  number: string;
-  label: string;
-}
-
 export interface TelnyxCallRequest {
   to: string;
   company: string;
@@ -242,41 +237,6 @@ export function getTelnyxCallerIds(): string[] {
 
   const merged = [primary, ...extras].filter((value): value is string => Boolean(value));
   return [...new Set(merged)];
-}
-
-function getTelnyxCallerIdLabelMap(): Record<string, string> {
-  const raw = process.env.TELNYX_PHONE_NUMBER_LABELS || "";
-  const map: Record<string, string> = {};
-
-  for (const entry of raw.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean)) {
-    const [number, ...labelParts] = entry.split(":");
-    const phoneNumber = number?.trim();
-    const label = labelParts.join(":").trim();
-
-    if (phoneNumber && label) {
-      map[phoneNumber] = label;
-    }
-  }
-
-  return map;
-}
-
-export function getTelnyxCallerIdOptions(): TelnyxCallerIdOption[] {
-  const numbers = getTelnyxCallerIds();
-  const labelMap = getTelnyxCallerIdLabelMap();
-
-  return numbers.map((number, index) => {
-    const configured = labelMap[number];
-    if (configured) {
-      return { number, label: configured };
-    }
-
-    if (index === 0) {
-      return { number, label: "Agentur-Duic" };
-    }
-
-    return { number, label: `Nummer ${index + 1}` };
-  });
 }
 
 async function listOwnedTelnyxNumbers(): Promise<string[]> {

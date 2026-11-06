@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, createContactRoutingState, instructionForContactRouting, isGatekeeperReasonQuestion, mentionsRetryTime } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, createContactRoutingState, isGatekeeperReasonQuestion, mentionsRetryTime } from "./contact-routing-controller.js";
 
 test("recognizes initial recorded welcomes, hold music and advertising without starting a conversation", () => {
   let state = createContactRoutingState("Herr Neumann");
@@ -177,7 +177,6 @@ test("keeps the fachgespraech behind the gatekeeper boundary", () => {
   let state = createContactRoutingState("Herr Neumann");
   state = advanceContactRouting(state, "Guten Tag, Zentrale der Beispiel GmbH.");
   assert.equal(state.stage, "gatekeeper");
-  assert.match(instructionForContactRouting(state), /Noch kein PKV-Fachgespräch/);
 
   state = advanceContactRouting(state, "Einen Moment bitte, ich verbinde Sie.");
   assert.equal(state.stage, "waiting_for_transfer");
@@ -193,7 +192,6 @@ test("stays silent throughout queue announcements until a person answers", () =>
 
   state = advanceContactRouting(state, "Einen Moment bitte, ich verbinde Sie.");
   assert.equal(state.stage, "waiting_for_transfer");
-  assert.match(instructionForContactRouting(state), /Sprich nicht/);
 
   state = advanceContactRouting(state, "Alle Mitarbeiter sind im Gespräch. Bitte warten Sie.");
   assert.equal(state.stage, "waiting_for_transfer");
@@ -271,7 +269,6 @@ test("confirms an unclear name match once and accepts a clear yes", () => {
     "Guten Tag.",
   );
   assert.equal(initial.stage, "confirming_decision_maker");
-  assert.match(instructionForContactRouting(initial), /genau einmal höflich/);
 
   const confirmed = advanceContactRouting(initial, "Ja, genau, den haben Sie am Apparat.");
   assert.equal(confirmed.stage, "decision_maker");
@@ -285,18 +282,6 @@ test("routes a denied identity check to the gatekeeper without repeating the nam
   const denied = advanceContactRouting(initial, "Nein, ich bin aus dem Empfang.");
 
   assert.equal(denied.stage, "gatekeeper");
-  assert.match(instructionForContactRouting(denied), /freundlich um die Verbindung/);
-});
-
-test("does not repeat an already made transfer request", () => {
-  const state = {
-    ...createContactRoutingState("Herr Biletzki"),
-    stage: "gatekeeper" as const,
-    gatekeeperRequestMade: true,
-  };
-
-  assert.match(instructionForContactRouting(state), /Wiederhole die Bitte nicht/);
-  assert.match(instructionForContactRouting({ ...state, targetName: undefined }), /Wiederhole die Bitte nicht/);
 });
 
 test("does not identify a target who is mentioned as unavailable", () => {

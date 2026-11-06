@@ -90,7 +90,7 @@ Wichtig: Die Admin-Seite und internen APIs sind geschützt. Die Telnyx-Callbacks
 
 ## CRM-Integration
 
-Bei der telefonischen Terminvereinbarung fragt Gloria nach der Terminauswahl: **„Soll der Termin persönlich oder digital stattfinden?“** „Persönlich“ bedeutet immer beim Kunden; im PDF-Terminbogen wird dann die Kundenadresse aus der Kampagnenliste eingetragen. Nach einem Ort fragt Gloria nicht. „Digital“ bedeutet Microsoft Teams; einen Meeting-Link oder Versandzeitpunkt verspricht Gloria nicht. Für Master-Benutzer versendet Gloria die Terminbestätigung mit Kalendereinladung. Ein PDF-Terminbogen wird vorerst ausschließlich für das gemeinsame Thema **private Krankenversicherung** erstellt und angehängt. Betriebliche Krankenversicherung und persönliche Themen erhalten keinen PDF-Anhang; ihre Terminbestätigung bleibt möglich. Auch manuelle PDF-Exporte sind auf dieses PKV-Thema beschränkt, selbst wenn eine persönliche Kampagne von PKV kopiert wurde. Bei normalen Benutzern kündigt Gloria an, dass der Benutzer mit seinem im Profil hinterlegten vollständigen Namen die Bestätigung versendet; Gloria verschickt diese Kundenmail nicht selbst. Bereits eingeplante Terminmails werden vor dem Versand erneut anhand der Benutzerrolle geprüft. Interne Report-Mails bleiben davon unberührt. Neue Anrufe benötigen einen zugeordneten Benutzer mit hinterlegtem Namen; ohne diese Angaben werden sie nicht gestartet. Für diese Änderungen müssen sowohl die Web-Anwendung als auch der Telefonie-Worker deployt werden.
+Bei der telefonischen Terminvereinbarung fragt Gloria nach der Terminauswahl: **„Soll der Termin persönlich oder digital stattfinden?“** „Persönlich“ bedeutet immer beim Kunden; im PDF-Terminbogen wird dann die Kundenadresse aus der Kampagnenliste eingetragen. Nach einem Ort fragt Gloria nicht. „Digital“ bedeutet Microsoft Teams. **Gloria verschickt keine E-Mails an Kunden.** Sie nimmt nur die E-Mail-Adresse auf; diese steht im Gesprächsbericht, in der internen Report-Mail („E-Mail für die Terminbestätigung“) und wird beim Lead hinterlegt, falls dort noch keine Adresse gespeichert ist. Der Benutzer versendet die Terminbestätigung selbst. Gloria kündigt sie am Gesprächsende für persönliche und digitale Termine an („Sie erhalten die Terminbestätigung von {Name aus dem Profil} per E-Mail.“); bei digitalen Terminen ergänzt sie, dass darin auch der Link zum Teams-Meeting enthalten ist. Einen Versandzeitpunkt nennt sie nicht. Alte, noch eingeplante Einladungs-Jobs werden ohne Versand verworfen. Der PDF-Terminbogen wird manuell über den Export erstellt und ist vorerst auf das gemeinsame Thema **private Krankenversicherung** beschränkt, auch wenn eine persönliche Kampagne von PKV kopiert wurde. Interne Report-Mails an den Benutzer bleiben unverändert. Neue Anrufe benötigen einen zugeordneten Benutzer mit hinterlegtem Namen; ohne diese Angaben werden sie nicht gestartet. Für diese Änderungen müssen sowohl die Web-Anwendung als auch der Telefonie-Worker deployt werden.
 
 ### Gesprächsstart, Warteschleifen und Wiedervorlagen
 
@@ -233,12 +233,14 @@ Für automatische Wiedervorlagen ist ein Cron-Job vorkonfiguriert:
 - `vercel.json` ruft alle 5 Minuten `/api/callbacks/run` auf.
 - Optional absichern mit `CRON_SECRET` in Vercel (Authorization Header `Bearer <CRON_SECRET>`).
 
-Die in `src/lib/gloria.ts` hinterlegte Identität sorgt dafür, dass Gloria:
+Die in `worker/src/gloria-core-instructions.ts` hinterlegten Grundregeln sorgen dafür, dass Gloria:
 
-- sich direkt als **digitale Vertriebsassistentin** erkenntlich macht,
-- **im Auftrag von Herrn Duic** spricht,
-- **Aufzeichnungserlaubnis** vorab anfragt,
-- und intelligent vom Skript abweichen darf, solange das Gespräch zielgerichtet bleibt.
+- sich direkt als **digitale Vertriebsassistentin** des zugeordneten Benutzers erkenntlich macht,
+- am Empfang auf das tatsächlich Gesagte reagiert und während einer Weiterleitung schweigt,
+- keine Einwilligungen, Zahlen, Zusagen oder Rückrufnummern erfindet,
+- und frei auf den Gesprächspartner eingeht, statt ein Skript abzulesen.
+
+`src/lib/gloria.ts` baut daraus nur noch den Prompt für die Stimmvorschau.
 
 ## Rechtlicher Hinweis
 

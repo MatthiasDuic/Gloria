@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import nodemailer, { type SendMailOptions } from "nodemailer";
 import { Pool } from "pg";
-import { enqueueAppointmentConfirmation } from "./appointment-confirmation";
 import { globalJobQueue, type Job } from "./job-queue";
-import { sendAppointmentInvite, sendReportEmail } from "./mailer";
+import { sendReportEmail } from "./mailer";
 import type { CallReport } from "./types";
 
 const report: CallReport = {
@@ -23,13 +22,7 @@ const report: CallReport = {
 };
 
 async function withMailFixture(
-  run: (
-    sent: () => SendMailOptions[],
-    leadWrites: unknown[][],
-    rejectRecipient: (address: string) => void,
-    setMasterLookupRoles: (roles: Array<"master" | "user">) => void,
-    transcriptReads: string[],
-  ) => Promise<void>,
+  run: (sent: () => SendMailOptions[], leadWrites: unknown[][], setLeadEmail: (email?: string) => void) => Promise<void>,
 ) {
   const previous = {
     DATABASE_URL: process.env.DATABASE_URL,
@@ -47,13 +40,11 @@ async function withMailFixture(
   process.env.REPORT_TO_EMAIL = "advisor@example.test";
   process.env.CRON_SECRET = "test-cron";
   process.env.APP_INTERNAL_TOKEN = "test-internal";
-  let masterLookupRoles: Array<"master" | "user"> = [];
-  const transcriptReads: string[] = [];
+  let leadEmail: string | undefined;
   mock.method(Pool.prototype, "query", async (sql: string, values: unknown[] = []) => {
-    if (/FROM\s+call_transcript_events\b/.test(sql)) transcriptReads.push(sql);
     if (/FROM users\s+WHERE id = \$1/.test(sql)) {
       const id = String(values[0]);
-      const role = id === "master" ? masterLookupRoles.shift() || "master" : id === "normal" ? "user" : undefined;
+      const role = id === "master" ? "master" : id === "normal" ? "user" : undefined;
       return {
         rows: role ? [{
           id, username: id, real_name: "Erika Mustermann", company_name: "Testagentur",
@@ -66,7 +57,7 @@ async function withMailFixture(
       return {
         rows: [{
           id: "lead", user_id: String(values[0]), company: "Testfirma", contact_name: "Testperson",
-          phone: "+492339555100", topic: "Beratung", status: "neu", attempts: 0,
+          phone: "+492339555100", email: leadEmail, topic: "Beratung", status: "neu", attempts: 0,
           call_source: "crm", email_history: [],
         }],
         rowCount: 1,
@@ -84,26 +75,14 @@ async function withMailFixture(
   }));
   const transport = nodemailer.createTransport({ jsonTransport: true });
   const sendMail = transport.sendMail.bind(transport);
-  const rejectedRecipients = new Set<string>();
   const sentMessages: SendMailOptions[] = [];
   mock.method(transport, "sendMail", async (message: SendMailOptions) => {
-    sentMessages.push({ ...message, attachments: message.attachments?.map((attachment) => ({ ...attachment })) });
-    const info = await sendMail(message);
-    return {
-      ...info,
-      accepted: info.envelope.to.filter((address) => !rejectedRecipients.has(address.toLowerCase())),
-      rejected: info.envelope.to.filter((address) => rejectedRecipients.has(address.toLowerCase())),
-    };
+    sentMessages.push({ ...message });
+    return sendMail(message);
   });
   mock.method(nodemailer, "createTransport", () => transport);
   try {
-    await run(
-      () => sentMessages,
-      leadWrites,
-      (address) => rejectedRecipients.add(address.toLowerCase()),
-      (roles) => { masterLookupRoles = [...roles]; },
-      transcriptReads,
-    );
+    await run(() => sentMessages, leadWrites, (email) => { leadEmail = email; });
   } finally {
     mock.restoreAll();
     for (const [name, value] of Object.entries(previous)) {
@@ -113,18 +92,12 @@ async function withMailFixture(
   }
 }
 
-test("normal users never send a customer appointment confirmation, but internal reports still work", async () => {
+test("internal reports are sent only to the advisor", async () => {
   await withMailFixture(async (sent) => {
-    const normalReport = { ...report, userId: "normal", appointmentMode: "Beim Kunden vor Ort" };
-    const result = await sendAppointmentInvite({
-      report: normalReport, attendeeEmail: "customer@example.test", appointmentPdf: Buffer.alloc(1001),
-    });
-    assert.equal(result.delivered, false);
-    assert.equal(sent().length, 0);
-
-    assert.equal((await sendReportEmail(normalReport)).delivered, true);
+    assert.equal((await sendReportEmail({ ...report, userId: "normal" })).delivered, true);
     assert.equal(sent().length, 1);
     assert.equal(sent()[0].to, "advisor@example.test");
+    assert.equal(sent()[0].icalEvent, undefined);
   });
 });
 
@@ -174,109 +147,64 @@ test("SMTP transport selects implicit TLS on port 465 and STARTTLS on other port
   }
 });
 
-test("master confirmations describe the appointment without promising an untracked digital link", async () => {
-  await withMailFixture(async (sent) => {
-    for (const appointmentMode of ["Beim Kunden vor Ort", "Microsoft Teams"]) {
-      const result = await sendAppointmentInvite({
-        report: { ...report, userId: "master", appointmentMode },
-        attendeeEmail: "customer@example.test",
-        appointmentPdf: Buffer.alloc(1001),
-      });
-      assert.equal(result.delivered, true);
-    }
-
-    assert.equal(sent().length, 2);
-    assert.match(String(sent()[0].text), /Termin.*best[aä]tigt/i);
-    assert.match(String(sent()[0].text), /Beim Kunden vor Ort/);
-    assert.doesNotMatch(String(sent()[0].text), /Link/i);
-    assert.match(String(sent()[1].text), /Microsoft Teams/);
-    assert.doesNotMatch(String(sent()[1].text), /Link|einen Tag vor dem Termin/i);
-  });
-});
-
-test("an appointment without a known owner cannot send a confirmation", async () => {
-  await withMailFixture(async (sent) => {
-    await assert.rejects(
-      sendAppointmentInvite({ report, attendeeEmail: "customer@example.test", appointmentPdf: Buffer.alloc(1001) }),
-      /Benutzer/i,
-    );
-    await assert.rejects(
-      sendAppointmentInvite({ report: { ...report, userId: "missing" }, attendeeEmail: "customer@example.test", appointmentPdf: Buffer.alloc(1001) }),
-      /Benutzer/i,
-    );
-    assert.equal(sent().length, 0);
-  });
-});
-
-test("master confirmations require a valid customer address", async () => {
-  await withMailFixture(async (sent) => {
-    for (const attendeeEmail of [undefined, "invalid-address", "customer@example.test,other@example.test"]) {
-      const result = await sendAppointmentInvite({
-        report: { ...report, userId: "master" }, attendeeEmail, appointmentPdf: Buffer.alloc(1001),
-      });
-      assert.equal(result.delivered, false);
-      assert.match(result.reason || "", /Kunden-E-Mail-Adresse/);
-    }
-    assert.equal(sent().length, 0);
-  });
-});
-
-test("only master appointments are queued for automatic confirmation", async () => {
-  await withMailFixture(async (sent) => {
-    const enqueue = mock.method(globalJobQueue, "enqueue", async () => "test-job");
-    const manual = await enqueueAppointmentConfirmation({ ...report, userId: "normal" }, "customer@example.test");
-    assert.match(manual.reason, /manuell/);
-    assert.equal(enqueue.mock.callCount(), 0);
-
-    const automatic = await enqueueAppointmentConfirmation({ ...report, userId: "master" }, "customer@example.test");
-    assert.match(automatic.reason, /test-job/);
-    assert.equal(enqueue.mock.callCount(), 1);
-    assert.equal(enqueue.mock.calls[0].arguments[0], "send_invite");
-    await assert.rejects(enqueueAppointmentConfirmation({ ...report, userId: "missing" }), /Benutzer/i);
-    assert.equal(enqueue.mock.callCount(), 1);
-    assert.equal(sent().length, 0);
-  });
-});
-
-test("the call webhook queues a customer confirmation only for the master user", async () => {
-  await withMailFixture(async () => {
+test("the call webhook never queues a customer mail and hands the spoken address to the user", async () => {
+  await withMailFixture(async (sent, leadWrites) => {
     const enqueue = mock.method(globalJobQueue, "enqueue", async (type) => `${type}-job`);
     const { POST } = await import("../app/api/calls/webhook/route");
     const appointmentAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     for (const [userId, spokenEmail, expectedEmail] of [
-      ["normal", "Ja, meine Adresse ist kunde@example.test.", undefined],
-      ["master", "Ja, meine Adresse ist kunde@example.test.", "kunde@example.test"],
+      ["normal", "Ja, meine Adresse ist kunde@example.test.", "kunde@example.test"],
       ["master", "Die Adresse lautet anna punkt muster at beispiel punkt de. Vielen Dank.", "anna.muster@beispiel.de"],
       ["master", "Meine Adresse ist m a x at b e i s p i e l punkt d e.", "max@beispiel.de"],
       ["master", "Bitte an kunde@beispiel.xn--p1ai senden.", "kunde@beispiel.xn--p1ai"],
     ]) {
+      const writesBefore = leadWrites.length;
       const response = await POST(new Request("https://example.test/api/calls/webhook", {
         method: "POST",
         headers: { "content-type": "application/json", "x-gloria-internal-token": "test-internal" },
         body: JSON.stringify({
-          callSid: `call-${enqueue.mock.callCount()}`, userId, callSource: "manual",
+          callSid: `call-${enqueue.mock.callCount()}`, userId, leadId: "lead", callSource: "crm",
           company: "Testfirma", topic: "Beratung", summary: "Termin vereinbart.", outcome: "Termin",
           appointmentAt, appointmentMode: "Microsoft Teams",
           transcript: [
-            { role: "assistant", text: "Für die Terminbestätigung brauche ich noch Ihre E-Mail-Adresse." },
+            { role: "assistant", text: "Damit Herr Duic Ihnen die Terminbestätigung per E-Mail zusenden kann, brauche ich noch Ihre E-Mail-Adresse." },
             { role: "user", text: spokenEmail },
           ],
         }),
       }));
       assert.equal(response.status, 200);
-      const calls = enqueue.mock.calls.map((call) => call.arguments);
-      const latest = calls.at(-1);
-      if (userId === "normal") {
-        assert.deepEqual(calls.map(([type]) => type), ["send_email"]);
-      } else {
-        assert.equal(latest?.[0], "send_invite");
-        assert.equal(latest?.[2].attendeeEmail, expectedEmail);
-      }
+      const body = await response.json() as { confirmationEmail?: string; report: CallReport };
+      assert.equal(body.confirmationEmail, expectedEmail);
+      assert.match(body.report.summary, new RegExp(`E-Mail für die Terminbestätigung: ${expectedEmail.replace(/[.+-]/g, "\\$&")}`));
+      assert.ok(leadWrites.slice(writesBefore).some((values) => values.includes(expectedEmail)));
     }
-    assert.deepEqual(enqueue.mock.calls.map((call) => call.arguments[0]), [
-      "send_email", "send_email", "send_invite", "send_email", "send_invite", "send_email", "send_invite",
-      "send_email", "send_invite",
-    ]);
+    assert.deepEqual(enqueue.mock.calls.map((call) => call.arguments[0]), ["send_email", "send_email", "send_email", "send_email"]);
+    assert.equal(sent().length, 0);
+  });
+});
+
+test("an existing lead address is never overwritten by the spoken address", async () => {
+  await withMailFixture(async (_sent, leadWrites, setLeadEmail) => {
+    setLeadEmail("info@testfirma.example");
+    mock.method(globalJobQueue, "enqueue", async (type) => `${type}-job`);
+    const { POST } = await import("../app/api/calls/webhook/route");
+    const response = await POST(new Request("https://example.test/api/calls/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-gloria-internal-token": "test-internal" },
+      body: JSON.stringify({
+        callSid: "call-existing-email", userId: "normal", leadId: "lead", callSource: "crm",
+        company: "Testfirma", topic: "Beratung", summary: "Termin vereinbart.", outcome: "Termin",
+        appointmentAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        transcript: [
+          { role: "assistant", text: "Ich brauche noch Ihre E-Mail-Adresse." },
+          { role: "user", text: "kunde@example.test" },
+        ],
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const body = await response.json() as { report: CallReport };
+    assert.match(body.report.summary, /E-Mail für die Terminbestätigung: kunde@example\.test/);
+    assert.ok(leadWrites.every((values) => !values.includes("kunde@example.test")));
   });
 });
 
@@ -297,13 +225,13 @@ async function processOneJob() {
   }));
 }
 
-test("an already queued normal-user invitation is skipped without sending", async () => {
+test("already queued legacy customer invitations are discarded without sending", async () => {
   await withMailFixture(async (sent, leadWrites) => {
-    const job: Job = {
+    const job = {
       id: "old-invite", type: "send_invite", callSid: "call",
-      payload: { report: { ...report, userId: "normal", leadId: "lead" } },
+      payload: { report: { ...report, userId: "master", leadId: "lead" }, attendeeEmail: "customer@example.test" },
       createdAt: Date.now(), attempts: 1, status: "processing",
-    };
+    } as unknown as Job;
     const { success, failure } = mockJobProcessing(job);
     const response = await processOneJob();
     assert.equal(response.status, 200);
@@ -317,71 +245,19 @@ test("an already queued normal-user invitation is skipped without sending", asyn
   });
 });
 
-test("the role is checked again immediately before sending a queued invitation", async () => {
-  await withMailFixture(async (sent, leadWrites, _rejectRecipient, setMasterLookupRoles) => {
-    setMasterLookupRoles(["master", "user"]);
+test("queued internal report mails are still delivered to the advisor", async () => {
+  await withMailFixture(async (sent) => {
     const job: Job = {
-      id: "downgraded-invite", type: "send_invite", callSid: "call",
-      payload: {
-        report: { ...report, userId: "master", leadId: "lead" },
-        attendeeEmail: "customer@example.test",
-      },
+      id: "report-mail", type: "send_email", callSid: "call",
+      payload: { report: { ...report, userId: "master" } },
       createdAt: Date.now(), attempts: 1, status: "processing",
     };
     const { success, failure } = mockJobProcessing(job);
-    const response = await processOneJob();
-    assert.equal(response.status, 200);
-    assert.equal(success.mock.callCount(), 1);
-    assert.equal(failure.mock.callCount(), 0);
-    assert.equal(sent().length, 0);
-    assert.equal(leadWrites.length, 0);
-  });
-});
-
-test("a successful master invitation is recorded only after the email was sent", async () => {
-  await withMailFixture(async (sent, leadWrites) => {
-    const job: Job = {
-      id: "master-invite", type: "send_invite", callSid: "call",
-      payload: {
-        report: { ...report, userId: "master", leadId: "lead", appointmentMode: "Microsoft Teams" },
-        attendeeEmail: "customer@example.test",
-      },
-      createdAt: Date.now(), attempts: 1, status: "processing",
-    };
-    const { success, failure } = mockJobProcessing(job);
-    const response = await processOneJob();
-    assert.equal(response.status, 200);
+    await processOneJob();
     assert.equal(success.mock.callCount(), 1);
     assert.equal(failure.mock.callCount(), 0);
     assert.equal(sent().length, 1);
-    assert.equal(leadWrites.length, 1);
-    const history = JSON.parse(String(leadWrites[0][21])) as Array<{ source: string; to: string }>;
-    assert.deepEqual(history.map(({ source, to }) => ({ source, to })), [
-      { source: "gloria", to: "customer@example.test" },
-    ]);
-  });
-});
-
-test("a customer rejected by SMTP is not recorded as sent", async () => {
-  await withMailFixture(async (sent, leadWrites, rejectRecipient) => {
-    rejectRecipient("customer@example.test");
-    const job: Job = {
-      id: "rejected-invite", type: "send_invite", callSid: "call",
-      payload: {
-        report: { ...report, userId: "master", leadId: "lead", appointmentMode: "Microsoft Teams" },
-        attendeeEmail: "customer@example.test",
-      },
-      createdAt: Date.now(), attempts: 1, status: "processing",
-    };
-    const { success, failure } = mockJobProcessing(job);
-    const response = await processOneJob();
-    const body = await response.json() as { processed: number; failed: number };
-    assert.equal(body.processed, 0);
-    assert.equal(body.failed, 1);
-    assert.equal(success.mock.callCount(), 0);
-    assert.equal(failure.mock.callCount(), 1);
-    assert.equal(sent().length, 1);
-    assert.equal(leadWrites.length, 0);
+    assert.equal(sent()[0].to, "advisor@example.test");
   });
 });
 
@@ -394,71 +270,5 @@ test("booking a report never claims a confirmation was already sent", async () =
     assert.equal(sent().length, 0);
     assert.equal(leadWrites.length, 1);
     assert.deepEqual(JSON.parse(String(leadWrites[0][21])), []);
-  });
-});
-
-test("non-PKV confirmations send their calendar without a PDF, including stale queued attachments", async () => {
-  await withMailFixture(async (sent) => {
-    for (const topic of ["betriebliche Krankenversicherung", "Meine PKV-Kampagne"]) {
-      for (const appointmentPdf of [undefined, Buffer.alloc(1001)]) {
-        const result = await sendAppointmentInvite({
-          report: { ...report, topic, userId: "master" }, attendeeEmail: "customer@example.test", appointmentPdf,
-        });
-        assert.equal(result.delivered, true);
-        const mail = sent().at(-1)!;
-        assert.equal(mail.attachments?.length, 1);
-        assert.equal(mail.attachments?.[0].contentType, "text/calendar; method=REQUEST; charset=UTF-8");
-        assert.doesNotMatch(String(mail.text), /Kundenterminbogen/);
-      }
-    }
-  });
-});
-
-test("PKV confirmations still require a complete PDF", async () => {
-  await withMailFixture(async (sent) => {
-    for (const appointmentPdf of [undefined, Buffer.alloc(999), Buffer.alloc(1001)]) {
-      const result = await sendAppointmentInvite({
-        report: { ...report, topic: "private Krankenversicherung", userId: "master" },
-        attendeeEmail: "customer@example.test", appointmentPdf,
-      });
-      assert.equal(result.delivered, Boolean(appointmentPdf && appointmentPdf.length >= 1000));
-    }
-    assert.equal(sent().length, 1);
-    assert.equal(sent()[0].attachments?.length, 2);
-  });
-});
-
-test("queued non-PKV invitations never load transcripts or generate a PDF", async () => {
-  await withMailFixture(async (sent, _leadWrites, _rejectRecipient, _setMasterLookupRoles, transcriptReads) => {
-    const job: Job = {
-      id: "no-pdf", type: "send_invite", callSid: "call",
-      payload: { report: { ...report, userId: "master", topic: "betriebliche Krankenversicherung" }, attendeeEmail: "customer@example.test" },
-      createdAt: Date.now(), attempts: 1, status: "processing",
-    };
-    const { success, failure } = mockJobProcessing(job);
-    await processOneJob();
-    assert.equal(success.mock.callCount(), 1);
-    assert.equal(failure.mock.callCount(), 0);
-    assert.equal(sent()[0].attachments?.length, 1);
-    assert.equal(transcriptReads.length, 0);
-  });
-});
-
-test("queued PKV invitations load the transcript and attach a complete PDF", async () => {
-  await withMailFixture(async (sent, _leadWrites, _rejectRecipient, _setMasterLookupRoles, transcriptReads) => {
-    const job: Job = {
-      id: "pkv-pdf", type: "send_invite", callSid: "call",
-      payload: { report: { ...report, userId: "master", topic: "private Krankenversicherung" }, attendeeEmail: "customer@example.test" },
-      createdAt: Date.now(), attempts: 1, status: "processing",
-    };
-    const { success, failure } = mockJobProcessing(job);
-    await processOneJob();
-    assert.equal(success.mock.callCount(), 1);
-    assert.equal(failure.mock.callCount(), 0);
-    assert.equal(transcriptReads.length, 1);
-    const pdf = sent()[0].attachments?.find((entry) => entry.contentType === "application/pdf")?.content;
-    assert.ok(Buffer.isBuffer(pdf));
-    assert.ok(pdf.length >= 1000);
-    assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   });
 });

@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { globalJobQueue, type Job } from "@/lib/job-queue";
-import { sendReportEmail, sendAppointmentInvite } from "@/lib/mailer";
-import { appointmentLocationForMode, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, isInPersonAppointmentMode } from "@/lib/appointment-form";
-import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
-import { appointmentConfirmationDelivery } from "@/lib/appointment-confirmation";
-import { appendLeadEmailHistory, getLeadById } from "@/lib/storage";
-import { shouldGenerateAppointmentPdf, type CallReport } from "@/lib/types";
+import { sendReportEmail } from "@/lib/mailer";
+import type { CallReport } from "@/lib/types";
 
 export const maxDuration = 300; // 5 minutes for job processing
+
+// Gloria versendet keine Kundenmails mehr; bereits eingereihte Altjobs werden verworfen.
+const DISCARDED_LEGACY_JOB_TYPES = new Set<string>(["send_invite", "extract_report"]);
 
 async function processEmailJob(job: Job): Promise<void> {
   const payload = job.payload as { report?: CallReport; reportId?: string };
@@ -19,91 +18,6 @@ async function processEmailJob(job: Job): Promise<void> {
     const result = await sendReportEmail(payload.report);
     if (!result.delivered) {
       throw new Error(`Email delivery failed: ${result.reason}`);
-    }
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error));
-  }
-}
-
-async function processInviteJob(job: Job): Promise<void> {
-  const payload = job.payload as {
-    report?: CallReport;
-    attendeeEmail?: string;
-    missingBasisQuestions?: string[];
-  };
-  if (!payload.report) {
-    throw new Error("No report in invite job payload");
-  }
-  if (await appointmentConfirmationDelivery(payload.report.userId) === "manual") {
-    console.info("appointment_confirmation.skipped", { jobId: job.id, reason: "non_master" });
-    return;
-  }
-  if (!payload.attendeeEmail) {
-    throw new Error("Kunden-E-Mail-Adresse fehlt; Terminbestätigung wurde nicht an den Kunden versendet.");
-  }
-
-  try {
-    const report = payload.report;
-    let appointmentPdf: Buffer | undefined;
-    let appointmentPdfFilename: string | undefined;
-    if (shouldGenerateAppointmentPdf(report.topic)) {
-      const transcriptEvents = report.callSid
-        ? await listCallTranscriptEventsFromPostgres(report.callSid)
-        : [];
-      const appointmentLead = report.leadId && isInPersonAppointmentMode(report.appointmentMode)
-        ? await getLeadById(report.leadId, report.userId).catch((error) => {
-          console.error("appointment_form.lead_lookup_failed", { jobId: job.id, error });
-          return undefined;
-        })
-        : undefined;
-      const appointmentForm = buildAppointmentFormInputFromReport({
-        ...report,
-        location: appointmentLocationForMode(report.appointmentMode, appointmentLead || undefined),
-        transcriptEvents,
-      });
-      appointmentPdf = await buildAppointmentFormPdf(appointmentForm);
-      if (appointmentPdf.length < 1000) {
-        throw new Error("Kundenterminbogen konnte nicht erzeugt werden.");
-      }
-      appointmentPdfFilename = getAppointmentFormFilename(appointmentForm);
-    }
-    const result = await sendAppointmentInvite({
-      report,
-      attendeeEmail: payload.attendeeEmail,
-      organizerName: "Gloria Consultant",
-      missingBasisQuestions: payload.missingBasisQuestions || [],
-      appointmentPdf,
-      appointmentPdfFilename,
-    });
-
-    if (!result.delivered && "skipped" in result && result.skipped) {
-      console.info("appointment_confirmation.skipped", { jobId: job.id, reason: "non_master" });
-      return;
-    }
-    if (!result.delivered) {
-      throw new Error(`Invite delivery failed: ${result.reason}`);
-    }
-
-    if (report.leadId && report.userId) {
-      try {
-        const subject = report.appointmentAt
-          ? `Terminbestaetigung versendet (${report.appointmentAt})`
-          : "Terminbestaetigung versendet";
-        const lead = await getLeadById(report.leadId, report.userId);
-        if (!lead) {
-          console.error("appointment_confirmation.history_lead_missing", { jobId: job.id, leadId: report.leadId });
-        } else if (!(lead.emailHistory || []).some((entry) => entry.source === "gloria" && entry.subject === subject)) {
-          const updated = await appendLeadEmailHistory(report.leadId, {
-            source: "gloria",
-            subject,
-            body: "Automatische Terminbestaetigung durch Gloria.",
-            to: payload.attendeeEmail,
-          }, report.userId);
-          if (!updated) console.error("appointment_confirmation.history_lead_missing", { jobId: job.id, leadId: report.leadId });
-        }
-      } catch (error) {
-        console.error("appointment_confirmation.history_failed_after_send", { jobId: job.id, error });
-      }
     }
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
@@ -132,8 +46,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
       if (job.type === "send_email") {
         await processEmailJob(job);
-      } else if (job.type === "send_invite") {
-        await processInviteJob(job);
+      } else if (DISCARDED_LEGACY_JOB_TYPES.has(job.type)) {
+        console.info("job.legacy_discarded", { jobId: job.id, type: job.type });
       } else {
         throw new Error(`Unknown job type: ${job.type}`);
       }

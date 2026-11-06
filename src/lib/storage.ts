@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { defaultLeads, defaultReports, defaultScripts } from "./sample-data";
-import { phoneMatches, normalizePhoneForMatch } from "./phone-utils";
 import {
   appendCallTranscriptEventToPostgres,
   appendConversationEventToPostgres,
@@ -1096,33 +1095,6 @@ export async function completeLeadTask(
   if (!updatedLead) return undefined;
   await writeLeads(nextLeads, userId);
   return updatedLead;
-}
-
-export async function findLeadForInboundCallbackByPhone(fromNumber: string): Promise<Lead | undefined> {
-  const leads = await readLeads();
-
-  const candidates = leads.filter((lead) => {
-    if (lead.status === "absage") {
-      return false;
-    }
-
-    return phoneMatches(fromNumber, lead.phone) || phoneMatches(fromNumber, lead.directDial);
-  });
-
-  if (candidates.length === 0) {
-    return undefined;
-  }
-
-  return [...candidates].sort((a, b) => {
-    const byAttempts = (b.attempts || 0) - (a.attempts || 0);
-    if (byAttempts !== 0) {
-      return byAttempts;
-    }
-
-    const aTs = Date.parse(a.nextCallAt || "") || 0;
-    const bTs = Date.parse(b.nextCallAt || "") || 0;
-    return bTs - aTs;
-  })[0];
 }
 
 async function writeLeads(leads: Lead[], userId?: string): Promise<void> {

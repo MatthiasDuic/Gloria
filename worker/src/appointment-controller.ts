@@ -263,12 +263,6 @@ export function matchOfferedAppointmentSelection(text: string, offeredSlots: str
   return undefined;
 }
 
-export function appointmentOfferInstruction(freeSlotsPrompt: string | undefined, preference: AppointmentPreference): string | undefined {
-  const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
-  if (choices.length < 2) return undefined;
-  return `Sage natürlich und ohne einschränkende Formulierungen: "Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?" Stelle in diesem Turn keine weitere Frage. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
-}
-
 // A short reply without a recognizable slot (e.g. garbled audio or a bare "Ja") must not be guessed by the model.
 function isUnclearSlotSelection(text: string): boolean {
   const trimmed = text.trim();

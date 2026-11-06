@@ -41,8 +41,9 @@ import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { buildGatekeeperIntro, buildGatekeeperTopicInstruction, buildGatekeeperTransferRequest, hasDeterministicGatekeeperTopic } from "./openai-realtime-call.js";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
+import { isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { newContext } from "./state.js";
 import { topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { cachePreloadedTopicPolicy } from "./topic-policy-prompt.js";
@@ -1271,7 +1272,7 @@ test("accepts a direct Monday selection as a confirmed slot without asking again
     { role: "user", text: "Montag passt gut.", at: 8 },
   );
 
-  assert.equal(isOfferedSlotPhrase(ctx, "Montag passt gut."), true);
+  assert.equal(isSuppliedAppointmentSlot(ctx.freeSlotsPrompt, "Montag passt gut."), true);
 });
 
 test("instructs the model to confirm an unambiguous offered weekday immediately", () => {
@@ -1284,8 +1285,8 @@ test("instructs the model to confirm an unambiguous offered weekday immediately"
 test("rejects invented slots and accepts exact supplied slots", () => {
   const ctx = buildPkvContext();
   ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
-  assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 11:00 Uhr"), true);
-  assert.equal(isOfferedSlotPhrase(ctx, "Mittwoch, 26. August um 09:00 Uhr"), false);
+  assert.equal(isSuppliedAppointmentSlot(ctx.freeSlotsPrompt, "Mittwoch, 26. August um 11:00 Uhr"), true);
+  assert.equal(isSuppliedAppointmentSlot(ctx.freeSlotsPrompt, "Mittwoch, 26. August um 09:00 Uhr"), false);
 });
 
 test("passes real free calendar slots through both session and response instructions", () => {
@@ -1304,14 +1305,18 @@ test("passes real free calendar slots through both session and response instruct
 
 test("uses the appointment-specific farewell after a slot is confirmed", () => {
   const ctx = buildPkvContext();
-  ctx.ownerRole = "master";
+  ctx.ownerRealName = "Matthias Duic";
   ctx.confirmedSlotPhrase = "Donnerstag, 22. Oktober um dreizehn Uhr";
-  const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Ihre E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen/);
-  assert.match(instructions, /Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde/);
+  ctx.appointmentMode = "Beim Kunden vor Ort";
+  const personal = buildRealtimeInstructions(ctx);
+  assert.match(personal, /Sie erhalten die Terminbestätigung von Matthias Duic per E-Mail\. Auf Wiederhören\./);
+  assert.match(personal, /Gloria versendet selbst keine E-Mails/);
+  assert.match(personal, /Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde/);
+  ctx.appointmentMode = "Microsoft Teams";
+  assert.match(buildRealtimeInstructions(ctx), /per E-Mail\. Darin ist auch der Link zum Teams-Meeting enthalten\. Auf Wiederhören\./);
 });
 
-test("normal-user appointment instructions name the owner, not Gloria, as email sender", () => {
+test("appointment instructions name the owner as the sender of the confirmation", () => {
   const ctx = newContext({
     callSid: "test-user-confirmation",
     streamSid: "test-stream",
@@ -1321,8 +1326,8 @@ test("normal-user appointment instructions name the owner, not Gloria, as email 
     confirmedSlotPhrase: "Donnerstag um zehn Uhr",
   });
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Ihre E-Mail-Adresse habe ich für die Terminbestätigung von Erika Mustermann aufgenommen/);
-  assert.doesNotMatch(instructions, /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
+  assert.match(instructions, /Sie erhalten die Terminbestätigung von Erika Mustermann per E-Mail/);
+  assert.doesNotMatch(instructions, /Ihre E-Mail-Adresse habe ich für die Terminbestätigung/);
 });
 
 test("formats times and Euro amounts in dynamic response instructions", () => {
@@ -1533,7 +1538,7 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
   assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
   assert.match(instructions, /persönlich oder digital/);
-  assert.match(instructions, /Versprich weder einen Zugangslink noch einen Versandzeitpunkt/);
+  assert.match(instructions, /der Link zum Meeting kommt mit der Terminbestätigung per E-Mail\. Nenne keinen Versandzeitpunkt/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /höchstens eine klare Hauptfrage pro Antwort/);
 });

@@ -342,28 +342,3 @@ export function advanceContactRouting(
   }
   return state;
 }
-
-export function instructionForContactRouting(state: ContactRoutingState): string {
-  switch (state.stage) {
-    case "awaiting_contact":
-      return state.targetName
-        ? `Stelle dich kurz transparent vor und frage ausschließlich nach ${state.targetName}. Noch kein Fachgespräch.`
-        : "Stelle dich kurz transparent vor und frage ausschließlich nach der zuständigen Person. Noch kein Fachgespräch.";
-    case "confirming_decision_maker":
-      return state.targetName
-        ? `Die Person könnte ${state.targetName} sein, aber die Namenszuordnung ist nicht sicher. Frage genau einmal höflich, ob du ${state.targetName} am Apparat hast. Bei Zustimmung beginne mit der regulären Eröffnung. Reagiere bei Nein auf die konkrete Antwort; ein Weiterleitungsangebot bestätigst du kurz statt erneut darum zu bitten. Noch kein Fachgespräch.`
-        : "Die Zuständigkeit ist nicht sicher. Frage genau einmal höflich, ob du die zuständige Ansprechperson am Apparat hast. Bei Zustimmung beginne mit der regulären Eröffnung. Reagiere sonst auf die konkrete Antwort und wiederhole kein Weiterleitungsangebot. Noch kein Fachgespräch.";
-    case "gatekeeper":
-      return state.gatekeeperRequestMade
-        ? `Du hast bereits um die Verbindung mit ${state.targetName || "der zuständigen Person"} gebeten. Wiederhole die Bitte nicht und starte kein Fachgespräch. Reagiere kurz auf die konkrete Antwort. Bei einem Rückrufangebot und einer Frage nach der Nummer nenne nur eine ausdrücklich bereitgestellte Rückrufnummer. Wenn keine Nummer vorliegt, sage das ehrlich.`
-        : state.targetName
-          ? `Die sprechende Person ist noch nicht als Entscheider bestätigt. Bitte ausschließlich freundlich um die Verbindung mit ${state.targetName}. Wenn nach dem Grund gefragt wird, nenne nur die kurze thematische Einordnung. Noch kein PKV-Fachgespräch.`
-        : "Die sprechende Person ist noch nicht als Entscheider bestätigt. Bitte ausschließlich um die Verbindung mit der zuständigen Person. Noch kein Fachgespräch.";
-    case "waiting_for_transfer":
-      return "Es läuft eine Weiterleitung oder Warteschleife. Sprich nicht und starte kein Fachgespräch. Warte auf die nächste menschliche Äußerung.";
-    case "decision_maker":
-      return "Der Entscheider ist bestätigt. Fahre mit dem fachlichen Gespräch fort.";
-    case "voicemail":
-      return "Eine Mailbox wurde erkannt. Starte kein Fachgespräch und vereinbare keinen Termin.";
-  }
-}

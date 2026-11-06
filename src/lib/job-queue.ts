@@ -1,7 +1,7 @@
 import { getDatabasePool, isDatabaseUrlConfigured } from "./report-db";
 import type { Pool } from "pg";
 
-export type JobType = "extract_report" | "send_email" | "send_invite";
+export type JobType = "send_email";
 
 export interface Job {
   id: string;

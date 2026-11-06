@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advancePkvStep, assessPkvConversation, extractContributionPhrase, extractCurrentContributionPhrase, instructionForPkvStage, instructionForPkvStep, isClearPkvInterest, responseTextForPkvStep, type ConversationTurn } from "./pkv-conversation-controller.js";
+import { assessPkvConversation, buildTenYearProjectionSentence, extractContributionPhrase, extractCurrentContributionPhrase, type ConversationTurn } from "./pkv-conversation-controller.js";
 
 test("derives one deterministic next step from the PKV transcript", () => {
   const turns: ConversationTurn[] = [];
@@ -15,7 +15,7 @@ test("derives one deterministic next step from the PKV transcript", () => {
   turns.push({ role: "user", text: "Ich zahle 1000 Euro im Monat." });
   const projection = assessPkvConversation(turns);
   assert.equal(projection.stage, "need_projection");
-  assert.match(instructionForPkvStage(projection), /1000 Euro/);
+  assert.equal(projection.contributionPhrase, "1000 Euro");
 
   turns.push({ role: "assistant", text: "Bei vier Prozent pro Jahr werden aus 1000 Euro in zehn Jahren ungefähr 1480 Euro." });
   assert.equal(assessPkvConversation(turns).stage, "need_concept");
@@ -27,22 +27,6 @@ test("derives one deterministic next step from the PKV transcript", () => {
   turns.push({ role: "assistant", text: "Herr Duic zeigt Ihnen Ihre persönliche Entwicklung und prüfbare Optionen. Wäre diese Klarheit für Sie hilfreich?" });
   turns.push({ role: "user", text: "Ja, das wäre hilfreich." });
   assert.equal(assessPkvConversation(turns).stage, "ready_to_schedule");
-});
-
-test("provides ready-to-speak text for deterministic PKV turns", () => {
-  assert.equal(responseTextForPkvStep(2), "Und welchen Beitrag zahlen Sie heute?");
-  assert.match(responseTextForPkvStep(3, "1280 Euro") || "", /615 Euro mehr.*1895 Euro monatlich.*hochgerechnet\?/);
-  assert.match(responseTextForPkvStep(3, "knapp neunhundert Euro") || "", /430 Euro mehr.*1330 Euro monatlich.*hochgerechnet\?/);
-  assert.match(responseTextForPkvStep(3, "Tausend zweihundert Euro") || "", /575 Euro mehr.*1775 Euro monatlich.*hochgerechnet\?/);
-  assert.equal(responseTextForPkvStep(4), undefined);
-});
-
-test("introduces the contribution trend before asking for the initial contribution", () => {
-  const instruction = instructionForPkvStep(1);
-  assert.match(instruction, /Herr Duic spricht aktuell mit vielen Unternehmern/);
-  assert.match(instruction, /Laut PKV Verband steigen die Beiträge in der Gesundheitsversorgung jedes Jahr um 3-5%, was auf den ersten Blick noch relativ harmlos wirkt, aber über die Jahre deutlich spürbar ist\. Wie ist das bei Ihnen\? Erinnern Sie sich noch, mit welchem Beitrag Sie einmal angefangen haben\?/);
-  assert.doesNotMatch(instruction, /Es geht um die Beitragsentwicklung/);
-  assert.deepEqual(advancePkvStep(1, "Damals waren es 420 Euro."), { nextStep: 2, shouldEnd: false });
 });
 
 test("does not treat an earlier yes as scheduling consent", () => {
@@ -71,24 +55,9 @@ test("does not unlock scheduling after a concept yes when the projection was ski
   assert.notEqual(assessment.stage, "ready_to_schedule");
 });
 
-test("does not advance from step 0 on a plain greeting", () => {
-  assert.deepEqual(advancePkvStep(0, "Guten Tag."), { nextStep: 0, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(0, "Ja, gerne."), { nextStep: 1, shouldEnd: false });
-});
-
-test("does not advance PKV stages on unrelated or repeated utterances", () => {
-  assert.deepEqual(advancePkvStep(1, "Hallo, willkommen."), { nextStep: 1, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(1, "Die Beiträge sind schon stark gestiegen."), { nextStep: 1, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(1, "Ja, das tue ich."), { nextStep: 1, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(1, "Ich kann mich nicht mehr erinnern."), { nextStep: 2, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(2, "Dann lass mich das mal eben fertig machen."), { nextStep: 2, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(2, "Weiß ich nicht."), { nextStep: 3, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(3, "Nein, so habe ich das noch nie durchgerechnet."), { nextStep: 4, shouldEnd: false });
-});
-
 test("uses a deterministic 10-year projection instead of inventing a wrong value", () => {
-  const instruction = instructionForPkvStep(3, "1000 Euro");
-  assert.match(instruction, /1000 Euro.*480 Euro mehr pro Monat.*1480 Euro/i);
+  const instruction = buildTenYearProjectionSentence("1000 Euro");
+  assert.match(instruction, /480 Euro mehr pro Monat.*1480 Euro/i);
   assert.match(instruction, /vier Prozent Steigerung pro Jahr/i);
   assert.doesNotMatch(instruction, /25 Euro mehr|rund 25|rund X Euro/i);
 });
@@ -110,8 +79,8 @@ test("never treats the initial contribution as the current contribution", () => 
     { role: "user", text: "Damals waren es 450 Euro." },
   ];
   assert.equal(extractCurrentContributionPhrase(onlyInitialContribution), undefined);
-  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(onlyInitialContribution)), /eineinhalbmal so hoch/i);
-  assert.doesNotMatch(instructionForPkvStep(3, extractCurrentContributionPhrase(onlyInitialContribution)), /450 Euro|665 Euro/i);
+  assert.match(buildTenYearProjectionSentence(extractCurrentContributionPhrase(onlyInitialContribution)), /eineinhalbmal so hoch/i);
+  assert.doesNotMatch(buildTenYearProjectionSentence(extractCurrentContributionPhrase(onlyInitialContribution)), /450 Euro|665 Euro/i);
 
   const withCurrentContribution: ConversationTurn[] = [
     ...onlyInitialContribution,
@@ -119,7 +88,7 @@ test("never treats the initial contribution as the current contribution", () => 
     { role: "user", text: "Aktuell sind es 1280 Euro." },
   ];
   assert.equal(extractCurrentContributionPhrase(withCurrentContribution), "1280 Euro");
-  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(withCurrentContribution)), /1280 Euro.*1895 Euro/i);
+  assert.match(buildTenYearProjectionSentence(extractCurrentContributionPhrase(withCurrentContribution)), /615 Euro mehr.*1895 Euro/i);
 
   assert.equal(
     extractCurrentContributionPhrase([{ role: "user", text: "Aktuell zahle ich 1280 Euro." }]),
@@ -134,38 +103,12 @@ test("accepts a bare amount as the answer to the current contribution question",
     { role: "user", text: "1280." },
   ];
   assert.equal(extractCurrentContributionPhrase(turns), "1280 Euro");
-  assert.match(instructionForPkvStep(3, extractCurrentContributionPhrase(turns)), /1280 Euro.*615 Euro mehr.*1895 Euro/i);
+  assert.match(buildTenYearProjectionSentence(extractCurrentContributionPhrase(turns)), /615 Euro mehr.*1895 Euro/i);
 });
 
-test("follows the short PKV sequence and asks about each contribution separately", () => {
-  assert.match(instructionForPkvStep(0), /Beitragsentwicklung.*kurzen Moment/i);
-  assert.match(instructionForPkvStep(1), /um 3-5%.*mit welchem Beitrag Sie einmal angefangen haben/i);
-  assert.doesNotMatch(instructionForPkvStep(1), /Es geht um die Beitragsentwicklung/i);
-  assert.match(instructionForPkvStep(2), /welchen Beitrag zahlen Sie heute/i);
-  assert.match(instructionForPkvStep(2), /ohne Einleitung, Bestätigung oder Dankesfloskel/i);
-  assert.match(instructionForPkvStep(3, "980 Euro"), /Haben Sie das schon einmal für sich hochgerechnet\?/i);
-  assert.match(instructionForPkvStep(4), /Herr Duic jeden Tag.*Wäre es für Sie interessant/i);
-  assert.deepEqual(advancePkvStep(1, "Ja, einen Moment."), { nextStep: 1, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(2, "Damals waren es 450 Euro."), { nextStep: 3, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(2, "Heute zahle ich 980 Euro."), { nextStep: 3, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(3, "Nein, das hatte ich noch nicht berechnet."), { nextStep: 4, shouldEnd: false });
-  assert.deepEqual(advancePkvStep(4, "Ja, das wäre interessant."), { nextStep: 6, shouldEnd: false });
-});
-
-test("does not invent a personal euro forecast or promise a meeting link", () => {
-  const projection = instructionForPkvStep(3);
-  const scheduling = instructionForPkvStep(6);
-  assert.match(projection, /eineinhalbmal so hoch/i);
-  assert.doesNotMatch(projection, /rund hundert Euro mehr/i);
-  assert.match(scheduling, /Soll der Termin persönlich oder digital stattfinden/i);
-  assert.doesNotMatch(scheduling, /Agentur|Link zum Meeting/i);
-});
-
-test("requires an unambiguous interest statement before starting appointment scheduling", () => {
-  assert.equal(isClearPkvInterest("Ja, gerne."), true);
-  assert.equal(isClearPkvInterest("Das würde ich gerne machen."), true);
-  assert.equal(isClearPkvInterest("Das klingt interessant."), true);
-  assert.equal(isClearPkvInterest("Das macht Sinn."), true);
-  assert.equal(isClearPkvInterest("Auf kommt mir aus."), false);
-  assert.equal(isClearPkvInterest("Mhm."), false);
+test("projects spoken contributions over ten years", () => {
+  assert.match(buildTenYearProjectionSentence("knapp neunhundert Euro"), /430 Euro mehr.*1330 Euro monatlich/);
+  assert.match(buildTenYearProjectionSentence("Tausend zweihundert Euro"), /575 Euro mehr.*1775 Euro monatlich/);
+  assert.match(buildTenYearProjectionSentence(), /eineinhalbmal so hoch/i);
+  assert.doesNotMatch(buildTenYearProjectionSentence(), /rund hundert Euro mehr/i);
 });

@@ -1,9 +1,6 @@
 import { TOPICS } from "./types";
 import type { ScriptConfig, Topic } from "./types";
-import type { ContactRole } from "@/lib/call-state-token";
 import { buildInternalHeaders } from "@/lib/internal-auth";
-
-export type RoleState = "reception" | "transfer" | "decision_maker";
 
 interface DashboardScriptsPayload {
   topicPolicies?: ScriptConfig[];
@@ -389,55 +386,6 @@ export async function prepareCall(params: {
     preparedAt: new Date().toISOString(),
     topicProfileKey: topicScript ? buildTopicProfileKey(topicScript) : undefined,
   };
-}
-
-export async function getTopicScriptProfile(
-  topic: Topic,
-  baseUrl?: string,
-  request?: Request,
-  userId?: string,
-): Promise<ScriptConfig> {
-  await ensureTelephonyRuntimeInitialized({ baseUrl, request });
-  const cacheKey = getRuntimeCacheKey(userId);
-
-  const scopedScripts = scriptProfilesByUser[cacheKey] || {};
-  const profile = scopedScripts[topic];
-  if (profile) {
-    return profile;
-  }
-
-  const resolvedBaseUrl = resolveBaseUrl(baseUrl, request);
-  await syncScripts(resolvedBaseUrl, userId);
-
-  const afterSync = (scriptProfilesByUser[cacheKey] || {})[topic];
-  if (!afterSync) {
-    throw new Error(`Kein Skriptprofil für Thema ${topic} gefunden.`);
-  }
-
-  return afterSync;
-}
-
-export function resolveRoleState(params: {
-  currentRole: ContactRole;
-  inferredRole?: ContactRole;
-  modelDetectedRole: "gatekeeper" | "decision-maker" | "unknown";
-  heardText: string;
-}): { contactRole: ContactRole; roleState: RoleState } {
-  const lower = params.heardText.toLowerCase();
-
-  if (
-    params.currentRole === "decision-maker" ||
-    params.inferredRole === "decision-maker" ||
-    params.modelDetectedRole === "decision-maker"
-  ) {
-    return { contactRole: "decision-maker", roleState: "decision_maker" };
-  }
-
-  if (/\b(verbinde|einen\s+moment|ich\s+stell\s+durch|ich\s+verbinde)\b/.test(lower)) {
-    return { contactRole: "gatekeeper", roleState: "transfer" };
-  }
-
-  return { contactRole: "gatekeeper", roleState: "reception" };
 }
 
 export function getTelephonyRuntimeSnapshot() {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceAppointmentRouting, appointmentOfferInstruction, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
+import { advanceAppointmentRouting, decideAppointment, detectAppointmentMode, detectAppointmentPreference, findSuppliedAppointmentSlot, getAppointmentOfferSlots, isSuppliedAppointmentSlot, matchOfferedAppointmentSelection } from "./appointment-controller.js";
 import { computeFreeSlots } from "./busy.js";
 import { parseSlotPhraseToIso } from "./finalize.js";
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
@@ -253,11 +253,7 @@ test("offers nonconsecutive days and different times within the requested time w
     "Mittwoch, 21. Oktober um 13:00 Uhr",
     "Freitag, 23. Oktober um 18:00 Uhr",
   ]);
-  const offer = appointmentOfferInstruction(slots, "morning");
-  assert.match(offer || "", /Ich kann Ihnen Montag, 19\. Oktober um 08:30 Uhr oder Mittwoch, 21\. Oktober um 10:00 Uhr anbieten/);
-  assert.doesNotMatch(offer || "", /ausschließlich|nur diese/i);
-  assert.match(offer || "", /Stelle in diesem Turn keine weitere Frage/);
-  assert.equal(appointmentOfferInstruction("- Montag, 19. Oktober um 09:00 Uhr", "morning"), undefined);
+  assert.deepEqual(getAppointmentOfferSlots("- Montag, 19. Oktober um 09:00 Uhr", "morning"), []);
   assert.deepEqual(getAppointmentOfferSlots(slots, "unknown"), []);
 });
 

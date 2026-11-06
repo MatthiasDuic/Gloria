@@ -1,43 +1,28 @@
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
+import type { AppointmentMode } from "./appointment-controller.js";
 
 
 export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
-export const APPOINTMENT_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Ihre E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen. Auf Wiederhören.";
 const APPOINTMENT_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z0-9][a-z0-9-]*[a-z0-9](?![a-z0-9-])/i;
 
 export type AppointmentConfirmationOwner = {
-  ownerRole?: "master" | "user";
   ownerRealName?: string;
+  appointmentMode?: AppointmentMode;
 };
 
 function appointmentAdvisor(owner: AppointmentConfirmationOwner): string {
   return owner.ownerRealName?.trim() || "Ihre Ansprechperson";
 }
 
-function appointmentEmailQuestion(owner: AppointmentConfirmationOwner, complete = false): string {
-  const address = `${complete ? "vollständige " : ""}E-Mail-Adresse`;
-  return owner.ownerRole === "master"
-    ? `Für die Terminbestätigung brauche ich noch Ihre ${address}.`
-    : `Für die Terminbestätigung von ${appointmentAdvisor(owner)} brauche ich noch Ihre ${address}.`;
+function appointmentEmailQuestion(complete = false): string {
+  return `Damit Sie die Terminbestätigung per E-Mail erhalten, brauche ich noch Ihre ${complete ? "vollständige " : ""}E-Mail-Adresse.`;
 }
 
+// Gloria versendet selbst nichts; der Benutzer schickt die Bestätigung (bei Teams mit Meeting-Link) manuell.
 export function appointmentFarewellText(owner: AppointmentConfirmationOwner = {}): string {
-  if (owner.ownerRole === "master") return APPOINTMENT_FAREWELL_TEXT;
-  return `Vielen Dank für das Gespräch. Der Termin ist eingetragen. Ihre E-Mail-Adresse habe ich für die Terminbestätigung von ${appointmentAdvisor(owner)} aufgenommen. Auf Wiederhören.`;
-}
-
-export function formatTimeForSpeech(timeStr: string): string {
-  // Re-export for use in other modules (delegates to formatTimeGerman)
-  const [hourStr, minuteStr] = timeStr.split(":") || [];
-  if (!hourStr) return timeStr;
-  const hour = Number.parseInt(hourStr, 10);
-  const minute = minuteStr ? Number.parseInt(minuteStr, 10) : 0;
-  const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
-  const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig"];
-  const hourWord = hourWords[hour % 24] || String(hour);
-  if (minute === 0) return `${hourWord} Uhr`;
-  const minuteWord = minuteWords[minute] || String(minute);
-  return `${hourWord} Uhr ${minuteWord}`;
+  const sender = owner.ownerRealName?.trim() ? ` von ${owner.ownerRealName.trim()}` : "";
+  const linkHint = owner.appointmentMode === "Microsoft Teams" ? " Darin ist auch der Link zum Teams-Meeting enthalten." : "";
+  return `Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung${sender} per E-Mail.${linkHint} Auf Wiederhören.`;
 }
 
 export function formatAmountForSpeech(amount: string | number): string {
@@ -92,6 +77,7 @@ export type PreparationState = {
   currentQuestionIndex?: number;
   consentRetryCount?: number;
   questionRetryCount?: number;
+  appointmentMode?: AppointmentMode;
 };
 
 export type PreparationTransition = {
@@ -213,14 +199,14 @@ function isAnswerPlausible(question: string, text: string): boolean {
   return normalized.length >= 3;
 }
 export function beginPreparation(
-  state: PreparationState,
+  initialState: PreparationState,
   confirmedSlotPhrase: string,
   turns: ConversationTurn[],
-  _appointmentMode?: import("./appointment-controller.js").AppointmentMode,
-  owner: AppointmentConfirmationOwner = {},
+  appointmentMode?: AppointmentMode,
 ): PreparationTransition {
+  const state: PreparationState = { ...initialState, appointmentMode: appointmentMode ?? initialState.appointmentMode };
   const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.`;
-  const emailQuestion = appointmentEmailQuestion(owner);
+  const emailQuestion = appointmentEmailQuestion();
   if (state.questions.length === 0) {
     return {
       state: { ...state, stage: "awaiting_email" },
@@ -255,7 +241,7 @@ export function advancePreparation(
   turns: ConversationTurn[],
   owner: AppointmentConfirmationOwner = {},
 ): PreparationTransition {
-  const emailQuestion = appointmentEmailQuestion(owner);
+  const emailQuestion = appointmentEmailQuestion();
   const advisor = appointmentAdvisor(owner);
   if (state.stage === "awaiting_consent") {
     const consent = preparationConsent(userText);
@@ -367,14 +353,14 @@ export function advancePreparation(
 
   if (state.stage === "awaiting_email") {
     if (!APPOINTMENT_EMAIL_PATTERN.test(userText)) {
-      const completeEmailQuestion = appointmentEmailQuestion(owner, true);
+      const completeEmailQuestion = appointmentEmailQuestion(true);
       return {
         state,
         instruction: `Sage ausschließlich: '${completeEmailQuestion}'`,
         speechText: completeEmailQuestion,
       };
     }
-    const farewell = appointmentFarewellText(owner);
+    const farewell = appointmentFarewellText({ ...owner, appointmentMode: state.appointmentMode ?? owner.appointmentMode });
     return {
       state: { ...state, stage: "completed", currentQuestionIndex: undefined },
       instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${farewell}' Danach rufe end_call auf. Stelle keine weitere Frage.`,

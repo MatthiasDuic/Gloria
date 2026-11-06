@@ -1,89 +1,21 @@
 import { NextResponse } from "next/server";
-import { sendAppointmentInvite, sendReportEmail } from "@/lib/mailer";
-import { getDashboardData, getLeadById, storeCallReport } from "@/lib/storage";
+import { sendReportEmail } from "@/lib/mailer";
+import { getDashboardData, getLeadById, storeCallReport, updateLeadDetails } from "@/lib/storage";
 import {
   appendCallTranscriptEventToPostgres,
   appendCallTranscriptEventsToPostgres,
-  findUserById,
   listCallTranscriptEventsFromPostgres,
   releaseCampaignCallLock,
   type TranscriptEvent,
 } from "@/lib/report-db";
 import { globalJobQueue } from "@/lib/job-queue";
-import { APPOINTMENT_EMAIL_PATTERN, enqueueAppointmentConfirmation } from "@/lib/appointment-confirmation";
+import { APPOINTMENT_EMAIL_PATTERN } from "@/lib/appointment-confirmation";
 import { buildReportTranscriptFallback } from "@/lib/transcript-utils";
 import { syncCrmCompanyEvent } from "@/lib/crm-sync";
 import { isDoNotCallRequest, suppressPhoneNumber } from "@/lib/call-safety";
 import type { ReportOutcome, Topic } from "@/lib/types";
 
 export const maxDuration = 60;
-
-const BASIS_FIELD_RULES: Array<{
-  key:
-    | "birthDate"
-    | "insuranceStatus"
-    | "insurer"
-    | "monthlyPremium"
-    | "height"
-    | "weight"
-    | "treatments"
-    | "diagnoses";
-  question: string;
-  promptPatterns: RegExp[];
-  answerPatterns?: RegExp[];
-}> = [
-  {
-    key: "insuranceStatus",
-    question: "Versicherungsstatus (privat oder gesetzlich)",
-    promptPatterns: [/privat\s+oder\s+gesetzlich|versicherungsstatus/i],
-    answerPatterns: [/\b(?:privat|gesetzlich|pkv|gkv)\b/i],
-  },
-  {
-    key: "birthDate",
-    question: "Geburtsdatum",
-    promptPatterns: [/geburtsdatum|geboren/i],
-    answerPatterns: [/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\.?\s+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+(?:19|20)\d{2}\b/i],
-  },
-  {
-    key: "insurer",
-    question: "Aktueller Krankenversicherer",
-    promptPatterns: [/versicherer|krankenkasse|krankenversicherung/i],
-    answerPatterns: [
-      /\b(aok|tk|techniker|barmer|dak|ikk|hkk|bkk|debeka|allianz|signal\s*iduna|huk|axa|generali|ottonova|uniqa|hansemerkur|deutsche\s*krankenversicherung)\b/i,
-      /\bbei\s+(der|dem)\s+[a-zA-ZäöüÄÖÜß\-]+/i,
-    ],
-  },
-  {
-    key: "monthlyPremium",
-    question: "Monatsbeitrag",
-    promptPatterns: [/monatsbeitrag|beitrag/i],
-    answerPatterns: [/\b\d{2,5}\s*(euro|eur)\b|\b\d{2,5}\b/i],
-  },
-  {
-    key: "height",
-    question: "Größe",
-    promptPatterns: [/wie\s+gro[ßs]|gr[öo]ße|groesse/i],
-    answerPatterns: [/\b(?:\d{2,3}(?:[.,]\d)?\s*(?:cm|zentimeter)?|1[.,]\d{1,2}\s*(?:m|meter)|(?:ein|eins|eine)\s+meter(?:\s+[a-zäöüß-]+)?)\b/i],
-  },
-  {
-    key: "weight",
-    question: "Gewicht",
-    promptPatterns: [/wie\s+viel\s+wiegen|gewicht/i],
-    answerPatterns: [/\b\d{2,3}(?:[.,]\d)?\s*(?:kg|kilo(?:gramm)?s?)?\b/i],
-  },
-  {
-    key: "treatments",
-    question: "Laufende Behandlungen",
-    promptPatterns: [/laufende\s+behandlungen?|in\s+behandlung/i],
-    answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
-  },
-  {
-    key: "diagnoses",
-    question: "Bekannte Diagnosen",
-    promptPatterns: [/bestehende\s+diagnosen|bekannte\s+diagnosen|diagnosen/i],
-    answerPatterns: [/\b(?:ja|nein|nö|keine?|nicht)\b/i],
-  },
-];
 
 function normalizeText(input: string): string {
   return input
@@ -94,82 +26,7 @@ function normalizeText(input: string): string {
     .replace(/ß/g, "ss");
 }
 
-function isRefusalAnswer(rawText: string): boolean {
-  const text = normalizeText(rawText);
-  return /weiss\s*nicht|keine\s*angabe|moechte\s*ich\s*nicht|will\s*ich\s*nicht|sp[aä]ter|u[eu]berspring|keine\s*zeit/.test(text);
-}
-
-function hasMeaningfulAnswer(rawText: string, answerPatterns?: RegExp[]): boolean {
-  const text = rawText.trim();
-  if (!text || isRefusalAnswer(text)) {
-    return false;
-  }
-  if (answerPatterns && answerPatterns.length > 0) {
-    return answerPatterns.some((pattern) => pattern.test(text));
-  }
-  return text.length >= 2;
-}
-
 type TranscriptSpeakerEntry = Pick<TranscriptEvent, "speaker" | "text">;
-
-function collectMissingBasisQuestions(events: TranscriptSpeakerEntry[]): string[] {
-  if (!events.length) {
-    return BASIS_FIELD_RULES.map((rule) => rule.question);
-  }
-
-  const basisOptOut = events.some((event) => {
-    if (event.speaker !== "Gloria") return false;
-    const text = normalizeText(event.text || "");
-    return /terminbestaetigungsmail|in ruhe beantworten|per mail beantworten|fragen.*mail/.test(text);
-  });
-  if (basisOptOut) {
-    return BASIS_FIELD_RULES.map((rule) => rule.question);
-  }
-
-  const asked = new Set<string>();
-  const answered = new Set<string>();
-
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index];
-    if (event.speaker !== "Gloria") continue;
-    const gloriaText = event.text || "";
-
-    for (const rule of BASIS_FIELD_RULES) {
-      if (!rule.promptPatterns.some((pattern) => pattern.test(gloriaText))) {
-        continue;
-      }
-
-      asked.add(rule.key);
-      let nextUserReply = "";
-      for (let lookahead = index + 1; lookahead < events.length; lookahead += 1) {
-        const candidate = events[lookahead];
-        if (candidate.speaker === "Gloria") {
-          break;
-        }
-        if (candidate.speaker === "Interessent" && candidate.text?.trim()) {
-          nextUserReply = candidate.text.trim();
-          break;
-        }
-      }
-
-      if (hasMeaningfulAnswer(nextUserReply, rule.answerPatterns)) {
-        answered.add(rule.key);
-      }
-    }
-  }
-
-  const missing = BASIS_FIELD_RULES.filter((rule) => asked.has(rule.key) && !answered.has(rule.key)).map(
-    (rule) => rule.question,
-  );
-
-  // Falls gar keine Basisfrage gestellt wurde (z. B. frueh beendet), trotzdem
-  // komplette Fragenliste in die Mail aufnehmen.
-  if (asked.size === 0) {
-    return BASIS_FIELD_RULES.map((rule) => rule.question);
-  }
-
-  return missing;
-}
 
 function normalizePotentialEmail(raw: string): string {
   return normalizeText(raw)
@@ -220,6 +77,25 @@ function inferAttendeeEmailFromTranscript(events: TranscriptSpeakerEntry[]): str
   }
 
   return undefined;
+}
+
+function buildFinalSummary(summary: string, transcript: IncomingTranscriptEntry[] | undefined, confirmationEmail?: string): string {
+  const emailLine = confirmationEmail ? `E-Mail für die Terminbestätigung: ${confirmationEmail}` : "";
+  const transcriptFallback = buildReportTranscriptFallback(transcript);
+  return [summary, emailLine, transcriptFallback].filter(Boolean).join("\n\n");
+}
+
+// Gloria versendet selbst keine Mails; die genannte Adresse wird für den manuellen Versand beim Lead hinterlegt.
+async function rememberConfirmationEmail(report: Awaited<ReturnType<typeof storeCallReport>>, confirmationEmail?: string) {
+  if (!confirmationEmail || !report.leadId || !report.userId) return;
+  try {
+    const lead = await getLeadById(report.leadId, report.userId);
+    if (lead && !lead.email?.trim()) {
+      await updateLeadDetails(lead.id, { email: confirmationEmail }, report.userId);
+    }
+  } catch (error) {
+    console.error("appointment_confirmation.lead_email_update_failed", { reportId: report.id, error });
+  }
 }
 
 type IncomingTranscriptEntry = {
@@ -392,10 +268,10 @@ export async function POST(request: Request) {
         payload.contactName || existingByCallSid?.contactName || lead?.contactName;
 
       if (recoveredCompany && recoveredTopic) {
-        const transcriptFallback = buildReportTranscriptFallback(payload.transcript);
-        const finalSummary = transcriptFallback
-          ? `${payload.summary}\n\n${transcriptFallback}`
-          : payload.summary;
+        const confirmationEmail = payload.outcome === "Termin"
+          ? inferAttendeeEmailFromTranscript(transcriptPersist.events)
+          : undefined;
+        const finalSummary = buildFinalSummary(payload.summary, payload.transcript, confirmationEmail);
         const report = await storeCallReport({
           callSource: payload.callSource,
           userId: finalUserId,
@@ -421,6 +297,7 @@ export async function POST(request: Request) {
         });
 
         await syncCrmCallReport(report);
+        await rememberConfirmationEmail(report, confirmationEmail);
         return NextResponse.json({
           ok: true,
           recoveredFinalizePayload: true,
@@ -517,10 +394,10 @@ export async function POST(request: Request) {
     });
   }
 
-  const transcriptFallback = buildReportTranscriptFallback(payload.transcript);
-  const finalSummary = transcriptFallback
-    ? `${payload.summary}\n\n${transcriptFallback}`
-    : payload.summary;
+  const confirmationEmail = payload.outcome === "Termin" && payload.appointmentAt
+    ? inferAttendeeEmailFromTranscript(transcriptPersist.events)
+    : undefined;
+  const finalSummary = buildFinalSummary(payload.summary, payload.transcript, confirmationEmail);
   const report = await storeCallReport({
     callSource: payload.callSource,
     userId: payload.userId,
@@ -545,6 +422,7 @@ export async function POST(request: Request) {
     recordingUrl: payload.recordingUrl,
   });
   await syncCrmCallReport(report);
+  await rememberConfirmationEmail(report, confirmationEmail);
 
   let emailResult: Awaited<ReturnType<typeof sendReportEmail>>;
   // Enqueue email job asynchronously instead of blocking
@@ -560,23 +438,11 @@ export async function POST(request: Request) {
     };
   }
 
-  let inviteResult:
-    | { delivered: boolean; to?: string | string[]; reason?: string; messageId?: string }
-    | undefined;
-
-  if (report.outcome === "Termin" && report.appointmentAt) {
-    inviteResult = await enqueueAppointmentConfirmation(
-      report,
-      inferAttendeeEmailFromTranscript(transcriptPersist.events),
-      collectMissingBasisQuestions(transcriptPersist.events),
-    );
-  }
-
   return NextResponse.json({
     ok: true,
     report,
     emailResult,
-    inviteResult,
+    confirmationEmail,
     transcript: {
       persisted: transcriptPersist.persisted,
       events: transcriptPersist.normalizedCount,

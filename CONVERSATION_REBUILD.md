@@ -51,11 +51,11 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Ereignisklassifikation und `end_call`-Sicherheitsprüfung verwenden dieselbe Quelle für eindeutige Gesprächsenden.
 - `worker/src/preparation-controller.ts` steuert Zustimmung, Fragenreihenfolge, bekannte Fakten, Abbruch und Abschluss nach der Terminbestätigung.
 - Ein Nein während der Vorbereitung beendet den Fragenkatalog sofort; bereits bekannte Versicherungs- und Beitragsdaten werden nicht erneut erfragt.
-- Nach Übermittlung der Bestätigungs-E-Mail wird die E-Mail-Frage nicht wiederholt.
+- Nach Nennung der E-Mail-Adresse wird die E-Mail-Frage nicht wiederholt.
 - Termin und Durchführungsart können in derselben Kundenantwort gewählt werden; es folgt keine doppelte Rückfrage oder Bestätigung.
 - Die zwei Kalenderoptionen werden natürlich angeboten, ohne einschränkende Formulierungen wie „ausschließlich diese Termine“.
 - Nach den freiwilligen Basisfragen wird immer die E-Mail-Adresse für die Terminbestätigung erfragt; danach folgt die feste Schlussformel ohne Bestätigung zum Auflegen.
-- Nach erfasster E-Mail-Adresse kündigt Gloria die Terminbestätigung an und weist darauf hin, dass vorab per Antwort auf die E-Mail Fragen gestellt werden können. Die kurze Standardverabschiedung bleibt Ablehnungen und Gesprächen ohne Termin vorbehalten.
+- Nach erfasster E-Mail-Adresse kündigt Gloria an, dass der Kunde die Terminbestätigung vom Benutzer per E-Mail erhält; bei digitalen Terminen ergänzt sie, dass darin der Link zum Teams-Meeting enthalten ist. Gloria verschickt selbst keine Kundenmails und nennt keinen Versandzeitpunkt. Die kurze Standardverabschiedung bleibt Ablehnungen und Gesprächen ohne Termin vorbehalten.
 - Der PKV-Anlass und die Frage nach einem kurzen Moment werden im Entscheider-Einstieg genau einmal genannt; nach Zustimmung beginnt direkt die Beitragsentwicklung ohne Wiederholung.
 - Das vollständige Gespräch wird neben den Transkriptereignissen als Report-Fallback gesichert, damit Detailansicht und PDF auch bei einem Ausfall der separaten Transkripttabelle vollständig bleiben.
 - Der konkret bestätigte Kalender-Slot und die Terminart werden strukturiert im Gesprächsreport gespeichert; die ausgeschriebene Sprachform wird ausschließlich für ElevenLabs verwendet.
