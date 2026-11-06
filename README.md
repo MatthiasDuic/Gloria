@@ -269,7 +269,7 @@ Die folgenden Variablen werden im Code tatsächlich verwendet. Für einen stabil
 |---|---|
 | `DATABASE_URL` | Reports/Skripte persistent in PostgreSQL gespeichert werden sollen |
 | `SMTP_HOST` | E-Mail-Reports aktiv gesendet werden sollen |
-| `SMTP_PORT` | E-Mail-Reports aktiv gesendet werden sollen |
+| `SMTP_PORT` | E-Mail-Reports aktiv gesendet werden sollen; Standard `587` (STARTTLS), Port `465` nutzt implizites TLS |
 | `SMTP_USER` | E-Mail-Reports aktiv gesendet werden sollen |
 | `SMTP_PASS` | E-Mail-Reports aktiv gesendet werden sollen |
 | `SMTP_FROM` | E-Mail-Reports aktiv gesendet werden sollen |

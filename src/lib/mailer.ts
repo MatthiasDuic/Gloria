@@ -9,10 +9,17 @@ function getTransporter() {
     return null;
   }
 
+  const port = Number(process.env.SMTP_PORT || 587);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("SMTP_PORT muss eine gültige Portnummer zwischen 1 und 65535 sein.");
+  }
+  const secure = port === 465;
+
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: false,
+    port,
+    secure,
+    requireTLS: !secure,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,

@@ -128,6 +128,52 @@ test("normal users never send a customer appointment confirmation, but internal 
   });
 });
 
+test("SMTP transport selects implicit TLS on port 465 and STARTTLS on other ports", async () => {
+  const previous = {
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASS: process.env.SMTP_PASS,
+    SMTP_PORT: process.env.SMTP_PORT,
+  };
+  process.env.SMTP_HOST = "smtp.example.test";
+  process.env.SMTP_USER = "test-user";
+  process.env.SMTP_PASS = "test-password";
+  const transport = nodemailer.createTransport({ jsonTransport: true });
+  const configurations: unknown[] = [];
+  mock.method(nodemailer, "createTransport", (options) => {
+    configurations.push(options);
+    return transport;
+  });
+  try {
+    for (const port of ["465", "587", "2525"]) {
+      process.env.SMTP_PORT = port;
+      assert.equal((await sendReportEmail(report)).delivered, true);
+    }
+
+    assert.deepEqual(configurations.map((options) => {
+      assert.ok(options && typeof options === "object");
+      return {
+        port: "port" in options ? options.port : undefined,
+        secure: "secure" in options ? options.secure : undefined,
+        requireTLS: "requireTLS" in options ? options.requireTLS : undefined,
+      };
+    }), [
+      { port: 465, secure: true, requireTLS: false },
+      { port: 587, secure: false, requireTLS: true },
+      { port: 2525, secure: false, requireTLS: true },
+    ]);
+
+    process.env.SMTP_PORT = "not-a-port";
+    await assert.rejects(sendReportEmail(report), /SMTP_PORT muss eine gültige Portnummer/);
+  } finally {
+    mock.restoreAll();
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("master confirmations describe the appointment and when the digital link arrives", async () => {
   await withMailFixture(async (sent) => {
     for (const appointmentMode of ["Beim Kunden vor Ort", "Microsoft Teams"]) {
