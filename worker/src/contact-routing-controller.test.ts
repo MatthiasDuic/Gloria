@@ -41,7 +41,11 @@ test("uses the healthcare contribution reason at reception without disclosing a 
   assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
   assert.doesNotMatch(reason, /privat|krankenversicherung/i);
   assert.equal(buildGatekeeperReason("PKV"), "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
-  assert.equal(buildGatekeeperReason("Energie"), "Es geht um das Thema Energie.");
+  assert.equal(buildGatekeeperReason("Kampagne Energie"), "Es geht um ein kurzes Anliegen für die zuständige Person.");
+  assert.equal(
+    buildGatekeeperReason("Kampagne Energie", undefined, "Ich habe eine Frage zum Thema betriebliche Altersvorsorge."),
+    "Es geht um das Thema betriebliche Altersvorsorge.",
+  );
 });
 
 test("uses a speakable campaign objective as the reception reason instead of an internal campaign name", () => {
@@ -264,7 +268,7 @@ test("a transfer announcement mentioning the target starts waiting rather than i
 test("confirms an unclear name match once and accepts a clear yes", () => {
   const initial = advanceContactRouting(
     createContactRoutingState("Herr Biletzki"),
-    "Biletzki, guten Tag.",
+    "Guten Tag.",
   );
   assert.equal(initial.stage, "confirming_decision_maker");
   assert.match(instructionForContactRouting(initial), /genau einmal höflich/);
@@ -276,7 +280,7 @@ test("confirms an unclear name match once and accepts a clear yes", () => {
 test("routes a denied identity check to the gatekeeper without repeating the name check", () => {
   const initial = advanceContactRouting(
     createContactRoutingState("Herr Biletzki"),
-    "Biletzki, guten Tag.",
+    "Guten Tag.",
   );
   const denied = advanceContactRouting(initial, "Nein, ich bin aus dem Empfang.");
 
@@ -323,6 +327,19 @@ test("treats a company greeting from another named person as a gatekeeper", () =
     "Musterbau GmbH, mein Name ist Müller. Was kann ich für Sie tun?",
   );
   assert.equal(state.stage, "gatekeeper");
+});
+
+test("routes name-first greetings to the receptionist or target without repeating the identity check", () => {
+  for (const text of ["Mussabaog, guten Tag.", "Müller, guten Tag.", "Paula hier."]) {
+    assert.equal(advanceContactRouting(createContactRoutingState("Herr Neumann"), text).stage, "gatekeeper", text);
+  }
+  for (const [target, text] of [
+    ["Herr Neumann", "Neumann, guten Tag."],
+    ["Ralf Lichtenberg", "Ralf Lichtenberg, guten Tag."],
+    ["Frau Köhler", "Sie sprechen mit Frau Köhler, guten Tag."],
+  ] as const) {
+    assert.equal(advanceContactRouting(createContactRoutingState(target), text).stage, "decision_maker", text);
+  }
 });
 
 test("makes voicemail a terminal routing state", () => {

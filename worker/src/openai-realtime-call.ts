@@ -79,10 +79,8 @@ type RealtimeToolCall = {
   argumentsJson: string;
 };
 
-// A first segment up to this length ("Hallo?", "Müller GmbH, Schmidt am Apparat") starts the neutral identity sentence before ASR finishes.
-const OPENING_SPECULATION_MAX_TURN_MS = Number.parseInt(process.env.OPENING_SPECULATION_MAX_TURN_MS?.trim() || "4500", 10);
 // Shorter end-of-speech pause while waiting for the first contact; later turns keep OPENAI_REALTIME_SILENCE_MS.
-const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "350", 10);
+const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "600", 10);
 
 const REALTIME_TOOLS = [
   {
@@ -252,18 +250,18 @@ export function buildDecisionMakerIdentity(
 }
 
 export function buildDecisionMakerIntro(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "topic">,
+  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "topic">
+    & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>,
 ): string {
   return `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerTopicQuestion(ctx)}`;
 }
 
 export function buildDecisionMakerTopicQuestion(
-  ctx: Pick<CallContext, "topic"> & Partial<Pick<CallContext, "callObjective">>,
+  ctx: Pick<CallContext, "topic"> & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>,
 ): string {
-  const reason = getSpeakableCampaignReason(ctx.callObjective);
-  if (reason) return `${reason} Passt es gerade für ein kurzes Gespräch?`;
-  const topic = ctx.topic?.trim() || "ein kurzes Anliegen";
-  return `Ich rufe zum Thema ${topic} an. Passt es gerade kurz?`;
+  const topic = buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
+  const reason = topic.sentence || (topic.inline ? `Ich rufe ${topic.inline} an.` : "Ich rufe mit einem kurzen Anliegen an.");
+  return `${reason} Passt es gerade für ein kurzes Gespräch?`;
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
@@ -350,6 +348,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: natürlich daran anknüpfen und zum nächsten Schritt überleiten, nicht abrupt zur nächsten Frage springen. Bei Interesse: den passenden nächsten Schritt anbieten. Vermeide routinemäßige Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder wiederholtes Bedanken.",
+    "EMPFANG UND WEITERLEITUNG: Eine eigene Namensnennung oder die Auskunft, dass die gesuchte Person nicht da ist, bedeutet Empfang/Gatekeeper; frage dann nicht erneut, ob du mit der gesuchten Person sprichst. Bitte nur einmal um Weiterleitung. Bei Nichterreichbarkeit frage höchstens einmal nach einem passenden Zeitpunkt und akzeptiere die Antwort ohne eine Rückrufzusage zu erfinden. Sobald weitergeleitet wird, bleibe still, bis die nächste Person spricht; beginne dann mit einer vollständigen, kurzen Vorstellung samt tatsächlichem Gesprächsthema.",
     "WEICHER GESPRÄCHSÜBERGANG: Nach der Vorstellung und einer Zusage zu einem kurzen Gespräch beginne mit einer kurzen, zugewandten Brücke, die den Anlass aus dem Auftrag mit dem Alltag der Person verbindet. Stelle erst danach eine einfache offene Frage zum Thema. Nicht direkt nach Versicherung, Beitrag oder Termin fragen, keine abrupte Abfolge von Vorstellung und Qualifizierung. Eine kurze freundliche Überleitung ist ausdrücklich erwünscht, aber kein Smalltalk, keine zweite Erlaubnisfrage und keine erneute Vorstellung. Beispiel nur für einen Auftrag zur Gesundheitskostenentwicklung: 'Dann ordne ich kurz ein, warum ich anrufe: Im Alltag bleibt oft wenig Zeit, die langfristige Entwicklung der Gesundheitskosten im Blick zu behalten. Wie erleben Sie das bei sich?' Formuliere situationsgerecht statt dieses Beispiel immer wörtlich zu verwenden. Bei 'Worum geht es genau?' beantworte zuerst diese Frage; bei Zeitmangel oder Ablehnung hat der Rückruf- beziehungsweise Ablehnungsablauf Vorrang. Bei Rückrufen knüpfe weich an den bekannten Gesprächsstand an, statt den Einstieg neu zu beginnen.",
     "KEINE ZEIT / RÜCKRUF: Sagt die angerufene Person nach der Begrüßung oder später, dass sie gerade keine Zeit hat, beschäftigt ist oder es gerade nicht passt, führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort. Frage einmal kurz: 'Kein Problem. Wann passt es Ihnen besser?' Übernimm den genannten Zeitpunkt so, wie er genannt wurde, ohne Rückfrage nach Uhrzeit oder Bestätigung. Verabschiede dich dann in einem Satz, z. B. 'Vielen Dank für das Gespräch. Dann melde ich mich wie besprochen morgen Vormittag noch einmal bei Ihnen. Einen schönen Tag noch und auf Wiederhören.' und rufe end_call auf. Behandle das nicht als Absage.",
     "Sprich ruhig, freundlich und konkret. Normalerweise ein kurzer Satz und eine Frage; für den weichen Übergang nach der Vorstellung sind höchstens zwei kurze Sätze und eine Hauptfrage erlaubt. Kein Callcenter-Monolog, keine künstliche Vertrautheit, keine Wiederholung der Kundenaussage und keine leeren Bestätigungen. Sprich Standarddeutsch und keine englischen Füllwörter.",
@@ -543,9 +542,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
   let identityAnnounced = false;
-  let speculativeIdentityIndex: number | undefined;
-  let openingSpeculationTried = false;
-  let speechSegmentStartedAt: number | null = null;
   let identityPrefetch: PrefetchedSpeech | null = null;
   let identityPrefetchController: AbortController | null = null;
   let topicPrefetch: PrefetchedSpeech | null = null;
@@ -867,7 +863,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
       ? `Du wurdest während dieses begonnenen Satzes unterbrochen: "${interruption}". Reagiere jetzt auf die neue Kundenaussage. Wiederhole den Satz nicht vollständig und stelle keine bereits beantwortete Frage erneut.\n${instructions}`
       : instructions;
     const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, withInterruption, false) : withInterruption;
-    return responses.request(responseInstructions);
+    const sent = responses.request(responseInstructions);
+    if (!sent) {
+      log.warn("realtime.event_response_deferred", {
+        callSid: ctx?.callSid,
+        stage: contactRouting?.stage,
+        responseActive: responses.isActive(),
+        playbackPending: playback.isPending() || userTurns.isBlocked(),
+      });
+    }
+    return sent;
   };
 
   const requestDeterministicSpeech = (
@@ -930,22 +935,29 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestDeterministicSpeech(text);
   };
 
-  const speakDeterministicIntro = (text: string, route: "decision_maker" | "gatekeeper") => {
+  const speakDeterministicIntro = (
+    text: string,
+    route: "decision_maker" | "gatekeeper",
+    prefetchedSpeech?: PrefetchedSpeech,
+  ) => {
     if (!ctx) return;
     playback.startResponse();
     ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
     void persistTranscriptDelta(ctx);
     currentAssistantTurnIndex = ctx.transcript.length - 1;
+    identityAnnounced = true;
     log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route, immediate: true });
     recordAssistantContext(text);
-    void speakWithElevenLabs(text);
+    if (!playPrefetchedSpeech(prefetchedSpeech || null, text)) void speakWithElevenLabs(text);
   };
 
   const prefetchIdentityAudio = () => {
     if (!ctx || identityPrefetch || terminationInProgress || process.env.ELEVENLABS_IDENTITY_PREFETCH?.trim() === "false") return;
     if (!isElevenLabsConfigured() || contactRouting?.stage !== "awaiting_contact" || ctx.transcript.length > 0) return;
-    const identityEntry = new PrefetchedSpeech(buildDecisionMakerIdentity(ctx));
-    const topicEntry = new PrefetchedSpeech(convertNumbersForSpeech(buildDecisionMakerTopicQuestion(ctx)));
+    const identityEntry = new PrefetchedSpeech(
+      `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerIdentityQuestion(ctx)}`,
+    );
+    const topicEntry = new PrefetchedSpeech(buildDecisionMakerIntro(ctx));
     const identityController = new AbortController();
     const topicController = new AbortController();
     identityPrefetch = identityEntry;
@@ -1012,39 +1024,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
-  const playIdentity = (text: string): boolean => playPrefetchedSpeech(identityPrefetch, text);
-
-  const startSpeculativeIdentity = (turnMs: number) => {
-    if (!ctx || terminationInProgress || !topicPolicyReady || identityAnnounced) return;
-    if (contactRouting?.stage !== "awaiting_contact" || ctx.transcript.length > 0) return;
-    if (playback.isPending() || responses.isActive() || pendingDeterministicSpeech) return;
-    const text = buildDecisionMakerIdentity(ctx);
-    playback.startResponse();
-    responseInterrupted = false;
-    ctx.transcript.push({ role: "assistant", text, at: Date.now(), phase: ctx.dialogState.phase });
-    speculativeIdentityIndex = ctx.transcript.length - 1;
-    currentAssistantTurnIndex = speculativeIdentityIndex;
-    identityAnnounced = true;
-    const cached = Boolean(identityPrefetch?.isReady() && identityPrefetch.text === text);
-    log.info("realtime.gloria_said", { callSid: ctx.callSid, text, route: "opening_identity", speculative: true, cached, turnMs });
-    recordAssistantContext(text);
-    if (!playIdentity(text)) void speakWithElevenLabs(text, true, true);
-  };
-
-  const withdrawSpeculativeIdentity = (index: number, reason: string) => {
-    identityAnnounced = false;
-    ttsTurn += 1;
-    ttsAbortController?.abort();
-    playback.interrupt();
-    sendTelnyx({ event: "clear" });
-    if (ctx) {
-      const entry = ctx.transcript[index];
-      if (entry?.role === "assistant" && entry.text === buildDecisionMakerIdentity(ctx)) ctx.transcript.splice(index, 1);
-      if (currentAssistantTurnIndex === index) currentAssistantTurnIndex = undefined;
-      log.info("realtime.speculative_identity_withdrawn", { callSid: ctx.callSid, reason });
-    }
-  };
-
   const requestHangupAfterPlayback = () => {
     hangupAfterPlayback = true;
     if (!playback.isPending() && !responses.isActive() && !userTurns.isBlocked() && ctx) {
@@ -1103,12 +1082,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
       return;
     }
-    const speculativeIndex = speculativeIdentityIndex;
-    speculativeIdentityIndex = undefined;
     openingSpeech?.stop();
     pendingMissingCallbackNumberNotice = false;
     const interruptedCallbackNumber = callbackNumberStage === "waiting_for_confirmation" && !callbackNumberDelivered;
-    if (speculativeIndex === undefined && playback.isPending()) {
+    if (playback.isPending()) {
       ttsTurn += 1;
       ttsAbortController?.abort();
       playback.interrupt();
@@ -1121,15 +1098,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const userFinalAt = currentContext.lastUserFinalAt || Date.now();
     log.info("realtime.user_turn_processing", { callSid: currentContext.callSid, asrFinalToProcessingMs: Date.now() - userFinalAt });
     const userEntry = { role: "user" as const, text: transcript, at: userFinalAt, phase: currentContext.dialogState.phase };
-    let pendingSpeculativeIndex: number | undefined;
-    if (speculativeIndex !== undefined && currentContext.transcript[speculativeIndex]?.role === "assistant") {
-      // The opening identity was started before ASR finished; keep the documented order customer -> Gloria.
-      currentContext.transcript.splice(speculativeIndex, 0, userEntry);
-      pendingSpeculativeIndex = speculativeIndex + 1;
-      if (currentAssistantTurnIndex !== undefined && currentAssistantTurnIndex >= speculativeIndex) currentAssistantTurnIndex += 1;
-    } else {
-      currentContext.transcript.push(userEntry);
-    }
+    currentContext.transcript.push(userEntry);
     rotateTranscriptIfNeeded(currentContext);
 
     updateDialogPhase(currentContext);
@@ -1169,7 +1138,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       const number = formatCallbackPhoneForSpeech(currentContext.ownerRealPhone);
       const reasonRequested = isGatekeeperReasonQuestion(transcript);
       const reason = reasonRequested
-        ? buildGatekeeperReason(currentContext.policyTopic || currentContext.topic, currentContext.callObjective)
+        ? buildGatekeeperReason(currentContext.policyTopic || currentContext.topic, currentContext.callObjective, currentContext.receptionTopicReason)
         : undefined;
       if (reasonRequested && reason === null) {
         const intro = identityAnnounced ? "" : `Stelle dich zuerst mit "${buildDecisionMakerIdentity(currentContext)}" vor. `;
@@ -1253,6 +1222,19 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (contactRouting) {
       const previousStage = contactRouting.stage;
       contactRouting = advanceContactRouting(contactRouting, transcript);
+      if (contactRouting.awaitingAvailabilityAnswer
+        && contactRouting.stage !== "waiting_for_transfer"
+        && contactRouting.stage !== "decision_maker") {
+        const suggestedTime = /\b(?:heute|morgen|übermorgen|vormittag|nachmittag|abend|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|uhr|halb|viertel|in\s+\d+\s+(?:tag|woche))/i.test(transcript);
+        contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false };
+        requestDeterministicSpeech(
+          suggestedTime
+            ? "Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören."
+            : "Vielen Dank. Dann versuche ich es zu einem späteren Zeitpunkt erneut. Auf Wiederhören.",
+          { hangupAfterPlayback: true },
+        );
+        return;
+      }
       currentContext.detectedVoicemail = contactRouting.stage === "voicemail";
       currentContext.queueDetected = contactRouting.stage === "waiting_for_transfer";
       currentContext.waitingForDecisionMaker = contactRouting.stage === "gatekeeper"
@@ -1264,13 +1246,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (contactRouting.stage !== previousStage) updateSession();
       if (contactRouting.stage === "waiting_for_transfer") {
         identityAnnounced = false;
-      }
-      if (pendingSpeculativeIndex !== undefined && (contactRouting.stage === "awaiting_contact"
-        || contactRouting.stage === "waiting_for_transfer" || contactRouting.stage === "voicemail")) {
-        withdrawSpeculativeIdentity(pendingSpeculativeIndex, contactRouting.stage);
+        contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false };
       }
       if (contactRouting.stage === "awaiting_contact") {
         waitForContact();
+        requestDeterministicSpeech("Entschuldigung, ich habe Sie akustisch nicht ganz verstanden. Mit wem spreche ich?");
         return;
       }
       if (contactRouting.stage === "gatekeeper" || contactRouting.stage === "confirming_decision_maker" || contactRouting.stage === "decision_maker") {
@@ -1301,42 +1281,49 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestDeterministicSpeech(FINAL_FAREWELL_TEXT, { hangupAfterPlayback: true });
         return;
       }
-      if (!identityAnnounced && previousStage !== "decision_maker" && previousStage !== "gatekeeper"
-        && identityPrefetch?.isUsable() && !currentContext.transcript.some((turn) => turn.role === "assistant")) {
-        const text = buildDecisionMakerIdentity(currentContext);
-        playback.startResponse();
-        responseInterrupted = false;
-        currentContext.transcript.push({ role: "assistant", text, at: Date.now(), phase: currentContext.dialogState.phase });
-        currentAssistantTurnIndex = currentContext.transcript.length - 1;
-        identityAnnounced = true;
-        log.info("realtime.gloria_said", { callSid: currentContext.callSid, text, route: "opening_identity", cached: identityPrefetch.isReady() });
-        recordAssistantContext(text);
-        if (!playIdentity(text)) void speakWithElevenLabs(text);
-      }
       if (contactRouting.stage === "confirming_decision_maker") {
         if (identityAnnounced) requestDeterministicSpeech(buildDecisionMakerIdentityQuestion(currentContext));
         else {
           identityAnnounced = true;
-          speakDeterministicIntro(`${buildDecisionMakerIdentity(currentContext)} ${buildDecisionMakerIdentityQuestion(currentContext)}`, "gatekeeper");
+          const intro = `${buildDecisionMakerIdentity(currentContext)} ${buildDecisionMakerIdentityQuestion(currentContext)}`;
+          speakDeterministicIntro(intro, "gatekeeper", identityPrefetch || undefined);
         }
         return;
       }
       if (contactRouting.stage !== "decision_maker") {
         if (isGatekeeperReasonQuestion(transcript)) {
           contactRouting.gatekeeperReasonGiven = true;
-          const reason = buildGatekeeperReason(currentContext.policyTopic || currentContext.topic, currentContext.callObjective);
+          const reason = buildGatekeeperReason(
+            currentContext.policyTopic || currentContext.topic,
+            currentContext.callObjective,
+            currentContext.receptionTopicReason,
+          );
           const introduction = identityAnnounced ? "" : `${buildDecisionMakerIdentity(currentContext)} `;
           identityAnnounced = true;
           if (reason) requestDeterministicSpeech(`${introduction}${reason}`);
           else requestEventResponse(`${introduction ? `Stelle dich zuerst mit "${introduction.trim()}" vor. ` : ""}Die Person am Empfang fragt nach dem Anrufgrund. Nenne in genau einem kurzen Satz den tatsächlichen Anlass aus dem Auftrag, nicht den internen Kampagnennamen. Stelle keine Frage, bitte nicht erneut um Weiterleitung und warte anschließend auf die Antwort. Kein Fachgespräch und keine erfundenen Angaben.`);
           return;
         }
-        if (isGatekeeperUnavailable(transcript)
-          || (contactRouting.gatekeeperRequestMade && /^(?:nein|leider\s+nicht|das\s+geht\s+nicht)(?:[.!?,\s]|$)/i.test(transcript.trim()))) {
-          requestDeterministicSpeech(
-            "Vielen Dank für die Auskunft. Dann versuche ich es zu einem anderen Zeitpunkt erneut. Auf Wiederhören.",
-            { hangupAfterPlayback: true },
-          );
+        if (isGatekeeperUnavailable(transcript)) {
+          const suggestedTime = /\b(?:heute|morgen|übermorgen|vormittag|nachmittag|abend|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|uhr|halb|viertel|in\s+\d+\s+(?:tag|woche))/i.test(transcript);
+          if (!contactRouting.availabilityFollowUpAsked && !suggestedTime) {
+            const target = contactRouting.targetName?.trim() || "die zuständige Person";
+            const addressedTarget = /^herr\s+/i.test(target) ? target.replace(/^herr\s+/i, "Herrn ") : target;
+            contactRouting = { ...contactRouting, availabilityFollowUpAsked: true, awaitingAvailabilityAnswer: true };
+            requestDeterministicSpeech(`Verstehe. Wann kann ich ${addressedTarget} am besten erreichen?`);
+          } else {
+            requestDeterministicSpeech(
+              suggestedTime
+                ? "Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören."
+                : "Vielen Dank für die Auskunft. Dann versuche ich es zu einem späteren Zeitpunkt erneut. Auf Wiederhören.",
+              { hangupAfterPlayback: true },
+            );
+          }
+          return;
+        }
+        if (contactRouting.gatekeeperRequestMade
+          && /^(?:nein|leider\s+nicht|das\s+geht\s+nicht)(?:[.!?,\s]|$)/i.test(transcript.trim())) {
+          requestDeterministicSpeech("Verstanden. Vielen Dank für Ihre Auskunft. Auf Wiederhören.", { hangupAfterPlayback: true });
           return;
         }
         const genericHelpOffer = /\b(?:wie\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|weiterhelfen)|was\s+(?:kann|darf)\s+ich\s+(?:für\s+sie\s+)?tun|womit\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|dienen))\b/i.test(transcript);
@@ -1348,6 +1335,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
         const topicKnown = hasDeterministicGatekeeperTopic(currentContext);
+        log.info("realtime.gatekeeper_opening", {
+          callSid: currentContext.callSid,
+          topicKnown,
+          identityAlreadyAnnounced: identityAnnounced,
+          requestAlreadyMade: contactRouting.gatekeeperRequestMade || false,
+        });
         if (identityAnnounced) {
           if (topicKnown) requestDeterministicSpeech(buildGatekeeperTransferRequest(currentContext));
           else requestEventResponse(buildGatekeeperTopicInstruction(currentContext, false));
@@ -1364,11 +1357,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, true));
         } else if (identityAnnounced) {
           const topicText = convertNumbersForSpeech(buildDecisionMakerTopicQuestion(currentContext));
-          requestDeterministicSpeech(topicText, { prefetchedSpeech: topicPrefetch || undefined });
-        } else if (currentContext.callObjective?.trim()) {
-          requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, identityAnnounced));
+          requestDeterministicSpeech(topicText);
+        } else if (currentContext.callObjective?.trim()
+          && !getSpeakableCampaignReason(currentContext.callObjective)) {
+          identityAnnounced = true;
+          requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, false));
         } else {
-          speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker");
+          speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker", topicPrefetch || undefined);
         }
         return;
       }
@@ -1721,7 +1716,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "input_audio_buffer.speech_started") {
         userTurns.speechStarted(message.item_id);
-        speechSegmentStartedAt = Date.now();
         hangupAfterPlayback = false;
         responses.markInterruptRequested();
         const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
@@ -1735,13 +1729,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (plan.interrupted) {
           responseVersion += 1;
           openingSpeech?.stop();
-          if (speculativeIdentityIndex !== undefined) {
-            // The caller was still talking: drop the early identity so it is announced again after the turn.
-            identityAnnounced = false;
-            if (ctx && ctx.transcript[speculativeIdentityIndex]?.role === "assistant") ctx.transcript.splice(speculativeIdentityIndex, 1);
-            if (currentAssistantTurnIndex === speculativeIdentityIndex) currentAssistantTurnIndex = undefined;
-            speculativeIdentityIndex = undefined;
-          }
           bargeInAwaitingTranscript = true;
           clearBargeInRecovery();
           ttsTurn += 1;
@@ -1769,15 +1756,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_stopped") {
         userTurns.speechStopped(message.item_id);
         if (bargeInAwaitingTranscript && !bargeInRecoveryTimer) {
-          bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 2200);
+          bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 3200);
         }
         flushUserTranscript();
-        if (!openingSpeculationTried) {
-          openingSpeculationTried = true;
-          const turnMs = speechSegmentStartedAt ? Date.now() - speechSegmentStartedAt : Number.POSITIVE_INFINITY;
-          if (OPENING_SPECULATION_MAX_TURN_MS > 0 && turnMs <= OPENING_SPECULATION_MAX_TURN_MS) startSpeculativeIdentity(turnMs);
-        }
-        speechSegmentStartedAt = null;
         return;
       }
 

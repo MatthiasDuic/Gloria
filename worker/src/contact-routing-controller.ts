@@ -16,6 +16,8 @@ export type ContactRoutingState = {
   targetName?: string;
   gatekeeperRequestMade?: boolean;
   gatekeeperReasonGiven?: boolean;
+  awaitingAvailabilityAnswer?: boolean;
+  availabilityFollowUpAsked?: boolean;
 };
 
 export function isGatekeeperReasonQuestion(text: string): boolean {
@@ -31,15 +33,16 @@ export function getSpeakableCampaignReason(callObjective?: string): string | und
   return `${firstSentence.replace(/[.!?]+$/, "").replace(/\s+/g, " ")}.`;
 }
 
-export function buildGatekeeperReason(topic?: string, callObjective?: string): string | null {
+export function buildGatekeeperReason(topic?: string, callObjective?: string, receptionTopicReason?: string): string | null {
   if (/privat.*krankenversicherung|\bpkv\b/i.test(topic || "")) {
     return "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.";
   }
-  const spokenReason = getSpeakableCampaignReason(callObjective);
+  const spokenReason = getSpeakableCampaignReason(callObjective) || getSpeakableCampaignReason(receptionTopicReason);
   if (spokenReason) return spokenReason;
   if (callObjective?.trim()) return null;
-  return topic?.trim()
-    ? `Es geht um das Thema ${topic.trim()}.`
+  const safeTopic = buildGatekeeperTopic(undefined, undefined, receptionTopicReason).inline?.replace(/^zum\s+thema\s+/i, "");
+  return safeTopic
+    ? `Es geht um das Thema ${safeTopic}.`
     : "Es geht um ein kurzes Anliegen für die zuständige Person.";
 }
 
@@ -60,7 +63,6 @@ export function buildGatekeeperTopic(
     const short = reason.split(/\s*[:;–—]\s*/)[0].replace(/[.!?]+$/, "").trim();
     return { sentence: `${short}.` };
   }
-  if (!callObjective?.trim() && topic?.trim()) return { inline: `zum Thema ${topic.trim()}` };
   return {};
 }
 
@@ -117,7 +119,7 @@ function deniesDecisionMakerIdentity(text: string): boolean {
 
 function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   const normalized = text.toLowerCase();
-  if (deniesDecisionMakerIdentity(normalized)) {
+  if (deniesDecisionMakerIdentity(normalized) || isGatekeeperUnavailable(normalized)) {
     return false;
   }
   if (/\b(?:stelle\s+sie\s+zu|stellen\s+sie\s+zu|verbinde\s+sie|verbinde|durchstellen|weiterleiten|weiterleite|schalte\s+weiter|durchstellen\s+zu)\b/i.test(normalized)) {
@@ -130,15 +132,17 @@ function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   const targetTokens = targetNameTokens(targetName);
   if (targetTokens.length === 0) return false;
   const escapedName = targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  const escapedSurname = targetTokens.at(-1)!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const nameRegex = new RegExp(
-    `(?:` +
-      `\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|` +
-      `\\bsie\\s+sprechen\\s+mit\\s+(?:herrn?|frau)?\\s*${escapedName}\\b|` +
-      `\\bhier\\s+(?:ist|spricht)\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
-      `\\b(?:herr|frau)?\\s*${escapedName}\\s+am\\s+apparat\\b|` +
-      `\\bich\\s+bin\\s+(?:herr|frau)?\\s*${escapedName}\\b` +
+      `(?:` +
+        `\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|` +
+        `\\bsie\\s+sprechen\\s+mit\\s+(?:herrn?|frau)?\\s*${escapedName}\\b|` +
+        `\\bhier\\s+(?:ist|spricht)\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
+        `\\b(?:herr|frau)?\\s*${escapedName}\\s+am\\s+apparat\\b|` +
+        `\\bich\\s+bin\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
+        `(?:^|[,.!?]\\s*|\\b(?:ja|hallo|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:herrn?\\s+|frau\\s+)?(?:${escapedName}|${escapedSurname})\\s*,?\\s*(?:guten\\s+(?:tag|morgen|abend)|hallo|hier|am\\s+apparat)\\b` +
       `)`,
-    "i",
+      "i",
   );
 
   return nameRegex.test(normalized);
@@ -157,6 +161,7 @@ function selfIntroducedNameTokens(text: string): string[] {
     new RegExp(`\\b(?:sie\\s+sprechen\\s+mit|mein(?:e)?\\s+name\\s+ist|hier\\s+(?:ist|spricht))\\s+(?:(?:herr|herrn|frau)\\s+)?${name}`, "i"),
     new RegExp(`\\bich\\s+bin\\s+(?:herr|frau)\\s+${name}`, "i"),
     new RegExp(`(?:^|[,.!?;]\\s*|\\b(?:hallo|ja|moin|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:(?:herr|frau)\\s+)?${name}\\s+(?:hier|am\\s+apparat)\\b`, "i"),
+    new RegExp(`(?:^|[,.!?;]\\s*|\\b(?:hallo|ja|moin|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:(?:herr|frau)\\s+)?${name}\\s*,?\\s*(?:guten\\s+(?:tag|morgen|abend)|hallo)\\b`, "i"),
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -197,6 +202,7 @@ function isClearlyGatekeeper(text: string, targetName?: string): boolean {
     || /\b(?:stelle\s+sie\s+zu|stellen\s+sie\s+zu|verbinde\s+sie|ich\s+verbinde|durchstellen|weiterleiten|weiterleite|schalte\s+weiter)\b/i.test(normalized)
     || /\b(?:zentrale|empfang|assistenz|telefonassistenz|sekretariat|rezeption|telefonzentrale)\b/i.test(normalized)
     || /\b(?:digitale|virtuelle|ki-?)\s*(?:telefon)?assistent(?:in)?\b|\bwie\s+lautet\s+ihr\s+name\b|\bmit\s+dem\s+richtigen\s+ansprechpartner\b/i.test(normalized)
+    || /\b(?:gmbh|ag|kg|ug|ohg)\b[\s\S]{0,40}\b(?:guten\s+(?:tag|morgen|abend)|hallo)\b/i.test(normalized)
     || /\b(?:gmbh|ag|kg|ug|ohg)\b.{0,60}\b(?:mein(?:e)?\s+name|hier\s+ist)\b/i.test(text);
 }
 
@@ -240,6 +246,8 @@ export function advanceContactRouting(
       stage: "gatekeeper",
       gatekeeperRequestMade: state.stage === "waiting_for_transfer" ? false : state.gatekeeperRequestMade || Boolean(transfer),
       gatekeeperReasonGiven: state.stage === "waiting_for_transfer" ? false : state.gatekeeperReasonGiven,
+      awaitingAvailabilityAnswer: state.stage === "waiting_for_transfer" ? false : state.awaitingAvailabilityAnswer,
+      availabilityFollowUpAsked: state.stage === "waiting_for_transfer" ? false : state.availabilityFollowUpAsked,
     };
   }
   if (transfer === "in_progress" || (transfer === "offered" && !hasTransferWaitInstruction(userText))) {
@@ -271,6 +279,8 @@ export function advanceContactRouting(
       ...state,
       gatekeeperRequestMade: state.stage === "waiting_for_transfer" ? false : state.gatekeeperRequestMade,
       gatekeeperReasonGiven: state.stage === "waiting_for_transfer" ? false : state.gatekeeperReasonGiven,
+      awaitingAvailabilityAnswer: state.stage === "waiting_for_transfer" ? false : state.awaitingAvailabilityAnswer,
+      availabilityFollowUpAsked: state.stage === "waiting_for_transfer" ? false : state.availabilityFollowUpAsked,
       stage: isClearlyGatekeeper(userText, state.targetName) ? "gatekeeper" : "confirming_decision_maker",
     };
   }

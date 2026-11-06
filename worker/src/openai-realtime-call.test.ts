@@ -488,19 +488,17 @@ test("the actual stream stays silent before a human and caps repeated queues at 
   });
 });
 
-test("a short first greeting starts the identity before ASR and only appends the routing question", { timeout: 10_000 }, async () => {
+test("a short first greeting waits for ASR then delivers a complete identity check", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     socket.message({ type: "input_audio_buffer.speech_started", item_id: "hello" });
     socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "hello" });
     await settleStreamEvents();
-    assert.equal(ttsRequests.length, 1);
-    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater/);
+    assert.equal(ttsRequests.length, 0);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "hello", transcript: "Ja, Müller?" });
-    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(ttsRequests.length, 2);
-    assert.match(ttsRequests[1], /Spreche ich mit Herrn Neumann\?/);
-    assert.doesNotMatch(ttsRequests[1], /Gloria|Entschuldigung/);
+    await waitForTtsRequests(ttsRequests, 1);
+    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater.*Spreche ich mit Herrn Neumann\?/);
+    assert.doesNotMatch(ttsRequests[0], /Entschuldigung/);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     assert.equal(hangups.length, 0);
   });
@@ -511,33 +509,35 @@ test("accepts an offered transfer once, stays quiet and introduces herself only 
     socket.message({ type: "session.updated" });
     socket.message({ type: "input_audio_buffer.speech_started", item_id: "greeting" });
     socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "greeting" });
-    await waitForTtsRequests(ttsRequests, 1);
+    await settleStreamEvents();
+    assert.equal(ttsRequests.length, 0);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "greeting", transcript: "Mussabaog, guten Tag." });
-    await waitForTtsRequests(ttsRequests, 2);
-    assert.match(requestedSpeech(ttsRequests)[1], /Spreche ich mit Herrn Neumann\?/);
+    await waitForTtsRequests(ttsRequests, 1);
+    assert.match(requestedSpeech(ttsRequests)[0], /Guten Tag, ich bin Gloria.*mit Herrn Neumann verbunden werden\. Es geht um die Zukunft des Versicherungsvertriebs/);
 
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Nein, aber ich kann Sie gerne weiterleiten." });
-    await waitForTtsRequests(ttsRequests, 3);
-    assert.match(requestedSpeech(ttsRequests)[2], /ja,?\s+gerne/i);
-    assert.doesNotMatch(requestedSpeech(ttsRequests)[2], /könnten|verbinden|weiterleiten|\?/i);
+    await waitForTtsRequests(ttsRequests, 2);
+    assert.match(requestedSpeech(ttsRequests)[1], /ja,?\s+gerne/i);
+    assert.doesNotMatch(requestedSpeech(ttsRequests)[1], /könnten|verbinden|weiterleiten|\?/i);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Einen Moment, ich stelle Sie durch." });
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "[Musik]" });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(ttsRequests.length, 3);
+    assert.equal(ttsRequests.length, 2);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
 
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ja." });
-    await waitForTtsRequests(ttsRequests, 4);
-    assert.match(requestedSpeech(ttsRequests)[3], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
+    await waitForTtsRequests(ttsRequests, 3);
+    assert.match(requestedSpeech(ttsRequests)[2], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ja." });
-    await waitForTtsRequests(ttsRequests, 5);
-    assert.match(requestedSpeech(ttsRequests)[4], /Zukunft des Versicherungsvertriebs/);
-    assert.doesNotMatch(requestedSpeech(ttsRequests)[4], /hier ist Gloria|Spreche ich mit/);
+    await waitForTtsRequests(ttsRequests, 4);
+    assert.match(requestedSpeech(ttsRequests)[3], /Zukunft des Versicherungsvertriebs/);
+    assert.doesNotMatch(requestedSpeech(ttsRequests)[3], /hier ist Gloria|Spreche ich mit/);
     assert.equal(hangups.length, 0);
   }, 0, 160, false,
-  "Es geht um die Zukunft des Versicherungsvertriebs und die Zusammenarbeit mit der BarmeniaGothaer. Vereinbare ein Kennenlernen.");
+  "Es geht um die Zukunft des Versicherungsvertriebs und die Zusammenarbeit mit der BarmeniaGothaer. Vereinbare ein Kennenlernen.",
+  "+491701234567", "Herr Neumann", null);
 });
 
 test("a receptionist's yes after a transfer request produces no speech until the next person answers", { timeout: 10_000 }, async () => {
@@ -741,20 +741,39 @@ test("uses the actual campaign objective after an uncertain recipient confirms t
   }, 0, 160, false, objective);
 });
 
-test("a pre-synthesized identity plays right after a long greeting and a named receptionist is asked to transfer", { timeout: 10_000 }, async () => {
+test("prefetches complete alternative opening turns and uses the gatekeeper route after classification", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
-    assert.match(prefetchedTexts.join(" "), /Guten Tag, hier ist Gloria/);
-    assert.match(prefetchedTexts.join(" "), /Ich rufe zum Thema Energie an/);
+    assert.ok(prefetchedTexts.some((text) => text.includes("Spreche ich mit Herrn Neumann?")));
+    assert.ok(prefetchedTexts.some((text) => text.includes("Ich rufe mit einem kurzen Anliegen an.")));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
     for (let attempt = 0; attempt < 50 && !socket.sent.some((event) => event.type === "response.create"); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const request = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } } | undefined;
-    assert.ok(request?.response.instructions.includes("Ich möchte gerne mit Herrn Neumann zum Thema <THEMA> verbunden werden."));
-    assert.equal(ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")), false);
+    assert.ok(request?.response.instructions.includes("und möchte gerne mit Herrn Neumann zum Thema <THEMA> verbunden werden."));
+    assert.equal(ttsRequests.length, 2);
     assert.equal(hangups.length, 0);
   }, 0, 160, true, "Beratung zu Energiekosten.", "+491701234567", "Herr Neumann", null);
+});
+
+test("asks once when the named contact is unavailable and closes politely after receiving a time", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Musterbau GmbH, guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herr Neumann ist gerade im Termin." });
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Wann kann ich Herrn Neumann am besten erreichen?")); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(ttsRequests.some((request) => request.includes("Wann kann ich Herrn Neumann am besten erreichen?")));
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Morgen gegen elf Uhr." });
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören.")); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(ttsRequests.some((request) => request.includes("Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören.")));
+    assert.equal(hangups.length, 0);
+  });
 });
 
 test("a receptionist hears whom Gloria wants to reach and why when the campaign reason is speakable", { timeout: 10_000 }, async () => {
@@ -762,7 +781,7 @@ test("a receptionist hears whom Gloria wants to reach and why when the campaign 
     socket.message({ type: "session.updated" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
-    const expected = "Ich möchte gerne mit Herrn Neumann verbunden werden. Es geht um die Energiekosten Ihres Betriebs.";
+    const expected = "und möchte gerne mit Herrn Neumann verbunden werden. Es geht um die Energiekosten Ihres Betriebs.";
     for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes(expected)); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.ok(ttsRequests.some((request) => request.includes(expected)));
     assert.equal(hangups.length, 0);
@@ -776,47 +795,55 @@ test("the first topic sentence is prefetched from a natural campaign objective a
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
     assert.ok(prefetchedTexts.some((text) => text.startsWith("Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater")));
-    assert.ok(prefetchedTexts.includes(topicSentence));
+    assert.ok(prefetchedTexts.some((text) => text.endsWith(topicSentence)));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
     await new Promise((resolve) => setTimeout(resolve, 250));
     assert.equal(ttsRequests.length, 2);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     assert.equal(hangups.length, 0);
   }, 0, 160, true,
-  "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Den passenden Einstieg für Unternehmen erläutern.");
+  "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Den passenden Einstieg für Unternehmen erläutern.",
+  "+491701234567", "Herr Neumann", null);
 });
 
-test("uses a spoken campaign objective as the topic opener and safely falls back to the topic otherwise", () => {
+test("uses a spoken campaign objective and never reads an internal campaign label as the topic", () => {
   assert.equal(
     buildDecisionMakerTopicQuestion({
       topic: "private Krankenversicherung",
       callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
     }),
-    "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Passt es gerade für ein kurzes Gespräch?",
+    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es gerade für ein kurzes Gespräch?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
       topic: "Recruiting",
       callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
     }),
-    "Ich rufe zum Thema Recruiting an. Passt es gerade kurz?",
+    "Ich rufe mit einem kurzen Anliegen an. Passt es gerade für ein kurzes Gespräch?",
+  );
+  assert.equal(
+    buildDecisionMakerTopicQuestion({
+      topic: "Recruiting",
+      callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
+      receptionTopicReason: "Ich habe eine fachliche Frage zum Thema Personalbedarf.",
+    }),
+    "Ich rufe zum Thema Personalbedarf an. Passt es gerade für ein kurzes Gespräch?",
   );
 });
 
-test("an early identity is withdrawn when the first short segment turns out to be a queue", { timeout: 10_000 }, async () => {
+test("does not speak speculatively before classifying a short greeting", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     socket.message({ type: "input_audio_buffer.speech_started", item_id: "queue" });
     socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "queue" });
     await settleStreamEvents();
-    assert.equal(ttsRequests.length, 1);
+    assert.equal(ttsRequests.length, 0);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "queue", transcript: "Bitte warten Sie." });
     socket.message({ type: "input_audio_buffer.speech_started", item_id: "human" });
     socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "human" });
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "human", transcript: "Hallo?" });
-    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(ttsRequests.length, 2);
-    assert.match(ttsRequests[1], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
+    await waitForTtsRequests(ttsRequests, 1);
+    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
     assert.equal(hangups.length, 0);
   });
 });
@@ -1345,6 +1372,7 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
     streamSid: "test-stream",
     contactName: "Herr Neumann",
     topic: "Individuelle Gesundheitsvorsorge",
+    receptionTopicReason: "Ich habe eine Frage zum Thema Individuelle Gesundheitsvorsorge.",
   });
 
   const instructions = buildRealtimeInstructions(ctx);
@@ -1362,8 +1390,11 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
   assert.equal(buildGatekeeperTransferRequest({
     ...ctx, topic: "Kampagne Q4",
     callObjective: "Es geht um ein kurzes Gespräch zum Kennenlernen: ein Austausch über die Zukunft des Vertriebs.",
+    receptionTopicReason: undefined,
   }), "Ich möchte gerne mit Herrn Neumann verbunden werden. Es geht um ein kurzes Gespräch zum Kennenlernen.");
-  const internalObjective = { ...ctx, topic: "Kampagne Q4", callObjective: "Interne Zielbeschreibung ohne Satzanfang" };
+  const internalObjective = {
+    ...ctx, topic: "Kampagne Q4", callObjective: "Interne Zielbeschreibung ohne Satzanfang", receptionTopicReason: undefined,
+  };
   assert.equal(hasDeterministicGatekeeperTopic(internalObjective), false);
   assert.match(buildGatekeeperTopicInstruction(internalObjective, true),
     /"Guten Tag, ich bin Gloria, .* und möchte gerne mit Herrn Neumann zum Thema <THEMA> verbunden werden\."/);
