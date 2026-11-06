@@ -1022,7 +1022,8 @@ test("acknowledges annual PKV cost increases before asking for the monthly contr
     "Wir steigen jedes Jahr.",
   );
   assert.match(followup || "", /^Ja, das höre ich öfter:/);
-  assert.match(followup || "", /Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr/);
+  assert.match(followup || "", /Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr\?$/);
+  assert.doesNotMatch(followup || "", /überspringen/i);
   assert.equal(buildPkvCostIncreaseFollowup("Was kostet das?", "Die steigen jedes Jahr."), undefined);
 });
 
@@ -1137,8 +1138,9 @@ test("requires the contribution and exact projection before scheduling, not mere
     { role: "assistant", text: "Haben Sie Beitragserhöhungen bemerkt?", at: 1 },
     { role: "user", text: "Ja, die Beiträge steigen jedes Jahr.", at: 2 },
   ];
-  assert.match(getRequiredContributionStep(ctx) || "", /Welchen monatlichen Beitrag zahlen Sie aktuell/);
+  assert.equal(getRequiredContributionStep(ctx), "Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr für Ihre Gesundheitsversorgung?");
   assert.match(buildRealtimeInstructions(ctx), /VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN/);
+  assert.match(buildRealtimeInstructions(ctx), /Biete nicht von dir aus an, die Beitragsangabe zu überspringen/);
   ctx.transcript.push(
     { role: "assistant", text: getRequiredContributionStep(ctx) || "", at: 3 },
     { role: "user", text: "630 Euro.", at: 4 },

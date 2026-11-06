@@ -138,7 +138,7 @@ export function buildPkvCostIncreaseFollowup(previousAssistantText: string, user
   const askedAboutCostDevelopment = /(?:kosten|beitr[aä]ge).{0,80}(?:wahrgenommen|erlebt)|(?:wahrgenommen|erlebt).{0,80}(?:kosten|beitr[aä]ge)/i.test(previousAssistantText);
   const reportedAnnualIncrease = /\b(?:steigen|steigt|erh[öo]hen sich|erh[öo]ht sich)\b.{0,32}\b(?:jedes jahr|j[aä]hrlich)\b/i.test(userText);
   if (!askedAboutCostDevelopment || !reportedAnnualIncrease) return undefined;
-  return "Ja, das höre ich öfter: Die Gründe sind im Alltag nicht immer direkt nachvollziehbar. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr? Sie können die Angabe auch überspringen.";
+  return "Ja, das höre ich öfter: Die Gründe sind im Alltag nicht immer direkt nachvollziehbar. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?";
 }
 
 export function shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText: string, userText: string): boolean {
@@ -177,7 +177,7 @@ export function getRequiredContributionStep(ctx: CallContext): string | undefine
     && /wei[ßs].*nicht|keine ahnung|nicht.*(?:sagen|nennen|angeben)|nicht beantworten/i.test(latestUser)) {
     return `${projection} Ohne Ihren heutigen Beitrag ist das nur eine allgemeine Beispielrechnung. Wäre eine individuelle Einordnung für Sie interessant?`;
   }
-  return "Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr für Ihre Gesundheitsversorgung? Sie können die Angabe auch überspringen.";
+  return "Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr für Ihre Gesundheitsversorgung?";
 }
 
 export function hasRequestedHumanTransfer(text: string): boolean {
@@ -394,7 +394,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.topicPolicyPrompt) parts.push(ctx.topicPolicyPrompt);
   const requiredContributionStep = !ctx.confirmedSlotPhrase ? getRequiredContributionStep(ctx) : undefined;
   if (requiredContributionStep) {
-    parts.push(`VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN: Nach dem weichen Einstieg und der ersten inhaltlichen Antwort zur Beitragsentwicklung ist zuerst dieser Schritt offen: ${requiredContributionStep} Überspringe die Beitragsfrage und die konkrete Zehn-Jahres-Rechnung nicht. Keine Terminfrage, keine Zeitpräferenz und kein Konzeptabschluss davor. Beantworte Kundenfragen zuerst; Zeitmangel, Ablehnung und das freiwillige Überspringen der Beitragsangabe bleiben vorrangig.`);
+    parts.push(`VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN: Nach dem weichen Einstieg und der ersten inhaltlichen Antwort zur Beitragsentwicklung ist zuerst dieser Schritt offen: ${requiredContributionStep} Überspringe die Beitragsfrage und die konkrete Zehn-Jahres-Rechnung nicht. Keine Terminfrage, keine Zeitpräferenz und kein Konzeptabschluss davor. Beantworte Kundenfragen zuerst; Zeitmangel, Ablehnung und der Wunsch, keinen Beitrag zu nennen, bleiben vorrangig. Biete nicht von dir aus an, die Beitragsangabe zu überspringen.`);
   }
   if (!ctx.confirmedSlotPhrase) {
     parts.push(ctx.freeSlotsPrompt
