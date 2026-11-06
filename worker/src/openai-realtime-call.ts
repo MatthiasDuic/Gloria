@@ -13,6 +13,7 @@ import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
+import { RealtimeOutputGate } from "./realtime-output-gate.js";
 import { replaceDiscouragedWords } from "./spoken-vocabulary.js";
 import { PrefetchedSpeech } from "./prefetched-speech.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
@@ -138,7 +139,26 @@ export function buildPkvCostIncreaseFollowup(previousAssistantText: string, user
   const askedAboutCostDevelopment = /(?:kosten|beitr[aä]ge).{0,80}(?:wahrgenommen|erlebt)|(?:wahrgenommen|erlebt).{0,80}(?:kosten|beitr[aä]ge)/i.test(previousAssistantText);
   const reportedAnnualIncrease = /\b(?:steigen|steigt|erh[öo]hen sich|erh[öo]ht sich)\b.{0,32}\b(?:jedes jahr|j[aä]hrlich)\b/i.test(userText);
   if (!askedAboutCostDevelopment || !reportedAnnualIncrease) return undefined;
-  return "Ja, das höre ich öfter: Die Gründe sind im Alltag nicht immer direkt nachvollziehbar. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?";
+  return "Ja, das merken gerade viele. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?";
+}
+
+export const NO_STRATEGY_ACKNOWLEDGEMENT = "Das höre ich sehr oft. Gerade wenn man nicht mal wirklich versteht, wie es überhaupt zu den Beitragsanpassungen kommt, ist dies leicht frustrierend.";
+
+export function isNoStrategyAnswer(previousAssistantText: string, userText: string): boolean {
+  if (!/\b(?:strategie|planung)\b/i.test(previousAssistantText)) return false;
+  const text = userText.trim();
+  if (/\b(?:gut aufgestellt|vorgesorgt|abgesichert|(?:alles\s+)?geregelt|im griff|k[üu]mmert sich|mein(?:em)?\s+(?:berater|makler))\b/i.test(text)) return false;
+  return /^(?:nein|nee|ne|nö|noe)(?=$|[\s,.!?;:-])/i.test(text)
+    || /\b(?:noch\s+nicht|bisher\s+nicht|eigentlich\s+nicht|nicht\s+wirklich|keine\s+(?:strategie|planung|ahnung|idee|gedanken|l[öo]sung)|nichts\s+(?:geplant|gemacht|unternommen)|nicht\s+(?:geplant|darum\s+gek[üu]mmert|dar[üu]ber\s+nachgedacht)|w[üu]sste\s+(?:auch\s+)?nicht|wei[ßs]\s+(?:auch\s+)?nicht,?\s+was)\b/i.test(text);
+}
+
+export function buildNoStrategyAcknowledgementInstruction(userText: string): string {
+  return [
+    `Der Kunde hat für die steigenden Beiträge noch keine Strategie oder Planung: "${userText.trim()}".`,
+    `Beginne deine Antwort wörtlich mit: '${NO_STRATEGY_ACKNOWLEDGEMENT}'`,
+    "Erläutere direkt danach ohne weitere Einleitung in ein bis zwei kurzen Sätzen den konkreten Lösungsansatz aus dem Auftrag und frage dann, ob eine unverbindliche individuelle Prüfung in einem kurzen Orientierungsgespräch für ihn interessant wäre.",
+    "Schlage in dieser Antwort noch keinen Termin und keine Uhrzeit vor.",
+  ].join(" ");
 }
 
 export function shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText: string, userText: string): boolean {
@@ -345,6 +365,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: natürlich daran anknüpfen und zum nächsten Schritt überleiten, nicht abrupt zur nächsten Frage springen. Bei Interesse: den passenden nächsten Schritt anbieten. Vermeide routinemäßige Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder wiederholtes Bedanken.",
+    "KEINE VORREDE: Kündige dein eigenes Vorgehen nie an und kommentiere es nicht, etwa 'ich frage zuerst kurz nach ...', 'ich prüfe kurz ...', 'ich knüpfe kurz an ...', 'dann notiere ich Ihr Interesse', 'dann halte ich fest ...' oder 'ich schließe das für Sie ab'. Sprich keine Vorrede und keinen Kommentar vor einer Antwort oder vor confirm_appointment; antworte direkt mit dem Inhalt. Nur vor end_call oder transfer_to_human sprichst du die Verabschiedung beziehungsweise Übergabeankündigung.",
     "EMPFANG UND WEITERLEITUNG: Eine eigene Namensnennung oder die Auskunft, dass die gesuchte Person nicht da ist, bedeutet Empfang/Gatekeeper; frage dann nicht erneut, ob du mit der gesuchten Person sprichst. Bitte nur einmal um Weiterleitung. Bei Nichterreichbarkeit frage höchstens einmal nach einem passenden Zeitpunkt und akzeptiere die Antwort ohne eine Rückrufzusage zu erfinden. Sobald weitergeleitet wird, bleibe still, bis die nächste Person spricht; beginne dann mit einer vollständigen, kurzen Vorstellung samt tatsächlichem Gesprächsthema.",
     "WEICHER GESPRÄCHSÜBERGANG: Nach der Vorstellung und einer Zusage zu einem kurzen Gespräch beginne mit einer kurzen, zugewandten Brücke, die den Anlass aus dem Auftrag mit dem Alltag der Person verbindet. Stelle erst danach eine einfache offene Frage zum Thema. Nicht direkt nach Versicherung, Beitrag oder Termin fragen, keine abrupte Abfolge von Vorstellung und Qualifizierung. Eine kurze freundliche Überleitung ist ausdrücklich erwünscht, aber kein Smalltalk, keine zweite Erlaubnisfrage und keine erneute Vorstellung. Beispiel nur für einen Auftrag zur Gesundheitskostenentwicklung: 'Dann ordne ich kurz ein, warum ich anrufe: Im Alltag bleibt oft wenig Zeit, die langfristige Entwicklung der Gesundheitskosten im Blick zu behalten. Wie erleben Sie das bei sich?' Formuliere situationsgerecht statt dieses Beispiel immer wörtlich zu verwenden. Bei 'Worum geht es genau?' beantworte zuerst diese Frage; bei Zeitmangel oder Ablehnung hat der Rückruf- beziehungsweise Ablehnungsablauf Vorrang. Bei Rückrufen knüpfe weich an den bekannten Gesprächsstand an, statt den Einstieg neu zu beginnen.",
     "KEINE ZEIT / RÜCKRUF: Sagt die angerufene Person nach der Begrüßung oder später, dass sie gerade keine Zeit hat, beschäftigt ist oder es gerade nicht passt, führe den Verkauf, die Qualifizierung und die Terminfragen NICHT fort. Frage einmal kurz: 'Kein Problem. Wann passt es Ihnen besser?' Übernimm den genannten Zeitpunkt so, wie er genannt wurde, ohne Rückfrage nach Uhrzeit oder Bestätigung. Verabschiede dich dann in einem Satz, z. B. 'Vielen Dank für das Gespräch. Dann melde ich mich wie besprochen morgen Vormittag noch einmal bei Ihnen. Einen schönen Tag noch und auf Wiederhören.' und rufe end_call auf. Behandle das nicht als Absage.",
@@ -510,6 +531,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
+  const outputGate = new RealtimeOutputGate();
   let openingSpeech: OpeningSpeechStream | null = null;
   let responseDialogueStream: ElevenLabsDialogueStream | null = null;
   let responseDialogueController: AbortController | null = null;
@@ -1020,6 +1042,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
+  const appendAssistantText = (text: string) => {
+    if (!text) return;
+    assistantTranscript += text;
+    openingSpeech?.append(text);
+  };
+
   const requestHangupAfterPlayback = () => {
     hangupAfterPlayback = true;
     if (!playback.isPending() && !responses.isActive() && !userTurns.isBlocked() && ctx) {
@@ -1431,6 +1459,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestDeterministicSpeech(requiredStep);
         return;
       }
+      if ((event.type === "answer" || event.type === "customer_question")
+        && currentContext.topicKind === "pkv"
+        && isNoStrategyAnswer(previousAssistantText, transcript)
+        && !currentContext.transcript.some((turn) => turn.role === "assistant" && turn.text.startsWith("Das höre ich sehr oft."))) {
+        requestEventResponse(buildNoStrategyAcknowledgementInstruction(transcript));
+        return;
+      }
       const routing = event.type === "answer"
         ? advanceAppointmentRouting(currentContext, currentContext.transcript, currentContext.freeSlotsPrompt)
         : { state: currentContext, speechText: undefined, readyToBook: false };
@@ -1827,14 +1862,20 @@ export async function handleOpenAiRealtimeTelnyxStream(
         currentAssistantTurnIndex = undefined;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
+        outputGate.reset();
+        return;
+      }
+
+      if (message.type === "response.output_item.added") {
+        if (responseInterrupted) return;
+        appendAssistantText(outputGate.observeItem(message.item));
         return;
       }
 
       if (message.type === "response.output_text.delta" || message.type === "response.text.delta") {
         if (responseInterrupted) return;
         if (!firstModelTokenAt) firstModelTokenAt = Date.now();
-        assistantTranscript += message.delta || "";
-        openingSpeech?.append(message.delta || "");
+        appendAssistantText(outputGate.acceptText(message.item_id, message.delta || ""));
         assistantTranscriptDeltaSeen = true;
         return;
       }
@@ -1845,14 +1886,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
       ) {
         if (responseInterrupted) return;
         if (!assistantTranscriptDeltaSeen) {
-          assistantTranscript += message.transcript || message.text || "";
-          openingSpeech?.append(message.transcript || message.text || "");
+          appendAssistantText(outputGate.acceptText(message.item_id, message.transcript || message.text || ""));
         }
         return;
       }
 
       if (message.type === "response.function_call_arguments.done" && message.name && message.call_id) {
         if (responseInterrupted) return;
+        appendAssistantText(outputGate.observeItem({ type: "function_call", name: message.name }));
         void handleToolCall({
           name: message.name,
           callId: message.call_id,
@@ -1879,8 +1920,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
           firstTtsChunkAt = null;
           assistantTranscript = "";
           assistantTranscriptDeltaSeen = false;
+          outputGate.reset();
           flushUserTranscript();
           return;
+        }
+        appendAssistantText(outputGate.finish());
+        const suppressedPreambles = outputGate.takeSuppressed();
+        if (ctx && suppressedPreambles.length) {
+          log.info("realtime.preamble_suppressed", { callSid: ctx.callSid, text: suppressedPreambles.join(" ") });
         }
         const rawTranscript = assistantTranscript.replace(/\s+/g, " ").trim();
         const transcript = rawTranscript;
@@ -2003,6 +2050,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         firstTtsChunkAt = null;
         assistantTranscript = "";
         assistantTranscriptDeltaSeen = false;
+        outputGate.reset();
         flushUserTranscript();
       }
     };

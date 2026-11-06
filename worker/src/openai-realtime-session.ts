@@ -9,11 +9,21 @@ export type RealtimeServerEvent = {
   name?: string;
   call_id?: string;
   arguments?: string;
+  output_index?: number;
+  item?: {
+    id?: string;
+    type?: string;
+    role?: string;
+    phase?: string;
+    name?: string;
+  };
   error?: { message?: string };
   response?: {
     status?: string;
     output?: Array<{
+      id?: string;
       type?: string;
+      phase?: string;
       name?: string;
       call_id?: string;
       arguments?: string;

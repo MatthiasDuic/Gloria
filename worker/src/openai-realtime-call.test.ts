@@ -41,7 +41,7 @@ import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { buildGatekeeperIntro, buildGatekeeperTopicInstruction, buildGatekeeperTransferRequest, hasDeterministicGatekeeperTopic } from "./openai-realtime-call.js";
-import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
+import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildNoStrategyAcknowledgementInstruction, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isNoStrategyAnswer, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { isSuppliedAppointmentSlot } from "./appointment-controller.js";
 import { newContext } from "./state.js";
@@ -943,6 +943,21 @@ test("normal assistant answers start TTS at the first complete sentence before r
   });
 });
 
+test("commentary preambles of the realtime model are never spoken", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, _hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "response.created" });
+    socket.message({ type: "response.output_item.added", item: { id: "pre", type: "message", role: "assistant", phase: "commentary" } });
+    socket.message({ type: "response.output_text.delta", item_id: "pre", delta: "Prima, dann finden wir als Nächstes eine passende Zeit—ich frage zuerst kurz nach Ihrer Tagespräferenz." });
+    socket.message({ type: "response.output_item.added", item: { id: "answer", type: "message", role: "assistant", phase: "final_answer" } });
+    socket.message({ type: "response.output_text.delta", item_id: "answer", delta: "Freut mich! Passt Ihnen eher vormittags oder nachmittags?" });
+    socket.message({ type: "response.done", response: { status: "completed", output: [] } });
+    await settleStreamEvents();
+    const spoken = ttsRequests.map((request) => JSON.parse(request || "{}").text).join(" ");
+    assert.equal(spoken, "Freut mich! Passt Ihnen eher vormittags oder nachmittags?");
+  });
+});
+
 function buildPkvContext() {
   const ctx = newContext({
     callSid: "test-realtime-pkv",
@@ -1021,10 +1036,38 @@ test("acknowledges annual PKV cost increases before asking for the monthly contr
     "Wie haben Sie die Entwicklung Ihrer Gesundheitskosten in den letzten Jahren wahrgenommen?",
     "Wir steigen jedes Jahr.",
   );
-  assert.match(followup || "", /^Ja, das höre ich öfter:/);
+  assert.match(followup || "", /^Ja, das merken gerade viele\./);
+  assert.doesNotMatch(followup || "", /höre ich/i, "the no-strategy acknowledgement later must not sound repetitive");
   assert.match(followup || "", /Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr\?$/);
   assert.doesNotMatch(followup || "", /überspringen/i);
   assert.equal(buildPkvCostIncreaseFollowup("Was kostet das?", "Die steigen jedes Jahr."), undefined);
+});
+
+test("recognizes answers without a strategy after the ten-year projection", () => {
+  const strategyQuestion = "Ihr Beitrag läge dann bei etwa eintausend dreihundert dreißig Euro monatlich. Haben Sie dafür bereits eine Strategie oder Planung?";
+  for (const answer of [
+    "Nein, habe ich bisher noch nicht.",
+    "Nein, ich wüsste auch nicht, was man dagegen tun soll.",
+    "Nö.",
+    "Noch nicht.",
+    "Nicht wirklich.",
+    "Ehrlich gesagt keine Ahnung.",
+    "Da habe ich mir noch keine Gedanken gemacht.",
+  ]) {
+    assert.equal(isNoStrategyAnswer(strategyQuestion, answer), true, answer);
+  }
+  for (const answer of ["Ja, ich habe vorgesorgt.", "Ja, habe ich.", "Nein, mein Berater kümmert sich darum.", "Doch, das ist alles geregelt."]) {
+    assert.equal(isNoStrategyAnswer(strategyQuestion, answer), false, answer);
+  }
+  assert.equal(isNoStrategyAnswer("Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?", "Nein."), false);
+});
+
+test("the no-strategy instruction starts with the agreeing acknowledgement and continues with the concept", () => {
+  const instruction = buildNoStrategyAcknowledgementInstruction("Nein, habe ich bisher noch nicht.");
+  assert.match(instruction, /Beginne deine Antwort wörtlich mit: 'Das höre ich sehr oft\. Gerade wenn man nicht mal wirklich versteht, wie es überhaupt zu den Beitragsanpassungen kommt, ist dies leicht frustrierend\.'/);
+  assert.match(instruction, /Lösungsansatz aus dem Auftrag/);
+  assert.match(instruction, /Orientierungsgespräch/);
+  assert.match(instruction, /noch keinen Termin/);
 });
 
 test("offers basic information by email only after a declined appointment-interest question", () => {
@@ -1492,6 +1535,15 @@ test("retains the complete session assignment in each response override througho
   assert.ok(intro.includes(policy.callObjective));
   assert.match(intro, /Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass/);
   assert.match(intro, /Interne Begriffe.*dürfen nicht gesprochen werden/);
+});
+
+test("forbids spoken preambles that announce Gloria's own next step", () => {
+  const ctx = newContext({ callSid: "test-no-preamble", streamSid: "test-stream", topic: "private Krankenversicherung" });
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /KEINE VORREDE: Kündige dein eigenes Vorgehen nie an und kommentiere es nicht/);
+  assert.match(instructions, /ich frage zuerst kurz nach/);
+  assert.match(instructions, /dann notiere ich Ihr Interesse/);
+  assert.match(instructions, /vor confirm_appointment; antworte direkt mit dem Inhalt/);
 });
 
 test("uses the configured company in the opening and falls back when it is missing", () => {
