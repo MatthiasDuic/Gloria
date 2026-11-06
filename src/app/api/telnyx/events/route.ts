@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
-import { completeOutboundCall, markOutboundCallActive, releaseCampaignCallLock } from "@/lib/report-db";
+import { completeOutboundCall, markOutboundCallActive, releaseCampaignCallLock, setReportResultDetailIfMissing } from "@/lib/report-db";
 import { processOutboundCallQueue } from "@/lib/outbound-call-queue";
+import { resultDetailForUnansweredHangup } from "@/lib/telnyx-hangup";
 import { getTelnyxPublicKey, telnyxCommandId, verifyTelnyxWebhook } from "@/lib/telnyx-webhook-auth";
 
 export const runtime = "nodejs";
@@ -16,6 +17,8 @@ type TelnyxEventPayload = {
   stream_url?: string;
   recording_id?: string;
   recording_url?: string;
+  hangup_cause?: string;
+  hangup_source?: string;
 };
 
 type TelnyxEvent = {
@@ -215,6 +218,15 @@ export async function POST(request: Request): Promise<NextResponse> {
         callSessionId: event.payload?.call_session_id,
       });
     } else if (eventType === "call.hangup") {
+      const unansweredResult = resultDetailForUnansweredHangup(event.payload?.hangup_cause);
+      if (unansweredResult) {
+        await setReportResultDetailIfMissing(callControlId, unansweredResult).catch((error) => {
+          log.error("telnyx.events.result_detail_failed", {
+            callControlId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
       await completeOutboundCall(callControlId, clientState.queueId);
       await releaseCampaignCallLock(callControlId);
       await processOutboundCallQueue().catch((error) => {
@@ -227,6 +239,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         callControlId,
         callLegId: event.payload?.call_leg_id,
         callSessionId: event.payload?.call_session_id,
+        hangupCause: event.payload?.hangup_cause,
+        hangupSource: event.payload?.hangup_source,
       });
     }
   } catch (error) {

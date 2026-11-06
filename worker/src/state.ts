@@ -86,6 +86,10 @@ export type CallContext = {
   humanContactDetected?: boolean;
   waitingForDecisionMaker?: boolean;
   queueDetected?: boolean;
+  /** Set when Gloria (not the remote party) initiated the hangup. */
+  endedByGloria?: boolean;
+  endReason?: "voicemail_detected" | "transfer_timeout" | "farewell" | "transferred" | "time_limit" | "error";
+  callbackNumberDelivered?: boolean;
 };
 
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {

@@ -44,6 +44,7 @@ export async function sendReportEmail(report: CallReport) {
     `Ansprechpartner: ${report.contactName || "-"}`,
     `Thema: ${report.topic}`,
     `Ergebnis: ${report.outcome}`,
+    ...(report.resultDetail && report.resultDetail !== report.outcome ? [`Was ist passiert: ${report.resultDetail}`] : []),
     `Gespräch am: ${report.conversationDate}`,
     `Wählversuche: ${report.attempts}`,
     `Termin: ${report.appointmentAt || "-"}`,

@@ -268,6 +268,8 @@ export interface CallReport {
   topic: Topic;
   summary: string;
   outcome: ReportOutcome;
+  /** One-word description of what actually happened (e.g. "Aufgelegt", "Anrufbeantworter", "Telefonmenü"). */
+  resultDetail?: string;
   conversationDate: string;
   appointmentAt?: string;
   appointmentMode?: string;

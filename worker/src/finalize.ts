@@ -360,6 +360,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     topic: ctx.topic,
     summary,
     outcome,
+    resultDetail: deriveResultDetail(ctx, outcome),
     conversationOccurred: fullDocumentation.conversationOccurred,
     callDisposition: fullDocumentation.callDisposition,
     followUpPlanned: fullDocumentation.followUpPlanned,
@@ -464,6 +465,44 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
     directDial: undefined,
     summary: summaryParts.join(" "),
   };
+}
+
+const AI_ASSISTANT_PATTERN = /\b(?:digitale[rn]?|virtuelle[rn]?|automatische[rn]?|ki-?)\s*(?:telefon|sprach)?assistent(?:in)?\b|\b(?:telefon|sprach)assistent(?:in)?\b|\bk[üu]nstliche[rn]?\s+intelligenz\b|\bvoice\s*bot\b/i;
+const PHONE_MENU_PATTERN = /(?:dr[üu]cken|w[äa]hlen)\s+sie\s+(?:bitte\s+)?(?:die\s+)?(?:\d|eins|zwei|drei|vier|f[üu]nf|sechs|sieben|acht|neun|null|stern|raute)\b|\btaste\s+(?:\d|eins|zwei|drei|stern|raute)\b|\bpress\s+\d/i;
+
+function isAiAssistantSelfIntroduction(text: string): boolean {
+  // "Sind Sie eine KI?" from a human must not mark the callee as a bot.
+  return AI_ASSISTANT_PATTERN.test(text) && !/\b(?:sind\s+sie|bist\s+du)\b/i.test(text);
+}
+
+/** One word describing what actually happened on the call, shown in the report's "Ergebnis" column. */
+export function deriveResultDetail(ctx: CallContext, outcome: Outcome): string {
+  if (outcome === "Termin" || outcome === "Absage" || outcome === "Wiedervorlage") return outcome;
+  if (ctx.endReason === "transferred") return "Weitergeleitet";
+  if (ctx.endReason === "error") return "Fehler";
+
+  const userTurns = ctx.transcript
+    .filter((entry) => entry.role === "user")
+    .map((entry) => entry.text.trim())
+    .filter(Boolean);
+  if (userTurns.some(isAiAssistantSelfIntroduction)) return "KI-Assistent";
+  if (ctx.detectedVoicemail || ctx.endReason === "voicemail_detected"
+    || userTurns.some((text) => classifyInboundSpeech(text) === "voicemail")) return "Anrufbeantworter";
+  if (ctx.callbackNumberDelivered) return "Rückrufnummer";
+
+  const humanReached = ctx.humanContactDetected === true
+    || (ctx.humanContactDetected !== false && userTurns.some((text) => looksLikeMeaningfulHumanTurn(text)));
+  if (!humanReached && userTurns.some((text) => PHONE_MENU_PATTERN.test(text))) return "Telefonmenü";
+  if (!humanReached && (ctx.queueDetected || userTurns.some((text) => classifyInboundSpeech(text) === "queue"))) {
+    return "Warteschleife";
+  }
+  if (ctx.endReason === "time_limit") return "Zeitlimit";
+  if (ctx.endReason === "transfer_timeout") {
+    return ctx.queueDetected || ctx.waitingForDecisionMaker ? "Warteschleife" : "Stille";
+  }
+  if (userTurns.length === 0) return ctx.endedByGloria ? "Stille" : "Aufgelegt";
+  if (ctx.endedByGloria) return ctx.waitingForDecisionMaker ? "Abwesend" : "Beendet";
+  return "Aufgelegt";
 }
 
 function deriveReportDocumentation(

@@ -202,6 +202,10 @@ function formatOutcomeLabel(value?: string): string {
   return normalized;
 }
 
+function formatReportResult(report: { outcome?: string; resultDetail?: string }): string {
+  return report.resultDetail?.trim() || formatOutcomeLabel(report.outcome);
+}
+
 function reportOutcomeBucket(report: DashboardData["reports"][number]): "no_contact" | "aborted" | "callback" | "appointment" | "rejection" {
   const outcome = (report.outcome || "").trim();
   if (/termin/i.test(outcome)) return "appointment";
@@ -2514,7 +2518,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
                       <div key={report.id} className="activity-item">
                         <div className="activity-date">{formatDate(report.conversationDate)}</div>
                         <div className="activity-content">
-                          <div className="activity-outcome">{formatOutcomeLabel(report.outcome)}</div>
+                          <div className="activity-outcome">{formatReportResult(report)}</div>
                           <div className="activity-summary">{report.summary || "(Keine Notiz)"}</div>
                           {report.appointmentAt && (
                             <div className="activity-appointment">
@@ -2767,7 +2771,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           <thead><tr><th>Kontakt</th><th>Ergebnis</th><th>Gespräch</th><th>Zusammenfassung</th><th>Aktion</th></tr></thead>
           <tbody>{reports.map((report) => <tr key={report.id}>
             <td><strong>{report.company}</strong><div className="subtle">{report.contactName || "Kein Ansprechpartner"}</div><div className="subtle">{report.topic}</div></td>
-            <td>{formatOutcomeLabel(report.outcome)}</td><td>{formatDate(report.conversationDate)}</td>
+            <td title={formatOutcomeLabel(report.outcome)}>{formatReportResult(report)}</td><td>{formatDate(report.conversationDate)}</td>
             <td>{report.summary.replace(/---\s*GESPRAECHSPROTOKOLL[\s\S]*$/i, "").slice(0, 220) || "Noch keine Zusammenfassung"}</td>
             <td><div className="task-actions"><button className="btn-small" onClick={() => openReportDetail(report)}>Anrufdetails</button><button type="button" className="btn-small danger" disabled={busy} onClick={() => void deleteCrmReport(report)}>Löschen</button></div></td>
           </tr>)}</tbody>
@@ -2788,7 +2792,7 @@ export default function CRMDashboard({ embedded = false }: { embedded?: boolean 
           <div className="detail-header"><div><div className="eyebrow">{sourceLabel}</div><h3>{selectedReport.company}</h3></div><button aria-label="Anrufdetails schließen" onClick={() => setSelectedReport(null)}>✕</button></div>
           <div className="detail-body">
             <div className="detail-section"><h4>Gesprächsergebnis</h4>
-              <dl className="report-facts"><div><dt>Ansprechpartner</dt><dd>{selectedReport.contactName || "-"}</dd></div><div><dt>Thema</dt><dd>{selectedReport.topic}</dd></div><div><dt>Angerufene Nummer</dt><dd>{selectedReport.calledPhone || selectedReport.directDial || lead?.phone || "-"}</dd></div><div><dt>Datum</dt><dd>{formatDate(selectedReport.conversationDate)}</dd></div><div><dt>Ergebnis</dt><dd>{formatOutcomeLabel(selectedReport.outcome)}</dd></div><div><dt>Versuche</dt><dd>{selectedReport.attempts}</dd></div></dl>
+              <dl className="report-facts"><div><dt>Ansprechpartner</dt><dd>{selectedReport.contactName || "-"}</dd></div><div><dt>Thema</dt><dd>{selectedReport.topic}</dd></div><div><dt>Angerufene Nummer</dt><dd>{selectedReport.calledPhone || selectedReport.directDial || lead?.phone || "-"}</dd></div><div><dt>Datum</dt><dd>{formatDate(selectedReport.conversationDate)}</dd></div><div><dt>Ergebnis</dt><dd title={formatOutcomeLabel(selectedReport.outcome)}>{formatReportResult(selectedReport)}</dd></div><div><dt>Versuche</dt><dd>{selectedReport.attempts}</dd></div></dl>
               {selectedReport.appointmentAt ? <p>Termin: {formatDate(selectedReport.appointmentAt)}{selectedReport.appointmentMode ? ` · ${selectedReport.appointmentMode}` : ""}</p> : null}
               {selectedReport.nextCallAt ? <p>Im Gespräch vereinbarter Rückruf: {formatDate(selectedReport.nextCallAt)}</p> : null}
               {lead?.status === "wiedervorlage" && lead.nextCallAt ? <p>Aktuelle Wiedervorlage: {formatDate(lead.nextCallAt)}</p> : null}

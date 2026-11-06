@@ -1850,6 +1850,7 @@ export async function storeCallReport(payload: {
   calledPhone?: string;
   nextCallAt?: string;
   callDisposition?: string;
+  resultDetail?: string;
   directDial?: string;
   attempts?: number;
   recordingConsent?: boolean;
@@ -1971,6 +1972,7 @@ export async function storeCallReport(payload: {
     topic: payload.topic,
     summary: mergedSummary,
     outcome: payload.outcome || existingReport?.outcome || "Nicht erreicht / kein Kontakt",
+    resultDetail: payload.resultDetail?.trim() || existingReport?.resultDetail,
     conversationDate: existingReport?.conversationDate || new Date().toISOString(),
     appointmentAt: payload.appointmentAt || existingReport?.appointmentAt,
     appointmentMode: payload.appointmentMode || existingReport?.appointmentMode,

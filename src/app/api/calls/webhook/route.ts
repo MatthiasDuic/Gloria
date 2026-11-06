@@ -281,7 +281,7 @@ async function syncCrmCallReport(report: Awaited<ReturnType<typeof storeCallRepo
   const summary = report.summary.split(/\n---\s*GESPRAECHSPROTOKOLL\b/i)[0].trim();
   const noteText = [
     `Gloria-Gespräch am ${report.conversationDate}`,
-    `Ergebnis: ${report.outcome}`,
+    `Ergebnis: ${report.resultDetail && report.resultDetail !== report.outcome ? `${report.outcome} (${report.resultDetail})` : report.outcome}`,
     `Thema: ${report.topic}`,
     report.contactName ? `Ansprechpartner: ${report.contactName}` : "",
     summary,
@@ -336,6 +336,7 @@ export async function POST(request: Request) {
     transcript?: IncomingTranscriptEntry[];
     conversationOccurred?: boolean;
     callDisposition?: string;
+    resultDetail?: string;
     followUpPlanned?: boolean;
     followUpAt?: string;
   };
@@ -412,6 +413,7 @@ export async function POST(request: Request) {
           calledPhone: payload.calledPhone,
           nextCallAt: payload.nextCallAt,
           callDisposition: payload.callDisposition,
+          resultDetail: payload.resultDetail,
           directDial: payload.directDial,
           attempts: payload.attempts,
           recordingConsent: payload.recordingConsent,
@@ -536,6 +538,7 @@ export async function POST(request: Request) {
     calledPhone: payload.calledPhone,
     nextCallAt: payload.nextCallAt,
     callDisposition: payload.callDisposition,
+    resultDetail: payload.resultDetail,
     directDial: payload.directDial,
     attempts: payload.attempts,
     recordingConsent: payload.recordingConsent,

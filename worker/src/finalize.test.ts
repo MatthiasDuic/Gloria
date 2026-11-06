@@ -1,8 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractReport, parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
+import { deriveResultDetail, extractReport, parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { newContext } from "./state.js";
+
+function resultCtx(userTexts: string[], extra: Partial<Parameters<typeof newContext>[0]> = {}) {
+  const ctx = newContext({ callSid: "result-test", streamSid: "test", company: "Testfirma", topic: "Test", ...extra });
+  ctx.transcript = userTexts.map((text, index) => ({ role: "user" as const, text, at: index }));
+  return ctx;
+}
+
+test("derives a one-word result describing what happened on the call", () => {
+  const noContact = "Nicht erreicht / kein Kontakt" as const;
+  const aborted = "Gespräch abgebrochen" as const;
+  assert.equal(deriveResultDetail(resultCtx(["Ja, gerne."]), "Termin"), "Termin");
+  assert.equal(deriveResultDetail(resultCtx(["Kein Interesse."]), "Absage"), "Absage");
+  assert.equal(deriveResultDetail(resultCtx(["Ja, Neumann hier, worum geht es denn?"], { humanContactDetected: true }), aborted), "Aufgelegt");
+  assert.equal(deriveResultDetail(resultCtx(["Hinterlassen Sie bitte eine Nachricht nach dem Signalton."], {
+    detectedVoicemail: true, endedByGloria: true, endReason: "voicemail_detected",
+  }), noContact), "Anrufbeantworter");
+  assert.equal(deriveResultDetail(resultCtx(["Willkommen bei Muster. Für den Vertrieb drücken Sie die 1, für den Service die 2."]), noContact), "Telefonmenü");
+  assert.equal(deriveResultDetail(resultCtx(["Bitte warten Sie, Sie befinden sich in der Warteschleife."], { queueDetected: true }), noContact), "Warteschleife");
+  assert.equal(deriveResultDetail(resultCtx(["Guten Tag, hier ist die digitale Assistentin der Firma Muster. Wie kann ich Ihnen helfen?"], {
+    humanContactDetected: true,
+  }), aborted), "KI-Assistent");
+  assert.equal(deriveResultDetail(resultCtx(["Sind Sie eine KI-Assistentin? Na gut, worum geht es?"], { humanContactDetected: true }), aborted), "Aufgelegt");
+  assert.equal(deriveResultDetail(resultCtx(["Der ist nicht da, geben Sie mir Ihre Nummer."], {
+    humanContactDetected: true, waitingForDecisionMaker: true, callbackNumberDelivered: true, endedByGloria: true,
+  }), aborted), "Rückrufnummer");
+  assert.equal(deriveResultDetail(resultCtx(["Herr Neumann ist heute leider nicht im Haus."], {
+    humanContactDetected: true, waitingForDecisionMaker: true, endedByGloria: true, endReason: "farewell",
+  }), aborted), "Abwesend");
+  assert.equal(deriveResultDetail(resultCtx([], { endedByGloria: true, endReason: "transfer_timeout" }), noContact), "Stille");
+  assert.equal(deriveResultDetail(resultCtx([]), noContact), "Aufgelegt");
+  assert.equal(deriveResultDetail(resultCtx(["Hallo?"], { endedByGloria: true, endReason: "error" }), noContact), "Fehler");
+});
 
 test("accepts model time forms but never silently substitutes midnight for a missing time", () => {
   const canonical = parseSlotPhraseToIso("Dienstag, 10. November um 08:30 Uhr");

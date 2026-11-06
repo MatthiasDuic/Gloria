@@ -812,6 +812,7 @@ async function initializeSchema() {
     ADD COLUMN IF NOT EXISTS phone_number_id TEXT;
   `);
   await db.query(`ALTER TABLE gloria_reports ADD COLUMN IF NOT EXISTS call_source TEXT;`);
+  await db.query(`ALTER TABLE gloria_reports ADD COLUMN IF NOT EXISTS result_detail TEXT;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS gloria_reports_call_sid_idx
@@ -1240,6 +1241,16 @@ export async function completeOutboundCall(callSid: string, queueId?: string): P
      RETURNING campaign_lock_token)
      DELETE FROM campaign_call_locks WHERE call_sid = $1 OR lock_token IN (SELECT campaign_lock_token FROM finished)`,
     [callSid.trim(), queueId || callSid.trim()],
+  );
+}
+
+export async function setReportResultDetailIfMissing(callSid: string, resultDetail: string): Promise<void> {
+  if (!shouldUsePostgres() || !callSid.trim() || !resultDetail.trim()) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE gloria_reports SET result_detail = $2, updated_at = NOW()
+     WHERE call_sid = $1 AND result_detail IS NULL`,
+    [callSid.trim(), resultDetail.trim()],
   );
 }
 
@@ -1949,7 +1960,8 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
         attempts,
         recording_consent,
         recording_url,
-        emailed_to
+        emailed_to,
+        result_detail
       FROM gloria_reports
       ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY conversation_date DESC;
@@ -1983,6 +1995,7 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
       topic: normalizeTopic(String(row.topic)),
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
+      resultDetail: row.result_detail ? String(row.result_detail) : undefined,
       conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
       appointmentAt: toIso(row.appointment_at),
       appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
@@ -2048,9 +2061,10 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             recording_url,
             emailed_to,
             call_source,
+            result_detail,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
           )
           ON CONFLICT (call_sid) WHERE call_sid IS NOT NULL
           DO UPDATE SET
@@ -2075,6 +2089,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             recording_url = gloria_reports.recording_url,
             emailed_to = EXCLUDED.emailed_to,
             call_source = EXCLUDED.call_source,
+            result_detail = COALESCE(EXCLUDED.result_detail, gloria_reports.result_detail),
             updated_at = NOW();
           `,
           [
@@ -2099,6 +2114,7 @@ export async function writeReportDatabaseToPostgres(data: ReportDatabase): Promi
             report.recordingUrl || null,
             report.emailedTo,
             report.callSource || null,
+            report.resultDetail || null,
           ],
         );
       }
@@ -3038,7 +3054,8 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
         attempts,
         recording_consent,
         recording_url,
-        emailed_to
+        emailed_to,
+        result_detail
       FROM gloria_reports
       WHERE id = $1
       LIMIT 1
@@ -3065,6 +3082,7 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
       topic: normalizeTopic(String(row.topic)),
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
+      resultDetail: row.result_detail ? String(row.result_detail) : undefined,
       conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
       appointmentAt: toIso(row.appointment_at),
       appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,

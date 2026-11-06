@@ -166,6 +166,10 @@ function formatOutcomeLabel(value?: string): string {
   return normalized;
 }
 
+function formatReportResult(report: { outcome?: string; resultDetail?: string }): string {
+  return report.resultDetail?.trim() || formatOutcomeLabel(report.outcome);
+}
+
 function reportOutcomeBucket(report: DashboardData["reports"][number]): "no_contact" | "aborted" | "callback" | "appointment" | "rejection" {
   const outcome = (report.outcome || "").trim();
   if (/termin/i.test(outcome)) return "appointment";
@@ -2857,7 +2861,7 @@ export default function HomePage() {
               const followUp = report.appointmentAt ? "Termin" : callback ? "Rückruf" : "Abgeschlossen";
               return <tr key={report.id}>
                 <td><strong>{report.company}</strong><div className="subtle">{report.contactName || "Kein Ansprechpartner"}</div><div className="subtle">{report.topic}</div></td>
-                <td><span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>{formatOutcomeLabel(report.outcome)}</span></td>
+                <td><span className={`status ${report.outcome === "Absage" ? "absage" : report.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`} title={formatOutcomeLabel(report.outcome)}>{formatReportResult(report)}</span></td>
                 <td><strong>{formatDate(report.conversationDate)}</strong><div className="subtle">{report.attempts} Versuch{report.attempts === 1 ? "" : "e"}</div></td>
                 <td><strong>{followUp}</strong><div className="subtle">{nextAt ? formatDate(nextAt) : "Keine Aktion offen"}</div></td>
                 <td style={{ minWidth: 260, maxWidth: 380 }}><span className="subtle">{(report.summary || "Keine Zusammenfassung verfügbar.").replace(/---\s*GESPRAECHSPROTOKOLL[\s\S]*$/i, "").slice(0, 220)}{report.summary.length > 220 ? " ..." : ""}</span></td>
@@ -4079,7 +4083,7 @@ export default function HomePage() {
                           <div>
                             <strong>{formatDate(report.conversationDate)}</strong>
                             <p className="subtle" style={{ margin: "4px 0 0" }}>
-                              Ergebnis: {report.outcome}
+                              Ergebnis: {formatReportResult(report)}
                               {report.appointmentAt ? ` · Termin: ${formatDate(report.appointmentAt)}` : ""}
                               {report.nextCallAt ? ` · Nächster Anruf: ${formatDate(report.nextCallAt)}` : ""}
                             </p>
@@ -4134,8 +4138,8 @@ export default function HomePage() {
               <button className="modal-close" onClick={() => setSelectedReport(null)}>✕</button>
               <h2>{selectedReport.company}</h2>
               <div className="row" style={{ marginTop: 8 }}>
-                <span className={`status ${selectedReport.outcome === "Absage" ? "absage" : selectedReport.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`}>
-                  {selectedReport.outcome}
+                <span className={`status ${selectedReport.outcome === "Absage" ? "absage" : selectedReport.outcome === "Wiedervorlage" ? "wiedervorlage" : ""}`} title={formatOutcomeLabel(selectedReport.outcome)}>
+                  {formatReportResult(selectedReport)}
                 </span>
                 <span className="subtle" style={{ fontSize: "0.85rem" }}>{formatDate(selectedReport.conversationDate)}</span>
                 {selectedReport.summary.includes("Testanruf ohne CRM-Zuordnung") ? <span className="subtle" style={{ fontSize: "0.85rem" }}>Testanruf ohne CRM-Kontakt</span> : null}

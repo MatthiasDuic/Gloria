@@ -5,7 +5,18 @@ import { Pool } from "pg";
 import { createTelnyxCall, encodeTelnyxClientState, resolveCallOwnerIdentity } from "./telnyx";
 import { CampaignOutsideHoursError } from "./campaign-schedule";
 import { extractTelnyxPublicKey, verifyTelnyxWebhook } from "./telnyx-webhook-auth";
+import { resultDetailForUnansweredHangup } from "./telnyx-hangup";
 import { POST as receiveTelnyxEvent } from "../app/api/telnyx/events/route";
+
+test("maps unanswered Telnyx hangup causes to one-word results and ignores answered calls", () => {
+  assert.equal(resultDetailForUnansweredHangup("user_busy"), "Besetzt");
+  assert.equal(resultDetailForUnansweredHangup("NO_ANSWER"), "Unbeantwortet");
+  assert.equal(resultDetailForUnansweredHangup("timeout"), "Unbeantwortet");
+  assert.equal(resultDetailForUnansweredHangup("call_rejected"), "Abgewiesen");
+  assert.equal(resultDetailForUnansweredHangup("unallocated_number"), "Ungültig");
+  assert.equal(resultDetailForUnansweredHangup("normal_clearing"), undefined);
+  assert.equal(resultDetailForUnansweredHangup(undefined), undefined);
+});
 
 test("worker contexts carry a tamper-evident bounded signature", () => {
   const previous = process.env.APP_INTERNAL_TOKEN;

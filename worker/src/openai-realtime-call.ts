@@ -420,6 +420,10 @@ function updateDialogPhase(ctx: CallContext): void {
 }
 
 export async function notifyCallAction(ctx: CallContext, action: "transfer" | "hangup"): Promise<boolean> {
+  if (action === "hangup") {
+    ctx.endedByGloria = true;
+    ctx.endReason ??= "farewell";
+  }
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const token = process.env.APP_INTERNAL_TOKEN || "";
   if (!baseUrl || !token) {
@@ -559,6 +563,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     onIdle: () => {
       if (callbackNumberTtsTurn === ttsTurn && playback.bytesSent() > 0) {
         callbackNumberDelivered = true;
+        if (ctx) ctx.callbackNumberDelivered = true;
         callbackNumberTtsTurn = null;
       }
       flushDeterministicSpeech();
@@ -1040,6 +1045,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     playback.stop();
     sendTelnyx({ event: "clear" });
     log.info(`realtime.${reason}`, { callSid: ctx.callSid });
+    ctx.endReason = reason;
     void notifyCallAction(ctx, "hangup");
   };
 
@@ -1556,6 +1562,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       const transferred = await notifyCallAction(ctx, "transfer");
       sendToolResult(tool.callId, { ok: transferred, ...(transferred ? {} : { error: "transfer_failed" }) });
       if (transferred) {
+        ctx.endReason = "transferred";
         log.info("realtime.transfer", { callSid: ctx.callSid });
       } else {
         requestDeterministicSpeech("Die Weiterleitung ist gerade leider nicht möglich. Möchten Sie stattdessen einen Rückruf vereinbaren?");
@@ -1658,6 +1665,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         log.info("realtime.closed", { callSid: ctx?.callSid, code, reason });
         if (ctx && !closed && !terminationInProgress) {
           terminationInProgress = true;
+          ctx.endReason = "error";
           void notifyCallAction(ctx, "hangup");
           telnyx.close(1011, "upstream_unavailable");
         }
@@ -2051,6 +2059,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       callDeadline = setTimeout(() => {
         if (!ctx || closed) return;
         terminationInProgress = true;
+        ctx.endReason = "time_limit";
         void notifyCallAction(ctx, "hangup");
         telnyx.close(1000, "call_time_limit");
       }, 30 * 60_000);
@@ -2068,6 +2077,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (!hasUsableCallAssignment(policy)) {
           terminationInProgress = true;
           log.error("realtime.missing_campaign_assignment", { callSid: ctx.callSid, topic: ctx.topic });
+          ctx.endReason = "error";
           void notifyCallAction(ctx, "hangup");
           telnyx.close(1011, "missing_campaign_assignment");
           return;
