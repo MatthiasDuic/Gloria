@@ -222,6 +222,29 @@ test("treats common short German phone greetings as a human contact", () => {
   }
 });
 
+test("routes a receptionist who introduces herself by another name to the gatekeeper flow", () => {
+  for (const [target, text] of [
+    ["Michael Fürst", "Das ist oblic. Sie sprechen mit Frau Köhler. Schönen guten Morgen."],
+    ["Benjamin Laube", "Hallo, Paula hier."],
+    ["Herr Neumann", "Mein Name ist Sabine Kraus, was kann ich für Sie tun?"],
+    ["Herr Neumann", "Guten Tag, Weber am Apparat."],
+  ] as const) {
+    assert.equal(advanceContactRouting(createContactRoutingState(target), text).stage, "gatekeeper", text);
+  }
+  assert.equal(advanceContactRouting(createContactRoutingState("Frau Köhler"), "Sie sprechen mit Frau Köhler, guten Tag.").stage, "decision_maker");
+  assert.equal(advanceContactRouting(createContactRoutingState("Herr Neumann"), "Ich bin Makler.").stage, "confirming_decision_maker");
+});
+
+test("a garbled short first greeting counts as human contact instead of waiting silently", () => {
+  for (const text of ["Keine reicht mehr.", "Kann sie so versorgen."]) {
+    assert.equal(advanceContactRouting(createContactRoutingState("Ralf Lichtenberg"), text).stage, "confirming_decision_maker", text);
+  }
+  assert.equal(
+    advanceContactRouting(createContactRoutingState("Herr Schmidt"), "Herzlich willkommen bei der Hausverwaltung Schmidt, Ihrem Immobilienpartner im Ruhrgebiet.").stage,
+    "waiting_for_transfer",
+  );
+});
+
 test("recognizes a self-identified decision maker without repeating the pitch", () => {
   const state = advanceContactRouting(
     createContactRoutingState("Frau Wagner"),

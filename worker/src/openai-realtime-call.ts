@@ -1307,7 +1307,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
           );
           return;
         }
-        if (event.type === "customer_question" || event.type === "unclear" || contactRouting.gatekeeperRequestMade) {
+        const genericHelpOffer = /\b(?:wie\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|weiterhelfen)|was\s+(?:kann|darf)\s+ich\s+(?:für\s+sie\s+)?tun|womit\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|dienen))\b/i.test(transcript);
+        const needsFreeAnswer = event.type === "customer_question" || (event.type === "unclear" && transcript.includes("?"));
+        if (contactRouting.gatekeeperRequestMade || (needsFreeAnswer && !genericHelpOffer)) {
           const introduction = identityAnnounced ? "" : `Stelle dich zuerst mit "${buildDecisionMakerIdentity(currentContext)}" vor. `;
           identityAnnounced = true;
           requestEventResponse(`${introduction}Du sprichst mit dem Empfang. Reagiere kurz und konkret auf die letzte Aussage oder Frage. Wiederhole keine bereits gestellte Weiterleitungsbitte, beginne kein Fachgespräch und erfinde keine Zusagen.`);

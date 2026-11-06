@@ -112,6 +112,7 @@ function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   const nameRegex = new RegExp(
     `(?:` +
       `\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|` +
+      `\\bsie\\s+sprechen\\s+mit\\s+(?:herrn?|frau)?\\s*${escapedName}\\b|` +
       `\\bhier\\s+(?:ist|spricht)\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
       `\\b(?:herr|frau)?\\s*${escapedName}\\s+am\\s+apparat\\b|` +
       `\\bich\\s+bin\\s+(?:herr|frau)?\\s*${escapedName}\\b` +
@@ -122,9 +123,49 @@ function identifiesDecisionMaker(text: string, targetName?: string): boolean {
   return nameRegex.test(normalized);
 }
 
+const NON_NAME_WORDS = new Set([
+  "hallo", "ja", "jaa", "nein", "guten", "tag", "morgen", "abend", "moin", "servus", "grüß", "gott", "hier", "wer", "was",
+  "ist", "spricht", "bitte", "firma", "praxis", "büro", "kanzlei", "agentur", "zentrale", "empfang", "herr", "herrn", "frau",
+  "der", "die", "das", "dem", "den", "und", "mit", "ich", "sie", "wir", "schönen", "schön", "einen", "willkommen",
+]);
+
+function selfIntroducedNameTokens(text: string): string[] {
+  const nameWord = "[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?";
+  const name = `(${nameWord}(?:\\s+${nameWord})?)`;
+  const patterns = [
+    new RegExp(`\\b(?:sie\\s+sprechen\\s+mit|mein(?:e)?\\s+name\\s+ist|hier\\s+(?:ist|spricht))\\s+(?:(?:herr|herrn|frau)\\s+)?${name}`, "i"),
+    new RegExp(`\\bich\\s+bin\\s+(?:herr|frau)\\s+${name}`, "i"),
+    new RegExp(`(?:^|[,.!?;]\\s*|\\b(?:hallo|ja|moin|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:(?:herr|frau)\\s+)?${name}\\s+(?:hier|am\\s+apparat)\\b`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const tokens = match[1].toLowerCase().split(/\s+/).filter((token) => token.length >= 3 && !NON_NAME_WORDS.has(token));
+    // Only a capitalized word that is not a greeting or a business label counts as a personal name.
+    if (tokens.length > 0 && /^[A-ZÄÖÜ]/.test(match[1])) return tokens;
+  }
+  return [];
+}
+
+// Phone greetings are often garbled by ASR (company names); a short human utterance still means someone answered.
+function isShortHumanAnswer(text: string, classification: ReturnType<typeof classifyInboundSpeech>): boolean {
+  if (classification !== "human") return false;
+  const words = text.trim().split(/\s+/).filter((word) => /[a-zäöüß]/i.test(word));
+  return words.length >= 2 && words.length <= 12;
+}
+
+function introducesOtherPerson(text: string, targetName?: string): boolean {
+  const targetTokens = targetNameTokens(targetName);
+  if (targetTokens.length === 0) return false;
+  const spokenTokens = selfIntroducedNameTokens(text);
+  if (spokenTokens.length === 0) return false;
+  return !spokenTokens.some((token) => targetTokens.includes(token));
+}
+
 function isClearlyGatekeeper(text: string, targetName?: string): boolean {
   const normalized = text.toLowerCase();
   const targetTokens = targetNameTokens(targetName);
+  if (introducesOtherPerson(text, targetName)) return true;
   const mentionsUnavailableTarget = targetTokens.length > 0
     && new RegExp(
       `\\b${targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+")}\\b[\\s\\S]{0,40}\\b(?:nicht\\s+da|nicht\\s+erreichbar|abwesend|außer\\s+haus|im\\s+termin|gerade\\s+nicht)\\b`,
@@ -194,7 +235,8 @@ export function advanceContactRouting(
     return state;
   }
   if (state.stage === "awaiting_contact" && !identifiesDecisionMaker(userText, state.targetName)
-    && !isClearlyGatekeeper(userText, state.targetName) && !isHumanContactAfterQueue(userText)) {
+    && !isClearlyGatekeeper(userText, state.targetName) && !isHumanContactAfterQueue(userText)
+    && !isShortHumanAnswer(userText, classification)) {
     return state;
   }
   if (state.stage === "confirming_decision_maker") {

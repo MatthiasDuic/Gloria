@@ -738,7 +738,7 @@ test("uses the actual campaign objective after an uncertain recipient confirms t
   }, 0, 160, false, objective);
 });
 
-test("a pre-synthesized identity plays right after a long greeting and only the routing follow-up is requested", { timeout: 10_000 }, async () => {
+test("a pre-synthesized identity plays right after a long greeting and a named receptionist is asked to transfer", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -746,8 +746,9 @@ test("a pre-synthesized identity plays right after a long greeting and only the 
     assert.match(prefetchedTexts.join(" "), /Guten Tag, hier ist Gloria/);
     assert.match(prefetchedTexts.join(" "), /Ich rufe zum Thema Energie an/);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
-    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.ok(ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")));
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Könnten Sie mich bitte mit Herrn Neumann verbinden")); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(ttsRequests.some((request) => request.includes("Könnten Sie mich bitte mit Herrn Neumann verbinden")));
+    assert.equal(ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")), false);
     assert.equal(hangups.length, 0);
   }, 0, 160, true);
 });
