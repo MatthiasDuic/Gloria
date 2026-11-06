@@ -6,7 +6,7 @@ import { advanceAppointmentRouting, convertSlotPhraseForSpeech, decideAppointmen
 import { planBargeIn } from "./barge-in-controller.js";
 import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction } from "./call-classification.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
-import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, getSpeakableCampaignReason, isGatekeeperReasonQuestion, isGatekeeperUnavailable, type ContactRoutingState } from "./contact-routing-controller.js";
+import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, buildGatekeeperTopic, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, getSpeakableCampaignReason, isGatekeeperReasonQuestion, isGatekeeperUnavailable, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
 import { advanceCallback, classifyCallbackNumberReply, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber, type CallbackNumberStage, type CallbackStage } from "./callback-controller.js";
 import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
@@ -275,21 +275,47 @@ Wiederhole die Begrüßung und die Vorstellung nicht. Nenne direkt und kurz auss
 Formuliere daraus eine kurze gesprochene Begrüßung mit dieser transparenten Identität. Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen. Frage, ob es gerade kurz passt. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
 }
 
-function buildGatekeeperIntro(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "contactName">,
-): string {
-  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
-  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
-  const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
-  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}. ${buildGatekeeperTransferRequest(ctx)}`;
-}
+type GatekeeperRequestContext = Pick<CallContext, "contactName" | "topic">
+  & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>;
 
-export function buildGatekeeperTransferRequest(ctx: Pick<CallContext, "contactName">): string {
+function buildGatekeeperWish(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
   const targetName = ctx.contactName?.trim() || "der zuständigen Person";
   const addressedTarget = /^herr\s+/i.test(targetName)
     ? targetName.replace(/^herr\s+/i, "Herrn ")
     : targetName;
-  return `Könnten Sie mich bitte mit ${addressedTarget} verbinden?`;
+  const topic = topicPlaceholder
+    ? { inline: `zum Thema ${topicPlaceholder}`, sentence: undefined }
+    : buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
+  return `möchte gerne mit ${addressedTarget}${topic.inline ? ` ${topic.inline}` : ""} verbunden werden.${topic.sentence ? ` ${topic.sentence}` : ""}`;
+}
+
+export function hasDeterministicGatekeeperTopic(ctx: GatekeeperRequestContext): boolean {
+  const topic = buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
+  return Boolean(topic.inline || topic.sentence);
+}
+
+export function buildGatekeeperIntro(
+  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft"> & GatekeeperRequestContext,
+  topicPlaceholder?: string,
+): string {
+  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
+  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
+  const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
+  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}, und ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+}
+
+/** Used when Gloria's identity was already spoken; completes it with whom and why. */
+export function buildGatekeeperTransferRequest(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
+  return `Ich ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+}
+
+/** Model fallback when the campaign has no speakable topic: only the topic phrase is generated. */
+export function buildGatekeeperTopicInstruction(
+  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft"> & GatekeeperRequestContext,
+  withIdentity: boolean,
+): string {
+  const template = withIdentity ? buildGatekeeperIntro(ctx, "<THEMA>") : buildGatekeeperTransferRequest(ctx, "<THEMA>");
+  return `Du sprichst mit dem Empfang. Sage genau diesen einen Satz und ersetze nur <THEMA> durch eine kurze, natürliche Themenbezeichnung (höchstens sechs Wörter) aus dem AUFTRAG FÜR GLORIA, nicht durch den internen Kampagnennamen: "${template}" Sage danach nichts weiter: keine Frage, kein Pitch, keine erfundenen Angaben.`;
 }
 
 export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "contactName">): string {
@@ -354,7 +380,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   }
   if (target) {
     parts.push(
-      `ERSTER SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, stelle dich transparent und kurz vor und nenne das tatsächliche Kampagnenthema. Wenn die Namenszuordnung unklar ist und kein Gatekeeper-Hinweis vorliegt, frage einmal höflich, ob ${addressedTarget} am Apparat ist. Wenn die Person Empfang oder Gatekeeper ist, bitte freundlich um Weiterleitung an ${addressedTarget}; nenne auf Nachfrage nur einen sachlichen Anlass aus dem Kampagnenkontext. Wiederhole eine bereits gestellte Weiterleitungsbitte nicht. Kein Pitch am Empfang.`,
+      `ERSTER SPRECHTURN: Wenn die Person klar sagt, dass sie selbst ${target} ist oder zuständig am Apparat ist, stelle dich transparent und kurz vor und nenne das tatsächliche Kampagnenthema. Wenn die Namenszuordnung unklar ist und kein Gatekeeper-Hinweis vorliegt, frage einmal höflich, ob ${addressedTarget} am Apparat ist. Wenn die Person Empfang oder Gatekeeper ist, stelle dich kurz als Gloria vor und sage in einem Satz, dass du gerne mit ${addressedTarget} zum Thema des Anrufs verbunden werden möchtest; nenne dabei kurz das tatsächliche Thema aus dem Kampagnenkontext. Wiederhole eine bereits gestellte Weiterleitungsbitte nicht. Kein Pitch am Empfang.`,
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
@@ -1321,10 +1347,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
           requestEventResponse(`${introduction}Du sprichst mit dem Empfang. Reagiere kurz und konkret auf die letzte Aussage oder Frage. Wiederhole keine bereits gestellte Weiterleitungsbitte, beginne kein Fachgespräch und erfinde keine Zusagen.`);
           return;
         }
-        if (identityAnnounced) requestDeterministicSpeech(buildGatekeeperTransferRequest(currentContext));
-        else {
+        const topicKnown = hasDeterministicGatekeeperTopic(currentContext);
+        if (identityAnnounced) {
+          if (topicKnown) requestDeterministicSpeech(buildGatekeeperTransferRequest(currentContext));
+          else requestEventResponse(buildGatekeeperTopicInstruction(currentContext, false));
+        } else {
           identityAnnounced = true;
-          speakDeterministicIntro(buildGatekeeperIntro(currentContext), "gatekeeper");
+          if (topicKnown) speakDeterministicIntro(buildGatekeeperIntro(currentContext), "gatekeeper");
+          else requestEventResponse(buildGatekeeperTopicInstruction(currentContext, true));
         }
         contactRouting.gatekeeperRequestMade = true;
         return;
@@ -2087,6 +2117,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ctx.topicKind = detectTopicKind(ctx.policyTopic);
         ctx.voiceProfile = createVoiceProfile(ctx.policyTopic);
         ctx.callObjective = policy.callObjective?.trim();
+        ctx.receptionTopicReason = policy.receptionTopicReason?.trim() || undefined;
         ctx.topicPolicyPrompt = topicPolicyToSystemPrompt(policy);
         if (preparationState.stage === "inactive" && !ctx.confirmedSlotPhrase) {
           preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", policy.topic, policy);

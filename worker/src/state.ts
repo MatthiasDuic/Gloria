@@ -86,6 +86,8 @@ export type CallContext = {
   humanContactDetected?: boolean;
   waitingForDecisionMaker?: boolean;
   queueDetected?: boolean;
+  /** Campaign-configured short reason for the reception ("Anlass am Empfang"). */
+  receptionTopicReason?: string;
   /** Set when Gloria (not the remote party) initiated the hangup. */
   endedByGloria?: boolean;
   endReason?: "voicemail_detected" | "transfer_timeout" | "farewell" | "transferred" | "time_limit" | "error";

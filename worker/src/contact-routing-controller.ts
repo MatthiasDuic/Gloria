@@ -43,6 +43,27 @@ export function buildGatekeeperReason(topic?: string, callObjective?: string): s
     : "Es geht um ein kurzes Anliegen für die zuständige Person.";
 }
 
+/** Topic for the gatekeeper transfer request: either inline ("zum Thema …") or as a short follow-up sentence. */
+export function buildGatekeeperTopic(
+  topic?: string,
+  callObjective?: string,
+  receptionTopicReason?: string,
+): { inline?: string; sentence?: string } {
+  if (/privat.*krankenversicherung|\bpkv\b/i.test(topic || "")) {
+    return { inline: "zum Thema Beitragsentwicklung in der Gesundheitsversorgung" };
+  }
+  const storedTopic = receptionTopicReason?.match(/\bzum\s+thema\s+([^.!?]+)/i)?.[1]
+    ?.split(/[,;:]|\s+(?:und|sowie)\s+(?:wie|was|warum|ob)\b/i)[0]?.trim();
+  if (storedTopic) return { inline: `zum Thema ${storedTopic}` };
+  const reason = getSpeakableCampaignReason(receptionTopicReason) || getSpeakableCampaignReason(callObjective);
+  if (reason) {
+    const short = reason.split(/\s*[:;–—]\s*/)[0].replace(/[.!?]+$/, "").trim();
+    return { sentence: `${short}.` };
+  }
+  if (!callObjective?.trim() && topic?.trim()) return { inline: `zum Thema ${topic.trim()}` };
+  return {};
+}
+
 function isNegatedTransfer(text: string): boolean {
   return text.split(/[,;.!?]|\b(?:aber|sondern)\b/i).some((part) => {
     const negated = /\b(?:nicht|nie|kein(?:e|en|er|em|es)?)\b/i.test(part);

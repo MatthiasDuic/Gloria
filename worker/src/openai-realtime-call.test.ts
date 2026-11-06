@@ -40,6 +40,7 @@ import { createHmac } from "node:crypto";
 import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { buildGatekeeperIntro, buildGatekeeperTopicInstruction, buildGatekeeperTransferRequest, hasDeterministicGatekeeperTopic } from "./openai-realtime-call.js";
 import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isOfferedSlotPhrase, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { newContext } from "./state.js";
@@ -90,7 +91,9 @@ async function withRealtimeStream(
   callObjective = "Beratung zu Energiekosten.",
   ownerRealPhone = "+491701234567",
   contactName = "Herr Neumann",
+  receptionTopicReason: string | null = "Ich habe eine Frage zum Thema Energiekosten.",
 ) {
+  const policyFields = { topic: "Energie", callObjective, ...(receptionTopicReason ? { receptionTopicReason } : {}) };
   const previous = {
     APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
@@ -115,7 +118,7 @@ async function withRealtimeStream(
   const finalized = new Promise<void>((resolve) => { finalPosted = resolve; });
   const api = agent.get("https://stream.test");
   const policyReply = api.intercept({ path: "/api/telnyx/topic-policies?userId=owner", method: "GET" }).reply(200, {
-    topicPolicies: [{ topic: "Energie", callObjective }],
+    topicPolicies: [policyFields],
   });
   if (policyDelayMs) policyReply.delay(policyDelayMs);
   policyReply.persist();
@@ -153,7 +156,7 @@ async function withRealtimeStream(
   const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
   try {
     await once(client, "open");
-    if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", { topic: "Energie", callObjective });
+    if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", policyFields);
     const unsigned = {
       queueId: "fixture-queue", userId: "owner", ownerRole: "user", ownerRealName: "Testberater",
       company: "Testfirma", topic: "Energie", contactName, calledPhone: "+492339555100", ownerRealPhone,
@@ -542,7 +545,7 @@ test("a receptionist's yes after a transfer request produces no speech until the
     socket.message({ type: "session.updated" });
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Zentrale der Beispiel GmbH, guten Tag." });
     await waitForTtsRequests(ttsRequests, 1);
-    assert.match(requestedSpeech(ttsRequests)[0], /mit Herrn Neumann verbinden/);
+    assert.match(requestedSpeech(ttsRequests)[0], /^Guten Tag, ich bin Gloria, .*und möchte gerne mit Herrn Neumann zum Thema Energiekosten verbunden werden\.$/);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ja." });
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(ttsRequests.length, 1);
@@ -746,11 +749,24 @@ test("a pre-synthesized identity plays right after a long greeting and a named r
     assert.match(prefetchedTexts.join(" "), /Guten Tag, hier ist Gloria/);
     assert.match(prefetchedTexts.join(" "), /Ich rufe zum Thema Energie an/);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
-    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Könnten Sie mich bitte mit Herrn Neumann verbinden")); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.ok(ttsRequests.some((request) => request.includes("Könnten Sie mich bitte mit Herrn Neumann verbinden")));
+    for (let attempt = 0; attempt < 50 && !socket.sent.some((event) => event.type === "response.create"); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    const request = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } } | undefined;
+    assert.ok(request?.response.instructions.includes("Ich möchte gerne mit Herrn Neumann zum Thema <THEMA> verbunden werden."));
     assert.equal(ttsRequests.some((request) => request.includes("Spreche ich mit Herrn Neumann")), false);
     assert.equal(hangups.length, 0);
-  }, 0, 160, true);
+  }, 0, 160, true, "Beratung zu Energiekosten.", "+491701234567", "Herr Neumann", null);
+});
+
+test("a receptionist hears whom Gloria wants to reach and why when the campaign reason is speakable", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
+    const expected = "Ich möchte gerne mit Herrn Neumann verbunden werden. Es geht um die Energiekosten Ihres Betriebs.";
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes(expected)); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(ttsRequests.some((request) => request.includes(expected)));
+    assert.equal(hangups.length, 0);
+  }, 0, 160, true, "Es geht um die Energiekosten Ihres Betriebs. Ziel ist ein Termin.", "+491701234567", "Herr Neumann", null);
 });
 
 test("the first topic sentence is prefetched from a natural campaign objective and is not requested after identity playback", { timeout: 10_000 }, async () => {
@@ -1335,7 +1351,23 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
   assert.match(instructions, /stelle dich transparent und kurz vor/);
   assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic/);
   assert.match(buildDecisionMakerIntro(ctx), /Ich rufe zum Thema Individuelle Gesundheitsvorsorge an/);
-  assert.match(instructions, /bitte freundlich um Weiterleitung an Herrn Neumann/);
+  assert.match(instructions, /gerne mit Herrn Neumann zum Thema des Anrufs verbunden werden möchtest/);
+  assert.equal(buildGatekeeperIntro(ctx),
+    "Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel, und möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
+  assert.equal(buildGatekeeperTransferRequest(ctx), "Ich möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
+  assert.equal(buildGatekeeperTransferRequest({
+    ...ctx, topic: "Kampagne Q4", callObjective: "Vertriebspartner gewinnen.",
+    receptionTopicReason: "Ich habe eine fachliche Frage zum Thema betriebliche Altersvorsorge.",
+  }), "Ich möchte gerne mit Herrn Neumann zum Thema betriebliche Altersvorsorge verbunden werden.");
+  assert.equal(buildGatekeeperTransferRequest({
+    ...ctx, topic: "Kampagne Q4",
+    callObjective: "Es geht um ein kurzes Gespräch zum Kennenlernen: ein Austausch über die Zukunft des Vertriebs.",
+  }), "Ich möchte gerne mit Herrn Neumann verbunden werden. Es geht um ein kurzes Gespräch zum Kennenlernen.");
+  const internalObjective = { ...ctx, topic: "Kampagne Q4", callObjective: "Interne Zielbeschreibung ohne Satzanfang" };
+  assert.equal(hasDeterministicGatekeeperTopic(internalObjective), false);
+  assert.match(buildGatekeeperTopicInstruction(internalObjective, true),
+    /"Guten Tag, ich bin Gloria, .* und möchte gerne mit Herrn Neumann zum Thema <THEMA> verbunden werden\."/);
+  assert.doesNotMatch(buildGatekeeperTopicInstruction(internalObjective, true), /Kampagne Q4 verbunden/);
   assert.doesNotMatch(instructions, /Barmenia Gothar|Beitragsentwicklung in der Gesundheitsversorgung/);
 });
 
