@@ -223,10 +223,10 @@ Vercel builds, deploys to alias URL, updates production.
 
 ### Step 4: Smoke Test
 ```powershell
-python tools/e2e_api_check.py
-python tools/e2e_campaign_call_flow.py
+curl.exe -s https://gloria.agentur-duic-sprockhoevel.de/api/health
+curl.exe -s https://gloria-tebr.onrender.com/readyz
 ```
-Confirms all endpoints alive and scoping correct.
+Confirms web app and telephony worker are alive.
 
 ---
 

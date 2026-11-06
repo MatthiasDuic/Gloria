@@ -108,11 +108,11 @@ test("does not book on a clarification question, vague request, or rejected mode
     { role: "user", text: "Was meinen Sie mit digital?" },
   ], freeSlots);
   assert.match(digitalQuestion.speechText || "", /Digital bedeutet eine Beratung per Microsoft Teams/);
-  const agencyRequest = advanceAppointmentRouting(state, [
+  const otherAnswer = advanceAppointmentRouting(state, [
     { role: "user", text: "In Ihrer Agentur." },
   ], freeSlots);
-  assert.notEqual(agencyRequest.readyToBook, true);
-  assert.match(agencyRequest.speechText || "", /Termine in der Agentur kann ich derzeit nicht vereinbaren/);
+  assert.notEqual(otherAnswer.readyToBook, true);
+  assert.equal(otherAnswer.speechText, "Soll der Termin persönlich oder digital stattfinden?");
 });
 
 test("accepts only slots supplied by the calendar", () => {
@@ -186,7 +186,7 @@ test("accepts selected offered slot without re-asking when latest turn is appoin
     ...readyPkvTurns(),
     { role: "assistant", text: "Welcher Termin passt Ihnen besser: Mittwoch, 26. August um 11:00 Uhr oder Donnerstag, 27. August um 15:30 Uhr?" },
     { role: "user", text: "Der zweite Termin passt besser." },
-    { role: "assistant", text: "Soll der Termin bei Ihnen vor Ort, in unserer Agentur oder per Microsoft Teams stattfinden?" },
+    { role: "assistant", text: "Soll der Termin persönlich oder digital stattfinden?" },
     { role: "user", text: "Bei mir vor Ort." },
   ];
   const decision = decideAppointment({

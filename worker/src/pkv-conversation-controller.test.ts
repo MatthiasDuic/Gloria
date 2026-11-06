@@ -152,13 +152,13 @@ test("follows the short PKV sequence and asks about each contribution separately
   assert.deepEqual(advancePkvStep(4, "Ja, das wäre interessant."), { nextStep: 6, shouldEnd: false });
 });
 
-test("does not invent a personal euro forecast or offer an agency appointment", () => {
+test("does not invent a personal euro forecast or promise a meeting link", () => {
   const projection = instructionForPkvStep(3);
   const scheduling = instructionForPkvStep(6);
   assert.match(projection, /eineinhalbmal so hoch/i);
   assert.doesNotMatch(projection, /rund hundert Euro mehr/i);
   assert.match(scheduling, /Soll der Termin persönlich oder digital stattfinden/i);
-  assert.doesNotMatch(scheduling, /bei Ihnen vor Ort, in (?:unserer )?Agentur|in (?:unserer )?Agentur oder/i);
+  assert.doesNotMatch(scheduling, /Agentur|Link zum Meeting/i);
 });
 
 test("requires an unambiguous interest statement before starting appointment scheduling", () => {

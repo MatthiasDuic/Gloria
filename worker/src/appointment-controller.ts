@@ -48,7 +48,6 @@ function normalizeSlot(value: string): string {
 type ChoiceClause = { text: string; question: boolean; preferred: boolean };
 type AppointmentModeSignal = {
   mode?: AppointmentMode;
-  unsupportedAgency: boolean;
   mentioned: boolean;
   question: boolean;
 };
@@ -120,15 +119,13 @@ function analyzeAppointmentPreference(text: string): { value?: "morning" | "afte
 function analyzeAppointmentMode(text: string): AppointmentModeSignal {
   const mentioned = /\b(?:digital|online|teams|video(?:termin|call)?|persönlich|persoenlich|vor\s+ort|agentur)\b/i.test(text);
   const question = /\?/.test(text) && mentioned;
-  const candidates: Array<{ value: AppointmentMode | "agency"; index: number; preferred: boolean }> = [];
-  const negated: Array<{ value: AppointmentMode | "agency"; index: number }> = [];
+  const candidates: Array<{ value: AppointmentMode; index: number; preferred: boolean }> = [];
+  const negated: Array<{ value: AppointmentMode; index: number }> = [];
 
   splitChoiceClauses(text).forEach((clause, index) => {
-    const values: Array<AppointmentMode | "agency"> = [];
-    const agency = /\bagentur\b/i.test(clause.text);
-    const inPerson = !agency && /\b(?:persönlich|persoenlich|vor\s+ort|bei\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)\s+(?:kommen|nach\s+hause)|(?:bei|in)\s+(?:meinem|unserem|meiner|unserer)\s+(?:betrieb|büro|firma)|bei\s+(?:mir|uns)\s+im\s+(?:büro|betrieb))\b/i.test(clause.text);
+    const values: AppointmentMode[] = [];
+    const inPerson = !/\bagentur\b/i.test(clause.text) && /\b(?:persönlich|persoenlich|vor\s+ort|bei\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)\s+(?:kommen|nach\s+hause)|(?:bei|in)\s+(?:meinem|unserem|meiner|unserer)\s+(?:betrieb|büro|firma)|bei\s+(?:mir|uns)\s+im\s+(?:büro|betrieb))\b/i.test(clause.text);
     if (inPerson) values.push("Beim Kunden vor Ort");
-    if (agency) values.push("agency");
     if (/\b(?:digital|online|teams|video(?:termin|call)?)\b/i.test(clause.text)) values.push("Microsoft Teams");
     if (values.length === 0 || clause.question) return;
     if (isNegatedChoice(clause.text)) {
@@ -144,18 +141,12 @@ function analyzeAppointmentMode(text: string): AppointmentModeSignal {
   const values = preferredValues.size === 1
     ? preferredValues
     : new Set(active.map((candidate) => candidate.value));
-  if (values.size !== 1) return { mentioned, question, unsupportedAgency: false };
-
-  const value = [...values][0];
-  if (value === "agency") return { mentioned, question, unsupportedAgency: true };
-  return { mode: value, mentioned, question, unsupportedAgency: false };
+  if (values.size !== 1) return { mentioned, question };
+  return { mode: [...values][0], mentioned, question };
 }
 
 export function appointmentModeFollowUp(text: string): string {
   const signal = analyzeAppointmentMode(text);
-  if (signal.unsupportedAgency) {
-    return "Termine in der Agentur kann ich derzeit nicht vereinbaren. Soll der Termin persönlich bei Ihnen oder digital per Microsoft Teams stattfinden?";
-  }
   if (signal.question) {
     return "Digital bedeutet eine Beratung per Microsoft Teams, persönlich bedeutet, dass der Berater zu Ihnen kommt. Was ist Ihnen lieber?";
   }
