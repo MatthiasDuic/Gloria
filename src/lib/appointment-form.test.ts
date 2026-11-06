@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { APPOINTMENT_FORM_MODES, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
+import { APPOINTMENT_FORM_MODES, appointmentLocationForMode, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, shouldIncludeHealthSection } from "./appointment-form";
 import { shouldGenerateAppointmentPdf } from "./types";
 
 test("appointment PDFs are enabled only for the shared private health insurance topic", async () => {
@@ -200,4 +200,13 @@ test("shouldIncludeHealthSection recognizes common PKV topic variants", () => {
   assert.equal(shouldIncludeHealthSection("Privatversicherung"), true);
   assert.equal(shouldIncludeHealthSection("private Krankenversicherung / Zusatzversicherung"), true);
   assert.equal(shouldIncludeHealthSection("gesetzliche Krankenversicherung"), true);
+});
+
+test("in-person appointments use the full customer address from the campaign list", () => {
+  const lead = { location: "Sprockhövel", addressStreet: "Hauptstraße 1", addressPostalCode: "45549", addressCity: "Sprockhövel" };
+  assert.equal(appointmentLocationForMode("Beim Kunden vor Ort", lead), "Hauptstraße 1, 45549 Sprockhövel");
+  assert.equal(appointmentLocationForMode("Beim Kunden vor Ort", { address: "Musterweg 5, 12345 Musterstadt", location: "Musterstadt" }), "Musterweg 5, 12345 Musterstadt");
+  assert.equal(appointmentLocationForMode("Beim Kunden vor Ort", { location: "Musterstadt" }), "Musterstadt");
+  assert.equal(appointmentLocationForMode("Microsoft Teams", lead), undefined);
+  assert.equal(appointmentLocationForMode(undefined, lead), undefined);
 });

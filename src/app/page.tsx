@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { buildCrmCalendarEntries, buildUnifiedCalendarEntries, getCallWorkspaceData, type CrmCalendarEntry } from "@/lib/crm-helpers";
 import GloriaCalendar from "@/components/GloriaCalendar";
@@ -452,7 +452,7 @@ function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfi
   if (normalized === "private krankenversicherung") {
     return {
       topicSummary: [
-        "Es geht darum, dem Interessenten greifbar zu machen, wie sich seine Krankenversicherungsbeitraege in den naechsten Jahren entwickeln koennen und welche Stellschrauben es fuer mehr Planbarkeit gibt.",
+        "Es geht darum, dem Interessenten greifbar zu machen, wie sich seine Krankenversicherungsbeitraege in den naechsten Jahren entwickeln koennen und welche Optionen es fuer mehr Planbarkeit gibt.",
         "Der Nutzen des Termins ist keine Produktshow, sondern eine persoenliche Einordnung mit eigener Zahl, Zehn-Jahres-Blick und klaren Handlungsoptionen.",
       ].join("\n"),
       behavior: [

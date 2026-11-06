@@ -2,7 +2,8 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 
 export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
-export const APPOINTMENT_FAREWELL_TEXT = "Vielen Dank für das Gespräch, ich lasse Ihnen die Terminbestätigung zukommen. Sollten Sie vorab Fragen haben, können Sie gerne auf die Mail antworten. Auf Wiederhören.";
+export const APPOINTMENT_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Ihre E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen. Auf Wiederhören.";
+const APPOINTMENT_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z0-9][a-z0-9-]*[a-z0-9](?![a-z0-9-])/i;
 
 export type AppointmentConfirmationOwner = {
   ownerRole?: "master" | "user";
@@ -16,13 +17,13 @@ function appointmentAdvisor(owner: AppointmentConfirmationOwner): string {
 function appointmentEmailQuestion(owner: AppointmentConfirmationOwner, complete = false): string {
   const address = `${complete ? "vollständige " : ""}E-Mail-Adresse`;
   return owner.ownerRole === "master"
-    ? `Damit wir Ihnen die Terminbestätigung zusenden können, brauche ich noch Ihre ${address}.`
-    : `Damit ${appointmentAdvisor(owner)} Ihnen die Terminbestätigung zusenden kann, brauche ich noch Ihre ${address}.`;
+    ? `Für die Terminbestätigung brauche ich noch Ihre ${address}.`
+    : `Für die Terminbestätigung von ${appointmentAdvisor(owner)} brauche ich noch Ihre ${address}.`;
 }
 
 export function appointmentFarewellText(owner: AppointmentConfirmationOwner = {}): string {
   if (owner.ownerRole === "master") return APPOINTMENT_FAREWELL_TEXT;
-  return `Vielen Dank für das Gespräch. ${appointmentAdvisor(owner)} wird Ihnen die Terminbestätigung per E-Mail zusenden. Auf Wiederhören.`;
+  return `Vielen Dank für das Gespräch. Der Termin ist eingetragen. Ihre E-Mail-Adresse habe ich für die Terminbestätigung von ${appointmentAdvisor(owner)} aufgenommen. Auf Wiederhören.`;
 }
 
 export function formatTimeForSpeech(timeStr: string): string {
@@ -215,10 +216,10 @@ export function beginPreparation(
   state: PreparationState,
   confirmedSlotPhrase: string,
   turns: ConversationTurn[],
-  appointmentMode?: import("./appointment-controller.js").AppointmentMode,
+  _appointmentMode?: import("./appointment-controller.js").AppointmentMode,
   owner: AppointmentConfirmationOwner = {},
 ): PreparationTransition {
-  const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.${appointmentMode === "Microsoft Teams" ? " Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit." : ""}`;
+  const confirmation = `Der Termin ${confirmedSlotPhrase} ist bestätigt.`;
   const emailQuestion = appointmentEmailQuestion(owner);
   if (state.questions.length === 0) {
     return {
@@ -365,9 +366,7 @@ export function advancePreparation(
 
 
   if (state.stage === "awaiting_email") {
-    const hasAtIndicator = /@|\bat\b/i.test(userText);
-    const hasDotIndicator = /\.|\bpunkt\b|\bdot\b/i.test(userText);
-    if (!hasAtIndicator || !hasDotIndicator) {
+    if (!APPOINTMENT_EMAIL_PATTERN.test(userText)) {
       const completeEmailQuestion = appointmentEmailQuestion(owner, true);
       return {
         state,

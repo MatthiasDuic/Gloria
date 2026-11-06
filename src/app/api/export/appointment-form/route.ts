@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUserFromRequest } from "@/lib/request-auth";
-import { APPOINTMENT_PDF_DISABLED_MESSAGE, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { APPOINTMENT_PDF_DISABLED_MESSAGE, appointmentLocationForMode, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
 import { shouldGenerateAppointmentPdf } from "@/lib/types";
 import { getConversationEventsForCallSid, getDashboardData } from "@/lib/storage";
 import { listCallTranscriptEventsFromPostgres, listUsers } from "@/lib/report-db";
@@ -44,9 +44,7 @@ export async function GET(request: Request) {
     const owner = report.userId === sessionUser.id
       ? sessionUser
       : (await listUsers()).find((entry) => entry.id === report.userId);
-    const location = lead?.location
-      || [lead?.addressStreet, [lead?.addressPostalCode, lead?.addressCity].filter(Boolean).join(" ")].filter(Boolean).join(", ")
-      || undefined;
+    const location = appointmentLocationForMode(report.appointmentMode, lead);
     const input = buildAppointmentFormInputFromReport({
       ...report,
       calledPhone: report.calledPhone || lead?.directDial || lead?.phone,

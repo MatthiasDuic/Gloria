@@ -103,7 +103,7 @@ Regeln:
 - "Nicht erreicht / kein Kontakt" wenn kein Kontakt zustande kam.
 - "Gespräch abgebrochen" wenn jemand kurz angerufen wurde, aber das Gespräch nach dem Einstieg abgebrochen wurde.
 - appointmentAt: nutze die LETZTE im Transkript bestätigte Termin-Aussage. Wenn der Anrufende "Donnerstag, 30. April, 15 Uhr" sagt, nimm das Datum exakt so.
-- nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt für einen ausgehenden Rückruf aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. directDial nur füllen, wenn der Interessent ausdrücklich eine alternative Nummer genannt hat.
+- nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt für einen ausgehenden Rückruf aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. Ausnahme: Wenn der Empfang die Zielperson erst für einen Zeitraum ankündigt (z. B. "nächste Woche", "nach dem Urlaub ab Montag") und Gloria zusagt, es dann erneut zu versuchen, ist das eine Wiedervorlage; setze nextCallAt auf den ersten Werktag dieses Zeitraums um 10:00 Uhr Europe/Berlin. directDial nur füllen, wenn der Interessent ausdrücklich eine alternative Nummer genannt hat.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
 
 export async function extractReport(ctx: CallContext): Promise<ExtractedReport | null> {

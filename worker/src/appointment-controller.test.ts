@@ -31,11 +31,15 @@ test("locks the selected Tuesday, retains the location and proceeds to booking w
   assert.equal(advanceAppointmentRouting(transition.state, turns, slots).state.appointmentMode, "Beim Kunden vor Ort");
 });
 
-test("recognizes the offered digital appointment mode", () => {
+test("treats a personal choice as an appointment at the customer without asking for a location", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Persönlich bitte." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne persoenlich." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne digital." }]), "Microsoft Teams");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Gerne bei mir vor Ort." }]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Nicht digital, lieber persönlich." }]), "Beim Kunden vor Ort");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Nicht persönlich, lieber digital." }]), "Microsoft Teams");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Was meinen Sie mit digital?" }]), undefined);
+  assert.equal(detectAppointmentMode([{ role: "user", text: "In Ihrer Agentur." }]), undefined);
 });
 
 test("matches numeric and spoken tool times to the canonical calendar slot", () => {
@@ -62,6 +66,53 @@ function readyPkvTurns(): ConversationTurn[] {
 test("detects the latest explicit appointment preference", () => {
   assert.equal(detectAppointmentPreference(readyPkvTurns()), "afternoon");
   assert.equal(detectAppointmentPreference([{ role: "user", text: "Das ist mir egal." }]), "unknown");
+  assert.equal(detectAppointmentPreference([{ role: "user", text: "Vormittags geht es nicht, lieber nachmittags." }]), "afternoon");
+  assert.equal(detectAppointmentPreference([{ role: "user", text: "Vormittags oder nachmittags wäre möglich." }]), "unknown");
+  assert.equal(detectAppointmentPreference([{ role: "user", text: "Nicht vormittags." }]), "unknown");
+});
+
+test("books an in-person appointment directly after the personal choice", () => {
+  const slots = [
+    "Montag, 9. November um 08:30 Uhr",
+    "Dienstag, 10. November um 11:00 Uhr",
+  ];
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: "Welcher Termin passt Ihnen besser?" },
+    { role: "user", text: "Der Montag passt." },
+  ];
+  const selected = advanceAppointmentRouting({ appointmentOfferedSlots: slots }, turns, freeSlots);
+  assert.equal(selected.state.selectedAppointmentSlot, slots[0]);
+  assert.equal(selected.state.appointmentMode, undefined);
+  assert.equal(selected.speechText, "Soll der Termin persönlich oder digital stattfinden?");
+
+  turns.push(
+    { role: "assistant", text: selected.speechText || "" },
+    { role: "user", text: "Nicht digital, lieber persönlich." },
+  );
+  const booked = advanceAppointmentRouting(selected.state, turns, freeSlots);
+  assert.equal(booked.readyToBook, true);
+  assert.equal(booked.state.appointmentMode, "Beim Kunden vor Ort");
+});
+
+test("does not book on a clarification question, vague request, or rejected mode", () => {
+  const state = { selectedAppointmentSlot: "Montag, 9. November um 08:30 Uhr" };
+  for (const text of ["Was meinen Sie mit digital?", "Bitte?", "Nicht digital."]) {
+    const transition = advanceAppointmentRouting(state, [
+      { role: "assistant", text: "Soll der Termin persönlich oder digital stattfinden?" },
+      { role: "user", text },
+    ], freeSlots);
+    assert.notEqual(transition.readyToBook, true, text);
+    assert.equal(transition.state.appointmentMode, undefined, text);
+  }
+  const digitalQuestion = advanceAppointmentRouting(state, [
+    { role: "user", text: "Was meinen Sie mit digital?" },
+  ], freeSlots);
+  assert.match(digitalQuestion.speechText || "", /Digital bedeutet eine Beratung per Microsoft Teams/);
+  const agencyRequest = advanceAppointmentRouting(state, [
+    { role: "user", text: "In Ihrer Agentur." },
+  ], freeSlots);
+  assert.notEqual(agencyRequest.readyToBook, true);
+  assert.match(agencyRequest.speechText || "", /Termine in der Agentur kann ich derzeit nicht vereinbaren/);
 });
 
 test("accepts only slots supplied by the calendar", () => {
@@ -168,7 +219,7 @@ test("requires asking for customer-proposed slot when both offered slots are rej
 
 test("detects the selected appointment mode from the customer answer", () => {
   assert.equal(detectAppointmentMode([{ role: "user", text: "Am liebsten bei mir vor Ort." }]), "Beim Kunden vor Ort");
-  assert.equal(detectAppointmentMode([{ role: "user", text: "Ich komme zu Ihnen in die Agentur." }]), "In der Agentur");
+  assert.equal(detectAppointmentMode([{ role: "user", text: "Ich komme zu Ihnen in die Agentur." }]), undefined);
   assert.equal(detectAppointmentMode([{ role: "user", text: "Machen wir das per Teams." }]), "Microsoft Teams");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Vor Ort." }]), "Beim Kunden vor Ort");
   assert.equal(detectAppointmentMode([{ role: "user", text: "Herr Duic kann zu mir kommen." }]), "Beim Kunden vor Ort");
@@ -176,7 +227,7 @@ test("detects the selected appointment mode from the customer answer", () => {
   assert.equal(detectAppointmentMode([
     { role: "user", text: "Bei mir." },
     { role: "user", text: "Der Montag passt besser." },
-  ]), "Beim Kunden vor Ort");
+  ]), undefined);
   assert.equal(detectAppointmentMode([{ role: "user", text: "Bei uns steigen die Beiträge jedes Jahr." }]), undefined);
 });
 
@@ -273,5 +324,20 @@ test("calendar generates only weekday slots within the requested business window
       (minutes >= 8 * 60 + 30 && minutes <= 11 * 60) || (minutes >= 13 * 60 && minutes <= 18 * 60),
       `slot outside allowed windows: ${slot.phrase}`,
     );
+  }
+});
+test("asks again for the slot instead of guessing on a garbled or bare reply", () => {
+  const slots = ["Montag, 16. November um 08:30 Uhr", "Freitag, 4. Dezember um 10:00 Uhr"];
+  for (const text of ["PaiTalk.", "Ja.", "Persönlich."]) {
+    const transition = advanceAppointmentRouting({ appointmentOfferedSlots: slots }, [
+      { role: "assistant", text: "Welcher Termin passt Ihnen besser?" },
+      { role: "user", text },
+    ], freeSlots);
+    assert.equal(transition.state.selectedAppointmentSlot, undefined, text);
+    assert.equal(transition.speechText, `Entschuldigung, das habe ich nicht genau verstanden. Passt Ihnen eher ${slots[0]} oder ${slots[1]}?`, text);
+  }
+  for (const text of ["Geht auch nächste Woche?", "Beide passen leider nicht.", "Haben Sie auch etwas am Nachmittag?"]) {
+    const transition = advanceAppointmentRouting({ appointmentOfferedSlots: slots }, [{ role: "user", text }], freeSlots);
+    assert.equal(transition.speechText, undefined, text);
   }
 });

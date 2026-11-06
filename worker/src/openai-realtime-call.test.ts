@@ -768,10 +768,10 @@ test("asks once when the named contact is unavailable and closes politely after 
     }
     assert.ok(ttsRequests.some((request) => request.includes("Wann kann ich Herrn Neumann am besten erreichen?")));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Morgen gegen elf Uhr." });
-    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören.")); attempt++) {
+    for (let attempt = 0; attempt < 50 && !ttsRequests.some((request) => request.includes("Vielen Dank. Dann versuche ich es morgen gegen elf Uhr erneut. Auf Wiederhören.")); attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.ok(ttsRequests.some((request) => request.includes("Vielen Dank, dann weiß ich Bescheid. Auf Wiederhören.")));
+    assert.ok(ttsRequests.some((request) => request.includes("Vielen Dank. Dann versuche ich es morgen gegen elf Uhr erneut. Auf Wiederhören.")));
     assert.equal(hangups.length, 0);
   });
 });
@@ -1307,8 +1307,8 @@ test("uses the appointment-specific farewell after a slot is confirmed", () => {
   ctx.ownerRole = "master";
   ctx.confirmedSlotPhrase = "Donnerstag, 22. Oktober um dreizehn Uhr";
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /ich lasse Ihnen die Terminbestätigung zukommen/);
-  assert.match(instructions, /können Sie gerne auf die Mail antworten/);
+  assert.match(instructions, /Ihre E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen/);
+  assert.match(instructions, /Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde/);
 });
 
 test("normal-user appointment instructions name the owner, not Gloria, as email sender", () => {
@@ -1321,8 +1321,8 @@ test("normal-user appointment instructions name the owner, not Gloria, as email 
     confirmedSlotPhrase: "Donnerstag um zehn Uhr",
   });
   const instructions = buildRealtimeInstructions(ctx);
-  assert.match(instructions, /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
-  assert.doesNotMatch(instructions, /ich lasse Ihnen die Terminbestätigung zukommen/);
+  assert.match(instructions, /Ihre E-Mail-Adresse habe ich für die Terminbestätigung von Erika Mustermann aufgenommen/);
+  assert.doesNotMatch(instructions, /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
 });
 
 test("formats times and Euro amounts in dynamic response instructions", () => {
@@ -1532,8 +1532,8 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
   const instructions = buildRealtimeInstructions(ctx);
   assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
   assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
-  assert.match(instructions, /Soll der Termin persönlich oder digital stattfinden/);
-  assert.match(instructions, /Link zur digitalen Beratung.*einen Tag vor dem Termin/);
+  assert.match(instructions, /persönlich oder digital/);
+  assert.match(instructions, /Versprich weder einen Zugangslink noch einen Versandzeitpunkt/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
   assert.match(instructions, /höchstens eine klare Hauptfrage pro Antwort/);
 });

@@ -1,4 +1,5 @@
 import { endsWithSentenceAbbreviation } from "./german-sentence.js";
+import { replaceDiscouragedWords } from "./spoken-vocabulary.js";
 
 export class OpeningSpeechStream {
   private readonly segmenter = new Intl.Segmenter("de", { granularity: "sentence" });
@@ -39,7 +40,7 @@ export class OpeningSpeechStream {
   }
 
   private enqueue(text: string): void {
-    const sentence = text.replace(/\s+/g, " ").trim();
+    const sentence = replaceDiscouragedWords(text.replace(/\s+/g, " ").trim());
     if (!sentence) return;
     this.pending = this.pending.then(async () => {
       if (this.stopped) return;

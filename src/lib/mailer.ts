@@ -255,9 +255,6 @@ export async function sendAppointmentInvite(options: AppointmentInviteOptions) {
     `Firma: ${report.company}`,
     `Zeitpunkt: ${when}`,
     ...(report.appointmentMode ? [`Terminart: ${report.appointmentMode}`] : []),
-    ...(report.appointmentMode === "Microsoft Teams"
-      ? ["", "Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit."]
-      : []),
     ...questionBlock,
     "",
     includePdf ? "Die Kalendereinladung und der Kundenterminbogen sind angehängt." : "Die Kalendereinladung ist angehängt.",

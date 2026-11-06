@@ -29,6 +29,30 @@ export interface AppointmentFormInput {
 
 export const APPOINTMENT_FORM_MODES = ["Beim Kunden vor Ort", "Microsoft Teams"] as const;
 
+export interface AppointmentAddressSource {
+  address?: string;
+  addressStreet?: string;
+  addressPostalCode?: string;
+  addressCity?: string;
+  location?: string;
+}
+
+export function isInPersonAppointmentMode(mode?: string): boolean {
+  return /vor\s+ort|persönlich|persoenlich/i.test(mode || "");
+}
+
+export function customerAppointmentAddress(lead?: AppointmentAddressSource): string | undefined {
+  if (!lead) return undefined;
+  const cityLine = [lead.addressPostalCode, lead.addressCity].map((part) => part?.trim()).filter(Boolean).join(" ");
+  const structured = [lead.addressStreet?.trim(), cityLine].filter(Boolean).join(", ");
+  if (lead.addressStreet?.trim()) return structured;
+  return lead.address?.trim() || structured || lead.location?.trim() || undefined;
+}
+
+export function appointmentLocationForMode(mode: string | undefined, lead?: AppointmentAddressSource): string | undefined {
+  return isInPersonAppointmentMode(mode) ? customerAppointmentAddress(lead) : undefined;
+}
+
 export interface AppointmentReportSource {
   company: string;
   contactName?: string;

@@ -174,7 +174,7 @@ test("SMTP transport selects implicit TLS on port 465 and STARTTLS on other port
   }
 });
 
-test("master confirmations describe the appointment and when the digital link arrives", async () => {
+test("master confirmations describe the appointment without promising an untracked digital link", async () => {
   await withMailFixture(async (sent) => {
     for (const appointmentMode of ["Beim Kunden vor Ort", "Microsoft Teams"]) {
       const result = await sendAppointmentInvite({
@@ -190,7 +190,7 @@ test("master confirmations describe the appointment and when the digital link ar
     assert.match(String(sent()[0].text), /Beim Kunden vor Ort/);
     assert.doesNotMatch(String(sent()[0].text), /Link/i);
     assert.match(String(sent()[1].text), /Microsoft Teams/);
-    assert.match(String(sent()[1].text), /Link.*einen Tag vor dem Termin/i);
+    assert.doesNotMatch(String(sent()[1].text), /Link|einen Tag vor dem Termin/i);
   });
 });
 

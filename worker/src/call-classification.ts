@@ -84,7 +84,18 @@ export function isHumanContactAfterQueue(text: string): boolean {
       || /\b(?:ich\s+(?:habe|möchte|will|kann|muss)|wir\s+(?:haben|möchten)|kein\s+interesse|nicht\s+(?:mehr\s+)?anrufen|rufen\s+sie\s+(?:bitte\s+)?nicht)\b/i.test(text)
       || /^(?:ja(?:\s+bitte)?|bitte|[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?),?\s*[.!?]*$/i.test(text.trim())
       || /^(?:ja|hallo|moin)\s*,?\s*[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*[,.!?]*\s*(?:ja)?[.!?]*$/i.test(text.trim())
-      || /^[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*,\s*(?:ja|hallo)[.!?]*$/i.test(text.trim()));
+      || /^[a-zäöüß-]{3,}(?:\s+[a-zäöüß-]{3,})?\s*,\s*(?:ja|hallo)[.!?]*$/i.test(text.trim())
+      || isGarbledPhoneGreeting(text));
+}
+
+// After a transfer the new person usually answers with company + name, which ASR often garbles
+// ("Wirmausabogin bihannoi mana-maaparat?"). Such a short greeting must not be ignored.
+function isGarbledPhoneGreeting(text: string): boolean {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter((word) => /[a-zäöüß]/i.test(word));
+  if (words.length === 0 || words.length > 8) return false;
+  if (/\b(?:für\s+(?:sie|dich)|telefon|anruf|moment|augenblick|sekunde|warten|kollegin?|verbinde|durchstellen|weiterleiten)\b/i.test(trimmed)) return false;
+  return /a+p+a+r+a+t/i.test(trimmed) || /\b(?:gmbh|ag|kg|ug|ohg|e\.?\s?k\.?)\b/i.test(trimmed) || /\?\s*$/.test(trimmed);
 }
 
 export function classifyInboundSpeech(text: string): CallClassification {

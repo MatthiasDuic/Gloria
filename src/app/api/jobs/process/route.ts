@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { globalJobQueue, type Job } from "@/lib/job-queue";
 import { sendReportEmail, sendAppointmentInvite } from "@/lib/mailer";
-import { buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename } from "@/lib/appointment-form";
+import { appointmentLocationForMode, buildAppointmentFormInputFromReport, buildAppointmentFormPdf, getAppointmentFormFilename, isInPersonAppointmentMode } from "@/lib/appointment-form";
 import { listCallTranscriptEventsFromPostgres } from "@/lib/report-db";
 import { appointmentConfirmationDelivery } from "@/lib/appointment-confirmation";
 import { appendLeadEmailHistory, getLeadById } from "@/lib/storage";
@@ -50,7 +50,17 @@ async function processInviteJob(job: Job): Promise<void> {
       const transcriptEvents = report.callSid
         ? await listCallTranscriptEventsFromPostgres(report.callSid)
         : [];
-      const appointmentForm = buildAppointmentFormInputFromReport({ ...report, transcriptEvents });
+      const appointmentLead = report.leadId && isInPersonAppointmentMode(report.appointmentMode)
+        ? await getLeadById(report.leadId, report.userId).catch((error) => {
+          console.error("appointment_form.lead_lookup_failed", { jobId: job.id, error });
+          return undefined;
+        })
+        : undefined;
+      const appointmentForm = buildAppointmentFormInputFromReport({
+        ...report,
+        location: appointmentLocationForMode(report.appointmentMode, appointmentLead || undefined),
+        transcriptEvents,
+      });
       appointmentPdf = await buildAppointmentFormPdf(appointmentForm);
       if (appointmentPdf.length < 1000) {
         throw new Error("Kundenterminbogen konnte nicht erzeugt werden.");

@@ -8,7 +8,7 @@ const policy = {
 };
 const knownStatusTurns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
 
-test("digital bookings mention the meeting link once while personal bookings continue unchanged", () => {
+test("booking confirmation does not promise a meeting link or delivery time", () => {
   for (const questions of ["", "Welche Themen sind Ihnen wichtig?"]) {
     const state = createPreparationState({ topic: "Test", preparationQuestions: questions });
     const personal = beginPreparation(state, "Montag um zehn Uhr", [], "Beim Kunden vor Ort");
@@ -16,8 +16,8 @@ test("digital bookings mention the meeting link once while personal bookings con
     const unchanged = beginPreparation(state, "Montag um zehn Uhr", []);
     assert.deepEqual(personal, unchanged);
     assert.equal(digital.state.stage, personal.state.stage);
-    assert.match(digital.speechText || "", /ist bestätigt\. Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit\./);
-    assert.equal(digital.speechText?.replace(" Den Link zur digitalen Beratung stellt Ihnen Ihr Berater einen Tag vor dem Termin bereit.", ""), personal.speechText);
+    assert.equal(digital.speechText, personal.speechText);
+    assert.doesNotMatch(digital.speechText || "", /Link|einen Tag vor dem Termin/i);
     assert.doesNotMatch(personal.speechText || "", /Meeting|Link/);
   }
   const state = createPreparationState({
@@ -25,23 +25,31 @@ test("digital bookings mention the meeting link once while personal bookings con
   });
   const digital = beginPreparation(state, "Montag um zehn Uhr", knownStatusTurns, "Microsoft Teams");
   assert.equal(digital.state.stage, "awaiting_email");
-  assert.match(digital.speechText || "", /Link zur digitalen Beratung.*bereits geklärten Angaben/);
+  assert.doesNotMatch(digital.speechText || "", /Link|einen Tag vor dem Termin/i);
 });
 
-test("normal users are named as the sender of the confirmation", () => {
+test("normal users are named as the appointment contact without claiming an email was sent", () => {
   const owner = { ownerRole: "user" as const, ownerRealName: "Erika Mustermann" };
   const state = createPreparationState({ topic: "Test" });
   const started = beginPreparation(state, "Montag um zehn Uhr", [], "Microsoft Teams", owner);
-  assert.match(started.speechText || "", /Erika Mustermann.*Terminbestätigung zusenden/);
+  assert.match(started.speechText || "", /Terminbestätigung von Erika Mustermann/);
   const finished = advancePreparation(started.state, "kunde@example.org", [], owner);
-  assert.match(finished.speechText || "", /Erika Mustermann wird Ihnen die Terminbestätigung per E-Mail zusenden/);
-  assert.doesNotMatch(finished.speechText || "", /ich lasse Ihnen|Herr Duic/i);
+  assert.match(finished.speechText || "", /Terminbestätigung von Erika Mustermann aufgenommen/);
+  assert.doesNotMatch(finished.speechText || "", /wird.*zusenden|versendet|zugestellt|ich lasse Ihnen|Herr Duic/i);
 
   const questions = createPreparationState({ topic: "Test", preparationQuestions: "Welche Fragen sind Ihnen wichtig?" });
   const consent = beginPreparation(questions, "Montag um zehn Uhr", [], "Beim Kunden vor Ort", owner);
   const declined = advancePreparation(consent.state, "Nein.", [], owner);
   assert.match(declined.speechText || "", /Erika Mustermann klärt/);
   assert.doesNotMatch(declined.speechText || "", /Herr Duic/);
+});
+
+test("does not accept an invalid email as the address for an appointment confirmation", () => {
+  const state = createPreparationState({ topic: "Test" });
+  const started = beginPreparation(state, "Montag um zehn Uhr", [], "Microsoft Teams");
+  const transition = advancePreparation(started.state, "kunde@beispiel.c", []);
+  assert.equal(transition.state.stage, "awaiting_email");
+  assert.match(transition.speechText || "", /vollständige E-Mail-Adresse/);
 });
 
 test("completes configured closing questions after booking without reasking the known 480 Euro contribution", () => {
@@ -256,10 +264,10 @@ test("completes all required PKV preparation questions before email", () => {
 
   transition = advancePreparation(transition.state, "kunde@example.de", [], { ownerRole: "master" });
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /Terminbestätigung zukommen/);
+  assert.match(transition.instruction, /E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen/);
   assert.equal(
     transition.speechText,
-    "Vielen Dank für das Gespräch, ich lasse Ihnen die Terminbestätigung zukommen. Sollten Sie vorab Fragen haben, können Sie gerne auf die Mail antworten. Auf Wiederhören.",
+    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Ihre E-Mail-Adresse habe ich für die Terminbestätigung aufgenommen. Auf Wiederhören.",
   );
   assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
 });

@@ -75,9 +75,55 @@ function isNegatedTransfer(text: string): boolean {
   });
 }
 
+const RETRY_WEEKDAYS = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"];
+
+// Turns a receptionist's availability hint into a natural retry phrase ("nächste Woche", "am Montag", ...).
+export function extractRetryTimePhrase(text: string): string | undefined {
+  const normalized = text.toLowerCase().replace(/\bguten\s+morgen\b/g, " ");
+  const numberWords: Record<string, string> = { "2": "zwei", "3": "drei", "4": "vier", zwei: "zwei", drei: "drei", vier: "vier" };
+  if (/\bübernächste[nr]?\s+woche\b/.test(normalized)) return "übernächste Woche";
+  if (/\b(?:nächste[nr]?|kommende[nr]?)\s+woche\b/.test(normalized)) return "nächste Woche";
+  const weeks = normalized.match(/\bin\s+(2|3|4|zwei|drei|vier)\s+wochen\b/);
+  if (weeks) return `in ${numberWords[weeks[1]]} Wochen`;
+  if (/\b(?:nächste[nr]?|kommende[nr]?)\s+monat\b/.test(normalized)) return "nächsten Monat";
+  if (/\bnach\s+(?:dem|seinem|ihrem)\s+urlaub\b/.test(normalized)) return "nach dem Urlaub";
+  if (/\bübermorgen\b/.test(normalized)) return "übermorgen";
+  const dayPart = normalized.match(/\b(heute|morgen)\s+(vormittag|nachmittag|früh|abend)\b/);
+  if (dayPart) return `${dayPart[1]} ${dayPart[2] === "früh" ? "früh" : dayPart[2][0].toUpperCase() + dayPart[2].slice(1)}`;
+  if (/\bmorgen\b/.test(normalized)) return "morgen";
+  const weekday = RETRY_WEEKDAYS.find((day) => new RegExp(`\\b${day}\\b`).test(normalized));
+  if (weekday) return `am ${weekday[0].toUpperCase()}${weekday.slice(1)}`;
+  if (/\bheute\s+nachmittag\b|\bam\s+nachmittag\b|\bnachmittags?\b/.test(normalized)) return "am Nachmittag";
+  if (/\bheute\s+vormittag\b|\bam\s+vormittag\b|\bvormittags?\b/.test(normalized)) return "am Vormittag";
+  if (/\bin\s+(?:einer|1)\s+stunde\b/.test(normalized)) return "in einer Stunde";
+  if (/\bheute\s+(?:noch|später)\b|\bspäter\s+heute\b/.test(normalized)) return "heute etwas später";
+  return undefined;
+}
+
+export function mentionsRetryTime(text: string): boolean {
+  return Boolean(extractRetryTimePhrase(text))
+    || /\b(?:uhr|halb\s+[a-zäöüß]+|viertel\s+(?:nach|vor))\b|\bab\s+(?:dem\s+)?\d/i.test(text);
+}
+
+function extractClockPhrase(text: string): string | undefined {
+  const match = text.match(/\b(gegen|um|ab)\s+((?:halb|viertel\s+(?:nach|vor))\s+[a-zäöüß]+|[a-zäöüß]+|\d{1,2}(?:[:.]\d{2})?)\s+uhr\b/i);
+  return match ? `${match[1].toLowerCase()} ${match[2]} Uhr` : undefined;
+}
+
+export function buildRetryFarewell(text: string, prefix = "Vielen Dank"): string {
+  const dayPhrase = extractRetryTimePhrase(text);
+  const clock = extractClockPhrase(text);
+  const phrase = dayPhrase && clock && /^(?:morgen|übermorgen|am\s+(?!vormittag|nachmittag))/i.test(dayPhrase)
+    ? `${dayPhrase} ${clock}`
+    : dayPhrase ?? clock;
+  if (phrase) return `${prefix}. Dann versuche ich es ${phrase} erneut. Auf Wiederhören.`;
+  if (mentionsRetryTime(text)) return `${prefix}. Dann versuche ich es zu der genannten Zeit erneut. Auf Wiederhören.`;
+  return `${prefix}. Dann versuche ich es zu einem späteren Zeitpunkt erneut. Auf Wiederhören.`;
+}
+
 export function isGatekeeperUnavailable(text: string): boolean {
   return isNegatedTransfer(text)
-    || /\b(?:nicht\s+(?:da|erreichbar|zu\s+sprechen|im\s+haus|verfügbar)|außer\s+haus|abwesend|im\s+termin|(?:hat|habe|haben)\s+(?:gerade\s+)?keine\s+zeit)\b/i.test(text);
+    || /\b(?:nicht\s+(?:da|erreichbar|zu\s+sprechen|im\s+haus|verfügbar|im\s+büro)|außer\s+haus|abwesend|im\s+termin|im\s+urlaub|(?:hat|habe|haben)\s+(?:gerade\s+|diese\s+woche\s+|noch\s+)*(?:keine\s+zeit|urlaub)|krank|in\s+elternzeit)\b/i.test(text);
 }
 
 export function classifyReceptionTransfer(text: string): "offered" | "in_progress" | null {
@@ -184,8 +230,18 @@ function introducesOtherPerson(text: string, targetName?: string): boolean {
   const targetTokens = targetNameTokens(targetName);
   if (targetTokens.length === 0) return false;
   const spokenTokens = selfIntroducedNameTokens(text);
-  if (spokenTokens.length === 0) return false;
+  if (spokenTokens.length === 0) return introducesOtherNameAtPhone(text, targetTokens);
   return !spokenTokens.some((token) => targetTokens.includes(token));
+}
+
+// "Musterbau GmbH, Stadler am Apparat" – a different surname right before "am Apparat" means reception.
+function introducesOtherNameAtPhone(text: string, targetTokens: string[]): boolean {
+  const match = text.match(/([A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)?)\s+[aA]m\s+[aA]pparat\b/);
+  if (!match) return false;
+  const spoken = match[1].toLowerCase();
+  if (NON_NAME_WORDS.has(spoken) || /^(?:gmbh|kg|ag|ug|ohg|co)$/.test(spoken)) return false;
+  // ASR often slightly misspells the target name; a shared prefix counts as the target.
+  return !targetTokens.some((token) => token === spoken || token.slice(0, 4) === spoken.slice(0, 4));
 }
 
 function isClearlyGatekeeper(text: string, targetName?: string): boolean {

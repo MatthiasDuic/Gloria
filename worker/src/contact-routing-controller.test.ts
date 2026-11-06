@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceContactRouting, buildGatekeeperReason, createContactRoutingState, instructionForContactRouting, isGatekeeperReasonQuestion } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, createContactRoutingState, instructionForContactRouting, isGatekeeperReasonQuestion, mentionsRetryTime } from "./contact-routing-controller.js";
 
 test("recognizes initial recorded welcomes, hold music and advertising without starting a conversation", () => {
   let state = createContactRoutingState("Herr Neumann");
@@ -351,4 +351,32 @@ test("makes voicemail a terminal routing state", () => {
 
   state = advanceContactRouting(state, "Neumann am Apparat.");
   assert.equal(state.stage, "voicemail");
+});
+test("names the concrete retry period from the reception in the farewell", () => {
+  assert.equal(
+    buildRetryFarewell("Herr Neumann hat diese Woche noch Urlaub, frühestens nächste Woche können Sie ihn erreichen."),
+    "Vielen Dank. Dann versuche ich es nächste Woche erneut. Auf Wiederhören.",
+  );
+  assert.equal(buildRetryFarewell("Er ist morgen Nachmittag wieder da."), "Vielen Dank. Dann versuche ich es morgen Nachmittag erneut. Auf Wiederhören.");
+  assert.equal(buildRetryFarewell("Am Donnerstag ist er wieder im Büro."), "Vielen Dank. Dann versuche ich es am Donnerstag erneut. Auf Wiederhören.");
+  assert.equal(buildRetryFarewell("Ab 14 Uhr ist er wieder da."), "Vielen Dank. Dann versuche ich es ab 14 Uhr erneut. Auf Wiederhören.");
+  assert.equal(buildRetryFarewell("Morgen gegen elf Uhr."), "Vielen Dank. Dann versuche ich es morgen gegen elf Uhr erneut. Auf Wiederhören.");
+  assert.equal(buildRetryFarewell("Später, so gegen Mittag."), "Vielen Dank. Dann versuche ich es zu einem späteren Zeitpunkt erneut. Auf Wiederhören.");
+  assert.equal(buildRetryFarewell("Das kann ich nicht sagen."), "Vielen Dank. Dann versuche ich es zu einem späteren Zeitpunkt erneut. Auf Wiederhören.");
+  assert.equal(mentionsRetryTime("Herr Neumann ist heute nicht im Haus."), false);
+  assert.equal(mentionsRetryTime("Guten Morgen, er ist nicht da."), false);
+});
+
+test("treats a different name before 'am Apparat' as reception and the target name as decision maker", () => {
+  const reception = advanceContactRouting(createContactRoutingState("Herr Neumann"), "Mussabau GmbH Stapler am Apparat.");
+  assert.equal(reception.stage, "gatekeeper");
+  const target = advanceContactRouting(createContactRoutingState("Herr Neumann"), "Musterbau GmbH, Neumann am Apparat.");
+  assert.equal(target.stage, "decision_maker");
+});
+
+test("reacts to a garbled greeting right after a transfer instead of waiting for 'Hallo'", () => {
+  const waiting = { ...createContactRoutingState("Herr Neumann"), stage: "waiting_for_transfer" as const, gatekeeperRequestMade: true };
+  const answered = advanceContactRouting(waiting, "Wirmausabogin bihannoi mana-maaparat?");
+  assert.equal(answered.stage, "confirming_decision_maker");
+  assert.equal(advanceContactRouting(waiting, "Herr Neumann, Telefon für Sie.").stage, "waiting_for_transfer");
 });

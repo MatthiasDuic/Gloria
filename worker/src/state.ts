@@ -57,7 +57,7 @@ export type CallContext = {
   // Vom Anrufenden bestätigte Termin-Phrase (z. B. "Donnerstag, den siebten Mai um vierzehn Uhr dreißig").
   // Sobald gesetzt, MUSS Phase 10 diese Phrase wortwörtlich übernehmen.
   confirmedSlotPhrase?: string;
-  appointmentMode?: "Beim Kunden vor Ort" | "In der Agentur" | "Microsoft Teams";
+  appointmentMode?: "Beim Kunden vor Ort" | "Microsoft Teams";
   // Adaptive Slot-Vorschläge: 4–6 freie 30-Min-Slots in den nächsten 5 Geschäftstagen,
   // berechnet aus der Busy-Liste. Wenn der Anrufende einen Vorschlag ablehnt, kann
   // Gloria aus dieser Liste alternative Slots ziehen, ohne Doppelbelegung.

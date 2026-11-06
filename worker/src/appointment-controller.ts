@@ -20,7 +20,7 @@ export function convertSlotPhraseForSpeech(slotPhrase: string): string {
   return result;
 }
 export type AppointmentPreference = "morning" | "afternoon" | "unknown";
-export type AppointmentMode = "Beim Kunden vor Ort" | "In der Agentur" | "Microsoft Teams";
+export type AppointmentMode = "Beim Kunden vor Ort" | "Microsoft Teams";
 
 export type AppointmentDecision =
   | { ok: true; preference: AppointmentPreference; slotPhrase: string }
@@ -45,25 +45,136 @@ function normalizeSlot(value: string): string {
     .trim();
 }
 
+type ChoiceClause = { text: string; question: boolean; preferred: boolean };
+type AppointmentModeSignal = {
+  mode?: AppointmentMode;
+  unsupportedAgency: boolean;
+  mentioned: boolean;
+  question: boolean;
+};
+
+function splitChoiceClauses(text: string): ChoiceClause[] {
+  const sentences = text.match(/[^.!?]+[.!?]?/g) || [text];
+  return sentences.flatMap((sentence) => {
+    const question = sentence.includes("?");
+    const clauses: ChoiceClause[] = [];
+    const separators = /[,;]|\b(?:aber|sondern|stattdessen|lieber|eher)\b/gi;
+    let start = 0;
+    let preferred = false;
+    for (const match of sentence.matchAll(separators)) {
+      const clause = sentence.slice(start, match.index).trim();
+      if (clause) {
+        clauses.push({
+          text: clause,
+          question,
+          preferred: preferred || /\b(?:am\s+liebsten|bevorzugt)\b/i.test(clause),
+        });
+      }
+      preferred = /\b(?:sondern|stattdessen|lieber|eher)\b/i.test(match[0]);
+      start = match.index + match[0].length;
+    }
+    const clause = sentence.slice(start).trim();
+    if (clause) {
+      clauses.push({
+        text: clause,
+        question,
+        preferred: preferred || /\b(?:am\s+liebsten|bevorzugt)\b/i.test(clause),
+      });
+    }
+    return clauses;
+  });
+}
+
+function isNegatedChoice(text: string): boolean {
+  const normalized = text.replace(/\bnicht\s+nur\b/i, "nur");
+  return /\b(?:nicht|kein(?:e|en|er|em|es)?|niemals|keinesfalls|weder)\b/i.test(normalized);
+}
+
+function analyzeAppointmentPreference(text: string): { value?: "morning" | "afternoon"; mentioned: boolean } {
+  const candidates: Array<{ value: "morning" | "afternoon"; index: number; preferred: boolean }> = [];
+  const negated: Array<{ value: "morning" | "afternoon"; index: number }> = [];
+  let mentioned = false;
+
+  splitChoiceClauses(text).forEach((clause, index) => {
+    const values: Array<"morning" | "afternoon"> = [];
+    if (/\b(?:vormittag|vormittags|morgens|früh)\b/i.test(clause.text)) values.push("morning");
+    if (/\b(?:nachmittag|nachmittags|mittags|später)\b/i.test(clause.text)) values.push("afternoon");
+    if (values.length === 0) return;
+    mentioned = true;
+    if (clause.question) return;
+    if (isNegatedChoice(clause.text)) {
+      for (const value of values) negated.push({ value, index });
+      return;
+    }
+    for (const value of values) candidates.push({ value, index, preferred: clause.preferred });
+  });
+
+  const active = candidates.filter((candidate) =>
+    !negated.some((entry) => entry.value === candidate.value && entry.index > candidate.index));
+  const values = new Set(active.map((candidate) => candidate.value));
+  if (values.size === 1) return { value: active[0].value, mentioned };
+  const preferredValues = new Set(active.filter((candidate) => candidate.preferred).map((candidate) => candidate.value));
+  return { value: preferredValues.size === 1 ? [...preferredValues][0] : undefined, mentioned };
+}
+
+function analyzeAppointmentMode(text: string): AppointmentModeSignal {
+  const mentioned = /\b(?:digital|online|teams|video(?:termin|call)?|persönlich|persoenlich|vor\s+ort|agentur)\b/i.test(text);
+  const question = /\?/.test(text) && mentioned;
+  const candidates: Array<{ value: AppointmentMode | "agency"; index: number; preferred: boolean }> = [];
+  const negated: Array<{ value: AppointmentMode | "agency"; index: number }> = [];
+
+  splitChoiceClauses(text).forEach((clause, index) => {
+    const values: Array<AppointmentMode | "agency"> = [];
+    const agency = /\bagentur\b/i.test(clause.text);
+    const inPerson = !agency && /\b(?:persönlich|persoenlich|vor\s+ort|bei\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)(?=\s*[.!?,]|$)|zu\s+(?:mir|uns)\s+(?:kommen|nach\s+hause)|(?:bei|in)\s+(?:meinem|unserem|meiner|unserer)\s+(?:betrieb|büro|firma)|bei\s+(?:mir|uns)\s+im\s+(?:büro|betrieb))\b/i.test(clause.text);
+    if (inPerson) values.push("Beim Kunden vor Ort");
+    if (agency) values.push("agency");
+    if (/\b(?:digital|online|teams|video(?:termin|call)?)\b/i.test(clause.text)) values.push("Microsoft Teams");
+    if (values.length === 0 || clause.question) return;
+    if (isNegatedChoice(clause.text)) {
+      for (const value of values) negated.push({ value, index });
+      return;
+    }
+    for (const value of values) candidates.push({ value, index, preferred: clause.preferred });
+  });
+
+  const active = candidates.filter((candidate) =>
+    !negated.some((entry) => entry.value === candidate.value && entry.index > candidate.index));
+  const preferredValues = new Set(active.filter((candidate) => candidate.preferred).map((candidate) => candidate.value));
+  const values = preferredValues.size === 1
+    ? preferredValues
+    : new Set(active.map((candidate) => candidate.value));
+  if (values.size !== 1) return { mentioned, question, unsupportedAgency: false };
+
+  const value = [...values][0];
+  if (value === "agency") return { mentioned, question, unsupportedAgency: true };
+  return { mode: value, mentioned, question, unsupportedAgency: false };
+}
+
+export function appointmentModeFollowUp(text: string): string {
+  const signal = analyzeAppointmentMode(text);
+  if (signal.unsupportedAgency) {
+    return "Termine in der Agentur kann ich derzeit nicht vereinbaren. Soll der Termin persönlich bei Ihnen oder digital per Microsoft Teams stattfinden?";
+  }
+  if (signal.question) {
+    return "Digital bedeutet eine Beratung per Microsoft Teams, persönlich bedeutet, dass der Berater zu Ihnen kommt. Was ist Ihnen lieber?";
+  }
+  return "Soll der Termin persönlich oder digital stattfinden?";
+}
+
 export function detectAppointmentPreference(turns: ConversationTurn[]): AppointmentPreference {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn.role !== "user") continue;
-    if (/\b(?:vormittag|vormittags|morgens|früh)\b/i.test(turn.text)) return "morning";
-    if (/\b(?:nachmittag|nachmittags|mittags|später)\b/i.test(turn.text)) return "afternoon";
+    const signal = analyzeAppointmentPreference(turn.text);
+    if (signal.mentioned) return signal.value || "unknown";
   }
   return "unknown";
 }
 
 export function detectAppointmentMode(turns: ConversationTurn[]): AppointmentMode | undefined {
-  const recentUserTurns = turns.filter((turn) => turn.role === "user").slice(-4).reverse();
-  for (const turn of recentUserTurns) {
-    const text = turn.text;
-    if (/\b(?:teams|video(?:termin|call)?|online|digital)\b/i.test(text)) return "Microsoft Teams";
-    if (/\b(?:in\s+(?:ihrer|eurer|der)\s+agentur|zu\s+ihnen\s+in\s+die\s+agentur|bei\s+(?:ihnen|euch|herrn\s+duic))\b/i.test(text)) return "In der Agentur";
-    if (/\b(?:persönlich|persoenlich|bei\s+mir(?=\s*(?:[.!?,]|$))|zu\s+mir|zu\s+uns|zu\s+hause|in\s+(?:meinem|unserem)\s+betrieb|bei\s+uns\s+vor\s+ort|vor\s+ort)\b/i.test(text)) return "Beim Kunden vor Ort";
-  }
-  return undefined;
+  const latestUserTurn = [...turns].reverse().find((turn) => turn.role === "user");
+  return latestUserTurn ? analyzeAppointmentMode(latestUserTurn.text).mode : undefined;
 }
 
 export function isSuppliedAppointmentSlot(freeSlotsPrompt: string | undefined, phrase: string): boolean {
@@ -167,6 +278,14 @@ export function appointmentOfferInstruction(freeSlotsPrompt: string | undefined,
   return `Sage natürlich und ohne einschränkende Formulierungen: "Ich kann Ihnen ${choices[0]} oder ${choices[1]} anbieten. Welcher Termin passt Ihnen besser?" Stelle in diesem Turn keine weitere Frage. Eine eindeutige Auswahl ist verbindlich; frage nicht erneut nach einer Bestätigung. Erfinde keine anderen Termine.`;
 }
 
+// A short reply without a recognizable slot (e.g. garbled audio or a bare "Ja") must not be guessed by the model.
+function isUnclearSlotSelection(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes("?") || rejectsBothOfferedSlots(trimmed)) return false;
+  if (/\b(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|woche|monat|januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|uhr|morgen|übermorgen|später|anderen?|nein|nicht|kein\w*)\b|\d/i.test(trimmed)) return false;
+  return trimmed.split(/\s+/).length <= 5;
+}
+
 export type AppointmentRoutingState = {
   appointmentOfferedSlots?: string[];
   selectedAppointmentSlot?: string;
@@ -180,19 +299,34 @@ export function advanceAppointmentRouting(
 ): { state: AppointmentRoutingState; speechText?: string; readyToBook?: boolean } {
   const latestUser = [...turns].reverse().find((turn) => turn.role === "user")?.text || "";
   const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant")?.text || "";
-  const mode = detectAppointmentMode(turns) || state.appointmentMode;
+  const modeSignal = analyzeAppointmentMode(latestUser);
+  const mode = modeSignal.mode;
   if (state.selectedAppointmentSlot) {
-    const nextState = { ...state, appointmentMode: mode };
-    if (mode) return { state: nextState, readyToBook: true };
-    return { state: nextState };
+    if (mode) return { state: { ...state, appointmentMode: mode }, readyToBook: true };
+    if (modeSignal.mentioned) {
+      return {
+        state: { ...state, appointmentMode: undefined },
+        speechText: appointmentModeFollowUp(latestUser),
+      };
+    }
+    return { state: { ...state, appointmentMode: undefined } };
   }
   if (state.appointmentOfferedSlots?.length) {
     const selected = matchOfferedAppointmentSelection(latestUser, state.appointmentOfferedSlots);
-    if (!selected) return { state };
+    if (!selected) {
+      if (!isUnclearSlotSelection(latestUser)) return { state };
+      const [first, second] = state.appointmentOfferedSlots;
+      return {
+        state,
+        speechText: `Entschuldigung, das habe ich nicht genau verstanden. Passt Ihnen eher ${first} oder ${second}?`,
+      };
+    }
     const nextState = { ...state, selectedAppointmentSlot: selected, appointmentMode: mode };
-    return mode
-      ? { state: nextState, readyToBook: true }
-      : { state: nextState, speechText: "Soll der Termin persönlich oder digital stattfinden?" };
+    if (mode) return { state: nextState, readyToBook: true };
+    return {
+      state: nextState,
+      speechText: modeSignal.mentioned ? appointmentModeFollowUp(latestUser) : appointmentModeFollowUp(""),
+    };
   }
   if (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant)) return { state };
   const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);
