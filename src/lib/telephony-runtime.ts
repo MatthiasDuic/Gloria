@@ -298,24 +298,23 @@ export function resetWorkerReadinessCacheForTests(): void {
 }
 
 /**
- * Returns the worker's blocking provider problems (exhausted credits, invalid keys) or null when calls can start.
- * Timeouts and network errors never block a call; only an explicit `blocking: true` from the worker does.
+ * Only a successful readiness check permits dialing. Unknown health must not reach a customer.
  */
 export async function getBlockingWorkerIssues(): Promise<string[] | null> {
   if (workerReadinessCache && Date.now() - workerReadinessCache.at < 20_000) return workerReadinessCache.issues;
   const url = getWorkerPreflightUrl("/readyz");
-  if (!url) return null;
+  if (!url) return ["Worker-Vorabprüfung ist nicht konfiguriert"];
   let issues: string[] | null = null;
   try {
-    const response = await fetch(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(4_000) });
-    const payload = await response.json().catch(() => null) as { blocking?: unknown; issues?: unknown } | null;
-    if (payload?.blocking === true) {
-      const reported = Array.isArray(payload.issues) ? payload.issues.filter((issue): issue is string => typeof issue === "string") : [];
-      issues = reported.length ? reported : ["Ein Sprachdienst ist derzeit nicht nutzbar"];
+    const response = await fetch(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const payload = await response.json() as { ok?: unknown; blocking?: unknown; issues?: unknown } | null;
+    if (!response.ok || payload?.ok !== true || payload.blocking !== false) {
+      const reported = Array.isArray(payload?.issues) ? payload.issues.filter((issue): issue is string => typeof issue === "string") : [];
+      issues = reported.length ? reported : ["Glorias Betriebsbereitschaft konnte nicht bestätigt werden"];
     }
   } catch (error) {
     console.warn("[preflight] worker.readiness_unavailable", { error: error instanceof Error ? error.message : String(error) });
-    return null;
+    issues = ["Glorias Vorabprüfung ist nicht erreichbar"];
   }
   workerReadinessCache = { at: Date.now(), issues };
   return issues;
@@ -327,7 +326,7 @@ async function preflightWorkerAndCalendar(baseUrl: string, userId: string | unde
   if (preloadUrl) {
     const start = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_000);
+    const timeout = setTimeout(() => controller.abort(), preloadId ? 12_000 : 2_000);
     try {
       const requestHeaders = new Headers(headers);
       const init: RequestInit = { method: "GET", headers: requestHeaders, cache: "no-store", signal: controller.signal };
@@ -347,6 +346,7 @@ async function preflightWorkerAndCalendar(baseUrl: string, userId: string | unde
         ms: Date.now() - start,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (preloadId) throw error;
     } finally {
       clearTimeout(timeout);
     }

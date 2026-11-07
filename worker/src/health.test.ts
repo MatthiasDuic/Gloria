@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dependenciesAreReady, evaluateDependencyHealth } from "./health.js";
-import { classifyProviderFailure, getServiceOutage, markServiceOutage, resetServiceOutagesForTests } from "./service-status.js";
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { dependenciesAreReady, evaluateDependencyHealth, getDependencyHealth } from "./health.js";
+import { classifyProviderFailure, clearServiceOutage, getServiceOutage, markServiceOutage, resetServiceOutagesForTests } from "./service-status.js";
 
 test("readiness requires every telephony dependency", () => {
   assert.equal(dependenciesAreReady({ openai: true, telnyx: true, elevenlabs: true }), true);
@@ -20,14 +21,14 @@ test("provider errors that need a top-up or a new key are recognised, transient 
   assert.equal(classifyProviderFailure(undefined, ""), undefined);
 });
 
-test("a known provider outage blocks calls and is reported in German, unreachability alone does not block", () => {
+test("provider outages and unknown reachability block calls", () => {
   resetServiceOutagesForTests();
   const healthy = evaluateDependencyHealth({ openai: true, telnyx: true, elevenlabs: true });
   assert.equal(healthy.blocking, false);
   assert.deepEqual(healthy.issues, []);
 
   const unreachable = evaluateDependencyHealth({ openai: false, telnyx: true, elevenlabs: true });
-  assert.equal(unreachable.blocking, false);
+  assert.equal(unreachable.blocking, true);
   assert.deepEqual(unreachable.issues, ["OpenAI nicht erreichbar"]);
 
   markServiceOutage("openai", "quota", "insufficient_quota");
@@ -44,10 +45,48 @@ test("a known provider outage blocks calls and is reported in German, unreachabi
   resetServiceOutagesForTests();
 });
 
-test("provider outages expire so a manual top-up is picked up without a restart", () => {
+test("provider outages stay blocked until a successful check clears them", () => {
   resetServiceOutagesForTests();
   markServiceOutage("openai", "quota", "insufficient_quota", 1_000);
-  assert.equal(getServiceOutage("openai", 1_000 + 60_000)?.kind, "quota");
-  assert.equal(getServiceOutage("openai", 1_000 + 11 * 60_000), undefined);
+  assert.equal(getServiceOutage("openai")?.kind, "quota");
+  clearServiceOutage("openai");
+  assert.equal(getServiceOutage("openai"), undefined);
   resetServiceOutagesForTests();
+});
+
+test("live dependency checks reject invalid Telnyx credentials and recover after top-up", async () => {
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  setGlobalDispatcher(agent);
+  const keys = ["OPENAI_API_KEY", "TELNYX_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_CREDIT_PROBE_MS"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = key === "OPENAI_CREDIT_PROBE_MS" ? "0" : "test-key";
+  resetServiceOutagesForTests();
+  try {
+    for (const phase of ["quota", "invalid-telnyx", "healthy"] as const) {
+      agent.get("https://api.openai.com").intercept({ path: "/v1/models" }).reply(200, {});
+      agent.get("https://api.openai.com").intercept({ path: "/v1/chat/completions", method: "POST" })
+        .reply(phase === "quota" ? 429 : 200, phase === "quota" ? { error: { code: "insufficient_quota" } } : {});
+      agent.get("https://api.telnyx.com").intercept({ path: "/v2/phone_numbers" })
+        .reply(phase === "invalid-telnyx" ? 401 : 200, {});
+      agent.get("https://api.elevenlabs.io").intercept({ path: "/v1/voices" }).reply(200, {});
+      agent.get("https://api.elevenlabs.io").intercept({ path: "/v1/user/subscription" })
+        .reply(200, { character_count: 100, character_limit: 10000 });
+      const health = await getDependencyHealth(0);
+      assert.equal(health.blocking, phase !== "healthy", phase);
+      if (phase === "quota") assert.ok(health.issues.includes("OpenAI-Guthaben aufgebraucht"));
+      if (phase === "invalid-telnyx") assert.equal(health.dependencies.telnyx, false);
+      if (phase === "healthy") assert.deepEqual(health.issues, []);
+    }
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetServiceOutagesForTests();
+    await agent.close();
+  }
 });

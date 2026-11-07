@@ -1,4 +1,4 @@
-export type ObjectionKind = "no_time" | "existing_advisor" | "send_information" | "skepticism" | "no_need" | "price" | "bad_experience" | "other";
+export type ObjectionKind = "no_time" | "existing_advisor" | "send_information" | "skepticism" | "no_need" | "price" | "bad_experience" | "consult_partner" | "statutory_insurance" | "other";
 
 export type ConversationEvent =
   | { type: "opt_out"; text: string; deletion: boolean }
@@ -111,6 +111,16 @@ export function classifyConversationEvent(text: string, context: ConversationEve
     return repeated ? { type: "clear_rejection", text: normalized } : { type: "objection", text: normalized, kind: "no_need" };
   }
   if (isAiIdentityQuestion(normalized)) return { type: "ai_identity_question", text: normalized };
+  if (/\b(?:ich\s+(?:bin\s+)?(?:gerade\s+)?(?:im\s+auto|am\s+steuer)|ich\s+fahre\s+(?:gerade\s+)?auto)\b/i.test(normalized)) {
+    return { type: "objection", text: normalized, kind: "no_time" };
+  }
+  if (/\bmit\s+(?:meiner|meinem|der|dem)\s+(?:frau|mann|partner(?:in)?|geschäftspartner(?:in)?|mitinhaber(?:in)?)\b[^.!?]{0,40}\b(?:besprechen|absprechen|klären|reden)\b/i.test(normalized)) {
+    return { type: "objection", text: normalized, kind: "consult_partner" };
+  }
+  if (/\bgesetzlich\s+(?:kranken)?versichert\b/i.test(normalized)
+    && /\b(?:betrifft\s+mich\s+nicht|nicht\s+relevant|nicht\s+für\s+mich)\b/i.test(normalized)) {
+    return { type: "objection", text: normalized, kind: "statutory_insurance" };
+  }
   if (isRecommendationRequest(normalized)) return { type: "customer_question", text: normalized };
   if (/\b(?:steuerberater(?:in)?|steuerb[üu]ro|buchhalter(?:in)?|(?:mein|meine|unser|unsere)\s+(?:berater|beraterin|makler|maklerin|vermittler|versicherungsvertreter)\b[^.!?]{0,30}\b(?:k[üu]mmert|macht|regelt)|(?:habe|haben|hab)\s+(?:schon\s+|bereits\s+)?(?:einen|meinen|eine|unsere?n?)\s+(?:berater|beraterin|makler|maklerin|vermittler)|bereits\s+beraten|bin\s+(?:selbst|selber)\s+(?:makler|berater|vermittler|versicherungs\w*))/i.test(normalized)) {
     return { type: "objection", text: normalized, kind: "existing_advisor" };
@@ -183,7 +193,7 @@ export function instructionForConversationEvent(
 function objectionReplyGuide(kind: ObjectionKind): string {
   switch (kind) {
     case "no_time":
-      return "Biete keinen Pitch an. Sage in einem Satz, dass es nur um eine kurze Einordnung geht, und frage höchstens nach einem passenden Rückrufzeitpunkt.";
+      return "Führe keinen Pitch, keine Qualifizierung und keine Terminierung fort. Wenn der Kunde Auto fährt, halte ihn nicht im Gespräch. Frage höchstens nach einem passenden Rückrufzeitpunkt und akzeptiere auch, wenn er keinen nennen möchte.";
     case "existing_advisor":
       return "Würdige die bestehende Betreuung ausdrücklich, ohne jemanden abzuwerten. Nennt der Kunde einen Steuerberater oder Buchhalter: Erkläre in einem Satz, dass dieser die steuerliche Seite abdeckt, während es im Termin um das konkrete Thema des Auftrags geht, und dass er gern einbezogen werden kann. Nennt er einen Berater oder Makler: Stelle den Termin als unverbindlichen Zweitblick dar. Ist der Kunde selbst Makler oder Vermittler, nimm das ernst und frage, ob ein fachlicher Austausch auf Augenhöhe für ihn interessant ist.";
     case "send_information":
@@ -193,7 +203,11 @@ function objectionReplyGuide(kind: ObjectionKind): string {
     case "no_need":
       return "Akzeptiere die Aussage respektvoll und dränge nicht. Stelle genau eine kurze, offene Rückfrage, die zeigt, ob das Thema wirklich geklärt ist (z. B. ob die künftige Beitragsentwicklung bereits eingeplant ist). Wenn der Kunde erneut ablehnt, verabschiede dich freundlich.";
     case "price":
-      return "Stelle klar, dass der Termin selbst unverbindlich und kostenfrei ist und es zunächst nur um eine Einordnung der eigenen Situation geht. Sprich nicht von Honoraren oder Gebühren, nenne keine Preise und mache keine Ersparnisversprechen. Stelle danach genau eine kurze Frage.";
+      return "Erkläre die Unverbindlichkeit des Termins. Bezeichne ihn nur als kostenfrei, wenn der Auftrag oder das hinterlegte Wissen dies ausdrücklich bestätigt; sonst sage, dass der Berater die Kostenfrage klären muss. Erfinde keine Honorare oder Gebühren und mache keine Ersparnisversprechen. Stelle danach höchstens eine kurze Frage.";
+    case "consult_partner":
+      return "Respektiere, dass der Kunde erst Rücksprache halten möchte. Biete an, die genannte Person in einen möglichen Termin einzubeziehen, ohne schon einen Termin zu buchen. Frage höchstens, ob ein späterer Rückruf nach der Rücksprache sinnvoll ist.";
+    case "statutory_insurance":
+      return "Nimm den Hinweis auf die gesetzliche Versicherung ernst. Erläutere nur dann kurz einen Bezug zum Thema, wenn der Auftrag ihn tatsächlich abdeckt. Behaupte keine PKV-Wechselmöglichkeit, keine Einsparung und keine individuelle Eignung. Passt der Auftrag nicht, beende das Gespräch höflich.";
     case "bad_experience":
       return "Zeige echtes Verständnis für die schlechte Erfahrung, ohne die Branche zu verteidigen oder andere abzuwerten. Betone Transparenz und Unverbindlichkeit und frage, ob ein kurzer, offener Termin trotzdem in Ordnung wäre.";
     default:

@@ -297,8 +297,7 @@ export function buildOwnerAffiliation(ctx: OwnerIdentityContext): string {
 export function buildDataSourceAnswer(ctx: Pick<CallContext, "ownerRealName"> & Partial<Pick<CallContext, "ownerDataSourceStatement">>): string {
   const statement = ctx.ownerDataSourceStatement?.replace(/\s+/g, " ").trim();
   if (statement) return /[.!?]$/.test(statement) ? statement : `${statement}.`;
-  const female = /^frau\s/i.test(buildAddressedOwner(ctx));
-  return `${buildOwnerNominative(ctx)} hat Ihr Unternehmen im Rahmen ${female ? "ihrer" : "seiner"} eigenen Unternehmensrecherche ausgewählt; genauere Auskunft gibt ${female ? "sie" : "er"} Ihnen gern persönlich.`;
+  return `Die genaue Herkunft Ihrer Kontaktdaten ist mir nicht hinterlegt. ${buildOwnerNominative(ctx)} kann Ihnen dazu Auskunft geben.`;
 }
 
 export const DATA_SOURCE_LIST_OFFER = "Wenn Sie keine weiteren Anrufe wünschen, nehme ich Sie selbstverständlich aus der Liste.";
@@ -311,7 +310,7 @@ export function buildOptOutFarewell(ctx: Pick<CallContext, "ownerRealName">, del
 
 export function buildAiIdentityAnswer(ctx: Pick<CallContext, "ownerRealName">): string {
   const owner = buildAddressedOwner(ctx);
-  return `Ja, ich bin eine KI-Assistentin und rufe im Auftrag von ${owner} an. Ein Termin findet dann persönlich mit ${/^frau\s/i.test(owner) ? "ihr" : "ihm"} statt.`;
+  return `Ja, ich bin eine KI-Assistentin und rufe im Auftrag von ${owner} an. Bei einem Termin sprechen Sie mit ${/^frau\s/i.test(owner) ? "ihr" : "ihm"}, nicht mit einer KI.`;
 }
 
 export function buildDecisionMakerIdentity(ctx: OwnerIdentityContext): string {
@@ -1298,7 +1297,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         identityAnnounced = true;
         requestDeterministicSpeech(`${intro}${answer}`);
       } else {
-        requestEventResponse(`Der Kunde fragt, woher die Kontaktdaten stammen. Sage wörtlich: "${answer}" Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf.`);
+        requestDeterministicSpeech(answer);
       }
       return;
     }

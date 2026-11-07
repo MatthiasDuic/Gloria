@@ -36,7 +36,7 @@ after(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true });
+  if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function seed(leads: Lead[]) {
@@ -62,6 +62,22 @@ test("repeated final reports do not count one physical call as multiple attempts
   const lead = await storage.getLeadById(sampleLead.id, sampleLead.userId);
   assert.equal(lead?.attempts, 1);
   assert.equal(lead?.status, "wiedervorlage");
+});
+
+test("a named successor is saved for the next call without dropping other contacts", async () => {
+  await seed([{ ...sampleLead, contactName: "Herr Alt", contactNames: ["Herr Alt", "Frau Andere"] }]);
+  const payload = {
+    callSid: "successor-call", leadId: sampleLead.id, userId: sampleLead.userId,
+    company: sampleLead.company, topic: sampleLead.topic, contactName: "Frau Neu",
+    previousContactName: "Herr Alt", successorContactName: "Frau Neu",
+    summary: "Herr Alt ist ausgeschieden. Frau Neu ist zuständig.",
+    outcome: "Wiedervorlage" as const, nextCallAt: "2026-11-09T10:00:00Z",
+  };
+  await storage.storeCallReport(payload);
+  await storage.storeCallReport(payload);
+  const lead = await storage.getLeadById(sampleLead.id, sampleLead.userId);
+  assert.equal(lead?.contactName, "Frau Neu");
+  assert.deepEqual(lead?.contactNames, ["Frau Neu", "Frau Andere"]);
 });
 
 test("mailbox reports schedule one-day then three-day callbacks and stop at the third attempt", async () => {

@@ -3,7 +3,6 @@ export type ProviderFailure = "quota" | "auth";
 
 type Outage = { kind: ProviderFailure; reason: string; at: number };
 
-const OUTAGE_TTL_MS = 10 * 60_000;
 const outages = new Map<ProviderService, Outage>();
 let version = 0;
 
@@ -34,15 +33,8 @@ export function clearServiceOutage(service: ProviderService): void {
   if (outages.delete(service)) version += 1;
 }
 
-export function getServiceOutage(service: ProviderService, now = Date.now()): Outage | undefined {
-  const outage = outages.get(service);
-  if (!outage) return undefined;
-  if (now - outage.at > OUTAGE_TTL_MS) {
-    outages.delete(service);
-    version += 1;
-    return undefined;
-  }
-  return outage;
+export function getServiceOutage(service: ProviderService): Outage | undefined {
+  return outages.get(service);
 }
 
 export function resetServiceOutagesForTests(): void {

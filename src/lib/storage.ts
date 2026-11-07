@@ -1814,6 +1814,8 @@ export async function storeCallReport(payload: {
   leadId?: string;
   company: string;
   contactName?: string;
+  previousContactName?: string;
+  successorContactName?: string;
   topic: Topic;
   summary?: string;
   summaryChunk?: string;
@@ -2037,8 +2039,16 @@ export async function storeCallReport(payload: {
       report.attempts = nextAttempts;
     }
 
+    const successor = payload.successorContactName?.trim();
+    const previousContact = (payload.previousContactName || lead.contactName || "").trim().toLowerCase();
+    const contactNames = successor
+      ? [...new Set([...(lead.contactNames || []).map((name) =>
+        name.trim().toLowerCase() === previousContact ? successor : name), successor])]
+      : lead.contactNames;
     return {
       ...lead,
+      contactName: successor || lead.contactName,
+      contactNames,
       attempts: nextAttempts,
       directDial: payload.directDial || lead.directDial,
       status: resolvedStatus,

@@ -81,10 +81,10 @@ WebSocket-Endpunkt des Workers.
 
 - `GET /health` – Liveness, antwortet sofort.
 - `GET /readyz` – Readiness inkl. Anbieterstatus. Antwort enthält `dependencies`,
-  `issues` (deutsche Klartextmeldungen) und `blocking`. `blocking: true` bedeutet,
-  dass ein bekannter Ausfall vorliegt (z. B. OpenAI-Guthaben aufgebraucht oder
-  ElevenLabs-Kontingent erschöpft). Die App startet dann keine Anrufe, pausiert
-  laufende Kampagnen und schickt eine Betriebsmail.
+  `issues` (deutsche Klartextmeldungen), `reportStorageReady` und `blocking`.
+  Nur `ok: true` und `blocking: false` erlauben neue Anrufe. Auch ein Timeout,
+  eine ungültige Antwort oder ein nicht beschreibbarer Berichtsspeicher
+  verhindern das Wählen; die betroffene Kampagne wird pausiert.
 - `POST /prepare-call` – wärmt den Gesprächskontext vor dem Wählen vor.
 - `WS /telnyx-stream` – Telnyx Media Stream (G.711, 8 kHz).
 
@@ -102,9 +102,18 @@ WebSocket-Endpunkt des Workers.
   diese Antwort mit der OpenAI-Sprachausgabe (`FALLBACK_TTS_ENABLED`,
   `FALLBACK_TTS_MODEL`, `FALLBACK_TTS_VOICE`). Das ist nur für kurze Aussetzer
   gedacht; ein erschöpftes ElevenLabs-Kontingent stoppt neue Anrufe.
-- **Report-Outbox**: Kann der Worker ein Gesprächsergebnis nicht an die App
-  senden, wird es mit Wiederholungen erneut zugestellt (nicht persistent über
-  einen Worker-Neustart hinweg).
+- **Report-Outbox**: Der Endbericht wird vor dem ersten Zustellversuch atomar
+  gespeichert. Render verwendet eine persistente 1-GB-Disk unter `/var/data`
+  (`render.yaml`); die Berichte liegen in `/var/data/gloria-outbox`.
+  `GLORIA_OUTBOX_DIR` überschreibt diesen Pfad für andere Installationen.
+  Beim Start und alle zwei Minuten werden offene Berichte erneut gesendet.
+  Gelöscht wird erst nach erfolgreicher Zustellung, nicht nach 24 Stunden.
+  Beschädigte Einträge bleiben erhalten und erzeugen `outbox.delivery_failed`.
+  Zugriff nur für den Worker; die Dateien können Transkripte und Gesundheitsangaben enthalten.
+- **Disk-Betrieb**: Render berechnet aktuell 0,25 USD/Monat für 1 GB.
+  Die Disk bleibt bei Neustarts und Deployments erhalten. Sie bindet den Worker
+  an eine Instanz und deaktiviert Zero-Downtime-Deployments. Während eines
+  Deployments blockiert die Vorabprüfung neue Anrufe.
 
 ## Anrufbeantworter und Ansagen
 

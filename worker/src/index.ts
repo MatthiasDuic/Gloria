@@ -5,6 +5,7 @@ import { getElevenLabsModel } from "./elevenlabs-tts.js";
 import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
 import { flushPendingReports } from "./finalize.js";
+import { checkReportStorage } from "./report-outbox.js";
 import { preloadTopicPolicy } from "./topic-policy-prompt.js";
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
@@ -66,16 +67,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.url === "/readyz") {
-    const health = await getDependencyHealth(90_000);
-    const ready = dependenciesAreReady(health.dependencies);
+    const [health, reportStorageReady] = await Promise.all([getDependencyHealth(90_000), checkReportStorage()]);
+    const ready = dependenciesAreReady(health.dependencies) && reportStorageReady;
     res.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({
       ok: ready,
       service: "gloria-stream-worker",
       revision: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || "local",
       dependencies: health.dependencies,
-      issues: health.issues,
-      blocking: health.blocking,
+      reportStorageReady,
+      issues: [...health.issues, ...(!reportStorageReady ? ["Berichtsspeicher nicht verfügbar"] : [])],
+      blocking: !ready,
       checkedAt: new Date(health.checkedAt).toISOString(),
       timestamp: new Date().toISOString(),
     }));
@@ -108,6 +110,7 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(PORT, () => {
   log.info("server.listening", { port: PORT });
+  flushPendingReports().catch((error) => log.error("outbox.flush_failed", { error: String(error) }));
 });
 
 const outboxTimer = setInterval(() => {

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveResultDetail, extractReport, parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
+import { deriveResultDetail, extractReport, flushPendingReports, parseRelativeCallbackAt, parseSlotPhraseToIso, persistAppointmentBooking, postReport } from "./finalize.js";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { newContext } from "./state.js";
 
@@ -222,6 +225,46 @@ test("a reached contact who hangs up is reported as an aborted conversation, nev
     if (oldOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = oldOpenAiKey;
     await agent.close();
+  }
+});
+
+test("a failed preliminary post still queues the full final report and a skipped response is not delivery", async () => {
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  setGlobalDispatcher(agent);
+  const dir = await mkdtemp(path.join(tmpdir(), "gloria-final-report-"));
+  const keys = ["APP_BASE_URL", "APP_INTERNAL_TOKEN", "GLORIA_OUTBOX_DIR"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.APP_BASE_URL = "https://final-recovery.test";
+  process.env.APP_INTERNAL_TOKEN = "test-token";
+  process.env.GLORIA_OUTBOX_DIR = dir;
+  try {
+    const pool = agent.get("https://final-recovery.test");
+    pool.intercept({ path: "/api/calls/webhook", method: "POST" }).reply(400, { ok: false });
+    pool.intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
+      const body = JSON.parse(String(options.body));
+      assert.equal(body.callSid, "durable-report");
+      assert.equal(body.transcript[0].text, "Bitte hinterlassen Sie eine Nachricht.");
+      assert.ok(body.summary);
+      return { statusCode: 200, data: { ok: true, skipped: true } };
+    });
+    const ctx = newContext({ callSid: "durable-report", streamSid: "test", company: "Test", topic: "Test", humanContactDetected: false });
+    ctx.transcript.push({ role: "user", text: "Bitte hinterlassen Sie eine Nachricht.", at: Date.now() });
+    await postReport(ctx);
+    assert.equal((await readdir(dir)).length, 1);
+    pool.intercept({ path: "/api/calls/webhook", method: "POST" }).reply(200, { ok: true });
+    await flushPendingReports();
+    assert.deepEqual(await readdir(dir), []);
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await agent.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

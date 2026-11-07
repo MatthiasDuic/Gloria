@@ -96,15 +96,30 @@ test("treats a recommendation request as a customer question, not as an existing
   assert.equal(ownAdvisor.type === "objection" && ownAdvisor.kind, "existing_advisor");
 });
 
-test("answers questions about the appointment's cost with the free, non-binding price guide", () => {
+test("answers cost questions without inventing a free appointment", () => {
   for (const text of ["Und was kostet mich das?", "Was kostet denn so ein Termin?", "Ist die Beratung kostenlos?", "Muss ich dafür was bezahlen?"]) {
     const event = classifyConversationEvent(text);
     assert.equal(event.type === "objection" && event.kind, "price", text);
     const instruction = instructionForConversationEvent(event);
     assert.match(instruction, /kostenfrei/);
-    assert.match(instruction, /nicht von Honoraren/);
+    assert.match(instruction, /nur als kostenfrei, wenn der Auftrag/);
+    assert.match(instruction, /Erfinde keine Honorare/);
   }
   assert.equal(classifyConversationEvent("Was kostet eine private Krankenversicherung im Alter?").type, "customer_question");
+});
+
+test("handles driving, consulting a partner and statutory-insurance objections without a sales push", () => {
+  for (const [text, kind] of [
+    ["Ich bin gerade im Auto.", "no_time"],
+    ["Ich fahre gerade Auto.", "no_time"],
+    ["Das muss ich mit meiner Frau besprechen.", "consult_partner"],
+    ["Ich bin gesetzlich versichert, das betrifft mich nicht.", "statutory_insurance"],
+  ] as const) {
+    const event = classifyConversationEvent(text);
+    assert.equal(event.type === "objection" && event.kind, kind);
+    assert.ok(instructionForConversationEvent(event).length > 100);
+  }
+  assert.equal(classifyConversationEvent("Ich bin gesetzlich versichert.").type, "answer");
 });
 
 test("classifies common objections by intent", () => {

@@ -217,6 +217,8 @@ export async function POST(request: Request) {
     followUpAt?: string;
     doNotCall?: boolean;
     dataDeletionRequested?: boolean;
+    previousContactName?: string;
+    successorContactName?: string;
   };
 
   const internalToken = process.env.APP_INTERNAL_TOKEN?.trim();
@@ -282,6 +284,8 @@ export async function POST(request: Request) {
           leadId: payload.leadId || existingByCallSid?.leadId,
           company: recoveredCompany,
           contactName: recoveredContactName,
+          previousContactName: payload.previousContactName,
+          successorContactName: payload.successorContactName,
           topic: recoveredTopic,
           summary: finalSummary,
           summaryChunk: payload.summaryChunk,
@@ -402,6 +406,8 @@ export async function POST(request: Request) {
     : undefined;
   const finalSummary = buildFinalSummary(payload.summary, payload.transcript, confirmationEmail);
   const report = await storeCallReport({
+    previousContactName: payload.previousContactName,
+    successorContactName: payload.successorContactName,
     callSource: payload.callSource,
     userId: payload.userId,
     phoneNumberId: payload.phoneNumberId,

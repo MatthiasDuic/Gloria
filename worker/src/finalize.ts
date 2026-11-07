@@ -4,7 +4,7 @@ import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 import { classifyCallbackDirection } from "./callback-controller.js";
 import { isConversationEndingText } from "./conversation-event-controller.js";
-import { enqueueReport, flushOutbox } from "./report-outbox.js";
+import { deliverReport, flushOutbox } from "./report-outbox.js";
 
 const transcriptProgress = new WeakMap<CallContext, { saved: number; pending: Promise<void> }>();
 
@@ -377,6 +377,8 @@ export async function postReport(ctx: CallContext): Promise<void> {
     topic: ctx.topic,
     summary,
     outcome,
+    previousContactName: ctx.successorContactName ? ctx.originalContactName : undefined,
+    successorContactName: ctx.successorContactName,
     doNotCall: Boolean(ctx.optOut),
     dataDeletionRequested: Boolean(ctx.optOut?.deletion),
     resultDetail: deriveResultDetail(ctx, outcome),
@@ -392,11 +394,11 @@ export async function postReport(ctx: CallContext): Promise<void> {
     recordingConsent,
     transcript: transcriptEntries,
   };
-  const finalPosted = await postWithRetry(url, headers, finalBody);
+  const finalPosted = await deliverReport(ctx.callSid || `report-${Date.now()}`, finalBody,
+    (body) => postWithRetry(url, headers, body, isAcceptedReportResponse));
   if (finalPosted) log.info("finalize.final_posted", { callSid: ctx.callSid, outcome });
   else {
     log.error("finalize.final_post_failed", { callSid: ctx.callSid, outcome });
-    await enqueueReport(ctx.callSid || `report-${Date.now()}`, finalBody);
   }
 }
 
@@ -416,8 +418,15 @@ export async function flushPendingReports(): Promise<void> {
   const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   if (!baseUrl) return;
   const { url, headers } = reportWebhookTarget(baseUrl);
-  const result = await flushOutbox((body) => postWithRetry(url, headers, body, undefined, { maxAttempts: 1, timeoutMs: 20_000 }));
+  const result = await flushOutbox((body) => postWithRetry(url, headers, body, isAcceptedReportResponse, { maxAttempts: 1, timeoutMs: 20_000 }));
   if (result.sent || result.pending || result.dropped) log.info("outbox.flush", result);
+}
+
+function isAcceptedReportResponse(text: string): boolean {
+  const payload: unknown = JSON.parse(text);
+  return typeof payload === "object" && payload !== null
+    && "ok" in payload && payload.ok === true
+    && !("skipped" in payload && payload.skipped === true);
 }
 
 async function postWithRetry(

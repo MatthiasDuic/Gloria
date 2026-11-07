@@ -9,7 +9,13 @@ services:
     startCommand: node dist/index.js
     autoDeploy: true
     maxShutdownDelaySeconds: 300
+    disk:
+      name: gloria-report-outbox
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
+      - key: GLORIA_OUTBOX_DIR
+        value: /var/data/gloria-outbox
       - key: NODE_VERSION
         value: 20
       - key: PORT

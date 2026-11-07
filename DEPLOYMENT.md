@@ -16,7 +16,7 @@ Vercel (Next.js, gloria.agentur-duic-sprockhoevel.de)
 Render-Worker (gloria-tebr.onrender.com, /telnyx-stream)
   ├─ OpenAI Realtime gpt-realtime-2.1 (Hören, Transkript, Dialog, Tools)
   ├─ ElevenLabs eleven_v4_turbo (Stimme), Ersatzstimme OpenAI TTS
-  └─ Bericht an die App (/api/reports, mit Wiederholungen)
+  └─ Bericht an die App (/api/calls/webhook, persistente Outbox auf Render-Disk)
 ```
 
 Alle Anrufe – Kampagne, Wiedervorlage, CRM und manuell – laufen über dieselbe
@@ -35,8 +35,16 @@ Prüfung nach dem Deploy:
 curl -s https://gloria-tebr.onrender.com/readyz
 ```
 
-`ok: true`, `blocking: false` und eine leere `issues`-Liste bedeuten: Gloria ist
-startklar.
+`ok: true`, `blocking: false`, `reportStorageReady: true` und eine leere
+`issues`-Liste bestätigen die technische Vorabprüfung. Fehlende, fehlerhafte
+oder nicht erreichbare Prüfungen erlauben keinen Anruf.
+
+Der Worker benötigt die in `render.yaml` definierte persistente 1-GB-Disk
+unter `/var/data`. Bei einem manuell angelegten Render-Service muss sie im
+Dashboard unter **Disk** angelegt werden; ein Git-Push allein richtet sie
+nicht ein. Die Outbox überlebt Neustarts und wird nach erfolgreicher
+Zustellung geleert. Die Disk kostet derzeit 0,25 USD/Monat und deaktiviert
+Zero-Downtime-Deployments sowie mehrere Worker-Instanzen.
 
 ## Umgebungsvariablen
 

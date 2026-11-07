@@ -276,7 +276,7 @@ export class CallOwnerIdentityError extends Error {
   }
 }
 
-/** Thrown before dialling when a voice provider certainly cannot serve the call (no credits, invalid key). */
+/** A failed readiness or preparation check must pause the campaign before dialing. */
 export class ProviderOutageError extends Error {
   constructor(readonly issues: string[]) {
     super(`Gloria ist nicht startklar: ${issues.join(", ")}. Bitte Guthaben bzw. Zugang prüfen.`);
@@ -405,12 +405,12 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
   }
 
   const topicProfileLoaded = Boolean(preparation?.topicProfileLoaded);
-  if (!preparation || !topicProfileLoaded) {
+  if (!preparation?.ready || !topicProfileLoaded) {
     const reason =
       lastPrepareError instanceof Error
         ? lastPrepareError.message
         : "Initialisierung ist nicht rechtzeitig fertig geworden.";
-    throw new Error(`RUNTIME_NOT_READY: ${reason}`);
+    throw new ProviderOutageError([`Gesprächsvorbereitung fehlgeschlagen: ${reason}`]);
   }
 
   if (isCampaign && !isWithinCampaignHours()) {

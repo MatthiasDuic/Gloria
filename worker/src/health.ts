@@ -1,4 +1,5 @@
 import { fetch } from "undici";
+import { log } from "./log.js";
 import { classifyProviderFailure, clearServiceOutage, getServiceOutage, markServiceOutage, serviceStatusVersion } from "./service-status.js";
 
 export type DependencyHealth = {
@@ -14,7 +15,7 @@ type CachedHealth = {
   dependencies: DependencyHealth;
   /** Human-readable problems for the app (German, shown to the user). */
   issues: string[];
-  /** True when calls would certainly fail (exhausted credits or invalid keys), as opposed to a transient check failure. */
+  /** New calls require a confirmed healthy dependency chain. */
   blocking: boolean;
   statusVersion?: number;
 };
@@ -22,15 +23,20 @@ type CachedHealth = {
 let cachedHealth: CachedHealth | undefined;
 let pendingCheck: Promise<CachedHealth> | undefined;
 
-async function check(url: string, headers: Record<string, string>, acceptedStatuses: number[] = []): Promise<boolean> {
+async function check(url: string, headers: Record<string, string>): Promise<boolean> {
   try {
     const response = await fetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(5_000),
     });
-    return response.ok || acceptedStatuses.includes(response.status);
-  } catch {
+    const service = url.includes("api.openai.com") ? "openai" : url.includes("api.elevenlabs.io") ? "elevenlabs" : undefined;
+    if (service && response.status === 401) markServiceOutage(service, "auth", `health ${response.status}`);
+    else if (service && response.ok && getServiceOutage(service)?.kind === "auth") clearServiceOutage(service);
+    await response.body?.cancel();
+    return response.ok;
+  } catch (error) {
+    log.warn("health.reachability_failed", { url, error: String(error) });
     return false;
   }
 }
@@ -39,27 +45,27 @@ async function performDependencyCheck(): Promise<CachedHealth> {
   const openAiKey = process.env.OPENAI_API_KEY?.trim();
   const telnyxKey = process.env.TELNYX_API_KEY?.trim();
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY?.trim();
-  const [openaiReachable, telnyx, elevenlabsReachable] = await Promise.all([
+  const [openaiReachable, telnyx, elevenlabsReachable, openaiCreditsReady] = await Promise.all([
     openAiKey
       ? check("https://api.openai.com/v1/models", { Authorization: `Bearer ${openAiKey}` })
       : Promise.resolve(false),
     telnyxKey
-      ? check("https://api.telnyx.com/v2/phone_numbers", { Authorization: `Bearer ${telnyxKey}` }, [401])
+      ? check("https://api.telnyx.com/v2/phone_numbers", { Authorization: `Bearer ${telnyxKey}` })
       : Promise.resolve(false),
     elevenLabsKey
       ? check("https://api.elevenlabs.io/v1/voices", { "xi-api-key": elevenLabsKey })
       : Promise.resolve(false),
-    openAiKey ? probeOpenAiCredits(openAiKey) : Promise.resolve(),
+    openAiKey ? probeOpenAiCredits(openAiKey) : Promise.resolve(false),
     elevenLabsKey ? probeElevenLabsCredits(elevenLabsKey) : Promise.resolve(),
   ]);
   return {
     checkedAt: Date.now(),
-    reachable: { openai: openaiReachable, telnyx, elevenlabs: elevenlabsReachable },
-    ...evaluateDependencyHealth({ openai: openaiReachable, telnyx, elevenlabs: elevenlabsReachable }),
+    reachable: { openai: openaiReachable && openaiCreditsReady, telnyx, elevenlabs: elevenlabsReachable },
+    ...evaluateDependencyHealth({ openai: openaiReachable && openaiCreditsReady, telnyx, elevenlabs: elevenlabsReachable }),
   };
 }
 
-/** Combines reachability with known provider outages; only outages that make every call fail are blocking. */
+/** Combines reachability and successful credit probes with known provider outages. */
 export function evaluateDependencyHealth(reachable: DependencyHealth): Pick<CachedHealth, "dependencies" | "issues" | "blocking"> {
   const openAiOutage = getServiceOutage("openai");
   const elevenLabsOutage = getServiceOutage("elevenlabs");
@@ -76,17 +82,19 @@ export function evaluateDependencyHealth(reachable: DependencyHealth): Pick<Cach
       elevenlabs: reachable.elevenlabs && !elevenLabsOutage,
     },
     issues,
-    blocking: Boolean(openAiOutage || elevenLabsOutage),
+    blocking: Boolean(openAiOutage || elevenLabsOutage) || !dependenciesAreReady(reachable),
   };
 }
 
 let lastCreditProbeAt = 0;
+let lastCreditProbeSucceeded = false;
 
 /** A one-token request is the only reliable way to notice exhausted OpenAI credits; the models endpoint still answers. */
-async function probeOpenAiCredits(apiKey: string): Promise<void> {
+async function probeOpenAiCredits(apiKey: string): Promise<boolean> {
   const intervalMs = Number.parseInt(process.env.OPENAI_CREDIT_PROBE_MS?.trim() || "300000", 10);
-  if (Date.now() - lastCreditProbeAt < intervalMs && !getServiceOutage("openai")) return;
+  if (Date.now() - lastCreditProbeAt < intervalMs && lastCreditProbeSucceeded && !getServiceOutage("openai")) return true;
   lastCreditProbeAt = Date.now();
+  lastCreditProbeSucceeded = false;
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -99,17 +107,21 @@ async function probeOpenAiCredits(apiKey: string): Promise<void> {
       signal: AbortSignal.timeout(8_000),
     });
     if (response.ok) {
+      await response.body?.cancel();
       clearServiceOutage("openai");
-      return;
+      lastCreditProbeSucceeded = true;
+      return true;
     }
     const body = await response.text().catch(() => "");
     const failure = response.status === 401 ? "auth" : classifyProviderFailure(body);
     if (failure && (response.status === 401 || response.status === 403 || response.status === 429)) {
       markServiceOutage("openai", failure, `probe ${response.status}: ${body}`);
     }
-  } catch {
-    // Network problems are covered by the reachability check.
+    log.warn("health.credit_probe_failed", { status: response.status, failure });
+  } catch (error) {
+    log.warn("health.credit_probe_failed", { error: String(error) });
   }
+  return false;
 }
 
 async function probeElevenLabsCredits(apiKey: string): Promise<void> {

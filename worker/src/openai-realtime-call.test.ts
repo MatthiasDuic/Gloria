@@ -308,7 +308,7 @@ test("answers 'Woher haben Sie meine Nummer?' at reception honestly and keeps th
     await waitForTtsRequests(ttsRequests, 1);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Woher haben Sie überhaupt unsere Nummer?" });
     await waitForTtsRequests(ttsRequests, 2);
-    assert.match(requestedSpeech(ttsRequests)[1], /^Herr Testberater hat Ihr Unternehmen im Rahmen seiner eigenen Unternehmensrecherche ausgewählt/);
+    assert.match(requestedSpeech(ttsRequests)[1], /^Die genaue Herkunft Ihrer Kontaktdaten ist mir nicht hinterlegt\. Herr Testberater kann Ihnen dazu Auskunft geben\./);
     assert.match(requestedSpeech(ttsRequests)[1], /nehme ich Sie selbstverständlich aus der Liste\.$/);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -1671,13 +1671,13 @@ test("introduces Gloria as the user's AI assistant with the configured company p
 test("answers data-source, AI identity and opt-out situations honestly and per user", () => {
   const statement = "Herr Duic hat eine Liste mit erfolgreichen Unternehmen zusammengestellt, teilweise durch eigene Recherche und teilweise über die Creditreform";
   assert.equal(buildDataSourceAnswer({ ownerRealName: "Matthias Duic", ownerDataSourceStatement: statement }), `${statement}.`);
-  assert.match(buildDataSourceAnswer({ ownerRealName: "Matthias Duic" }), /^Herr Matthias Duic hat Ihr Unternehmen im Rahmen seiner eigenen Unternehmensrecherche ausgewählt/);
-  assert.match(buildDataSourceAnswer({ ownerRealName: "Frau Anna Muster" }), /im Rahmen ihrer eigenen Unternehmensrecherche.*gibt sie Ihnen/);
+  assert.match(buildDataSourceAnswer({ ownerRealName: "Matthias Duic" }), /nicht hinterlegt\. Herr Matthias Duic kann Ihnen dazu Auskunft geben/);
+  assert.match(buildDataSourceAnswer({ ownerRealName: "Frau Anna Muster" }), /nicht hinterlegt\. Frau Anna Muster kann Ihnen dazu Auskunft geben/);
   assert.match(DATA_SOURCE_LIST_OFFER, /aus der Liste/);
   const ctx = newContext({ callSid: "test-data-source", streamSid: "test-stream", topic: "Gesundheitskosten", ownerRealName: "Matthias Duic", ownerDataSourceStatement: statement });
   assert.ok(buildRealtimeInstructions(ctx).includes(statement));
 
-  assert.match(buildAiIdentityAnswer({ ownerRealName: "Matthias Duic" }), /^Ja, ich bin eine KI-Assistentin und rufe im Auftrag von Herrn Matthias Duic an\. Ein Termin findet dann persönlich mit ihm statt\.$/);
+  assert.match(buildAiIdentityAnswer({ ownerRealName: "Matthias Duic" }), /^Ja, ich bin eine KI-Assistentin und rufe im Auftrag von Herrn Matthias Duic an\. Bei einem Termin sprechen Sie mit ihm, nicht mit einer KI\.$/);
   assert.match(buildOptOutFarewell({ ownerRealName: "Matthias Duic" }, true), /Löschwunsch an Herrn Matthias Duic weiter.*Auf Wiederhören\.$/);
   assert.equal(buildOptOutFarewell({ ownerRealName: "Matthias Duic" }, false),
     "Selbstverständlich. Ich habe notiert, dass wir Sie nicht mehr anrufen. Entschuldigen Sie die Störung. Auf Wiederhören.");

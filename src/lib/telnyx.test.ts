@@ -3,7 +3,7 @@ import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test, { mock } from "node:test";
 import { Pool } from "pg";
 import { createTelnyxCall, encodeTelnyxClientState, ProviderOutageError, resolveCallOwnerIdentity } from "./telnyx";
-import { resetWorkerReadinessCacheForTests } from "./telephony-runtime";
+import { getBlockingWorkerIssues, resetWorkerReadinessCacheForTests } from "./telephony-runtime";
 import { CampaignOutsideHoursError } from "./campaign-schedule";
 import { extractTelnyxPublicKey, verifyTelnyxWebhook } from "./telnyx-webhook-auth";
 import { resultDetailForUnansweredHangup } from "./telnyx-hangup";
@@ -206,6 +206,29 @@ test("rejects malformed owner phone values instead of making up a number from em
   }
 });
 
+test("unknown, malformed and unhealthy readiness never permit dialing", async () => {
+  const scenarios = [
+    () => Response.json({ ok: true, blocking: false, issues: [] }),
+    () => Response.json({ ok: false, blocking: false, issues: ["OpenAI nicht erreichbar"] }, { status: 503 }),
+    () => Response.json({ ok: true }, { status: 200 }),
+    () => new Response("<html>Unavailable</html>", { status: 502 }),
+    () => { throw new Error("Network timeout"); },
+  ];
+  try {
+    for (const [index, response] of scenarios.entries()) {
+      resetWorkerReadinessCacheForTests();
+      const request = mock.method(globalThis, "fetch", async () => response());
+      const issues = await getBlockingWorkerIssues();
+      if (index === 0) assert.equal(issues, null);
+      else assert.ok(issues?.length, `Scenario ${index} must block calls`);
+      request.mock.restore();
+    }
+  } finally {
+    mock.restoreAll();
+    resetWorkerReadinessCacheForTests();
+  }
+});
+
 test("a blocking provider outage on the worker stops the call before Telnyx dials", async () => {
   const keys = ["DATABASE_URL", "TELNYX_API_KEY", "TELNYX_CONNECTION_ID", "TELNYX_PHONE_NUMBER", "APP_BASE_URL", "APP_INTERNAL_TOKEN", "OPENAI_API_KEY", "WORKER_HEALTHCHECK_URL"] as const;
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -308,6 +331,7 @@ test("call dispatch refreshes the owner's role, name and callback number from th
   let state: { ownerRole?: string; ownerRealName?: string; ownerRealPhone?: string; userId?: string } | undefined;
   mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith("/readyz")) return Response.json({ ok: true, blocking: false, issues: [] });
     if (url.includes("/api/telnyx/topic-policies")) {
       return Response.json({ topicPolicies: [{ topic: "Test", opener: "", discovery: "", objectionHandling: "", close: "" }] });
     }
