@@ -1,7 +1,7 @@
 import type { CallSource, Topic } from "./types";
 import { createHmac } from "node:crypto";
 import { CampaignOutsideHoursError, isWithinCampaignHours } from "./campaign-schedule";
-import { prepareCall } from "./telephony-runtime";
+import { getBlockingWorkerIssues, prepareCall } from "./telephony-runtime";
 import { findUserById, listPhoneNumbersByUser } from "./report-db";
 import { normalizePhoneForDial } from "./phone-utils";
 import { log } from "./log";
@@ -21,6 +21,8 @@ export interface TelnyxCallRequest {
   ownerRole?: UserRole;
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
+  ownerIntroCompanyPhrase?: string;
+  ownerDataSourceStatement?: string;
   voiceId?: string;
   isTestCall?: boolean;
   callSource?: CallSource;
@@ -94,23 +96,19 @@ function getAppBaseUrl(request?: Request): string {
   );
 }
 
-function getTelnyxMediaStreamUrl(): string {
+/** The worker only serves /telnyx-stream, so every configured stream URL is pinned to that path. */
+export function getTelnyxMediaStreamUrl(): string {
   const normalize = (raw?: string): string | undefined => {
     const value = raw?.trim();
     if (!value) return undefined;
-    const rewritten = value.replace("/twilio-stream", "/telnyx-stream");
     try {
-      const url = new URL(rewritten);
+      const url = new URL(value);
       if (url.protocol === "https:") url.protocol = "wss:";
       if (url.protocol === "http:") url.protocol = "ws:";
-      if (!url.pathname || url.pathname === "/") {
-        url.pathname = "/telnyx-stream";
-      } else if (url.pathname === "/twilio-stream") {
-        url.pathname = "/telnyx-stream";
-      }
+      url.pathname = "/telnyx-stream";
       return url.toString();
     } catch {
-      return rewritten;
+      return undefined;
     }
   };
 
@@ -159,6 +157,8 @@ export function encodeTelnyxClientState(payload: TelnyxCallRequest): string {
     ownerRole: payload.ownerRole,
     ownerCompanyName: payload.ownerCompanyName,
     ownerGesellschaft: payload.ownerGesellschaft,
+    ownerIntroCompanyPhrase: (payload.ownerIntroCompanyPhrase || "").slice(0, 160) || undefined,
+    ownerDataSourceStatement: (payload.ownerDataSourceStatement || "").slice(0, 500) || undefined,
     voiceId: payload.voiceId,
     isTestCall: payload.isTestCall === true,
     callSource: payload.callSource || (payload.isTestCall || !payload.leadId ? "manual" : "crm"),
@@ -276,7 +276,21 @@ export class CallOwnerIdentityError extends Error {
   }
 }
 
-export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realName: string; realPhone?: string; role: UserRole }> {
+/** Thrown before dialling when a voice provider certainly cannot serve the call (no credits, invalid key). */
+export class ProviderOutageError extends Error {
+  constructor(readonly issues: string[]) {
+    super(`Gloria ist nicht startklar: ${issues.join(", ")}. Bitte Guthaben bzw. Zugang prüfen.`);
+    this.name = "ProviderOutageError";
+  }
+}
+
+export async function resolveCallOwnerIdentity(userId?: string): Promise<{
+  realName: string;
+  realPhone?: string;
+  role: UserRole;
+  introCompanyPhrase?: string;
+  dataSourceStatement?: string;
+}> {
   const resolvedUserId = userId?.trim();
   if (!resolvedUserId) {
     throw new CallOwnerIdentityError("Der Anruf hat keinen zugeordneten Benutzer. Bitte den Kontakt einem Benutzer zuweisen.");
@@ -299,7 +313,13 @@ export async function resolveCallOwnerIdentity(userId?: string): Promise<{ realN
   const normalizedPhone = /^\+?[\d\s()./-]+$/.test(rawPhone) ? normalizePhoneForDial(rawPhone) : undefined;
   const realPhone = normalizedPhone && /^\+[1-9]\d{7,14}$/.test(normalizedPhone) ? normalizedPhone : undefined;
   if (rawPhone && !realPhone) log.warn("telnyx.call_owner_invalid_phone", { userId: resolvedUserId });
-  return { realName, realPhone, role: owner.role };
+  return {
+    realName,
+    realPhone,
+    role: owner.role,
+    introCompanyPhrase: owner.introCompanyPhrase?.trim() || undefined,
+    dataSourceStatement: owner.dataSourceStatement?.trim() || undefined,
+  };
 }
 
 export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Request) {
@@ -397,6 +417,11 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     throw new CampaignOutsideHoursError();
   }
 
+  const blockingIssues = await getBlockingWorkerIssues();
+  if (blockingIssues) {
+    throw new ProviderOutageError(blockingIssues);
+  }
+
   const apiBaseUrl = getTelnyxApiBaseUrl();
   const timeoutMs = Math.max(
     3_000,
@@ -410,7 +435,14 @@ export async function createTelnyxCall(payload: TelnyxCallRequest, request?: Req
     ...(payload.queueId ? { command_id: payload.queueId } : {}),
     to: payload.to,
     from,
-    client_state: encodeTelnyxClientState({ ...payload, ownerRealName: owner.realName, ownerRealPhone: owner.realPhone, ownerRole: owner.role }),
+    client_state: encodeTelnyxClientState({
+      ...payload,
+      ownerRealName: owner.realName,
+      ownerRealPhone: owner.realPhone,
+      ownerRole: owner.role,
+      ownerIntroCompanyPhrase: owner.introCompanyPhrase,
+      ownerDataSourceStatement: owner.dataSourceStatement,
+    }),
   };
 
   let response: Response;

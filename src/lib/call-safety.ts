@@ -11,8 +11,22 @@ async function database() {
   return pool;
 }
 
+const LIST_NOUN = String.raw`(?:anruf|kontakt|kunden|adress|telefon)?(?:liste|datenbank|kartei|verteiler|datei)`;
+
+/** Mirrors the worker's opt-out detection (worker/src/conversation-event-controller.ts) as a server-side safety net. */
+export function isDataDeletionRequest(text: string): boolean {
+  return /\bl[öo]schen\s+sie\b/i.test(text)
+    || /\b(?:daten|nummer|telefonnummer|kontaktdaten|angaben|adresse)\b[^.!?]{0,40}\b(?:l[öo]schen|gel[öo]scht|entfernen|entfernt)\b/i.test(text)
+    || /\b(?:l[öo]schen|entfernen)\b[^.!?]{0,30}\b(?:meine|unsere|die|alle)\s+(?:daten|nummer|telefonnummer|kontaktdaten|angaben)\b/i.test(text)
+    || /\bwiderspreche\b[^.!?]{0,50}\b(?:daten|nutzung|verarbeitung|speicherung|verwendung)\b/i.test(text)
+    || /\bwiderspruch\s+gegen\b[^.!?]{0,40}\b(?:daten|nutzung|verarbeitung|speicherung|verwendung)\b/i.test(text);
+}
+
 export function isDoNotCallRequest(text: string): boolean {
-  return /nicht\s+mehr\s+anrufen|rufen\s+sie\s+(?:mich\s+)?(?:bitte\s+)?nicht\s+mehr\s+an|keine\s+(?:weiteren\s+)?(?:werbe)?anrufe|streichen\s+sie\s+mich|nummer\s+l[öo]schen/i.test(text);
+  if (isDataDeletionRequest(text)) return true;
+  return /\bnicht\s+mehr\s+an(?:rufen|zurufen)\b|\bnie\s+wieder\s+an(?:rufen|zurufen)?\b|\brufen\s+sie\s+(?:mich|uns|hier)?\s*(?:bitte\s+)?(?:nie\s+wieder|nicht\s+mehr|nie\s+mehr)\s+an\b|\bkeine\s+(?:weiteren\s+)?(?:werbe)?anrufe\b|\bkeine\s+werbung\b|\bstreichen\s+sie\s+(?:mich|uns|meine|unsere|die)\b|\bnummer\s+l[öo]schen\b|\bh[öo]ren\s+sie\s+auf,?\s+(?:mich|uns|hier)\s+anzurufen\b|\bwiderspreche\b[^.!?]{0,40}\bwerbung\b/i.test(text)
+    || (new RegExp(String.raw`\b(?:aus|von)\s+(?:ihrer|der|eurer|dieser|ihren|den)\s+${LIST_NOUN}`, "i").test(text)
+      && /\b(?:nehmen|streichen|l[öo]schen|entfernen|austragen|raus)\b/i.test(text));
 }
 
 export async function suppressPhoneNumber(userId: string, phone: string): Promise<void> {

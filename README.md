@@ -1,6 +1,6 @@
 # Gloria – KI-Assistentin für B2B-Neukundenakquise
 
-Dieses Projekt erstellt eine **einsatzbereite Admin-Oberfläche** für `Gloria`, die digitale Vertriebsassistentin im Auftrag von **Herrn Matthias Duic**.
+Dieses Projekt erstellt eine **einsatzbereite Admin-Oberfläche** für `Gloria`, die KI-Assistentin, die im Auftrag des jeweiligen Benutzers (Master: **Herr Matthias Duic**) telefoniert.
 
 ## 🚀 Produktionsstatus
 
@@ -235,7 +235,8 @@ Für automatische Wiedervorlagen ist ein Cron-Job vorkonfiguriert:
 
 Die in `worker/src/gloria-core-instructions.ts` hinterlegten Grundregeln sorgen dafür, dass Gloria:
 
-- sich direkt als **digitale Vertriebsassistentin** des zugeordneten Benutzers erkenntlich macht,
+- sich direkt als **KI-Assistentin** des zugeordneten Benutzers erkenntlich macht (Firmenzusatz und Datenherkunft pflegt der Master je Benutzer in der Benutzerverwaltung),
+- Widerspruch und Löschwünsche sofort respektiert (Nummer wird gesperrt),
 - am Empfang auf das tatsächlich Gesagte reagiert und während einer Weiterleitung schweigt,
 - keine Einwilligungen, Zahlen, Zusagen oder Rückrufnummern erfindet,
 - und frei auf den Gesprächspartner eingeht, statt ein Skript abzulesen.

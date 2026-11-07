@@ -19,6 +19,7 @@ import {
   findUserById,
   readLeadsFromPostgres,
   readReportDatabaseFromPostgres,
+  readReportByCallSidFromPostgres,
   readScriptsFromPostgres,
   readUserScriptsFromPostgres,
   writeCampaignListsStateToPostgres,
@@ -1836,9 +1837,11 @@ export async function storeCallReport(payload: {
     topic: payload.topic,
   });
 
-  const reportDb = await readReportDatabase();
-  const reports = reportDb.reports;
   const callSid = payload.callSid?.trim() || undefined;
+  // With Postgres only this call's report is rewritten, so loading every report of every user is unnecessary (webhook timeouts).
+  const reportDb = (callSid && isDatabaseUrlConfigured() ? await readReportByCallSidFromPostgres(callSid) : null)
+    || await readReportDatabase();
+  const reports = reportDb.reports;
 
   const existingIndex = callSid
     ? reports.findIndex((report) => report.callSid?.trim() === callSid)
@@ -2001,7 +2004,7 @@ export async function storeCallReport(payload: {
     // Auto-Retry bei "Kein Kontakt":
     // Nach Versuch 1 -> erneut in 1 Tag, nach Versuch 2 -> in 3 Tagen,
     // nach Versuch 3 -> endgueltig "absage". Nur anwenden, wenn der Report
-    // bereits existierte (= Update von Twilio-Status oder finalizeCall), um
+    // bereits existierte (= Update durch Telnyx-Status oder finalizeCall), um
     // den Initial-Platzhalter beim Kampagnen-Start nicht zu ueberschreiben.
     const isRetryable =
       payload.outcome === "Nicht erreicht / kein Kontakt" &&

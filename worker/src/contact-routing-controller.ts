@@ -18,10 +18,13 @@ export type ContactRoutingState = {
   gatekeeperReasonGiven?: boolean;
   awaitingAvailabilityAnswer?: boolean;
   availabilityFollowUpAsked?: boolean;
+  /** The target left the company and Gloria asked who is responsible now. */
+  awaitingSuccessorAnswer?: boolean;
+  successorQuestionAsked?: boolean;
 };
 
 export function isGatekeeperReasonQuestion(text: string): boolean {
-  return /\b(?:worum\s+(?:es\s+)?geht|um\s+was\s+geht|(?:worum|um\s+was)\s+handelt\s+es\s+sich|was\s+(?:genau\s+)?ist\s+(?:denn\s+)?(?:der\s+)?(?:grund|anlass)|was\s+(?:ist|wäre)\s+(?:denn\s+)?(?:ihr\s+)?anliegen|weshalb\s+rufen|warum\s+rufen)\b/i.test(text);
+  return /\b(?:worum\s+(?:es\s+)?geht|um\s+was\s+geht|(?:worum|um\s+was)\s+handelt\s+es\s+sich|was\s+(?:genau\s+)?ist\s+(?:denn\s+)?(?:der\s+)?(?:grund|anlass)|was\s+(?:ist|wäre)\s+(?:denn\s+)?(?:ihr\s+)?anliegen|weshalb\s+rufen|warum\s+rufen|in\s+welcher\s+angelegenheit|was\s+(?:wollen|möchten)\s+sie\s+(?:denn\s+)?(?:genau\s+)?(?:von\s+(?:ihm|ihr|herrn?\s+[a-zäöüß]+|frau\s+[a-zäöüß]+)|mit\s+(?:ihm|ihr))|weswegen\s+(?:rufen|möchten|wollen))\b/i.test(text);
 }
 
 export function getSpeakableCampaignReason(callObjective?: string): string | undefined {
@@ -69,11 +72,19 @@ export function buildGatekeeperTopic(
 function isNegatedTransfer(text: string): boolean {
   return text.split(/[,;.!?]|\b(?:aber|sondern)\b/i).some((part) => {
     const negated = /\b(?:nicht|nie|kein(?:e|en|er|em|es)?)\b/i.test(part);
-    const transferVerb = /\b(?:verbinden|verbinde|verbunden|weiterleiten|weiterleite|weitergeleitet|durchstellen|durchgestellt|weitergeben)\b/i.test(part)
-      || /\b(?:stelle|stellen|leite|leiten|gebe|geben|schalte|schalten)\b[^.!?]{0,100}\b(?:durch|weiter|zu)\b/i.test(part);
+    const transferVerb = /\b(?:verbinden|verbinde|verbunden|weiterleiten|weiterleite|weitergeleitet|durchstellen|durchgestellt|weitergeben|weiterreichen)\b/i.test(part)
+      || /\b(?:stelle|stellen|leite|leiten|gebe|geben|schalte|schalten|reiche|reichen)\b[^.!?]{0,100}\b(?:durch|weiter|zu)\b/i.test(part);
     return negated && transferVerb;
   });
 }
+
+const ORDINAL_DAY_WORDS = [
+  "", "ersten", "zweiten", "dritten", "vierten", "fünften", "sechsten", "siebten", "achten", "neunten", "zehnten",
+  "elften", "zwölften", "dreizehnten", "vierzehnten", "fünfzehnten", "sechzehnten", "siebzehnten", "achtzehnten",
+  "neunzehnten", "zwanzigsten", "einundzwanzigsten", "zweiundzwanzigsten", "dreiundzwanzigsten", "vierundzwanzigsten",
+  "fünfundzwanzigsten", "sechsundzwanzigsten", "siebenundzwanzigsten", "achtundzwanzigsten", "neunundzwanzigsten",
+  "dreißigsten", "einunddreißigsten",
+];
 
 const RETRY_WEEKDAYS = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"];
 
@@ -86,6 +97,16 @@ export function extractRetryTimePhrase(text: string): string | undefined {
   const weeks = normalized.match(/\bin\s+(2|3|4|zwei|drei|vier)\s+wochen\b/);
   if (weeks) return `in ${numberWords[weeks[1]]} Wochen`;
   if (/\b(?:nächste[nr]?|kommende[nr]?)\s+monat\b/.test(normalized)) return "nächsten Monat";
+  if (/\bbis\s+(?:zum\s+)?ende\s+des\s+monats\b/.test(normalized)) return "Anfang nächsten Monats";
+  if (/\bende\s+des\s+monats\b/.test(normalized)) return "Ende des Monats";
+  if (/\bbis\s+(?:zum\s+)?ende\s+der\s+woche\b|\b(?:den\s+)?rest\s+der\s+woche\b|\bdiese\s+woche\s+(?:nicht|noch\s+(?:im\s+)?urlaub|im\s+urlaub|krank|weg|unterwegs|auf\s+(?:geschäfts|dienst)reise)\b/.test(normalized)) {
+    return "nächste Woche";
+  }
+  if (/\bende\s+der\s+woche\b/.test(normalized)) return "Ende der Woche";
+  const untilDay = normalized.match(/\bbis\s+(?:zum|einschließlich)\s+(\d{1,2})\.?(?!\d)/);
+  if (untilDay && ORDINAL_DAY_WORDS[Number(untilDay[1])]) return `nach dem ${ORDINAL_DAY_WORDS[Number(untilDay[1])]}`;
+  const fromDay = normalized.match(/\bab\s+(?:dem\s+)?(\d{1,2})\.(?!\d)/);
+  if (fromDay && ORDINAL_DAY_WORDS[Number(fromDay[1])]) return `ab dem ${ORDINAL_DAY_WORDS[Number(fromDay[1])]}`;
   if (/\bnach\s+(?:dem|seinem|ihrem)\s+urlaub\b/.test(normalized)) return "nach dem Urlaub";
   if (/\bübermorgen\b/.test(normalized)) return "übermorgen";
   const dayPart = normalized.match(/\b(heute|morgen)\s+(vormittag|nachmittag|früh|abend)\b/);
@@ -123,7 +144,31 @@ export function buildRetryFarewell(text: string, prefix = "Vielen Dank"): string
 
 export function isGatekeeperUnavailable(text: string): boolean {
   return isNegatedTransfer(text)
-    || /\b(?:nicht\s+(?:da|erreichbar|zu\s+sprechen|im\s+haus|verfügbar|im\s+büro)|außer\s+haus|abwesend|im\s+termin|im\s+urlaub|(?:hat|habe|haben)\s+(?:gerade\s+|diese\s+woche\s+|noch\s+)*(?:keine\s+zeit|urlaub)|krank|in\s+elternzeit)\b/i.test(text);
+    || isContactNoLongerAtCompany(text)
+    || /\b(?:nicht\s+(?:da|erreichbar|zu\s+sprechen|im\s+haus|verfügbar|im\s+büro|am\s+platz)|außer\s+haus|abwesend|im\s+termin|im\s+urlaub|(?:hat|habe|haben)\s+(?:gerade\s+|diese\s+woche\s+|noch\s+)*(?:keine\s+zeit|urlaub)|krank|in\s+elternzeit|in\s+(?:mutterschutz|kur|reha)|im\s+(?:meeting|homeoffice|home-office|außendienst)|in\s+(?:einer|der)\s+(?:besprechung|sitzung|konferenz)|in\s+besprechung|auf\s+(?:geschäfts|dienst)reise|auf\s+(?:montage|der\s+baustelle|einer\s+messe|messe)|in\s+der\s+mittagspause|(?:schon|bereits)\s+(?:im|in\s+den)\s+feierabend|telefoniert\s+gerade|(?:ist|sitzt)\s+gerade\s+(?:am\s+telefon|im\s+gespräch|in\s+einem\s+gespräch)|in\s+einem\s+telefonat|beim\s+kunden|kommt\s+erst\s+(?:morgen|später|nächste|am|nach|wieder))\b/i.test(text);
+}
+
+/** The requested person has left the company (or is unknown there) – asking "wann erreiche ich ihn" makes no sense. */
+export function isContactNoLongerAtCompany(text: string): boolean {
+  if (/\bheute\b/i.test(text) && !/\bausgeschieden|ruhestand|rente\b/i.test(text)) return false;
+  return /\bnicht\s+mehr\s+(?:bei\s+uns|im\s+unternehmen|in\s+(?:der|unserer)\s+firma|im\s+betrieb|für\s+uns\s+tätig|hier\s+(?:beschäftigt|tätig|angestellt))\b|\barbeitet\s+(?:schon\s+lange\s+|leider\s+)?nicht\s+mehr\s+(?:hier|bei\s+uns|für\s+uns)\b|\bhat\s+(?:das\s+unternehmen|die\s+firma|uns|den\s+betrieb)\s+(?:schon\s+|bereits\s+|leider\s+)?verlassen\b|\b(?:ist|sind)\s+(?:schon\s+|bereits\s+|leider\s+)?(?:ausgeschieden|in\s+(?:rente|den\s+ruhestand)\s+gegangen|im\s+ruhestand|in\s+rente|verstorben)\b|\bgibt\s+es\s+(?:hier|bei\s+uns)\s+(?:nicht|keine[nr]?)\b|\b(?:kenne|kennen)\s+(?:ich|wir)\s+(?:hier\s+)?nicht\b|\b(?:so\s+)?(?:jemand(?:en)?|niemand(?:en)?)\s+(?:mit\s+(?:dem|diesem)\s+namen\s+)?(?:gibt\s+es|haben\s+wir)\s+(?:hier\s+)?(?:nicht|keine?n?)\b|\bfalsch\s+verbunden\b/i.test(text);
+}
+
+/** "Das macht jetzt Frau Meier" / "Ich verbinde Sie mit Herrn Schulz" → "Frau Meier" / "Herr Schulz". */
+export function extractSuccessorName(text: string): string | undefined {
+  const name = String.raw`(herrn?|frau)\s+([A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?)`;
+  const patterns = [
+    new RegExp(String.raw`\b(?:zuständig\s+ist|zuständig\s+wäre|nachfolger(?:in)?\s+ist|das\s+(?:macht|übernimmt|betreut|regelt)|ansprechpartner(?:in)?\s+ist|sprechen\s+sie\s+(?:am\s+besten|lieber|bitte)?\s*mit|wenden\s+sie\s+sich\s+an|(?:verbinde|stelle|gebe)\s+(?:sie|ihnen)\s+(?:gern(?:e)?\s+)?(?:mit|zu|an)?)\s+(?:(?:jetzt|nun|inzwischen|mittlerweile|aktuell|dann|gerne?)\s+)*${name}`, "i"),
+    new RegExp(String.raw`\b${name}\s+(?:hat|ist)\s+(?:das|den\s+bereich|seine\s+aufgaben|ihre\s+aufgaben|die\s+aufgaben)?\s*(?:übernommen|zuständig|jetzt\s+zuständig|nachfolger(?:in)?)\b`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const surname = match[2];
+    if (NON_NAME_WORDS.has(surname.toLowerCase())) continue;
+    return `${/^frau$/i.test(match[1]) ? "Frau" : "Herr"} ${surname}`;
+  }
+  return undefined;
 }
 
 export function classifyReceptionTransfer(text: string): "offered" | "in_progress" | null {
@@ -137,7 +182,15 @@ export function classifyReceptionTransfer(text: string): "offered" | "in_progres
     || /\b(?:ich|wir)\s+(?:leite|leiten|gebe|geben)\s+(?:sie|dich|den\s+anruf|das\s+gespräch)\b[^.!?]{0,100}\bweiter\b/i.test(text)
     || /\b(?:ich|wir)\s+(?:werde|werden)\s+(?:sie|dich|den\s+anruf|das\s+gespräch)\b[^.!?]{0,100}\b(?:verbinden|weiterleiten|durchstellen|weitergeben)\b/i.test(text)
     || /\b(?:sie|ihr\s+anruf|das\s+gespräch)\s+w(?:ird|erden)\s+(?:jetzt\s+)?(?:weitergeleitet|verbunden|durchgestellt)\b/i.test(text)
-    || /\b(?:ich|wir)\s+(?:hole|holen)\s+(?:ihn|sie|den\s+kollegen|die\s+kollegin)\b/i.test(text)) {
+    || /\b(?:ich|wir)\s+(?:hole|holen|hol)\s+(?:ihn|sie|den\s+kollegen|die\s+kollegin|den\s+chef|die\s+chefin|herrn?\s+[a-zäöüß]+|frau\s+[a-zäöüß]+)\b(?![^.!?]{0,30}\b(?:stift|zettel|papier|unterlagen|akte)\b)/i.test(text)
+    || /\b(?:ich|wir)\s+(?:reiche|reichen)\s+(?:sie|dich|den\s+hörer|das\s+telefon|das\s+gespräch|mal|kurz|gleich|jetzt)\b[^.!?]{0,40}\bweiter\b/i.test(text)
+    || /\b(?:ich|wir)\s+(?:übergebe|übergeben)\s+(?:sie|dich|den\s+hörer|das\s+telefon|das\s+gespräch|an\s+(?:herrn?|frau|den|die))\b(?![^.!?]{0,30}\b(?:nachricht|anliegen|info))/i.test(text)
+    || /\b(?:ich|wir)\s+(?:gebe|geben)\s+ihnen\s+(?:mal\s+|gleich\s+|jetzt\s+|kurz\s+|eben\s+)?(?:herrn?|frau|den\s+(?:chef|kollegen|herrn)|die\s+(?:chefin|kollegin))\b(?![^.!?]{0,30}\b(?:nummer|durchwahl|adresse|mail)\b)/i.test(text)
+    || /\b(?:ich|wir)\s+(?:gebe|geben)\s+(?:den\s+hörer|das\s+telefon)\s+(?:mal\s+|gleich\s+|kurz\s+)?weiter\b/i.test(text)
+    || /\b(?:er|sie|der\s+chef|die\s+chefin|(?:herr|frau)\s+[a-zäöüß]+)\s+kommt\s+(?:gleich|sofort|direkt)\s*(?:[.!,]|$)/i.test(text)
+    || /\bkommt\s+(?:gleich|sofort|jetzt|direkt)\s+(?:ans\s+telefon|an\s+den\s+apparat)\b/i.test(text)
+    || /\b(?:moment|augenblick|sekunde)\b[^.!?]{0,15}\b(?:er|sie)\s+kommt\s*(?:[.!,]|$)/i.test(text)
+    || /\bbleiben\s+sie\s+(?:bitte\s+)?(?:kurz\s+|mal\s+)?(?:dran|am\s+apparat|in\s+der\s+leitung)\b(?![^.!?]{0,40}\b(?:stift|zettel|notieren|aufschreiben|mitschreiben)\b)/i.test(text)) {
     return "in_progress";
   }
   const offered = text.split(/[.!?;]+/).some((part) =>

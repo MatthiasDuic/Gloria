@@ -5,7 +5,7 @@ import { getDashboardData } from "@/lib/storage";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type TelephonyProvider = "twilio" | "telnyx" | "unknown";
+type TelephonyProvider = "telnyx" | "unknown";
 
 function getConfiguredTelnyxHost(): string {
   try {
@@ -16,10 +16,6 @@ function getConfiguredTelnyxHost(): string {
 }
 
 function detectProvider(hostname: string): TelephonyProvider {
-  if (hostname === "api.twilio.com" || hostname.endsWith(".twilio.com")) {
-    return "twilio";
-  }
-
   if (
     hostname === getConfiguredTelnyxHost() ||
     hostname.endsWith(".telnyx.com") ||
@@ -44,7 +40,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Kein URL-Parameter angegeben." }, { status: 400 });
   }
 
-  // Only proxy authentic Twilio recording URLs
+  // Only proxy authentic Telnyx recording URLs
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(url);
@@ -72,18 +68,6 @@ export async function GET(request: NextRequest) {
 
   const headers: Record<string, string> = {};
 
-  if (provider === "twilio") {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
-    const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
-
-    if (!accountSid || !authToken) {
-      return NextResponse.json({ error: "Twilio-Zugangsdaten nicht konfiguriert." }, { status: 503 });
-    }
-
-    const credentials = btoa(`${accountSid}:${authToken}`);
-    headers.Authorization = `Basic ${credentials}`;
-  }
-
   if (provider === "telnyx") {
     const isApiHost =
       parsedUrl.hostname === getConfiguredTelnyxHost() ||
@@ -102,9 +86,8 @@ export async function GET(request: NextRequest) {
     const providerResponse = await fetch(url, { headers });
 
     if (!providerResponse.ok) {
-      const providerLabel = provider === "telnyx" ? "Telnyx" : "Twilio";
       return NextResponse.json(
-        { error: `${providerLabel} antwortete mit ${providerResponse.status}.` },
+        { error: `Telnyx antwortete mit ${providerResponse.status}.` },
         { status: providerResponse.status },
       );
     }

@@ -17,9 +17,20 @@ export type RealtimeServerEvent = {
     phase?: string;
     name?: string;
   };
-  error?: { message?: string };
+  error?: { message?: string; code?: string; type?: string };
   response?: {
     status?: string;
+    status_details?: {
+      type?: string;
+      reason?: string;
+      error?: { type?: string; code?: string; message?: string };
+    };
+    usage?: {
+      total_tokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      input_token_details?: { cached_tokens?: number; text_tokens?: number; audio_tokens?: number };
+    };
     output?: Array<{
       id?: string;
       type?: string;
@@ -86,6 +97,7 @@ export class OpenAiRealtimeSession {
         const event = JSON.parse(data.toString()) as RealtimeServerEvent;
         if (event.type === "session.updated" && !this.ready) {
           this.ready = true;
+          this.reconnectAttempts = 0;
           for (const audio of this.queuedAudio.splice(0)) this.send({ type: "input_audio_buffer.append", audio });
           this.options.onReady?.();
         }

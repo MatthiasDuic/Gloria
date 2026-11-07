@@ -5,6 +5,7 @@ import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-clas
 test("distinguishes closed-office announcements from an unavailable named person", () => {
   assert.equal(classifyInboundSpeech("Unser Büro ist momentan nicht besetzt."), "voicemail");
   assert.equal(classifyInboundSpeech("Herr Schneider ist momentan nicht erreichbar."), "human");
+  assert.equal(classifyInboundSpeech("Herr Neumann hat diese Woche noch Urlaub, frühestens nächste Woche."), "human");
 });
 
 test("classifies voicemail prompts", () => {
@@ -16,6 +17,10 @@ test("classifies voicemail prompts", () => {
     "Der Teilnehmer ist momentan nicht erreichbar.",
     "You have reached the voicemail of Mr. Biletzki.",
     "Please leave a message after the tone.",
+    "Sie rufen außerhalb unserer Geschäftszeiten an.",
+    "Unsere Öffnungszeiten sind montags bis freitags von acht bis siebzehn Uhr.",
+    "Die Person, die Sie anrufen, ist zurzeit nicht erreichbar.",
+    "Der gewünschte Gesprächspartner ist zurzeit nicht erreichbar.",
   ]) {
     assert.equal(classifyInboundSpeech(prompt), "voicemail", prompt);
   }

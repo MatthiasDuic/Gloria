@@ -215,6 +215,8 @@ export async function POST(request: Request) {
     resultDetail?: string;
     followUpPlanned?: boolean;
     followUpAt?: string;
+    doNotCall?: boolean;
+    dataDeletionRequested?: boolean;
   };
 
   const internalToken = process.env.APP_INTERNAL_TOKEN?.trim();
@@ -227,8 +229,8 @@ export async function POST(request: Request) {
   }
   payload.recordingConsent = false;
   payload.recordingUrl = undefined;
-  if (payload.userId && payload.calledPhone && Array.isArray(payload.transcript)
-    && payload.transcript.some((entry) => (entry.role === "user" || entry.speaker === "Interessent") && isDoNotCallRequest(entry.text || ""))) {
+  if (payload.userId && payload.calledPhone && (payload.doNotCall === true || (Array.isArray(payload.transcript)
+    && payload.transcript.some((entry) => (entry.role === "user" || entry.speaker === "Interessent") && isDoNotCallRequest(entry.text || ""))))) {
     await suppressPhoneNumber(payload.userId, payload.calledPhone);
   }
 
@@ -318,6 +320,7 @@ export async function POST(request: Request) {
         topic: payload.topic,
         summaryChunk: payload.summaryChunk,
         outcome: payload.outcome,
+        resultDetail: payload.resultDetail,
         appointmentAt: payload.appointmentAt,
         appointmentMode: payload.appointmentMode,
         calledPhone: payload.calledPhone,

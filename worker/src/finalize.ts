@@ -3,6 +3,8 @@ import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 import { classifyCallbackDirection } from "./callback-controller.js";
+import { isConversationEndingText } from "./conversation-event-controller.js";
+import { enqueueReport, flushOutbox } from "./report-outbox.js";
 
 const transcriptProgress = new WeakMap<CallContext, { saved: number; pending: Promise<void> }>();
 
@@ -52,7 +54,7 @@ export async function persistAppointmentBooking(ctx: CallContext, appointmentAt:
     const response = JSON.parse(text) as { report?: { appointmentAt?: string; outcome?: string } };
     return response.report?.outcome === "Termin"
       && Date.parse(response.report.appointmentAt || "") === Date.parse(appointmentAt);
-  });
+  }, { maxAttempts: 2, timeoutMs: 10_000 });
 }
 
 function wait(ms: number): Promise<void> {
@@ -259,12 +261,7 @@ export async function postReport(ctx: CallContext): Promise<void> {
     return;
   }
 
-  const token = process.env.APP_INTERNAL_TOKEN || "";
-  const url = `${baseUrl}/api/calls/webhook`;
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    ...(token ? { "x-gloria-internal-token": token } : {}),
-  };
+  const { url, headers } = reportWebhookTarget(baseUrl);
 
   const recordingConsent = detectRecordingConsent(ctx.transcript);
   const documentation = deriveReportDocumentation(ctx, null);
@@ -301,8 +298,12 @@ export async function postReport(ctx: CallContext): Promise<void> {
     company: ctx.company,
     calledPhone: ctx.calledPhone,
     appointmentMode: ctx.appointmentMode,
-    contactName: ctx.contactName,
+    contactName: ctx.contactName || ctx.originalContactName,
     topic: ctx.topic,
+    doNotCall: Boolean(ctx.optOut),
+    dataDeletionRequested: Boolean(ctx.optOut?.deletion),
+    // Deterministic one-word result, so the report never shows a misleading default if the final post is lost.
+    resultDetail: deriveResultDetail(ctx, ctx.confirmedSlotPhrase ? "Termin" : buildFallbackExtraction(ctx).outcome),
     // summaryChunk triggers transcript-only storage path (no email sent).
     summaryChunk: prelimSummaryText,
     recordingConsent,
@@ -310,10 +311,11 @@ export async function postReport(ctx: CallContext): Promise<void> {
   });
 
   if (!phase1Ok) {
+    // The final post below carries the full transcript too, so a failed preliminary post must not lose the report.
     log.error("finalize.preliminary_post_failed", { callSid: ctx.callSid });
-    return;
+  } else {
+    log.info("finalize.preliminary_posted", { callSid: ctx.callSid });
   }
-  log.info("finalize.preliminary_posted", { callSid: ctx.callSid });
 
   // Phase 2: LLM-Auswertung; updated existierenden Report per callSid.
   const hasVoicemail = ctx.detectedVoicemail
@@ -329,6 +331,11 @@ export async function postReport(ctx: CallContext): Promise<void> {
   }
 
   let outcome: Outcome = resolvedExtraction.outcome;
+  if (outcome === "Nicht erreicht / kein Kontakt" && ctx.decisionMakerReached && !hasVoicemail) {
+    // The contact person spoke with Gloria, so this was a contact that ended early, not an unreachable number.
+    log.warn("finalize.reached_contact_misclassified", { callSid: ctx.callSid });
+    outcome = "Gespräch abgebrochen";
+  }
   let appointmentAt: string | undefined = resolvedExtraction.appointmentAt;
   let summary = resolvedExtraction.summary;
 
@@ -336,6 +343,16 @@ export async function postReport(ctx: CallContext): Promise<void> {
     outcome = "Termin";
     const parsed = parseSlotPhraseToIso(ctx.confirmedSlotPhrase);
     if (parsed) appointmentAt = parsed;
+  }
+  if (ctx.optOut && outcome !== "Termin") {
+    outcome = "Absage";
+    summary = `${ctx.optOut.deletion
+      ? "WIDERSPRUCH UND LÖSCHWUNSCH: Der Kontakt hat weiteren Anrufen widersprochen und die Löschung seiner Daten verlangt. Nummer wurde gesperrt; Löschung bitte prüfen und durchführen."
+      : "WIDERSPRUCH: Der Kontakt wünscht keine weiteren Anrufe. Nummer wurde gesperrt."}\n\n${summary}`;
+  }
+  if (ctx.contactLeftCompany) {
+    const original = ctx.originalContactName?.trim() || "Die gesuchte Ansprechperson";
+    summary = `KONTAKT AUSGESCHIEDEN: ${original} ist laut Auskunft nicht mehr im Unternehmen.${ctx.successorContactName ? ` Neue zuständige Person: ${ctx.successorContactName}.` : ""}\n\n${summary}`;
   }
 
   const fullDocumentation = deriveReportDocumentation(ctx, resolvedExtraction);
@@ -351,15 +368,17 @@ export async function postReport(ctx: CallContext): Promise<void> {
     email: resolvedExtraction.contactEmail,
   });
 
-  const finalPosted = await postWithRetry(url, headers, {
+  const finalBody: Record<string, unknown> = {
     userId: ctx.userId,
     leadId: ctx.leadId,
     callSid: ctx.callSid,
     company: ctx.company,
-    contactName: ctx.contactName,
+    contactName: ctx.contactName || ctx.originalContactName,
     topic: ctx.topic,
     summary,
     outcome,
+    doNotCall: Boolean(ctx.optOut),
+    dataDeletionRequested: Boolean(ctx.optOut?.deletion),
     resultDetail: deriveResultDetail(ctx, outcome),
     conversationOccurred: fullDocumentation.conversationOccurred,
     callDisposition: fullDocumentation.callDisposition,
@@ -372,9 +391,33 @@ export async function postReport(ctx: CallContext): Promise<void> {
     directDial: resolvedExtraction.directDial,
     recordingConsent,
     transcript: transcriptEntries,
-  });
+  };
+  const finalPosted = await postWithRetry(url, headers, finalBody);
   if (finalPosted) log.info("finalize.final_posted", { callSid: ctx.callSid, outcome });
-  else log.error("finalize.final_post_failed", { callSid: ctx.callSid, outcome });
+  else {
+    log.error("finalize.final_post_failed", { callSid: ctx.callSid, outcome });
+    await enqueueReport(ctx.callSid || `report-${Date.now()}`, finalBody);
+  }
+}
+
+function reportWebhookTarget(baseUrl: string): { url: string; headers: Record<string, string> } {
+  const token = process.env.APP_INTERNAL_TOKEN || "";
+  return {
+    url: `${baseUrl}/api/calls/webhook`,
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { "x-gloria-internal-token": token } : {}),
+    },
+  };
+}
+
+/** Retries final reports that could not be delivered earlier (e.g. app cold start or short outage). */
+export async function flushPendingReports(): Promise<void> {
+  const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+  if (!baseUrl) return;
+  const { url, headers } = reportWebhookTarget(baseUrl);
+  const result = await flushOutbox((body) => postWithRetry(url, headers, body, undefined, { maxAttempts: 1, timeoutMs: 20_000 }));
+  if (result.sent || result.pending || result.dropped) log.info("outbox.flush", result);
 }
 
 async function postWithRetry(
@@ -382,24 +425,27 @@ async function postWithRetry(
   headers: Record<string, string>,
   body: Record<string, unknown>,
   validateResponse?: (text: string) => boolean,
+  options: { maxAttempts?: number; timeoutMs?: number } = {},
 ): Promise<boolean> {
-  const maxAttempts = 2;
+  // Reports are posted after the call, so they may wait out a slow Vercel cold start; bookings run live and stay short.
+  const maxAttempts = options.maxAttempts ?? 4;
+  const timeoutMs = options.timeoutMs ?? 25_000;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
       const text = await res.text();
       if (res.ok && (!validateResponse || validateResponse(text))) return true;
-      const retryable = res.status >= 500 || res.status === 429;
+      const retryable = res.status >= 500 || res.status === 429 || res.status === 408;
       log.error("finalize.post_failed", { status: res.status, body: text.slice(0, 400), attempt, retryable });
       if (!retryable || attempt >= maxAttempts) return false;
-      await wait(Math.min(4000, 400 * (2 ** (attempt - 1))));
+      await wait(Math.min(8000, 1000 * (2 ** (attempt - 1))));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error("finalize.post_error", { error: message, attempt });
       if (attempt >= maxAttempts) return false;
-      await wait(Math.min(4000, 400 * (2 ** (attempt - 1))));
+      await wait(Math.min(8000, 1000 * (2 ** (attempt - 1))));
     } finally {
       clearTimeout(timeout);
     }
@@ -424,7 +470,9 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
     || userTurns.some((turn) => classifyInboundSpeech(turn.text) === "voicemail");
   const humanTurns = userTurns.filter((turn) => classifyInboundSpeech(turn.text) === "human");
   const hadConversation = ctx.humanContactDetected !== false && !hasVoicemailCue && humanTurns.some((turn) => turn.text.trim().length > 1);
-  const rejected = ctx.humanContactDetected !== false && !hasVoicemailCue && humanTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text));
+  const rejected = Boolean(ctx.optOut) || (ctx.humanContactDetected !== false && !hasVoicemailCue
+    && humanTurns.some((turn) => /(kein\s+interesse|nicht\s+interessiert|rufen\s+sie\s+bitte\s+nicht|danke,?\s+nein)/i.test(turn.text)
+      || (isConversationEndingText(turn.text) && !/\b(?:auf\s+wiederh[öo]ren|auf\s+wiedersehen|tsch[üu]ss)\b/i.test(turn.text))));
 
   const appointmentAt = ctx.confirmedSlotPhrase ? parseSlotPhraseToIso(ctx.confirmedSlotPhrase) : undefined;
   const outcome: Outcome = appointmentAt
@@ -477,7 +525,9 @@ function isAiAssistantSelfIntroduction(text: string): boolean {
 
 /** One word describing what actually happened on the call, shown in the report's "Ergebnis" column. */
 export function deriveResultDetail(ctx: CallContext, outcome: Outcome): string {
+  if (ctx.optOut) return "Gesperrt";
   if (outcome === "Termin" || outcome === "Absage" || outcome === "Wiedervorlage") return outcome;
+  if (ctx.contactLeftCompany) return "Ausgeschieden";
   if (ctx.endReason === "transferred") return "Weitergeleitet";
   if (ctx.endReason === "error") return "Fehler";
 
@@ -546,12 +596,14 @@ function deriveReportDocumentation(
 }
 
 function extractRejectionReason(text: string): string | undefined {
-  if (/nicht\s+(?:mehr\s+)?anrufen|keine\s+(?:werbe)?anrufe|streichen\s+mich/i.test(text)) return "Keine Werbeanrufe";
+  if (/l[öo]schen|gel[öo]scht|widersprech|widerspruch/i.test(text)) return "Widerspruch / Löschwunsch";
+  if (/nicht\s+(?:mehr\s+)?an(?:zu)?rufen|keine\s+(?:weiteren\s+)?(?:werbe)?anrufe|streichen\s+(?:sie\s+)?(?:mich|uns)|aus\s+(?:ihrer|der|eurer)\s+\w*(?:liste|datenbank|kartei)|keine\s+werbung/i.test(text)) return "Keine Werbeanrufe";
+  if (/(?:kaufen|machen|schlie(?:ß|ss)en)\s+(?:wir|ich)?\s*(?:grunds[äa]tzlich\s+)?nichts\s+(?:\w+\s+)?(?:am|per|übers?)\s+telefon|keine\s+(?:gesch[äa]fte|vertr[äa]ge|termine)\s+(?:am|per|übers?)\s+telefon/i.test(text)) return "Keine Telefongeschäfte";
   if (/keine?\s+zeit|gerade\s+schlecht|unpassend|muss\s+gleich\s+weg/i.test(text)) return "Keine Zeit";
-  if (/berater|makler|bereits\s+(?:versorgt|beraten)/i.test(text)) return "Bereits versorgt";
+  if (/berater|makler|steuerb|bereits\s+(?:versorgt|beraten)/i.test(text)) return "Bereits versorgt";
   if (/zu\s+teuer|kein\s+budget|kosten/i.test(text)) return "Budget / Kosten";
   if (/falsch|nicht\s+zuständig|nicht\s+der\s+richtige/i.test(text)) return "Falscher Ansprechpartner";
-  if (/kein\s+interesse|nicht\s+interessiert|kommt\s+nicht\s+infrage/i.test(text)) return "Kein Interesse";
+  if (/kein(?:en)?\s+(?:interesse|bedarf)|nicht\s+interessiert|kommt\s+nicht\s+infrage|brauchen\s+wir\s+nicht/i.test(text)) return "Kein Interesse";
   return undefined;
 }
 

@@ -41,6 +41,8 @@ export async function GET(request: Request) {
         email: user.email,
         realPhone: user.realPhone,
         gesellschaft: user.gesellschaft,
+        introCompanyPhrase: user.introCompanyPhrase,
+        dataSourceStatement: user.dataSourceStatement,
         selectedVoiceId: user.selectedVoiceId,
         allowedPlaybookTopics: user.allowedPlaybookTopics,
         createdAt: user.createdAt,
@@ -72,6 +74,8 @@ export async function POST(request: Request) {
       email?: string;
       realPhone?: string;
       gesellschaft?: string;
+      introCompanyPhrase?: string;
+      dataSourceStatement?: string;
       selectedVoiceId?: string;
       allowedPlaybookTopics?: string[];
       password?: string;
@@ -95,6 +99,8 @@ export async function POST(request: Request) {
       email: String(payload.email || "").trim(),
       realPhone: String(payload.realPhone || "").trim(),
       gesellschaft: String(payload.gesellschaft || "").trim(),
+      introCompanyPhrase: String(payload.introCompanyPhrase || "").trim().slice(0, 160),
+      dataSourceStatement: String(payload.dataSourceStatement || "").trim().slice(0, 500),
       selectedVoiceId: String(payload.selectedVoiceId || "").trim(),
       allowedPlaybookTopics: Array.isArray(payload.allowedPlaybookTopics)
         ? payload.allowedPlaybookTopics.map((topic) => String(topic).trim()).filter(Boolean)

@@ -179,6 +179,52 @@ test("fallback outcomes distinguish voicemail and queues from human conversation
   }
 });
 
+test("a reached contact who hangs up is reported as an aborted conversation, never as unreachable", async () => {
+  const dispatcher = getGlobalDispatcher();
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  const oldBase = process.env.APP_BASE_URL;
+  const oldToken = process.env.APP_INTERNAL_TOKEN;
+  const oldOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.APP_BASE_URL = "https://finalize.test";
+  process.env.APP_INTERNAL_TOKEN = "test-token";
+  process.env.OPENAI_API_KEY = "test-key";
+  setGlobalDispatcher(agent);
+  const posts: Array<Record<string, unknown>> = [];
+  agent.get("https://api.openai.com").intercept({ path: "/v1/chat/completions", method: "POST" }).reply(200, {
+    choices: [{ message: { content: JSON.stringify({ outcome: "Nicht erreicht / kein Kontakt", summary: "Kein Gespräch." }) } }],
+  });
+  agent.get("https://finalize.test").intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
+    posts.push(JSON.parse(String(options.body)) as Record<string, unknown>);
+    return { statusCode: 200, data: { ok: true } };
+  }).times(2);
+  try {
+    const ctx = newContext({ callSid: "dm-hangup", streamSid: "test", userId: "test-user", company: "Testfirma", topic: "Test" });
+    ctx.humanContactDetected = true;
+    ctx.decisionMakerReached = true;
+    ctx.transcript.push(
+      { role: "user", text: "Neumann, guten Tag.", at: 1_000 },
+      { role: "assistant", text: "Guten Tag, Herr Neumann. Passt es Ihnen gerade kurz?", at: 2_000 },
+      { role: "user", text: "Nee.", at: 3_000 },
+    );
+    await postReport(ctx);
+    assert.equal(posts.length, 2);
+    assert.equal(posts[0].resultDetail, "Aufgelegt");
+    assert.equal(posts[1].outcome, "Gespräch abgebrochen");
+    assert.equal(posts[1].resultDetail, "Aufgelegt");
+    agent.assertNoPendingInterceptors();
+  } finally {
+    setGlobalDispatcher(dispatcher);
+    if (oldBase === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = oldBase;
+    if (oldToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = oldToken;
+    if (oldOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = oldOpenAiKey;
+    await agent.close();
+  }
+});
+
 test("parses the exact numeric calendar slot used by the appointment controller", () => {
   const parsed = parseSlotPhraseToIso("Donnerstag, 31. Dezember um 13:00 Uhr");
   assert.match(parsed || "", /-12-31T12:00:00\.000Z$/);

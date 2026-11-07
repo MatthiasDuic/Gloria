@@ -43,6 +43,10 @@ export type CallContext = {
   ownerRole?: "master" | "user";
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
+  /** Spoken company phrase, e.g. "von der BarmeniaGothaer in Sprockhövel". */
+  ownerIntroCompanyPhrase?: string;
+  /** Spoken answer to "Woher haben Sie meine Nummer?". */
+  ownerDataSourceStatement?: string;
   voiceId?: string;
   topicKind: TopicKind;
   voiceProfile: VoiceProfile;
@@ -84,6 +88,8 @@ export type CallContext = {
   // Runtime-Klassifikation fuer Spezialfaelle im Call.
   detectedVoicemail?: boolean;
   humanContactDetected?: boolean;
+  /** The intended contact person was on the line at some point during the call. */
+  decisionMakerReached?: boolean;
   waitingForDecisionMaker?: boolean;
   queueDetected?: boolean;
   /** Campaign-configured short reason for the reception ("Anlass am Empfang"). */
@@ -92,6 +98,14 @@ export type CallContext = {
   endedByGloria?: boolean;
   endReason?: "voicemail_detected" | "transfer_timeout" | "farewell" | "transferred" | "time_limit" | "error";
   callbackNumberDelivered?: boolean;
+  /** The callee objected to further calls (do-not-call); deletion = also asked to delete the data. */
+  optOut?: { deletion: boolean };
+  /** The intended contact person no longer works at the company. */
+  contactLeftCompany?: boolean;
+  /** Lead contact before Gloria switched to a named successor. */
+  originalContactName?: string;
+  /** Successor named by the reception after the original contact left. */
+  successorContactName?: string;
 };
 
 export function newContext(initial: Partial<CallContext> & { callSid: string; streamSid: string }): CallContext {

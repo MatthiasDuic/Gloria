@@ -1,5 +1,5 @@
-// Gemeinsame Header für interne Server-zu-Server-Aufrufe (z. B. zwischen
-// /api/twilio/voice → /api/twilio/inbound/lookup). Nutzt entweder Basic Auth
+// Gemeinsame Header für interne Server-zu-Server-Aufrufe (z. B. Worker → App).
+// Nutzt entweder Basic Auth
 // oder einen gemeinsamen Token. Wird in Edge- und Node-Runtime eingesetzt.
 
 export function buildInternalHeaders(): Record<string, string> {

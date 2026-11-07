@@ -6,18 +6,20 @@ import { advanceAppointmentRouting, appointmentModeFollowUp, convertSlotPhraseFo
 import { planBargeIn } from "./barge-in-controller.js";
 import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction } from "./call-classification.js";
 import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
-import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, buildGatekeeperTopic, buildRetryFarewell, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, getSpeakableCampaignReason, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime, type ContactRoutingState } from "./contact-routing-controller.js";
-import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isUnclearConversationText } from "./conversation-event-controller.js";
+import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, buildGatekeeperTopic, buildRetryFarewell, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, extractSuccessorName, getSpeakableCampaignReason, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime, type ContactRoutingState } from "./contact-routing-controller.js";
+import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isNoNeedStatement, isUnclearConversationText } from "./conversation-event-controller.js";
 import { advanceCallback, classifyCallbackNumberReply, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber, type CallbackNumberStage, type CallbackStage } from "./callback-controller.js";
 import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
 import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { RealtimeOutputGate } from "./realtime-output-gate.js";
-import { replaceDiscouragedWords } from "./spoken-vocabulary.js";
+import { replaceDiscouragedWords, stripSpokenQuotes } from "./spoken-vocabulary.js";
 import { PrefetchedSpeech } from "./prefetched-speech.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
 import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio, type DialogueStreamResult } from "./elevenlabs-tts.js";
+import { isFallbackTtsEnabled, streamFallbackSpeech } from "./fallback-tts.js";
+import { classifyProviderFailure, markServiceOutage, type ProviderFailure } from "./service-status.js";
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
@@ -26,6 +28,8 @@ import { TelnyxPlayback } from "./telnyx-playback.js";
 import { hasUsableCallAssignment, loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { GLORIA_CORE_INSTRUCTIONS } from "./gloria-core-instructions.js";
 import { buildTenYearProjectionSentence, extractContributionPhrase, extractCurrentContributionPhrase } from "./pkv-conversation-controller.js";
+
+const TECHNICAL_ISSUE_FAREWELL = "Entschuldigung, wir haben gerade ein technisches Problem. Wir melden uns zu einem späteren Zeitpunkt noch einmal bei Ihnen. Auf Wiederhören.";
 
 type TelnyxFrame =
   | { event: "connected" }
@@ -62,6 +66,8 @@ type ClientState = {
   ownerRole?: "master" | "user";
   ownerCompanyName?: string;
   ownerGesellschaft?: string;
+  ownerIntroCompanyPhrase?: string;
+  ownerDataSourceStatement?: string;
   previousSummary?: string;
   isCallback?: number;
   isTestCall?: boolean;
@@ -213,8 +219,11 @@ export function shouldRecoverInterruptedBargeIn(awaitingTranscript: boolean, tra
 }
 
 function hasClearFarewellOrRejection(ctx: CallContext): boolean {
-  const latestUserText = [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text || "";
+  if (ctx.optOut) return true;
+  const userTexts = ctx.transcript.filter((turn) => turn.role === "user").map((turn) => turn.text);
+  const latestUserText = userTexts.at(-1) || "";
   if (isConversationEndingText(latestUserText)) return true;
+  if (isNoNeedStatement(latestUserText) && userTexts.slice(0, -1).some((text) => isNoNeedStatement(text))) return true;
   // Gloria already said goodbye (e.g. after an agreed callback): hanging up must not trigger another farewell loop.
   const latest = ctx.transcript.at(-1);
   return latest?.role === "assistant" && /\bauf\s+wiederh[öo]ren\b/i.test(latest.text);
@@ -261,37 +270,79 @@ function getSocietyName(ctx: Pick<CallContext, "ownerGesellschaft">): string {
   return ctx.ownerGesellschaft?.trim() || "Agentur Duic Sprockhövel";
 }
 
-export function buildDecisionMakerIdentity(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft">,
-): string {
+/** Legally required AI disclosure (EU AI Act Art. 50): Gloria always introduces herself as an AI assistant. */
+export const GLORIA_ROLE_LABEL = "KI-Assistentin";
+
+type OwnerIdentityContext = Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft">
+  & Partial<Pick<CallContext, "ownerIntroCompanyPhrase">>;
+
+function buildAddressedOwner(ctx: Pick<CallContext, "ownerRealName">): string {
   const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
-  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
-  const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
-  return `Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}.`;
+  if (/^frau\s/i.test(ownerName)) return ownerName;
+  return /^herrn?\s/i.test(ownerName) ? ownerName.replace(/^herr\s/i, "Herrn ") : `Herrn ${ownerName}`;
+}
+
+function buildOwnerNominative(ctx: Pick<CallContext, "ownerRealName">): string {
+  return buildAddressedOwner(ctx).replace(/^Herrn\s/, "Herr ");
+}
+
+/** Spoken affiliation after the owner name, e.g. "von der BarmeniaGothaer in Sprockhövel". */
+export function buildOwnerAffiliation(ctx: OwnerIdentityContext): string {
+  const phrase = ctx.ownerIntroCompanyPhrase?.replace(/\s+/g, " ").trim().replace(/[.,;:!?]+$/, "");
+  if (phrase) return /^(?:von|bei|aus|vom)\s/i.test(phrase) ? phrase : `von ${phrase}`;
+  return `bei ${ctx.ownerCompanyName?.trim() || getSocietyName(ctx)}`;
+}
+
+/** Honest answer to "Woher haben Sie meine Nummer?" (GDPR Art. 14 data source). */
+export function buildDataSourceAnswer(ctx: Pick<CallContext, "ownerRealName"> & Partial<Pick<CallContext, "ownerDataSourceStatement">>): string {
+  const statement = ctx.ownerDataSourceStatement?.replace(/\s+/g, " ").trim();
+  if (statement) return /[.!?]$/.test(statement) ? statement : `${statement}.`;
+  const female = /^frau\s/i.test(buildAddressedOwner(ctx));
+  return `${buildOwnerNominative(ctx)} hat Ihr Unternehmen im Rahmen ${female ? "ihrer" : "seiner"} eigenen Unternehmensrecherche ausgewählt; genauere Auskunft gibt ${female ? "sie" : "er"} Ihnen gern persönlich.`;
+}
+
+export const DATA_SOURCE_LIST_OFFER = "Wenn Sie keine weiteren Anrufe wünschen, nehme ich Sie selbstverständlich aus der Liste.";
+
+export function buildOptOutFarewell(ctx: Pick<CallContext, "ownerRealName">, deletion: boolean): string {
+  return deletion
+    ? `Selbstverständlich. Ich habe notiert, dass wir Sie nicht mehr anrufen, und gebe Ihren Löschwunsch an ${buildAddressedOwner(ctx)} weiter. Entschuldigen Sie die Störung. Auf Wiederhören.`
+    : "Selbstverständlich. Ich habe notiert, dass wir Sie nicht mehr anrufen. Entschuldigen Sie die Störung. Auf Wiederhören.";
+}
+
+export function buildAiIdentityAnswer(ctx: Pick<CallContext, "ownerRealName">): string {
+  const owner = buildAddressedOwner(ctx);
+  return `Ja, ich bin eine KI-Assistentin und rufe im Auftrag von ${owner} an. Ein Termin findet dann persönlich mit ${/^frau\s/i.test(owner) ? "ihr" : "ihm"} statt.`;
+}
+
+export function buildDecisionMakerIdentity(ctx: OwnerIdentityContext): string {
+  return `Guten Tag, hier ist Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}.`;
 }
 
 export function buildDecisionMakerIntro(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft" | "topic">
+  ctx: OwnerIdentityContext & Pick<CallContext, "topic">
     & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>,
 ): string {
   return `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerTopicQuestion(ctx)}`;
 }
+
+export const DECISION_MAKER_TIME_QUESTION = "Passt es Ihnen gerade für ein kurzes Gespräch?";
 
 export function buildDecisionMakerTopicQuestion(
   ctx: Pick<CallContext, "topic"> & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>,
 ): string {
   const topic = buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
   const reason = topic.sentence || (topic.inline ? `Ich rufe ${topic.inline} an.` : "Ich rufe mit einem kurzen Anliegen an.");
-  return `${reason} Passt es gerade für ein kurzes Gespräch?`;
+  return `${reason} ${DECISION_MAKER_TIME_QUESTION}`;
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
+  const topicRule = `Nenne ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen. Schließe mit genau dieser Frage: '${DECISION_MAKER_TIME_QUESTION}' Verwende das Wort 'kurz' nicht zusätzlich im Anlass-Satz. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
   if (identityAlreadySpoken) {
     return `Du hast dich soeben bereits mit diesem Satz vorgestellt: "${buildDecisionMakerIdentity(ctx)}"
-Wiederhole die Begrüßung und die Vorstellung nicht. Nenne direkt und kurz ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen. Frage, ob es gerade kurz passt. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
+Wiederhole die Begrüßung und die Vorstellung nicht. ${topicRule}`;
   }
-  return `${buildDecisionMakerIdentity(ctx)}
-Formuliere daraus eine kurze gesprochene Begrüßung mit dieser transparenten Identität. Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen. Frage, ob es gerade kurz passt. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
+  return `Beginne wörtlich mit dieser transparenten Vorstellung: "${buildDecisionMakerIdentity(ctx)}"
+${topicRule}`;
 }
 
 type GatekeeperRequestContext = Pick<CallContext, "contactName" | "topic">
@@ -314,13 +365,10 @@ export function hasDeterministicGatekeeperTopic(ctx: GatekeeperRequestContext): 
 }
 
 export function buildGatekeeperIntro(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft"> & GatekeeperRequestContext,
+  ctx: OwnerIdentityContext & GatekeeperRequestContext,
   topicPlaceholder?: string,
 ): string {
-  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
-  const addressedOwner = /^herr\s/i.test(ownerName) ? ownerName : `Herrn ${ownerName}`;
-  const company = ctx.ownerCompanyName?.trim() || getSocietyName(ctx);
-  return `Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von ${addressedOwner} bei ${company}, und ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+  return `Guten Tag, ich bin Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}, und ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
 }
 
 /** Used when Gloria's identity was already spoken; completes it with whom and why. */
@@ -330,7 +378,7 @@ export function buildGatekeeperTransferRequest(ctx: GatekeeperRequestContext, to
 
 /** Model fallback when the campaign has no speakable topic: only the topic phrase is generated. */
 export function buildGatekeeperTopicInstruction(
-  ctx: Pick<CallContext, "ownerRealName" | "ownerCompanyName" | "ownerGesellschaft"> & GatekeeperRequestContext,
+  ctx: OwnerIdentityContext & GatekeeperRequestContext,
   withIdentity: boolean,
 ): string {
   const template = withIdentity ? buildGatekeeperIntro(ctx, "<THEMA>") : buildGatekeeperTransferRequest(ctx, "<THEMA>");
@@ -347,8 +395,7 @@ export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "conta
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
-  const company = ctx.ownerCompanyName?.trim() || "Agentur Duic Sprockhövel";
-  const owner = ctx.ownerRealName?.trim() || "Matthias Duic";
+  const addressedOwner = buildAddressedOwner(ctx);
   const target = ctx.contactName?.trim();
   const addressedTarget = target?.replace(/^herr\s+/i, "Herrn ");
   const today = new Date().toLocaleDateString("de-DE", {
@@ -361,7 +408,11 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   const parts = [
     GLORIA_CORE_INSTRUCTIONS,
-    `Du bist Gloria, die digitale Vertriebsassistentin von ${company}, und telefonierst im Auftrag von ${owner}. Stelle dich mit genau dieser Rollenbezeichnung vor, nicht als 'KI-Assistentin'. Bleibe bei Nachfragen transparent darüber, dass du eine KI bist.`,
+    `Du bist Gloria, die ${GLORIA_ROLE_LABEL} von ${addressedOwner} ${buildOwnerAffiliation(ctx)}, und telefonierst ausschließlich in diesem Auftrag. Stelle dich immer ausdrücklich als '${GLORIA_ROLE_LABEL}' vor (gesetzliche Transparenzpflicht), nie als Mensch, Mitarbeiterin oder 'digitale Vertriebsassistentin'. Fragt jemand, ob du eine KI, ein Roboter oder ein Mensch bist, bestätige ehrlich in einem Satz, dass du eine KI-Assistentin bist, und mache dann ohne Rechtfertigung weiter.`,
+    `DATENHERKUNFT: Fragt jemand, woher du die Nummer oder die Kontaktdaten hast oder wie ihr auf ihn kommt, antworte ehrlich und ohne Ausflüchte: '${buildDataSourceAnswer(ctx)}' Biete an, ihn auf Wunsch aus der Liste zu nehmen. Erfinde keine anderen Quellen.`,
+    "WIDERSPRUCH UND LÖSCHUNG: Sagt jemand, er möchte nicht mehr angerufen werden, aus der Liste genommen werden oder seine Daten gelöscht haben, bestätige das sofort in einem Satz, entschuldige dich kurz für die Störung, verabschiede dich und rufe end_call auf. Kein Überzeugungsversuch.",
+    "SMALLTALK UND ABSCHWEIFEN: Beginnt die Person mit Smalltalk oder weicht sie vom Thema ab, reagiere freundlich, menschlich und in höchstens einem kurzen Satz darauf, ohne eigene Erlebnisse, Orte oder Beobachtungen zu erfinden. Leite dann mit einer natürlichen Brücke zum Anliegen zurück und stelle genau eine passende Frage. Nicht ignorieren, nicht ausdehnen.",
+    "EINWÄNDE: Behandle Einwände wie 'kein Bedarf', 'das macht mein Steuerberater', 'ich habe einen Makler', 'zu teuer' oder 'schlechte Erfahrungen' ernsthaft: kurz würdigen, in einem Satz konkret und ehrlich antworten, dann genau eine passende Frage. Nie widersprechen, nie Druck. Ein Steuerberater deckt die steuerliche Seite ab, nicht die Absicherung und ihre langfristige Entwicklung; er kann gern einbezogen werden. Bei wiederholtem Nein oder klarer Ablehnung freundlich verabschieden.",
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
     `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: natürlich daran anknüpfen und zum nächsten Schritt überleiten, nicht abrupt zur nächsten Frage springen. Bei Interesse: den passenden nächsten Schritt anbieten. Vermeide routinemäßige Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder wiederholtes Bedanken.",
@@ -380,9 +431,6 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn der Kunde eine Frage oder einen Einwand bringt, verlässt du den geplanten Gesprächspfad sofort, beantwortest ihn konkret und kehrst nur bei natürlicher Gelegenheit zum Ziel zurück.",
     "Wenn der Kunde klar ablehnt, respektierst du das ohne weiteren Überredungsversuch, verabschiedest dich hörbar und rufst danach end_call auf.",
     "TERMINBESTÄTIGUNG: Ein Termin ist erst nach erfolgreichem confirm_appointment eingetragen. Gloria versendet selbst keine E-Mails; sie nimmt nur die E-Mail-Adresse auf, damit der Berater die Terminbestätigung versenden kann. Kündige an, dass der Kunde die Terminbestätigung per E-Mail erhält, bei einem digitalen Termin einschließlich des Links zum Teams-Meeting. Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde, und nenne keinen Versandzeitpunkt.",
-    ctx.confirmedSlotPhrase
-      ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${appointmentFarewellText(ctx)}' Beende danach das Gespräch ohne weitere Frage.`
-      : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`,
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach nur, ob der Termin persönlich oder digital stattfinden soll. Frage niemals nach einem Ort oder einer Adresse: 'persönlich' bedeutet immer beim Kunden vor Ort, die Adresse kommt aus den Kundendaten. Eine Frage zu einer Terminart, eine Verneinung oder ein unklarer Laut ist keine Auswahl und darf keine Buchung auslösen. Erkläre 'digital' bei Nachfrage als Beratung per Microsoft Teams; der Link zum Meeting kommt mit der Terminbestätigung per E-Mail. Nenne keinen Versandzeitpunkt. Erst nach eindeutiger Auswahl rufst du confirm_appointment für den vollständigen angebotenen Slot auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
@@ -413,6 +461,11 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
   }
   if (ctx.topicPolicyPrompt) parts.push(ctx.topicPolicyPrompt);
+  parts.push("ERSTKONTAKT: Behaupte nicht, die Person habe angefragt oder um einen Rückruf gebeten, außer das ist im Anrufkontext ausdrücklich vermerkt. Beginne transparent und natürlich mit dem tatsächlichen Anlass; verwende keinen festen Pitch.");
+  parts.push("WORTWAHL: Sprich natürlich und alltagsnah. Verwende keine technischen oder mechanischen Metaphern für Lösungsmöglichkeiten; sprich stattdessen einfach von 'Optionen' oder 'Möglichkeiten'.");
+
+  // Everything above stays identical for the whole call, so OpenAI can reuse it from the prompt cache.
+  // State that changes during the call (contribution step, calendar, confirmed slot) must stay below.
   const requiredContributionStep = !ctx.confirmedSlotPhrase ? getRequiredContributionStep(ctx) : undefined;
   if (requiredContributionStep) {
     parts.push(`VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN: Nach dem weichen Einstieg und der ersten inhaltlichen Antwort zur Beitragsentwicklung ist zuerst dieser Schritt offen: ${requiredContributionStep} Überspringe die Beitragsfrage und die konkrete Zehn-Jahres-Rechnung nicht. Keine Terminfrage, keine Zeitpräferenz und kein Konzeptabschluss davor. Beantworte Kundenfragen zuerst; Zeitmangel, Ablehnung und der Wunsch, keinen Beitrag zu nennen, bleiben vorrangig. Biete nicht von dir aus an, die Beitragsangabe zu überspringen.`);
@@ -425,9 +478,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   if (ctx.confirmedSlotPhrase) {
     parts.push(`Bereits bestätigter Termin: ${ctx.confirmedSlotPhrase}. Diesen Termin nicht verändern.`);
   }
-  
-  parts.push("ERSTKONTAKT: Behaupte nicht, die Person habe angefragt oder um einen Rückruf gebeten, außer das ist im Anrufkontext ausdrücklich vermerkt. Beginne transparent und natürlich mit dem tatsächlichen Anlass; verwende keinen festen Pitch.");
-  parts.push("WORTWAHL: Sprich natürlich und alltagsnah. Verwende keine technischen oder mechanischen Metaphern für Lösungsmöglichkeiten; sprich stattdessen einfach von 'Optionen' oder 'Möglichkeiten'.");
+  parts.push(ctx.confirmedSlotPhrase
+    ? `VERABSCHIEDUNG NACH TERMIN UND E-MAIL: Die letzte Aussage muss exakt lauten: '${appointmentFarewellText(ctx)}' Beende danach das Gespräch ohne weitere Frage.`
+    : `VERABSCHIEDUNG OHNE TERMIN: Die letzte Aussage muss exakt lauten: '${FINAL_FAREWELL_TEXT}' Rufe danach end_call auf.`);
 
   const instructions = parts.join("\n\n");
   return replaceDiscouragedWords(convertNumbersForSpeech(instructions));
@@ -531,10 +584,16 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
   let assistantTranscript = "";
   let assistantTranscriptDeltaSeen = false;
-  const outputGate = new RealtimeOutputGate();
+  const isEndCallAllowed = (): boolean => Boolean(ctx) && (preparationState.stage === "completed"
+    || hasClearFarewellOrRejection(ctx!) || hasAffirmedAssistantEndQuestion(ctx!));
+  const outputGate = new RealtimeOutputGate({
+    canAnnounce: (toolName) => toolName !== "end_call" || isEndCallAllowed(),
+    hangupFallbackText: FINAL_FAREWELL_TEXT,
+  });
   let openingSpeech: OpeningSpeechStream | null = null;
   let responseDialogueStream: ElevenLabsDialogueStream | null = null;
   let responseDialogueController: AbortController | null = null;
+  let responseDialogueIsCurrent: (() => boolean) | null = null;
   let responseVersion = 0;
   let assistantContinuationRequested = false;
   let ttsAbortController: AbortController | null = null;
@@ -753,83 +812,117 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
   };
 
-  const speakWithElevenLabs = async (text: string, finishAudio = true, allowWhileListening = false): Promise<void> => {
-    if (!isElevenLabsConfigured()) {
-      log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
-      playback.interrupt();
-      return;
+  const noteElevenLabsFailure = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    const kind = classifyProviderFailure(message);
+    if (kind) {
+      markServiceOutage("elevenlabs", kind, message);
+      log.error("realtime.elevenlabs_outage", { callSid: ctx?.callSid, kind, error: message.slice(0, 200) });
     }
+  };
 
+  /** Speaks the text with the second voice provider when ElevenLabs produced no audio at all. */
+  const speakWithFallbackVoice = async (
+    text: string,
+    signal: AbortSignal,
+    onChunk: (chunk: Buffer) => void,
+    reason: string,
+  ): Promise<boolean> => {
+    if (!text.trim() || signal.aborted || !isFallbackTtsEnabled()) return false;
+    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
+    let bytes = 0;
+    try {
+      await streamFallbackSpeech(text, outputFormat, signal, (chunk) => {
+        bytes += chunk.length;
+        onChunk(chunk);
+      });
+      log.warn("realtime.fallback_tts_used", { callSid: ctx?.callSid, reason, audioBytes: bytes, text: text.slice(0, 60) });
+      return bytes > 0;
+    } catch (error) {
+      if (!signal.aborted) {
+        log.error("realtime.fallback_tts_failed", {
+          callSid: ctx?.callSid,
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return false;
+    }
+  };
+
+  const speakWithElevenLabs = async (text: string, finishAudio = true, allowWhileListening = false): Promise<void> => {
     const turn = ++ttsTurn;
     const controller = new AbortController();
     ttsAbortController?.abort();
     ttsAbortController = controller;
     const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
     const audioBytes = { value: 0 };
+    const receivedBytes = { value: 0 };
+    const isCurrent = () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && (allowWhileListening || !userTurns.isBlocked());
+    const onChunk = (chunk: Buffer) => {
+      receivedBytes.value += chunk.length;
+      appendTtsAudioChunk(chunk, isCurrent, audioBytes, finishAudio);
+    };
     let retryCount = 0;
+    let primaryError: unknown;
 
     try {
-      if (isElevenLabsDialogueModel()) {
+      if (!isElevenLabsConfigured()) {
+        primaryError = new Error("ElevenLabs ist nicht konfiguriert");
+        log.error("realtime.elevenlabs_not_configured", { callSid: ctx?.callSid });
+      } else if (isElevenLabsDialogueModel()) {
         const dialogue = new ElevenLabsDialogueStream({
           outputFormat,
           signal: controller.signal,
-          onChunk: (chunk) => appendTtsAudioChunk(
-            chunk,
-            () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && (allowWhileListening || !userTurns.isBlocked()),
-            audioBytes,
-            finishAudio,
-          ),
+          onChunk,
           voiceProfile: ctx?.voiceProfile,
         });
         await dialogue.append(text);
         const result = await dialogue.finish();
         logDialogueResult(result);
-        if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
-          if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
-          if (result.audioBytes === 0) {
-            log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
-            playback.interrupt();
+        if (result.audioBytes === 0 && result.error) primaryError = new Error(result.error);
+      } else {
+        while (true) {
+          try {
+            await streamElevenLabsAudio(text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
+            if (audioBytes.value > 0) logTtsModelInUse(getElevenLabsModel(), "http_stream", false);
+            break;
+          } catch (error) {
+            if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, receivedBytes.value, retryCount)) {
+              retryCount += 1;
+              log.warn("realtime.elevenlabs_retry", { callSid: ctx?.callSid, retryCount, error: error instanceof Error ? error.message : String(error) });
+              continue;
+            }
+            throw error;
           }
-        }
-        return;
-      }
-
-      while (true) {
-        try {
-          await streamElevenLabsAudio(text, outputFormat, controller.signal, (chunk) => {
-            appendTtsAudioChunk(
-              chunk,
-              () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && (allowWhileListening || !userTurns.isBlocked()),
-              audioBytes,
-              finishAudio,
-            );
-          }, ctx?.voiceProfile, getElevenLabsModel());
-          if (audioBytes.value > 0) logTtsModelInUse(getElevenLabsModel(), "http_stream", false);
-          break;
-        } catch (error) {
-          if (!controller.signal.aborted && shouldRetryElevenLabsStream(error, audioBytes.value, retryCount)) {
-            retryCount += 1;
-            log.warn("realtime.elevenlabs_retry", { callSid: ctx?.callSid, retryCount, error: error instanceof Error ? error.message : String(error) });
-            continue;
-          }
-          throw error;
-        }
-      }
-      if (!controller.signal.aborted && turn === ttsTurn && !responseInterrupted) {
-        if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
-        if (audioBytes.value === 0) {
-          log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
-          playback.interrupt();
         }
       }
     } catch (error) {
-      if (!controller.signal.aborted) {
+      primaryError = error;
+    }
+
+    try {
+      if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+      if (primaryError) {
         log.error("realtime.elevenlabs_failed", {
           callSid: ctx?.callSid,
-          error: error instanceof Error ? error.message : String(error),
-          audioBytes: audioBytes.value,
+          error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+          audioBytes: receivedBytes.value,
           retryCount,
         });
+        noteElevenLabsFailure(primaryError);
+      }
+      if (receivedBytes.value === 0) {
+        if (!primaryError) log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid, text: text.slice(0, 60) });
+        await speakWithFallbackVoice(text, controller.signal, onChunk, primaryError ? "elevenlabs_failed" : "elevenlabs_empty_audio");
+      } else if (primaryError) {
+        playback.interrupt();
+        return;
+      }
+      if (controller.signal.aborted || turn !== ttsTurn || responseInterrupted) return;
+      if (audioBytes.value > 0) {
+        if (finishAudio) playback.finishAudio(outputFormat === "alaw_8000" ? 0xd5 : 0xff);
+      } else {
         playback.interrupt();
       }
     } finally {
@@ -837,24 +930,47 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
   };
 
-  const finishResponseDialogueStream = async () => {
+  const finishResponseDialogueStream = async (fallbackText = "") => {
     const stream = responseDialogueStream;
     const controller = responseDialogueController;
+    const isCurrent = responseDialogueIsCurrent;
     responseDialogueStream = null;
     responseDialogueController = null;
+    responseDialogueIsCurrent = null;
     if (!stream) return;
+    const fallbackAudioBytes = { value: 0 };
+    let audioBytes = 0;
+    let failure: unknown;
     try {
       const result = await stream.finish();
       logDialogueResult(result);
-      if (result.audioBytes === 0 && !controller?.signal.aborted) {
-        log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid });
-      }
+      audioBytes = result.audioBytes;
+      if (result.audioBytes === 0 && result.error) failure = new Error(result.error);
     } catch (error) {
-      if (!controller?.signal.aborted) {
+      failure = error;
+    }
+    try {
+      if (controller?.signal.aborted) return;
+      if (failure) {
         log.error("realtime.elevenlabs_failed", {
           callSid: ctx?.callSid,
-          error: error instanceof Error ? error.message : String(error),
+          error: failure instanceof Error ? failure.message : String(failure),
+          audioBytes,
         });
+        noteElevenLabsFailure(failure);
+      }
+      if (audioBytes === 0) {
+        if (!failure) log.warn("realtime.elevenlabs_empty_audio", { callSid: ctx?.callSid });
+        const spoken = controller && isCurrent
+          ? await speakWithFallbackVoice(
+            fallbackText,
+            controller.signal,
+            (chunk) => appendTtsAudioChunk(chunk, isCurrent, fallbackAudioBytes, false),
+            failure ? "elevenlabs_failed" : "elevenlabs_empty_audio",
+          )
+          : false;
+        if (!spoken) playback.interrupt();
+      } else if (failure) {
         playback.interrupt();
       }
     } finally {
@@ -1043,9 +1159,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const appendAssistantText = (text: string) => {
-    if (!text) return;
-    assistantTranscript += text;
-    openingSpeech?.append(text);
+    const spoken = stripSpokenQuotes(text);
+    if (!spoken) return;
+    assistantTranscript += spoken;
+    openingSpeech?.append(spoken);
   };
 
   const requestHangupAfterPlayback = () => {
@@ -1058,7 +1175,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
   };
 
-  const hangupImmediately = (reason: "voicemail_detected" | "transfer_timeout") => {
+  const hangupImmediately = (reason: "voicemail_detected" | "transfer_timeout" | "error") => {
     if (!ctx || terminationInProgress) return;
     terminationInProgress = true;
     openingSpeech?.stop();
@@ -1076,6 +1193,30 @@ export async function handleOpenAiRealtimeTelnyxStream(
     log.info(`realtime.${reason}`, { callSid: ctx.callSid });
     ctx.endReason = reason;
     void notifyCallAction(ctx, "hangup");
+  };
+
+  let providerOutageHandled = false;
+  /** Ends the call politely when OpenAI rejects requests for billing or key reasons; the farewell uses ElevenLabs only. */
+  const handleOpenAiOutage = (kind: ProviderFailure, reason: string) => {
+    markServiceOutage("openai", kind, reason);
+    if (providerOutageHandled || !ctx || terminationInProgress) return;
+    providerOutageHandled = true;
+    ctx.endReason = "error";
+    log.error("realtime.openai_outage", { callSid: ctx.callSid, kind, error: reason.slice(0, 200) });
+    openingSpeech?.stop();
+    responseDialogueStream?.cancel();
+    responseDialogueStream = null;
+    responseDialogueController = null;
+    ttsTurn += 1;
+    ttsAbortController?.abort();
+    playback.interrupt();
+    responses.stop();
+    userTurns.clear();
+    pendingDeterministicSpeech = null;
+    requestDeterministicSpeech(TECHNICAL_ISSUE_FAREWELL, { hangupAfterPlayback: true, allowWhileWaiting: true });
+    setTimeout(() => {
+      if (ctx && !terminationInProgress) hangupImmediately("error");
+    }, 15_000).unref?.();
   };
 
   const waitForContact = () => {
@@ -1131,9 +1272,60 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
 
-    const event = classifyConversationEvent(transcript);
+    const previousUserTexts = currentContext.transcript.slice(0, -1)
+      .filter((turn) => turn.role === "user")
+      .map((turn) => turn.text);
+    const event = classifyConversationEvent(transcript, { previousUserTexts });
     const numberRequest = isCallbackNumberRequest(transcript);
     const transferOffered = classifyReceptionTransfer(transcript);
+    const atReception = Boolean(contactRouting && contactRouting.stage !== "decision_maker");
+    if (event.type === "opt_out" && classifyInboundSpeech(transcript) !== "voicemail") {
+      callbackNumberStage = null;
+      callbackStage = "done";
+      currentContext.optOut = { deletion: event.deletion };
+      currentContext.queueDetected = false;
+      currentContext.humanContactDetected = true;
+      log.info("realtime.opt_out", { callSid: currentContext.callSid, deletion: event.deletion });
+      requestDeterministicSpeech(buildOptOutFarewell(currentContext, event.deletion), { hangupAfterPlayback: true });
+      return;
+    }
+    if (event.type === "data_source_question" && contactRouting?.stage !== "waiting_for_transfer") {
+      const answer = `${buildDataSourceAnswer(currentContext)} ${DATA_SOURCE_LIST_OFFER}`;
+      log.info("realtime.data_source_question", { callSid: currentContext.callSid, atReception });
+      currentContext.humanContactDetected = true;
+      if (atReception || callbackNumberStage) {
+        const intro = identityAnnounced ? "" : `${buildDecisionMakerIdentity(currentContext)} `;
+        identityAnnounced = true;
+        requestDeterministicSpeech(`${intro}${answer}`);
+      } else {
+        requestEventResponse(`Der Kunde fragt, woher die Kontaktdaten stammen. Sage wörtlich: "${answer}" Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf.`);
+      }
+      return;
+    }
+    if (event.type === "ai_identity_question" && contactRouting?.stage !== "waiting_for_transfer" && !hasRequestedHumanTransfer(transcript)) {
+      currentContext.humanContactDetected = true;
+      if (atReception && contactRouting) {
+        if (!identityAnnounced) {
+          identityAnnounced = true;
+          const request = currentContext.contactName?.trim() && hasDeterministicGatekeeperTopic(currentContext)
+            ? ` ${buildGatekeeperTransferRequest(currentContext)}`
+            : "";
+          if (request) contactRouting.gatekeeperRequestMade = true;
+          requestDeterministicSpeech(`${buildDecisionMakerIdentity(currentContext).replace(/^Guten Tag, /, "Ja, ")}${request}`);
+        } else {
+          const repeatRequest = contactRouting.gatekeeperRequestMade && !currentContext.contactLeftCompany
+            && hasDeterministicGatekeeperTopic(currentContext)
+            ? ` ${buildGatekeeperTransferRequest(currentContext)}`
+            : "";
+          requestDeterministicSpeech(`${buildAiIdentityAnswer(currentContext)}${repeatRequest}`);
+        }
+      } else if (!callbackNumberStage) {
+        requestEventResponse(`Der Kunde fragt, ob er mit einer KI spricht. Sage wörtlich: "${buildAiIdentityAnswer(currentContext)}" Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf.`);
+      } else {
+        requestDeterministicSpeech(buildAiIdentityAnswer(currentContext));
+      }
+      return;
+    }
     if (callbackNumberStage && event.type === "clear_rejection" && classifyInboundSpeech(transcript) !== "voicemail") {
       callbackNumberStage = null;
       currentContext.queueDetected = false;
@@ -1246,6 +1438,25 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (contactRouting) {
       const previousStage = contactRouting.stage;
       contactRouting = advanceContactRouting(contactRouting, transcript);
+      const contactLeft = previousStage !== "decision_maker" && isContactNoLongerAtCompany(transcript);
+      const successor = contactLeft || contactRouting.awaitingSuccessorAnswer ? extractSuccessorName(transcript) : undefined;
+      if (contactLeft) {
+        if (!currentContext.contactLeftCompany) currentContext.originalContactName = currentContext.contactName;
+        currentContext.contactLeftCompany = true;
+        contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false };
+        log.info("realtime.contact_left_company", { callSid: currentContext.callSid, successorKnown: Boolean(successor) });
+      }
+      if (successor) {
+        currentContext.successorContactName = successor;
+        currentContext.contactName = successor;
+        contactRouting = { ...contactRouting, targetName: successor, awaitingSuccessorAnswer: false };
+        updateSession();
+      } else if (currentContext.contactLeftCompany && !currentContext.successorContactName
+        && contactRouting.stage === "waiting_for_transfer" && contactRouting.targetName) {
+        currentContext.contactName = undefined;
+        contactRouting = { ...contactRouting, targetName: undefined };
+        updateSession();
+      }
       if (contactRouting.awaitingAvailabilityAnswer
         && contactRouting.stage !== "waiting_for_transfer"
         && contactRouting.stage !== "decision_maker") {
@@ -1264,7 +1475,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (contactRouting.stage !== previousStage) updateSession();
       if (contactRouting.stage === "waiting_for_transfer") {
         identityAnnounced = false;
-        contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false };
+        contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false, awaitingSuccessorAnswer: false };
       }
       if (contactRouting.stage === "awaiting_contact") {
         waitForContact();
@@ -1274,6 +1485,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (contactRouting.stage === "gatekeeper" || contactRouting.stage === "confirming_decision_maker" || contactRouting.stage === "decision_maker") {
         currentContext.humanContactDetected = true;
       }
+      if (contactRouting.stage === "decision_maker") currentContext.decisionMakerReached = true;
 
       if (contactRouting.stage !== "waiting_for_transfer") {
         if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
@@ -1322,6 +1534,33 @@ export async function handleOpenAiRealtimeTelnyxStream(
           else requestEventResponse(`${introduction ? `Stelle dich zuerst mit "${introduction.trim()}" vor. ` : ""}Die Person am Empfang fragt nach dem Anrufgrund. Nenne in genau einem kurzen Satz den tatsächlichen Anlass aus dem Auftrag, nicht den internen Kampagnennamen. Stelle keine Frage, bitte nicht erneut um Weiterleitung und warte anschließend auf die Antwort. Kein Fachgespräch und keine erfundenen Angaben.`);
           return;
         }
+        if (contactLeft || contactRouting.awaitingSuccessorAnswer) {
+          if (successor) {
+            contactRouting = { ...contactRouting, gatekeeperRequestMade: true, successorQuestionAsked: true };
+            if (hasDeterministicGatekeeperTopic(currentContext)) {
+              requestDeterministicSpeech(`Vielen Dank für den Hinweis. ${buildGatekeeperTransferRequest(currentContext)}`);
+            } else {
+              requestEventResponse(buildGatekeeperTopicInstruction(currentContext, false));
+            }
+            return;
+          }
+          if (!contactRouting.successorQuestionAsked) {
+            contactRouting = { ...contactRouting, awaitingSuccessorAnswer: true, successorQuestionAsked: true };
+            requestDeterministicSpeech("Vielen Dank für den Hinweis. Wer ist denn jetzt bei Ihnen für dieses Thema zuständig?");
+            return;
+          }
+          contactRouting = { ...contactRouting, awaitingSuccessorAnswer: false };
+          if (/\b(?:geschäftsführ\w*|chef(?:in)?|inhaber(?:in)?|leitung|kolleg\w*|personalabteilung|buchhaltung)\b/i.test(transcript)
+            && !/\b(?:weiß\s+ich\s+nicht|keine\s+ahnung|niemand|keiner)\b/i.test(transcript)) {
+            currentContext.contactName = undefined;
+            contactRouting = { ...contactRouting, targetName: undefined, gatekeeperRequestMade: true };
+            updateSession();
+            requestDeterministicSpeech("Vielen Dank. Könnten Sie mich bitte mit der zuständigen Person verbinden?");
+            return;
+          }
+          requestDeterministicSpeech("Verstanden. Vielen Dank für Ihre Hilfe. Auf Wiederhören.", { hangupAfterPlayback: true });
+          return;
+        }
         if (isGatekeeperUnavailable(transcript)) {
           const suggestedTime = mentionsRetryTime(transcript);
           if (!contactRouting.availabilityFollowUpAsked && !suggestedTime) {
@@ -1340,7 +1579,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
           return;
         }
         const genericHelpOffer = /\b(?:wie\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|weiterhelfen)|was\s+(?:kann|darf)\s+ich\s+(?:für\s+sie\s+)?tun|womit\s+kann\s+ich\s+(?:ihnen\s+)?(?:helfen|dienen))\b/i.test(transcript);
-        const needsFreeAnswer = event.type === "customer_question" || (event.type === "unclear" && transcript.includes("?"));
+        const needsFreeAnswer = event.type === "customer_question" || event.type === "small_talk" || event.type === "objection"
+          || (event.type === "unclear" && transcript.includes("?"));
         if (contactRouting.gatekeeperRequestMade || (needsFreeAnswer && !genericHelpOffer)) {
           const introduction = identityAnnounced ? "" : `Stelle dich zuerst mit "${buildDecisionMakerIdentity(currentContext)}" vor. `;
           identityAnnounced = true;
@@ -1415,7 +1655,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         && !/\b(?:nein|nicht|doch nicht)\b/i.test(transcript);
       requestDeterministicSpeech(
         wantsBasicInfo
-          ? "Gerne. Ich notiere Ihren Wunsch nach kurzen Basisinformationen für Herrn Duic. Auf Wiederhören."
+          ? `Gerne. Ich notiere Ihren Wunsch nach kurzen Basisinformationen für ${buildAddressedOwner(currentContext)}. Auf Wiederhören.`
           : FINAL_FAREWELL_TEXT,
         { hangupAfterPlayback: true },
       );
@@ -1617,8 +1857,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (tool.name === "end_call") {
-      const canTerminateFromPreparation = preparationState.stage === "completed";
-      if (!canTerminateFromPreparation && !hasClearFarewellOrRejection(ctx) && !hasAffirmedAssistantEndQuestion(ctx)) {
+      if (!isEndCallAllowed()) {
         const instruction = "Beende das Gespräch nicht und verlange keine Bestätigung zum Auflegen. Fahre mit dem noch offenen Gesprächsschritt fort.";
         sendToolResult(tool.callId, { ok: false, error: "unclear_hangup_request", instruction });
         requestResponse(instruction);
@@ -1709,6 +1948,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
       onEvent: (message) => handleRealtimeEvent(message),
       onClose: (code, reason) => {
         log.info("realtime.closed", { callSid: ctx?.callSid, code, reason });
+        // After a provider outage the technical farewell is still playing via ElevenLabs; its own timer hangs up.
+        if (providerOutageHandled) return;
         if (ctx && !closed && !terminationInProgress) {
           terminationInProgress = true;
           ctx.endReason = "error";
@@ -1718,6 +1959,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
       },
       onError: (error) => {
         log.error("realtime.socket_error", { callSid: ctx?.callSid, error: error.message });
+        const failure = classifyProviderFailure(error.message);
+        if (failure) handleOpenAiOutage(failure, error.message);
       },
     });
 
@@ -1731,7 +1974,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
         log.error("realtime.session_error", {
           callSid: ctx?.callSid,
           error: errorMessage,
+          code: message.error?.code,
+          errorType: message.error?.type,
         });
+        const failure = classifyProviderFailure(errorMessage, message.error?.code, message.error?.type);
+        if (failure) handleOpenAiOutage(failure, errorMessage);
         return;
       }
 
@@ -1837,15 +2084,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
           ttsAbortController = controller;
           responseDialogueController = controller;
           const audioBytes = { value: 0 };
+          const isCurrent = () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && !userTurns.isBlocked();
+          responseDialogueIsCurrent = isCurrent;
           responseDialogueStream = new ElevenLabsDialogueStream({
             outputFormat: outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000",
             signal: controller.signal,
-            onChunk: (chunk) => appendTtsAudioChunk(
-              chunk,
-              () => !controller.signal.aborted && turn === ttsTurn && !responseInterrupted && !userTurns.isBlocked(),
-              audioBytes,
-              false,
-            ),
+            onChunk: (chunk) => appendTtsAudioChunk(chunk, isCurrent, audioBytes, false),
             voiceProfile: ctx?.voiceProfile,
           });
         }
@@ -1905,6 +2149,35 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "response.done") {
         const currentVersion = responseVersion;
         const currentOpening = openingSpeech;
+        const usage = message.response?.usage;
+        if (ctx && usage) {
+          log.info("realtime.response_usage", {
+            callSid: ctx.callSid,
+            inputTokens: usage.input_tokens,
+            cachedInputTokens: usage.input_token_details?.cached_tokens,
+            outputTokens: usage.output_tokens,
+            responseCreatedToFirstTokenMs: responseCreatedAt && firstModelTokenAt ? firstModelTokenAt - responseCreatedAt : undefined,
+          });
+        }
+        if (message.response?.status === "failed") {
+          const details = message.response.status_details?.error;
+          const errorMessage = details?.message || message.response.status_details?.reason || "response_failed";
+          log.error("realtime.response_failed", {
+            callSid: ctx?.callSid,
+            error: errorMessage,
+            code: details?.code,
+            errorType: details?.type,
+          });
+          const failure = classifyProviderFailure(errorMessage, details?.code, details?.type);
+          if (failure) {
+            responseVersion += 1;
+            assistantTranscript = "";
+            assistantTranscriptDeltaSeen = false;
+            outputGate.reset();
+            handleOpenAiOutage(failure, errorMessage);
+            return;
+          }
+        }
         if (responseInterrupted || message.response?.status === "cancelled" || message.response?.status === "canceled") {
           responseVersion += 1;
           currentOpening?.stop();
@@ -1996,7 +2269,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (transcript) {
           if (currentOpening) {
             await currentOpening.finish();
-            await finishResponseDialogueStream();
+            await finishResponseDialogueStream(transcript);
             if (responseVersion !== currentVersion || responseInterrupted) return;
             playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
           } else {
@@ -2091,6 +2364,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ownerRole: state.ownerRole === "master" || state.ownerRole === "user" ? state.ownerRole : undefined,
         ownerCompanyName: state.ownerCompanyName,
         ownerGesellschaft: state.ownerGesellschaft,
+        ownerIntroCompanyPhrase: state.ownerIntroCompanyPhrase,
+        ownerDataSourceStatement: state.ownerDataSourceStatement,
         previousSummary: state.previousSummary,
         isCallback: state.isCallback === 1,
         isTestCall: state.isTestCall === true,

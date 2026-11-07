@@ -13,11 +13,12 @@ import {
   bindCampaignCallLock,
   type OutboundCallQueueJob,
 } from "@/lib/report-db";
-import { getLeadById, isCampaignListActive, storeCallReport } from "@/lib/storage";
+import { getLeadById, isCampaignListActive, setCampaignListActive, storeCallReport } from "@/lib/storage";
 import { isPhoneNumberSuppressed } from "@/lib/call-safety";
-import { CallOwnerIdentityError, createTelnyxCall, resolveCallOwnerIdentity, type TelnyxCallRequest } from "@/lib/telnyx";
+import { CallOwnerIdentityError, createTelnyxCall, ProviderOutageError, resolveCallOwnerIdentity, type TelnyxCallRequest } from "@/lib/telnyx";
 import { log } from "@/lib/log";
 import { CampaignOutsideHoursError, isWithinCampaignHours } from "@/lib/campaign-schedule";
+import { sendOperationalEmail } from "@/lib/mailer";
 
 type CallReportPayload = Omit<Parameters<typeof storeCallReport>[0], "callSid">;
 
@@ -145,12 +146,16 @@ async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
       || (job.payload.reservedCampaignLead === undefined && !job.userId
         && job.payload.callSource === undefined && job.reportPayload.callSource === undefined
         && job.payload.isTestCall !== true);
-    if (error instanceof CallOwnerIdentityError && reservedCampaignLead
+    if ((error instanceof CallOwnerIdentityError || error instanceof ProviderOutageError) && reservedCampaignLead
       && typeof job.payload.leadId === "string") {
       await restoreUnstartedCampaignLead(job.payload.leadId, job.userId);
     }
     if (job.campaignLockToken) {
       await releaseCampaignCallLockByToken(job.campaignLockToken);
+    }
+    if (error instanceof ProviderOutageError) {
+      await pauseCampaignForProviderOutage(job, error);
+      return false;
     }
     log.error("outbound_call_queue.start_failed", {
       queueId: job.id,
@@ -158,6 +163,46 @@ async function startClaimedCall(job: OutboundCallQueueJob): Promise<boolean> {
       error: reason,
     });
     return false;
+  }
+}
+
+let lastProviderOutageAlertAt = 0;
+
+/** Stops the affected campaign instead of burning through leads, and tells the operator once what to fix. */
+async function pauseCampaignForProviderOutage(job: OutboundCallQueueJob, error: ProviderOutageError): Promise<void> {
+  let pausedList: string | undefined;
+  if (job.campaignLockToken && typeof job.payload.leadId === "string") {
+    try {
+      const lead = await getLeadById(job.payload.leadId, job.userId);
+      if (lead?.listId && !lead.listId.startsWith("crm-search-")) {
+        await setCampaignListActive(lead.listId, false, job.userId);
+        pausedList = lead.listName || lead.listId;
+      }
+    } catch (pauseError) {
+      log.error("outbound_call_queue.campaign_pause_failed", { queueId: job.id, error: String(pauseError) });
+    }
+  }
+  log.error("outbound_call_queue.provider_outage", {
+    queueId: job.id,
+    userId: job.userId,
+    issues: error.issues,
+    pausedList,
+  });
+  if (Date.now() - lastProviderOutageAlertAt < 30 * 60_000) return;
+  lastProviderOutageAlertAt = Date.now();
+  try {
+    await sendOperationalEmail({
+      subject: `Gloria pausiert: ${error.issues.join(", ")}`,
+      body: [
+        "Gloria hat einen Anruf nicht gestartet, weil ein Sprachdienst derzeit nicht nutzbar ist:",
+        ...error.issues.map((issue) => `- ${issue}`),
+        "",
+        pausedList ? `Die Kampagne „${pausedList}“ wurde pausiert. Der Kontakt bleibt unverbraucht.` : "Der Kontakt bleibt unverbraucht.",
+        "Bitte Guthaben aufladen bzw. den API-Schlüssel prüfen. Gloria erkennt die Behebung innerhalb von etwa einer Minute; pausierte Kampagnen danach bitte wieder starten.",
+      ].join("\n"),
+    });
+  } catch (mailError) {
+    log.error("outbound_call_queue.provider_outage_alert_failed", { error: String(mailError) });
   }
 }
 

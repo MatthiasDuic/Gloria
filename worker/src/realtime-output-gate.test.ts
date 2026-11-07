@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RealtimeOutputGate } from "./realtime-output-gate.js";
+import { RealtimeOutputGate, stripMetaCommentary } from "./realtime-output-gate.js";
 
 function speak(gate: RealtimeOutputGate, steps: Array<{ item?: { id: string; type: string; phase?: string; name?: string }; delta?: [string, string] }>): string {
   let spoken = "";
@@ -93,4 +93,34 @@ test("reset forgets held commentary from a previous response", () => {
   gate.reset();
   assert.equal(gate.finish(), "");
   assert.deepEqual(gate.takeSuppressed(), []);
+});
+
+test("never speaks internal meta commentary about the customer or the hang-up", () => {
+  assert.equal(stripMetaCommentary("Der Kunde möchte keine Anrufe mehr. Selbstverständlich, entschuldigen Sie die Störung. Auf Wiederhören."),
+    "Selbstverständlich, entschuldigen Sie die Störung. Auf Wiederhören.");
+  assert.equal(stripMetaCommentary("Ich beende jetzt das Gespräch. Auf Wiederhören."), "Auf Wiederhören.");
+  assert.equal(stripMetaCommentary("Ich rufe end_call auf."), "");
+  assert.equal(stripMetaCommentary("Vielen Dank für das Gespräch. Auf Wiederhören."), "Vielen Dank für das Gespräch. Auf Wiederhören.");
+
+  const gate = new RealtimeOutputGate();
+  const spoken = speak(gate, [
+    { item: { id: "c1", type: "message", phase: "commentary" } },
+    { delta: ["c1", "Die Person lehnt ab. Alles Gute, auf Wiederhören."] },
+    { item: { id: "t1", type: "function_call", name: "end_call" } },
+  ]);
+  assert.equal(spoken, "Alles Gute, auf Wiederhören.");
+  assert.deepEqual(gate.takeSuppressed(), ["Die Person lehnt ab. Alles Gute, auf Wiederhören."]);
+});
+
+test("drops a farewell announcement when the hang-up is not allowed and adds a farewell to a silent hang-up", () => {
+  const blocked = new RealtimeOutputGate({ canAnnounce: () => false });
+  const spokenWhenBlocked = speak(blocked, [
+    { item: { id: "c1", type: "message", phase: "commentary" } },
+    { delta: ["c1", "Dann beende ich das Gespräch. Auf Wiederhören."] },
+    { item: { id: "t1", type: "function_call", name: "end_call" } },
+  ]);
+  assert.equal(spokenWhenBlocked, "");
+
+  const silent = new RealtimeOutputGate({ hangupFallbackText: "Vielen Dank für Ihre Zeit. Auf Wiederhören." });
+  assert.equal(silent.observeItem({ id: "t1", type: "function_call", name: "end_call" }), "Vielen Dank für Ihre Zeit. Auf Wiederhören.");
 });

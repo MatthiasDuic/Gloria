@@ -1,6 +1,6 @@
 import { decideAppointment } from "./appointment-controller.js";
 import { advanceContactRouting, createContactRoutingState, type ContactRoutingStage } from "./contact-routing-controller.js";
-import { classifyConversationEvent, type ConversationEvent } from "./conversation-event-controller.js";
+import { classifyConversationEvent, type ConversationEvent, type ObjectionKind } from "./conversation-event-controller.js";
 import { assessPkvConversation, type ConversationTurn, type PkvConversationStage } from "./pkv-conversation-controller.js";
 
 export type EvaluationViolationCode =
@@ -25,7 +25,7 @@ export type DialogScenario = {
   expected: {
     pkvStage?: PkvConversationStage;
     eventType?: ConversationEvent["type"];
-    eventKind?: "no_time" | "existing_advisor" | "send_information" | "skepticism" | "other";
+    eventKind?: ObjectionKind;
     routingStage?: ContactRoutingStage;
     appointmentAllowed?: boolean;
     violationCodes?: EvaluationViolationCode[];

@@ -41,6 +41,7 @@ import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { buildGatekeeperIntro, buildGatekeeperTopicInstruction, buildGatekeeperTransferRequest, hasDeterministicGatekeeperTopic } from "./openai-realtime-call.js";
+import { buildAiIdentityAnswer, buildDataSourceAnswer, buildDecisionMakerIdentity, buildOptOutFarewell, buildOwnerAffiliation, DATA_SOURCE_LIST_OFFER } from "./openai-realtime-call.js";
 import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildNoStrategyAcknowledgementInstruction, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isNoStrategyAnswer, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { isSuppliedAppointmentSlot } from "./appointment-controller.js";
@@ -293,6 +294,73 @@ test("explains an instruction-style reason before reporting that the callback nu
   }, 0, 160, false, "Erkläre den unverbindlichen Austausch über den Versicherungsvertrieb.", "");
 });
 
+async function waitForHangups(hangups: object[], count: number) {
+  for (let attempt = 0; attempt < 100 && hangups.length < count; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(hangups.length, count);
+}
+
+test("answers 'Woher haben Sie meine Nummer?' at reception honestly and keeps the call open", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Woher haben Sie überhaupt unsere Nummer?" });
+    await waitForTtsRequests(ttsRequests, 2);
+    assert.match(requestedSpeech(ttsRequests)[1], /^Herr Testberater hat Ihr Unternehmen im Rahmen seiner eigenen Unternehmensrecherche ausgewählt/);
+    assert.match(requestedSpeech(ttsRequests)[1], /nehme ich Sie selbstverständlich aus der Liste\.$/);
+    assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(hangups.length, 0);
+  });
+});
+
+test("an opt-out with deletion request ends the call politely and reports do-not-call", { timeout: 10_000 }, async () => {
+  const requests = await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Rufen Sie hier bitte nicht mehr an und löschen Sie unsere Daten." });
+    await waitForTtsRequests(ttsRequests, 2);
+    assert.match(requestedSpeech(ttsRequests)[1], /^Selbstverständlich\. Ich habe notiert, dass wir Sie nicht mehr anrufen, und gebe Ihren Löschwunsch an Herrn Testberater weiter\./);
+    assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
+    await waitForHangups(hangups, 1);
+  });
+  const finalReport = requests.find((payload) => payload.summary && payload.outcome);
+  assert.ok(finalReport);
+  assert.equal(finalReport.doNotCall, true);
+  assert.equal(finalReport.dataDeletionRequested, true);
+});
+
+test("asks once for the successor when the contact has left and ends politely when nobody is named", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herr Neumann ist nicht mehr bei uns." });
+    await waitForTtsRequests(ttsRequests, 2);
+    assert.equal(requestedSpeech(ttsRequests)[1], "Vielen Dank für den Hinweis. Wer ist denn jetzt bei Ihnen für dieses Thema zuständig?");
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Das weiß ich leider nicht." });
+    await waitForTtsRequests(ttsRequests, 3);
+    assert.equal(requestedSpeech(ttsRequests)[2], "Verstanden. Vielen Dank für Ihre Hilfe. Auf Wiederhören.");
+    await waitForHangups(hangups, 1);
+  });
+});
+
+test("asks for the named successor after the contact has left the company", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herr Neumann hat das Unternehmen verlassen, das macht jetzt Frau Meier." });
+    await waitForTtsRequests(ttsRequests, 2);
+    assert.match(requestedSpeech(ttsRequests)[1], /^Vielen Dank für den Hinweis\. Ich möchte gerne mit Frau Meier zum Thema Energiekosten verbunden werden\.$/);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(hangups.length, 0);
+  });
+});
+
 test("waits until a receptionist is ready to write down the callback number", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
@@ -498,7 +566,7 @@ test("a short first greeting waits for ASR then delivers a complete identity che
     assert.equal(ttsRequests.length, 0);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "hello", transcript: "Ja, Müller?" });
     await waitForTtsRequests(ttsRequests, 1);
-    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater.*Spreche ich mit Herrn Neumann\?/);
+    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Testberater.*Spreche ich mit Herrn Neumann\?/);
     assert.doesNotMatch(ttsRequests[0], /Entschuldigung/);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     assert.equal(hangups.length, 0);
@@ -790,12 +858,12 @@ test("a receptionist hears whom Gloria wants to reach and why when the campaign 
 });
 
 test("the first topic sentence is prefetched from a natural campaign objective and is not requested after identity playback", { timeout: 10_000 }, async () => {
-  const topicSentence = "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Passt es gerade für ein kurzes Gespräch?";
+  const topicSentence = "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Passt es Ihnen gerade für ein kurzes Gespräch?";
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
-    assert.ok(prefetchedTexts.some((text) => text.startsWith("Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Testberater")));
+    assert.ok(prefetchedTexts.some((text) => text.startsWith("Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Testberater")));
     assert.ok(prefetchedTexts.some((text) => text.endsWith(topicSentence)));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -813,14 +881,14 @@ test("uses a spoken campaign objective and never reads an internal campaign labe
       topic: "private Krankenversicherung",
       callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
     }),
-    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es gerade für ein kurzes Gespräch?",
+    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es Ihnen gerade für ein kurzes Gespräch?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
       topic: "Recruiting",
       callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
     }),
-    "Ich rufe mit einem kurzen Anliegen an. Passt es gerade für ein kurzes Gespräch?",
+    "Ich rufe mit einem kurzen Anliegen an. Passt es Ihnen gerade für ein kurzes Gespräch?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
@@ -828,7 +896,7 @@ test("uses a spoken campaign objective and never reads an internal campaign labe
       callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
       receptionTopicReason: "Ich habe eine fachliche Frage zum Thema Personalbedarf.",
     }),
-    "Ich rufe zum Thema Personalbedarf an. Passt es gerade für ein kurzes Gespräch?",
+    "Ich rufe zum Thema Personalbedarf an. Passt es Ihnen gerade für ein kurzes Gespräch?",
   );
 });
 
@@ -1095,7 +1163,7 @@ test("asks for a callback instead of continuing the pitch when the contact has n
 test("applies shared natural-dialogue and safety rules to live campaigns", () => {
   const instructions = buildRealtimeInstructions(buildPkvContext());
   assert.match(instructions, /individuellen Dialog statt ein Skript/);
-  assert.match(instructions, /transparent als digitale Vertriebsassistentin vor/);
+  assert.match(instructions, /transparent als KI-Assistentin deines Auftraggebers vor/);
   assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
   assert.match(instructions, /Erfinde keine Tarife, Zahlen, Quellen/);
 });
@@ -1348,6 +1416,21 @@ test("passes real free calendar slots through both session and response instruct
   assert.doesNotMatch(buildRealtimeInstructions(ctx), /AKTUELLER KALENDERSTATUS UND TERMINAUSWAHL/);
 });
 
+test("keeps the instruction prefix stable while calendar, contribution and appointment state change", () => {
+  const ctx = buildPkvContext();
+  ctx.topicPolicyPrompt = "AUFTRAG FÜR GLORIA: Testwissen zur Beitragsentwicklung.";
+  const before = buildRealtimeInstructions(ctx);
+  const stableEnd = before.indexOf("WORTWAHL:");
+  assert.ok(stableEnd > before.indexOf("AUFTRAG FÜR GLORIA"), "knowledge must precede the dynamic tail");
+  ctx.freeSlotsPrompt = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr";
+  ctx.transcript.push({ role: "user", text: "Ich zahle ungefähr 900 Euro.", at: Date.now() });
+  ctx.confirmedSlotPhrase = "Mittwoch, 26. August um 11:00 Uhr";
+  const after = buildRealtimeInstructions(ctx);
+  assert.equal(after.slice(0, stableEnd), before.slice(0, stableEnd));
+  assert.match(after.slice(stableEnd), /VERABSCHIEDUNG NACH TERMIN/);
+  assert.match(before.slice(stableEnd), /VERABSCHIEDUNG OHNE TERMIN/);
+});
+
 test("uses the appointment-specific farewell after a slot is confirmed", () => {
   const ctx = buildPkvContext();
   ctx.ownerRealName = "Matthias Duic";
@@ -1427,11 +1510,11 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /stelle dich transparent und kurz vor/);
-  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic/);
+  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic/);
   assert.match(buildDecisionMakerIntro(ctx), /Ich rufe zum Thema Individuelle Gesundheitsvorsorge an/);
   assert.match(instructions, /gerne mit Herrn Neumann zum Thema des Anrufs verbunden werden möchtest/);
   assert.equal(buildGatekeeperIntro(ctx),
-    "Guten Tag, ich bin Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel, und möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
+    "Guten Tag, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel, und möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
   assert.equal(buildGatekeeperTransferRequest(ctx), "Ich möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
   assert.equal(buildGatekeeperTransferRequest({
     ...ctx, topic: "Kampagne Q4", callObjective: "Vertriebspartner gewinnen.",
@@ -1479,8 +1562,8 @@ for (const mode of ["normal", "test", "callback"] as const) {
     if (mode === "callback") assert.match(instructions, /Einstiegsbeitrag bereits erfasst/);
 
     const intro = buildDecisionMakerIntroInstructions(ctx);
-    assert.match(intro, /Gloria, die digitale Vertriebsassistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
-    assert.match(intro, /Themenbezeichnung aus dem AUFTRAG FÜR GLORIA, nicht den internen Kampagnennamen/);
+    assert.match(intro, /Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
+    assert.match(intro, /Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen/);
     assert.doesNotMatch(intro, /Ich rufe zum Thema private Krankenversicherung/);
     assert.match(intro, /Noch keinen Pitch, keine Fachfragen und keine Terminfrage/);
 
@@ -1533,7 +1616,7 @@ test("retains the complete session assignment in each response override througho
   }
   const intro = buildRealtimeResponseInstructions(ctx, buildDecisionMakerIntroInstructions(ctx));
   assert.ok(intro.includes(policy.callObjective));
-  assert.match(intro, /Nenne anschließend ausschließlich den tatsächlichen Gesprächsanlass/);
+  assert.match(intro, /Nenne ausschließlich den tatsächlichen Gesprächsanlass/);
   assert.match(intro, /Interne Begriffe.*dürfen nicht gesprochen werden/);
 });
 
@@ -1566,6 +1649,38 @@ test("uses the configured company in the opening and falls back when it is missi
     ownerGesellschaft: "   ",
   });
   assert.match(buildDecisionMakerIntro(fallbackContext), /bei Agentur Duic Sprockhövel/);
+});
+
+test("introduces Gloria as the user's AI assistant with the configured company phrase", () => {
+  const owner = { ownerRealName: "Matthias Duic", ownerCompanyName: "Agentur Duic Sprockhövel", ownerGesellschaft: "BarmeniaGothaer" };
+  const configured = { ...owner, ownerIntroCompanyPhrase: "von der BarmeniaGothaer in Sprockhövel." };
+  assert.equal(buildOwnerAffiliation(configured), "von der BarmeniaGothaer in Sprockhövel");
+  assert.equal(buildOwnerAffiliation({ ...owner, ownerIntroCompanyPhrase: "der Allianz Generalvertretung Muster" }), "von der Allianz Generalvertretung Muster");
+  assert.equal(buildOwnerAffiliation(owner), "bei Agentur Duic Sprockhövel");
+  assert.equal(buildDecisionMakerIdentity(configured),
+    "Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel.");
+  assert.equal(buildDecisionMakerIdentity({ ...configured, ownerRealName: "Frau Anna Muster" }),
+    "Guten Tag, hier ist Gloria, die KI-Assistentin von Frau Anna Muster von der BarmeniaGothaer in Sprockhövel.");
+  const ctx = newContext({ callSid: "test-identity", streamSid: "test-stream", contactName: "Herr Neumann", topic: "Gesundheitskosten", ...configured });
+  assert.match(buildGatekeeperIntro(ctx), /^Guten Tag, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel, und möchte gerne mit Herrn Neumann/);
+  const instructions = buildRealtimeInstructions(ctx);
+  assert.match(instructions, /Stelle dich immer ausdrücklich als 'KI-Assistentin' vor/);
+  assert.doesNotMatch(instructions, /Du bist Gloria, die digitale Vertriebsassistentin/);
+});
+
+test("answers data-source, AI identity and opt-out situations honestly and per user", () => {
+  const statement = "Herr Duic hat eine Liste mit erfolgreichen Unternehmen zusammengestellt, teilweise durch eigene Recherche und teilweise über die Creditreform";
+  assert.equal(buildDataSourceAnswer({ ownerRealName: "Matthias Duic", ownerDataSourceStatement: statement }), `${statement}.`);
+  assert.match(buildDataSourceAnswer({ ownerRealName: "Matthias Duic" }), /^Herr Matthias Duic hat Ihr Unternehmen im Rahmen seiner eigenen Unternehmensrecherche ausgewählt/);
+  assert.match(buildDataSourceAnswer({ ownerRealName: "Frau Anna Muster" }), /im Rahmen ihrer eigenen Unternehmensrecherche.*gibt sie Ihnen/);
+  assert.match(DATA_SOURCE_LIST_OFFER, /aus der Liste/);
+  const ctx = newContext({ callSid: "test-data-source", streamSid: "test-stream", topic: "Gesundheitskosten", ownerRealName: "Matthias Duic", ownerDataSourceStatement: statement });
+  assert.ok(buildRealtimeInstructions(ctx).includes(statement));
+
+  assert.match(buildAiIdentityAnswer({ ownerRealName: "Matthias Duic" }), /^Ja, ich bin eine KI-Assistentin und rufe im Auftrag von Herrn Matthias Duic an\. Ein Termin findet dann persönlich mit ihm statt\.$/);
+  assert.match(buildOptOutFarewell({ ownerRealName: "Matthias Duic" }, true), /Löschwunsch an Herrn Matthias Duic weiter.*Auf Wiederhören\.$/);
+  assert.equal(buildOptOutFarewell({ ownerRealName: "Matthias Duic" }, false),
+    "Selbstverständlich. Ich habe notiert, dass wir Sie nicht mehr anrufen. Entschuldigen Sie die Störung. Auf Wiederhören.");
 });
 
 test("explicitly teaches the correct Duic pronunciation as Duitsch", () => {

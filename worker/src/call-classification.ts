@@ -18,6 +18,10 @@ const VOICEMAIL_PATTERNS: RegExp[] = [
   /teilnehmer\s+ist\s+(?:(?:zurzeit|momentan|derzeit)\s+)?nicht\s+erreichbar/i,
   /(?:unser\s+b[üu]ro|unsere\s+praxis|unser\s+gesch[äa]ft)[\s\S]{0,40}nicht\s+besetzt/i,
   /sind\s+vor[üu]bergehend\s+nicht\s+erreichbar/i,
+  /au[ßs]erhalb\s+(?:unserer\s+)?(?:gesch[äa]fts|[öo]ffnungs|b[üu]ro|sprech|service)zeiten/i,
+  /(?:unsere\s+)?(?:gesch[äa]fts|[öo]ffnungs|b[üu]ro|sprech|service)zeiten\s+sind\b/i,
+  /die\s+person,?\s+die\s+sie\s+(?:an)?rufen/i,
+  /der\s+gew[üu]nschte\s+gespr[äa]chspartner\s+ist/i,
   /(?:hinterlassen|aufzeichnen)\s+sie\s+(?:ihre\s+)?(?:nachricht|aufnahme)\b/i,
 ];
 

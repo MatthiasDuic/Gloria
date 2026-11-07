@@ -3,6 +3,7 @@ import { log } from "@/lib/log";
 import { completeOutboundCall, markOutboundCallActive, releaseCampaignCallLock, setReportResultDetailIfMissing } from "@/lib/report-db";
 import { processOutboundCallQueue } from "@/lib/outbound-call-queue";
 import { resultDetailForUnansweredHangup } from "@/lib/telnyx-hangup";
+import { getTelnyxMediaStreamUrl } from "@/lib/telnyx";
 import { getTelnyxPublicKey, telnyxCommandId, verifyTelnyxWebhook } from "@/lib/telnyx-webhook-auth";
 
 export const runtime = "nodejs";
@@ -40,56 +41,6 @@ function readApiKey(): string {
     throw new Error("TELNYX_API_KEY fehlt.");
   }
   return apiKey;
-}
-
-function getTelnyxMediaStreamUrl(): string {
-  const normalize = (raw?: string): string | undefined => {
-    const value = raw?.trim();
-    if (!value) return undefined;
-    const rewritten = value.replace("/twilio-stream", "/telnyx-stream");
-    try {
-      const url = new URL(rewritten);
-      if (url.protocol === "https:") url.protocol = "wss:";
-      if (url.protocol === "http:") url.protocol = "ws:";
-      if (!url.pathname || url.pathname === "/") {
-        url.pathname = "/telnyx-stream";
-      } else if (url.pathname === "/twilio-stream") {
-        url.pathname = "/telnyx-stream";
-      }
-      return url.toString();
-    } catch {
-      return rewritten;
-    }
-  };
-
-  const derivedFromHealthcheck = (() => {
-    const health = process.env.WORKER_HEALTHCHECK_URL?.trim();
-    if (!health) return undefined;
-    try {
-      const url = new URL(health);
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-      url.pathname = "/telnyx-stream";
-      url.search = "";
-      url.hash = "";
-      return url.toString();
-    } catch {
-      return undefined;
-    }
-  })();
-
-  const explicit = normalize(process.env.TELNYX_MEDIA_STREAM_URL);
-  const legacyHostPattern = /gloria-stream-worker\.onrender\.com/i;
-  if (explicit && !legacyHostPattern.test(explicit)) {
-    return explicit;
-  }
-
-  const fallback =
-    derivedFromHealthcheck ||
-    normalize(process.env.TWILIO_MEDIA_STREAM_URL) ||
-    normalize(process.env.MEDIA_STREAM_WSS_URL) ||
-    "wss://gloria-tebr.onrender.com/telnyx-stream";
-
-  return fallback;
 }
 
 async function sendTelnyxCommand(

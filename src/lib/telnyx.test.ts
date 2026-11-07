@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test, { mock } from "node:test";
 import { Pool } from "pg";
-import { createTelnyxCall, encodeTelnyxClientState, resolveCallOwnerIdentity } from "./telnyx";
+import { createTelnyxCall, encodeTelnyxClientState, ProviderOutageError, resolveCallOwnerIdentity } from "./telnyx";
+import { resetWorkerReadinessCacheForTests } from "./telephony-runtime";
 import { CampaignOutsideHoursError } from "./campaign-schedule";
 import { extractTelnyxPublicKey, verifyTelnyxWebhook } from "./telnyx-webhook-auth";
 import { resultDetailForUnansweredHangup } from "./telnyx-hangup";
@@ -202,6 +203,68 @@ test("rejects malformed owner phone values instead of making up a number from em
     mock.restoreAll();
     if (previous === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previous;
+  }
+});
+
+test("a blocking provider outage on the worker stops the call before Telnyx dials", async () => {
+  const keys = ["DATABASE_URL", "TELNYX_API_KEY", "TELNYX_CONNECTION_ID", "TELNYX_PHONE_NUMBER", "APP_BASE_URL", "APP_INTERNAL_TOKEN", "OPENAI_API_KEY", "WORKER_HEALTHCHECK_URL"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.DATABASE_URL = "postgres://localhost/gloria-test";
+  process.env.TELNYX_API_KEY = "test-key";
+  process.env.TELNYX_CONNECTION_ID = "test-connection";
+  process.env.TELNYX_PHONE_NUMBER = "+492339555100";
+  process.env.APP_BASE_URL = "https://app.example.test";
+  process.env.APP_INTERNAL_TOKEN = "test-token";
+  process.env.OPENAI_API_KEY = "test-key";
+  process.env.WORKER_HEALTHCHECK_URL = "https://worker.example.test/health";
+  resetWorkerReadinessCacheForTests();
+  mock.method(Pool.prototype, "query", async (sql: string) => {
+    if (/FROM users\s+WHERE id = \$1/.test(sql)) {
+      return {
+        rows: [{
+          id: "normal", username: "normal", real_name: "Erika Mustermann", company_name: "Testagentur",
+          real_phone: "0170 1234567", password_hash: "test", role: "user", created_at: "2026-01-01T00:00:00.000Z",
+        }],
+        rowCount: 1,
+      };
+    }
+    if (/FROM phone_numbers\s+WHERE user_id = \$1/.test(sql)) {
+      return { rows: [{ id: "phone", user_id: "normal", phone_number: "+492339555100", label: "Test", active: true }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  let dialled = false;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/telnyx/topic-policies")) {
+      return Response.json({ topicPolicies: [{ topic: "Test", opener: "", discovery: "", objectionHandling: "", close: "" }] });
+    }
+    if (url.includes("/phone_numbers?")) return Response.json({ data: [{ phone_number: "+492339555100" }] });
+    if (url.endsWith("/readyz")) {
+      return Response.json({ ok: false, blocking: true, issues: ["OpenAI-Guthaben aufgebraucht"] }, { status: 503 });
+    }
+    if (url.endsWith("/calls") && init?.method === "POST") {
+      dialled = true;
+      return Response.json({ data: { call_control_id: "test-call" } });
+    }
+    if (url.includes("/health") || url.includes("/api/calendar/busy") || url.includes("/v1/models")) {
+      return Response.json({ ok: true });
+    }
+    throw new Error(`Unexpected test request: ${url}`);
+  });
+  try {
+    await assert.rejects(
+      createTelnyxCall({ to: "+492339555200", company: "Testfirma", topic: "Test", userId: "normal", callSource: "manual" }),
+      (error: unknown) => error instanceof ProviderOutageError && /nicht startklar: OpenAI-Guthaben aufgebraucht/.test(error.message),
+    );
+    assert.equal(dialled, false);
+  } finally {
+    mock.restoreAll();
+    resetWorkerReadinessCacheForTests();
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 

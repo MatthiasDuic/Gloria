@@ -1,274 +1,95 @@
-# Gloria KI-Assistent - Deployment Guide
+# Gloria KI-Assistentin – Betrieb und Deployment
 
-## Production Status ✅
-
-**Last Deploy:** April 21, 2026 via `npx vercel deploy --prod`  
-**URL:** https://gloria-ki-assistant.vercel.app (aliased to gloria.agentur-duic-sprockhoevel.de)  
-**Health Check:** `/api/health` → 200 OK  
-**E2E Validation:** 14/14 tests passing
-
----
-
-## Core Features Deployed
-
-### 1. **Multi-Tenant Architecture**
-- ✅ User authentication via cookie sessions (`gloria_session`)
-- ✅ Role-based access control (master/user)
-- ✅ User-scoped data isolation (scripts, reports, leads, campaigns)
-- ✅ PostgreSQL on Render with userId foreign keys
-
-### 2. **Telephony Pipeline (Twilio + OpenAI Chat + ElevenLabs)**
-- ✅ Inbound call routing via `/api/twilio/voice`
-- ✅ Outbound campaign calling via `/api/campaigns/lists`
-- ✅ User-scoped script caching in `telephony-runtime.ts`
-- ✅ Script origin tracking in call reports
-- ✅ AI conversation loop with ElevenLabs voice synthesis
-- ✅ Call completion webhooks → report persistence
-
-### 3. **Campaign Management**
-- ✅ CSV/XLS import with auto-parsing (`/api/campaigns/import`)
-- ✅ Lead persistence in PostgreSQL
-- ✅ Campaign list state management (`/api/campaigns/lists`)
-- ✅ Manual + scheduled callback support (`/api/callbacks/run`, due callbacks checked every minute)
-
-### 4. **Admin Interface**
-- ✅ User management (`/api/admin/users`)
-- ✅ Phone number configuration (`/api/admin/phone-numbers`)
-- ✅ Learning/script management (`/api/learning`)
-- ✅ Report export to Outlook (`/api/export/outlook`)
-
-### 5. **Security**
-- ✅ Basic Auth for internal APIs (BASIC_AUTH_USERNAME=MDUIC)
-- ✅ Call state tokens for Twilio callback validation
-- ✅ Cron job protection via CRON_SECRET
-- ✅ User scope guards on learning/reporting endpoints
-
----
-
-## Key Configuration Files
-
-### Environment (.env.local)
-```
-APP_BASE_URL=
-BASIC_AUTH_USERNAME=
-BASIC_AUTH_PASSWORD=
-CALL_STATE_SECRET=
-CRON_SECRET=
-DATABASE_URL=
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
-ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
-```
-
-### Premium Voice Profile (Locked Sweetspot)
-Set these values in production (Render worker) to keep one consistent premium mode:
+## Architektur
 
 ```
-OPENAI_MODEL=gpt-4.1
-LLM_TRANSCRIPT_TURNS=10
-LLM_MAX_TOKENS=115
-LLM_TIMEOUT_MS=7600
-LLM_EARLY_FLUSH_CHARS=70
-
-ELEVENLABS_MODEL=eleven_v4_turbo
-ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2
-ELEVENLABS_STABILITY=0.27
-ELEVENLABS_SIMILARITY=0.86
-ELEVENLABS_STYLE=0.62
-ELEVENLABS_SPEED=0.90
-ELEVENLABS_SPEAKER_BOOST=false
-ELEVENLABS_LATENCY_MODE=3
-
-OPENAI_REALTIME_ASR_MODEL=gpt-4o-realtime-preview
-OPENAI_TRANSCRIBE_LANGUAGE=de
-OPENAI_ASR_SILENCE_MS=520
-ASR_FINAL_COALESCE_MS=520
-ASR_UTTERANCE_END_GRACE_MS=320
+Kampagne / CRM / manueller Anruf
+        │
+        ▼
+Vercel (Next.js, gloria.agentur-duic-sprockhoevel.de)
+  ├─ queueOutboundCall → processOutboundCallQueue → createTelnyxCall
+  │     └─ Vorab-Check: Worker /readyz (Guthaben, Zugang) – bei Ausfall kein Anruf
+  ├─ Telnyx Call Control + Webhooks (/api/telnyx/events)
+  └─ PostgreSQL (Leads, Kampagnen, Berichte, Warteschlange)
+        │
+        ▼  Telnyx Media Stream (G.711 PCMA, 8 kHz)
+Render-Worker (gloria-tebr.onrender.com, /telnyx-stream)
+  ├─ OpenAI Realtime gpt-realtime-2.1 (Hören, Transkript, Dialog, Tools)
+  ├─ ElevenLabs eleven_v4_turbo (Stimme), Ersatzstimme OpenAI TTS
+  └─ Bericht an die App (/api/reports, mit Wiederholungen)
 ```
 
-Der Worker streamt v4 Turbo per Text-to-Dialogue-WebSocket und sendet vollständige Sätze bereits während die KI-Antwort entsteht. Bei einem Fehler, bevor Audio empfangen wurde, wird der Fallback verwendet. `ELEVENLABS_STYLE`, `ELEVENLABS_SPEED` und `ELEVENLABS_SPEAKER_BOOST` werden nur vom Fallback unterstützt.
+Alle Anrufe – Kampagne, Wiedervorlage, CRM und manuell – laufen über dieselbe
+Warteschlange. Es gibt keinen zweiten Anrufpfad. Maximal drei Gespräche laufen
+gleichzeitig; weitere Aufträge warten persistent in PostgreSQL.
 
-Notes:
-- This profile is tuned for fast first audio while preserving a natural premium sales tone.
-- Keep these values identical across staging and production to avoid drift in call behavior.
+## Deploy
 
-### Build & Runtime
-- Next.js 16.2.3 (App Router, TypeScript)
-- Vercel deployment (nodejs runtime for API routes)
-- Package.json: `npm run build` → `.next/` artifact
+- **App (Vercel)**: Push auf `main` deployt automatisch.
+- **Worker (Render)**: Push auf `main` deployt automatisch (`render.yaml`,
+  `autoDeploy: true`). Die laufende Revision steht in `GET /readyz` unter `revision`.
 
----
+Prüfung nach dem Deploy:
 
-## Telephony Architecture
-
-```
-User calls +4923399255995 (Twilio)
-  ↓
-/api/twilio/voice (webhook answer)
-  ├─ getContext() → extracts topic, userId
-  ├─ prepareCall() → initialisiert Laufzeit-Kontext + ElevenLabs
-  └─ returns TwiML with Gather/Say
-      ↓
-User speaks → Twilio transcribes
-  ↓
-/api/twilio/voice/process (user input handling)
-  ├─ getScriptOrigin(topic, userId) → tracks script source
-  ├─ getTopicScript() → resolves user-scoped script
-  ├─ OpenAI Chat-Completions-Entscheidungslogik
-  ├─ ElevenLabs voice synthesis
-  ├─ POST to /api/calls/webhook → interim report
-  └─ returns next TwiML
-      ↓
-[Call continues until hangup]
-  ↓
-/api/twilio/status (completion webhook)
-  ├─ extracts userId from callback URL
-  └─ POST to /api/calls/webhook → final report + recording
-      ↓
-/api/calls/webhook (report aggregation)
-  ├─ storeCallReport(userId, phoneNumberId)
-  └─ email to REPORT_TO_EMAIL (matthias.duic@...)
+```bash
+curl -s https://gloria-tebr.onrender.com/readyz
 ```
 
-### Script Selection Logic
+`ok: true`, `blocking: false` und eine leere `issues`-Liste bedeuten: Gloria ist
+startklar.
 
-**Before Fix:** All users shared single global `scriptProfiles` cache → wrong scripts loaded.
+## Umgebungsvariablen
 
-**After Fix:** 
-- `scriptProfilesByUser: Record<string, Partial<Record<Topic, ScriptConfig>>>`
-- `getRuntimeCacheKey(userId)` returns userId or "global"
-- `syncScripts(baseUrl, userId)` fetches via `/api/twilio/scripts?userId=<userId>`
-- Each user's scripts isolated in per-user Map
+- App: siehe `.env.example`.
+- Worker: siehe `worker/.env.example` und `worker/README.md`.
 
-**Fallback:** If user has no custom script, falls back to global scripts automatically.
+Pflicht in der App: `DATABASE_URL`, `APP_BASE_URL`, `APP_INTERNAL_TOKEN`,
+`CRON_SECRET`, `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER`,
+`TELNYX_PUBLIC_KEY`, `WORKER_HEALTHCHECK_URL`, `OPENAI_API_KEY`.
 
-### Shared outbound-call queue
+## Cron-Jobs (vercel.json)
 
-- Campaign calls run Monday through Friday from **09:00 to 17:30 Europe/Berlin**,
-  without a midday pause. At 17:30 no new campaign call may start, including
-  calls requested by the dashboard or already waiting in the shared queue.
-  Active conversations finish normally. Campaigns remain active overnight;
-  pending queue jobs and active lists resume automatically from 09:00 on the
-  next working day through the existing queue and campaign cron jobs.
-- `CAMPAIGN_TIMEZONE` and `CAMPAIGN_SLOTS` can override this schedule. Production
-  defaults apply when these variables are not configured.
-- Gloria starts at most **five outbound calls at a time** across all users.
-- Further manual calls, campaign calls, and callbacks are stored in the shared
-  PostgreSQL queue and started in fair per-user rotation as active calls finish.
-- The CRM polls queue state and shows active calls, each user's waiting position,
-  and recent call-start failures.
-- `DATABASE_URL` and `CRON_SECRET` must be configured in Vercel. The
-  `/api/calls/queue/process` cron runs every minute as a recovery path; Telnyx
-  hangup events normally start the next queued calls immediately.
-- `/api/controlling/daily-sync` writes that day's Gloria call outcomes
-  into each paired CRM user's daily Controlling entry at 19:00 Europe/Berlin.
-  Vercel invokes it at 17:00 and 18:00 UTC; the endpoint's timezone check runs
-  only the invocation that corresponds to 19:00 locally. It requires both
-  `CRON_SECRET` and `GLORIA_CRM_INTEGRATION_TOKEN`.
+| Pfad | Zweck |
+| --- | --- |
+| `/api/calls/queue/process` | Anrufwarteschlange abarbeiten (jede Minute) |
+| `/api/callbacks/run` | Fällige Wiedervorlagen und Gloria-Aufgaben anrufen |
+| `/api/campaigns/run-active` | Aktive Kampagnen in den Kampagnenzeiten befüllen |
+| `/api/jobs/process` | Hintergrundjobs |
+| `/api/reports/cleanup` | Nächtliche Bereinigung |
+| `/api/campaign-knowledge/refresh` | Wissensquellen der Kampagnen aktualisieren |
+| `/api/learning/optimize/cron` | Wöchentliche Leitfaden-Optimierung |
+| `/api/controlling/daily-sync` | Controlling-Abgleich |
 
----
+## Ausfälle von OpenAI oder ElevenLabs
 
-## Maintenance Checklist
+Das automatische Aufladen bei OpenAI ist nicht aktiv. Deshalb gilt:
 
-### Daily
-- [ ] Monitor `/api/health` (production endpoint)
-- [ ] Check database connection via Render console
-- [ ] Review call logs in `/api/calls/webhook` responses
+1. Der Worker prüft das OpenAI-Guthaben regelmäßig. Ist es aufgebraucht oder der
+   Zugang ungültig, meldet `/readyz` `blocking: true`.
+2. Vor jedem Anruf fragt die App `/readyz` ab. Bei `blocking: true` wird nicht
+   gewählt, der Lead bleibt offen, die betroffene Kampagne wird pausiert und es
+   geht eine Betriebsmail „Gloria pausiert: …“ an `REPORT_TO_EMAIL`
+   (höchstens alle 30 Minuten).
+3. Nach dem Aufladen ist Gloria nach etwa einer Minute wieder startklar. Die
+   Kampagne muss danach im CRM wieder gestartet werden.
+4. Fällt OpenAI mitten im Gespräch aus, verabschiedet sich Gloria höflich und legt
+   auf (Ergebnis `Fehler`). Liefert ElevenLabs kurz kein Audio, spricht Gloria die
+   Antwort mit der Ersatzstimme.
 
-### Weekly
-- [ ] Verify Twilio webhook logs (account.twilio.com)
-- [ ] Check email delivery success (SMTP to strato.de)
-- [ ] Review error rates in call reports
+## Ergebnisse im Bericht
 
-### Monthly
-- [ ] Database backup verification (Render auto-backups)
-- [ ] ElevenLabs quota check
-- [ ] OpenAI API usage (Chat Completions)
+Neben dem Gesprächsausgang (Termin, Wiedervorlage, Absage, Nicht erreicht)
+erhält jeder Anruf ein Ein-Wort-Ergebnis, z. B. `Aufgelegt`, `Anrufbeantworter`,
+`Telefonmenü`, `Warteschleife`, `KI-Assistent`, `Weitergeleitet`,
+`Rückrufnummer`, `Ausgeschieden`, `Gesperrt`, `Zeitlimit`, `Fehler` sowie aus
+Telnyx `Besetzt`, `Unbeantwortet`, `Ungültig`, `Abgewiesen`. Ein Löschwunsch
+(`Gesperrt`) sperrt die Nummer dauerhaft für weitere Anrufe.
 
-### Security
-- **Don't commit .env.local** (gitignore active)
-- **Rotate credentials** if exposed:
-  - BASIC_AUTH_PASSWORD
-  - TWILIO_AUTH_TOKEN
-  - OPENAI_API_KEY
-  - ELEVENLABS_API_KEY
-- **Monitor CRON_SECRET** usage in logs
+## Fehlerbilder
 
----
-
-## Deployment Process
-
-### Step 1: Build & Test
-```powershell
-npm run build
-```
-Compiles TypeScript, bundles routes, no lingering errors required.
-
-### Step 2: Validate Locally (optional)
-```powershell
-npm run dev
-# Then curl http://localhost:3000/api/health
-```
-
-### Step 3: Deploy to Production
-```powershell
-npx vercel deploy --prod --yes
-```
-Vercel builds, deploys to alias URL, updates production.
-
-### Step 4: Smoke Test
-```powershell
-curl.exe -s https://gloria.agentur-duic-sprockhoevel.de/api/health
-curl.exe -s https://gloria-tebr.onrender.com/readyz
-```
-Confirms web app and telephony worker are alive.
-
----
-
-## Common Issues & Solutions
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Script mismatch in campaign calls | Old global cache (pre-fix) | Redeploy with user-scoped caching |
-| Unauthorized API errors | Missing internal header | Add `Authorization: Basic <base64(MDUIC:password)>` |
-| Call fails to connect | Twilio webhook URL wrong | Verify `/api/twilio/voice` in Twilio console |
-| Reports not emailed | SMTP credentials invalid | Test via `curl -X POST /api/calls/webhook` with valid userId |
-| Script origin shows "global" | User has no custom script | OK—fallback is expected behavior |
-
----
-
-## Rollback Plan
-
-If deployment causes issues:
-
-```powershell
-# List recent deployments
-vercel list
-
-# Rollback to previous production
-vercel promote <previous-deployment-id>
-
-# Or redeploy from git
-git checkout <stable-commit>
-npm run build
-npx vercel deploy --prod --yes
-```
-
----
-
-## Support Contact
-
-**Matthias Duic**  
-- Email: matthias.duic@agentur-duic-sprockhoevel.de
-- Twilio Callback: +4915755806701 (inbound forward)
-- Report Recipient: REPORT_TO_EMAIL in env
-
----
-
-**Last Updated:** April 21, 2026  
-**Version:** 1.0 (Production Release)
+| Symptom | Ursache | Abhilfe |
+| --- | --- | --- |
+| Anruf startet nicht, Meldung „Gloria ist nicht startklar“ | Guthaben oder Zugang bei OpenAI/ElevenLabs | Aufladen bzw. Schlüssel prüfen, `/readyz` kontrollieren, Kampagne neu starten |
+| Kampagne steht auf pausiert | Anbieter-Ausfall (siehe Betriebsmail) | wie oben |
+| Ergebnis `Fehler` | Abbruch durch einen Anbieter während des Gesprächs | Worker-Logs auf Render prüfen (`realtime.openai_outage`, `realtime.elevenlabs_outage`) |
+| Gloria antwortet langsam | Latenz OpenAI/ElevenLabs | Logs `realtime.turn_latency`, `realtime.response_usage` prüfen |

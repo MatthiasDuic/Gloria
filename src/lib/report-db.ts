@@ -44,6 +44,10 @@ export interface AppUser {
   email: string;
   realPhone: string;
   gesellschaft: string;
+  /** Spoken company phrase in Gloria's introduction, e.g. "von der BarmeniaGothaer in Sprockhövel". */
+  introCompanyPhrase: string;
+  /** Spoken answer to "Woher haben Sie meine Nummer?" (GDPR Art. 14 data source). */
+  dataSourceStatement: string;
   selectedVoiceId: string;
   allowedPlaybookTopics: string[];
   crmSavedViews: CrmSavedView[];
@@ -51,6 +55,33 @@ export interface AppUser {
   passwordHash: string;
   role: UserRole;
   createdAt: string;
+}
+
+export const MASTER_INTRO_COMPANY_PHRASE = "von der BarmeniaGothaer in Sprockhövel";
+export const MASTER_DATA_SOURCE_STATEMENT = "Herr Duic hat eine Liste mit erfolgreichen Unternehmen zusammengestellt, teilweise durch eigene Recherche und teilweise über die Creditreform.";
+
+const USER_SELECT_COLUMNS = "id, username, real_name, company_name, address, email, real_phone, gesellschaft, intro_company_phrase, data_source_statement, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at";
+
+function mapUserRow(row: Record<string, unknown>): AppUser {
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    realName: String(row.real_name),
+    companyName: String(row.company_name),
+    address: String(row.address || ""),
+    email: String(row.email || ""),
+    realPhone: String(row.real_phone || ""),
+    gesellschaft: String(row.gesellschaft || ""),
+    introCompanyPhrase: String(row.intro_company_phrase || ""),
+    dataSourceStatement: String(row.data_source_statement || ""),
+    selectedVoiceId: String(row.selected_voice_id || ""),
+    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
+    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
+    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
+    passwordHash: String(row.password_hash),
+    role: row.role === "master" ? "master" : "user",
+    createdAt: toIso(row.created_at as string | Date | null) || new Date().toISOString(),
+  };
 }
 
 export interface UserPhoneNumber {
@@ -498,6 +529,16 @@ async function initializeSchema() {
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS real_phone TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gesellschaft TEXT NOT NULL DEFAULT '';`);
+  // Nullable on purpose: NULL means "never configured", so the master defaults are seeded exactly once.
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS intro_company_phrase TEXT;`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS data_source_statement TEXT;`);
+  await db.query(
+    `UPDATE users SET
+       intro_company_phrase = COALESCE(intro_company_phrase, $2),
+       data_source_statement = COALESCE(data_source_statement, $3)
+     WHERE LOWER(username) = LOWER($1) AND (intro_company_phrase IS NULL OR data_source_statement IS NULL)`,
+    [process.env.BASIC_AUTH_USERNAME?.trim() || "mduic", MASTER_INTRO_COMPANY_PHRASE, MASTER_DATA_SOURCE_STATEMENT],
+  );
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS selected_voice_id TEXT NOT NULL DEFAULT '';`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_playbook_topics JSONB NOT NULL DEFAULT '[]'::jsonb;`);
   await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS crm_saved_views JSONB NOT NULL DEFAULT '[]'::jsonb;`);
@@ -1412,15 +1453,15 @@ export async function ensureMasterAdmin(): Promise<void> {
   }
 
   await db.query(
-    `
-    INSERT INTO users (id, username, real_name, company_name, password_hash, role, created_at)
-    VALUES ($1,$2,$3,$4,$5,'master',NOW())
-    `,
+    `INSERT INTO users (id, username, real_name, company_name, intro_company_phrase, data_source_statement, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'master',NOW())`,
     [
       makeId("usr"),
       username,
       "Matthias Duic",
       "Agentur Duic Sprockhoevel",
+      MASTER_INTRO_COMPANY_PHRASE,
+      MASTER_DATA_SOURCE_STATEMENT,
       hashPassword(password),
     ],
   );
@@ -1434,37 +1475,12 @@ export async function findUserByUsername(username: string): Promise<AppUser | nu
   await ensureSchema();
   const db = getPool();
   const result = await db.query(
-    `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
-    FROM users
-    WHERE LOWER(username) = LOWER($1)
-    LIMIT 1
-    `,
+    `SELECT ${USER_SELECT_COLUMNS} FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
     [username],
   );
 
   const row = result.rows[0];
-  if (!row) {
-    return null;
-  }
-
-  return {
-    id: String(row.id),
-    username: String(row.username),
-    realName: String(row.real_name),
-    companyName: String(row.company_name),
-    address: String(row.address || ""),
-    email: String(row.email || ""),
-    realPhone: String(row.real_phone || ""),
-    gesellschaft: String(row.gesellschaft || ""),
-    selectedVoiceId: String(row.selected_voice_id || ""),
-    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
-    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
-    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
-    passwordHash: String(row.password_hash),
-    role: row.role === "master" ? "master" : "user",
-    createdAt: toIso(row.created_at) || new Date().toISOString(),
-  };
+  return row ? mapUserRow(row) : null;
 }
 
 export async function findUserById(userId: string): Promise<AppUser | null> {
@@ -1475,37 +1491,12 @@ export async function findUserById(userId: string): Promise<AppUser | null> {
   await ensureSchema();
   const db = getPool();
   const result = await db.query(
-    `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
-    FROM users
-    WHERE id = $1
-    LIMIT 1
-    `,
+    `SELECT ${USER_SELECT_COLUMNS} FROM users WHERE id = $1 LIMIT 1`,
     [userId],
   );
 
   const row = result.rows[0];
-  if (!row) {
-    return null;
-  }
-
-  return {
-    id: String(row.id),
-    username: String(row.username),
-    realName: String(row.real_name),
-    companyName: String(row.company_name),
-    address: String(row.address || ""),
-    email: String(row.email || ""),
-    realPhone: String(row.real_phone || ""),
-    gesellschaft: String(row.gesellschaft || ""),
-    selectedVoiceId: String(row.selected_voice_id || ""),
-    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
-    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
-    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
-    passwordHash: String(row.password_hash),
-    role: row.role === "master" ? "master" : "user",
-    createdAt: toIso(row.created_at) || new Date().toISOString(),
-  };
+  return row ? mapUserRow(row) : null;
 }
 
 export async function findUserByCrmUserId(crmUserId: string): Promise<AppUser | null> {
@@ -1565,30 +1556,10 @@ export async function listUsers(): Promise<AppUser[]> {
   await ensureSchema();
   const db = getPool();
   const result = await db.query(
-    `
-    SELECT id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, crm_saved_views, crm_ui_preferences, password_hash, role, created_at
-    FROM users
-    ORDER BY created_at DESC
-    `,
+    `SELECT ${USER_SELECT_COLUMNS} FROM users ORDER BY created_at DESC`,
   );
 
-  return result.rows.map((row) => ({
-    id: String(row.id),
-    username: String(row.username),
-    realName: String(row.real_name),
-    companyName: String(row.company_name),
-    address: String(row.address || ""),
-    email: String(row.email || ""),
-    realPhone: String(row.real_phone || ""),
-    gesellschaft: String(row.gesellschaft || ""),
-    selectedVoiceId: String(row.selected_voice_id || ""),
-    allowedPlaybookTopics: parseJsonTextArray(row.allowed_playbook_topics),
-    crmSavedViews: parseCrmSavedViews(row.crm_saved_views),
-    crmUiPreferences: parseCrmUiPreferences(row.crm_ui_preferences),
-    passwordHash: String(row.password_hash),
-    role: row.role === "master" ? "master" : "user",
-    createdAt: toIso(row.created_at) || new Date().toISOString(),
-  }));
+  return result.rows.map((row) => mapUserRow(row));
 }
 
 export async function createUser(input: {
@@ -1601,6 +1572,8 @@ export async function createUser(input: {
   email?: string;
   realPhone?: string;
   gesellschaft?: string;
+  introCompanyPhrase?: string;
+  dataSourceStatement?: string;
   selectedVoiceId?: string;
   allowedPlaybookTopics?: string[];
 }): Promise<AppUser> {
@@ -1611,8 +1584,8 @@ export async function createUser(input: {
 
   await db.query(
     `
-    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, gesellschaft, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+    INSERT INTO users (id, username, real_name, company_name, address, email, real_phone, gesellschaft, intro_company_phrase, data_source_statement, selected_voice_id, allowed_playbook_topics, password_hash, role, created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
     `,
     [
       id,
@@ -1623,6 +1596,8 @@ export async function createUser(input: {
       input.email || "",
       input.realPhone || "",
       input.gesellschaft || "",
+      input.introCompanyPhrase?.trim() || "",
+      input.dataSourceStatement?.trim() || "",
       input.selectedVoiceId || "",
       JSON.stringify((input.allowedPlaybookTopics || []).map((t) => t.trim()).filter(Boolean)),
       hashPassword(input.password),
@@ -1653,6 +1628,8 @@ export async function updateUser(
     email?: string;
     realPhone?: string;
     gesellschaft?: string;
+    introCompanyPhrase?: string;
+    dataSourceStatement?: string;
     selectedVoiceId?: string;
     allowedPlaybookTopics?: string[];
     crmSavedViews?: CrmSavedView[];
@@ -1684,6 +1661,12 @@ export async function updateUser(
   }
   if (input.gesellschaft !== undefined) {
     await db.query(`UPDATE users SET gesellschaft = $2 WHERE id = $1`, [userId, input.gesellschaft]);
+  }
+  if (input.introCompanyPhrase !== undefined) {
+    await db.query(`UPDATE users SET intro_company_phrase = $2 WHERE id = $1`, [userId, input.introCompanyPhrase.trim()]);
+  }
+  if (input.dataSourceStatement !== undefined) {
+    await db.query(`UPDATE users SET data_source_statement = $2 WHERE id = $1`, [userId, input.dataSourceStatement.trim()]);
   }
   if (input.selectedVoiceId !== undefined) {
     await db.query(`UPDATE users SET selected_voice_id = $2 WHERE id = $1`, [userId, input.selectedVoiceId]);
@@ -1929,17 +1912,7 @@ export async function writeScriptsToPostgres(scripts: ScriptConfig[]): Promise<b
   }
 }
 
-export async function readReportDatabaseFromPostgres(userId?: string): Promise<ReportDatabase | null> {
-  if (!shouldUsePostgres()) {
-    return null;
-  }
-
-  try {
-    await ensureSchema();
-
-    const db = getPool();
-    const reportsResult = await db.query(`
-      SELECT
+const REPORT_SELECT_COLUMNS = `
         id,
         user_id,
         phone_number_id,
@@ -1961,7 +1934,77 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
         recording_consent,
         recording_url,
         emailed_to,
-        result_detail
+        result_detail`;
+
+type DateValue = string | Date | null | undefined;
+
+function mapReportRow(row: Record<string, unknown>): CallReport {
+  return {
+    id: String(row.id),
+    userId: row.user_id ? String(row.user_id) : undefined,
+    phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
+    callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
+    callSid: row.call_sid ? String(row.call_sid) : undefined,
+    leadId: row.lead_id ? String(row.lead_id) : undefined,
+    company: String(row.company),
+    contactName: row.contact_name ? String(row.contact_name) : undefined,
+    directDial: row.direct_dial ? String(row.direct_dial) : undefined,
+    calledPhone: row.called_phone ? String(row.called_phone) : undefined,
+    topic: normalizeTopic(String(row.topic)),
+    summary: String(row.summary || ""),
+    outcome: normalizeOutcome(String(row.outcome)),
+    resultDetail: row.result_detail ? String(row.result_detail) : undefined,
+    conversationDate: toIso(row.conversation_date as DateValue) || new Date().toISOString(),
+    appointmentAt: toIso(row.appointment_at as DateValue),
+    appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
+    nextCallAt: toIso(row.next_call_at as DateValue),
+    attempts: Number(row.attempts || 1),
+    recordingConsent: Boolean(row.recording_consent),
+    recordingUrl: row.recording_url ? String(row.recording_url) : undefined,
+    emailedTo: String(row.emailed_to || process.env.REPORT_TO_EMAIL || ""),
+  };
+}
+
+function mapRecordingRow(row: Record<string, unknown>): RecordingEntry {
+  return {
+    id: String(row.id),
+    callSid: String(row.call_sid),
+    company: String(row.company),
+    contactName: row.contact_name ? String(row.contact_name) : undefined,
+    topic: normalizeTopic(String(row.topic)),
+    recordingUrl: String(row.recording_url),
+    createdAt: toIso(row.created_at as DateValue) || new Date().toISOString(),
+  };
+}
+
+/** Reads only the report (and recordings) of one call, so storing a call result does not load every report. */
+export async function readReportByCallSidFromPostgres(callSid: string): Promise<ReportDatabase | null> {
+  if (!shouldUsePostgres()) return null;
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const [reportsResult, recordingsResult] = await Promise.all([
+      db.query(`SELECT ${REPORT_SELECT_COLUMNS} FROM gloria_reports WHERE call_sid = $1 ORDER BY conversation_date DESC LIMIT 1;`, [callSid]),
+      db.query(`SELECT id, call_sid, company, contact_name, topic, recording_url, created_at FROM gloria_recordings WHERE call_sid = $1;`, [callSid]),
+    ]);
+    return { reports: reportsResult.rows.map(mapReportRow), recordings: recordingsResult.rows.map(mapRecordingRow) };
+  } catch (error) {
+    console.error("Postgres report lookup failed, fallback to full report read", error);
+    return null;
+  }
+}
+
+export async function readReportDatabaseFromPostgres(userId?: string): Promise<ReportDatabase | null> {
+  if (!shouldUsePostgres()) {
+    return null;
+  }
+
+  try {
+    await ensureSchema();
+
+    const db = getPool();
+    const reportsResult = await db.query(`
+      SELECT${REPORT_SELECT_COLUMNS}
       FROM gloria_reports
       ${userId ? "WHERE user_id = $1" : ""}
       ORDER BY conversation_date DESC;
@@ -1981,40 +2024,8 @@ export async function readReportDatabaseFromPostgres(userId?: string): Promise<R
       userId ? [userId] : [],
     );
 
-    const reports: CallReport[] = reportsResult.rows.map((row) => ({
-      id: String(row.id),
-      userId: row.user_id ? String(row.user_id) : undefined,
-      phoneNumberId: row.phone_number_id ? String(row.phone_number_id) : undefined,
-      callSource: row.call_source === "manual" || row.call_source === "crm" ? row.call_source : undefined,
-      callSid: row.call_sid ? String(row.call_sid) : undefined,
-      leadId: row.lead_id ? String(row.lead_id) : undefined,
-      company: String(row.company),
-      contactName: row.contact_name ? String(row.contact_name) : undefined,
-      directDial: row.direct_dial ? String(row.direct_dial) : undefined,
-      calledPhone: row.called_phone ? String(row.called_phone) : undefined,
-      topic: normalizeTopic(String(row.topic)),
-      summary: String(row.summary || ""),
-      outcome: normalizeOutcome(String(row.outcome)),
-      resultDetail: row.result_detail ? String(row.result_detail) : undefined,
-      conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
-      appointmentAt: toIso(row.appointment_at),
-      appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
-      nextCallAt: toIso(row.next_call_at),
-      attempts: Number(row.attempts || 1),
-      recordingConsent: Boolean(row.recording_consent),
-      recordingUrl: row.recording_url ? String(row.recording_url) : undefined,
-      emailedTo: String(row.emailed_to || process.env.REPORT_TO_EMAIL || ""),
-    }));
-
-    const recordings: RecordingEntry[] = recordingsResult.rows.map((row) => ({
-      id: String(row.id),
-      callSid: String(row.call_sid),
-      company: String(row.company),
-      contactName: row.contact_name ? String(row.contact_name) : undefined,
-      topic: normalizeTopic(String(row.topic)),
-      recordingUrl: String(row.recording_url),
-      createdAt: toIso(row.created_at) || new Date().toISOString(),
-    }));
+    const reports: CallReport[] = reportsResult.rows.map(mapReportRow);
+    const recordings: RecordingEntry[] = recordingsResult.rows.map(mapRecordingRow);
 
     return { reports, recordings };
   } catch (error) {
@@ -2353,7 +2364,7 @@ export async function readConversationEventsFromPostgres(userId?: string): Promi
           : undefined,
       turn: typeof row.turn === "number" ? row.turn : undefined,
       text: row.text_value ? String(row.text_value) : undefined,
-      createdAt: toIso(row.created_at) || new Date().toISOString(),
+      createdAt: toIso(row.created_at as DateValue) || new Date().toISOString(),
     }));
   } catch (error) {
     console.error("Postgres event read failed, fallback to file storage", error);
@@ -2522,7 +2533,7 @@ export async function readLeadsFromPostgres(userId?: string): Promise<Lead[] | n
       topic: normalizeTopic(String(row.topic)),
       note: row.note ? String(row.note) : undefined,
       notes: parseLeadNotes(row.notes),
-      nextCallAt: toIso(row.next_call_at),
+      nextCallAt: toIso(row.next_call_at as DateValue),
       status:
         row.status === "neu" ||
         row.status === "angerufen" ||
@@ -3083,10 +3094,10 @@ export async function findReportByIdFromPostgres(reportId: string): Promise<Call
       summary: String(row.summary || ""),
       outcome: normalizeOutcome(String(row.outcome)),
       resultDetail: row.result_detail ? String(row.result_detail) : undefined,
-      conversationDate: toIso(row.conversation_date) || new Date().toISOString(),
-      appointmentAt: toIso(row.appointment_at),
+      conversationDate: toIso(row.conversation_date as DateValue) || new Date().toISOString(),
+      appointmentAt: toIso(row.appointment_at as DateValue),
       appointmentMode: row.appointment_mode ? String(row.appointment_mode) : undefined,
-      nextCallAt: toIso(row.next_call_at),
+      nextCallAt: toIso(row.next_call_at as DateValue),
       attempts: Number(row.attempts || 1),
       recordingConsent: Boolean(row.recording_consent),
       recordingUrl: row.recording_url ? String(row.recording_url) : undefined,

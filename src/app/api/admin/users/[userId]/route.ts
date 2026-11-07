@@ -30,6 +30,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       email?: string;
       realPhone?: string;
       gesellschaft?: string;
+      introCompanyPhrase?: string;
+      dataSourceStatement?: string;
       selectedVoiceId?: string;
       allowedPlaybookTopics?: string[];
       password?: string;
@@ -44,6 +46,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       email: payload.email,
       realPhone: payload.realPhone,
       gesellschaft: payload.gesellschaft,
+      introCompanyPhrase: typeof payload.introCompanyPhrase === "string" ? payload.introCompanyPhrase.slice(0, 160) : undefined,
+      dataSourceStatement: typeof payload.dataSourceStatement === "string" ? payload.dataSourceStatement.slice(0, 500) : undefined,
       selectedVoiceId: payload.selectedVoiceId,
       allowedPlaybookTopics: payload.allowedPlaybookTopics,
       password: payload.password,

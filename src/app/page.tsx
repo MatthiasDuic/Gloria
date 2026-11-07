@@ -940,6 +940,8 @@ export default function HomePage() {
     email?: string;
     realPhone?: string;
     gesellschaft?: string;
+    introCompanyPhrase?: string;
+    dataSourceStatement?: string;
     createdAt?: string;
     phoneNumbers?: ManagedPhoneNumber[];
     selectedVoiceId?: string;
@@ -1012,6 +1014,8 @@ export default function HomePage() {
     email: string;
     realPhone: string;
     gesellschaft: string;
+    introCompanyPhrase: string;
+    dataSourceStatement: string;
     role: "master" | "user";
     password: string;
     assignedPhone: string;
@@ -2420,6 +2424,8 @@ export default function HomePage() {
       email: user.email || "",
       realPhone: user.realPhone || "",
       gesellschaft: user.gesellschaft || "",
+      introCompanyPhrase: user.introCompanyPhrase || "",
+      dataSourceStatement: user.dataSourceStatement || "",
       role: user.role,
       password: "",
       assignedPhone: phone?.phoneNumber || "",
@@ -2451,6 +2457,8 @@ export default function HomePage() {
         email: editDraft.email,
         realPhone: editDraft.realPhone,
         gesellschaft: editDraft.gesellschaft,
+        introCompanyPhrase: editDraft.introCompanyPhrase,
+        dataSourceStatement: editDraft.dataSourceStatement,
         role: editDraft.role,
         selectedVoiceId: editDraft.selectedVoiceId,
         allowedPlaybookTopics: Array.from(new Set(editDraft.allowedPlaybookTopics
@@ -2931,8 +2939,9 @@ export default function HomePage() {
 
                 <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
                 <ul>
-                  <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als digitale Vertriebsassistentin der Agentur Duic in Sprockhövel vor.</li>
-                  <li>Gloria handelt im Auftrag von Matthias Duic und nutzt ausschließlich die hinterlegten, freigegebenen Topic Policies für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+                  <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als KI-Assistentin des jeweiligen Benutzers vor (z. B. „Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel“). Der Firmenzusatz kommt aus dem Benutzerprofil.</li>
+                  <li>Gloria handelt im Auftrag des jeweiligen Benutzers und nutzt ausschließlich die hinterlegten, freigegebenen Topic Policies für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
+                  <li>Auf die Frage nach der Herkunft der Kontaktdaten nennt Gloria wörtlich die im Benutzerprofil hinterlegte Datenherkunft. Wer keine Anrufe mehr wünscht oder die Löschung verlangt, wird sofort gesperrt; Gloria beendet das Gespräch freundlich.</li>
                   <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
                   <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
                   <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
@@ -3825,6 +3834,14 @@ export default function HomePage() {
                                         <div>
                                           <label>Gesellschaft</label>
                                           <input value={editDraft.gesellschaft} onChange={(e) => setEditDraft({ ...editDraft, gesellschaft: e.target.value })} placeholder="z. B. Barmenia, Allianz" />
+                                        </div>
+                                        <div className="full-row">
+                                          <label>Firmenangabe in Glorias Vorstellung</label>
+                                          <input value={editDraft.introCompanyPhrase} maxLength={160} onChange={(e) => setEditDraft({ ...editDraft, introCompanyPhrase: e.target.value })} placeholder="z. B. von der BarmeniaGothaer in Sprockhövel" />
+                                        </div>
+                                        <div className="full-row">
+                                          <label>Antwort auf „Woher haben Sie meine Nummer?“</label>
+                                          <textarea value={editDraft.dataSourceStatement} maxLength={500} rows={2} onChange={(e) => setEditDraft({ ...editDraft, dataSourceStatement: e.target.value })} placeholder="z. B. Herr Duic hat eine Liste mit erfolgreichen Unternehmen zusammengestellt, teilweise durch eigene Recherche und teilweise über die Creditreform." />
                                         </div>
                                         <div>
                                           <label>Rolle</label>

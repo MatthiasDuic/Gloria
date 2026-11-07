@@ -4,6 +4,7 @@ import { dependenciesAreReady, getDependencyHealth } from "./health.js";
 import { getElevenLabsModel } from "./elevenlabs-tts.js";
 import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
 import { log } from "./log.js";
+import { flushPendingReports } from "./finalize.js";
 import { preloadTopicPolicy } from "./topic-policy-prompt.js";
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
@@ -65,7 +66,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.url === "/readyz") {
-    const health = await getDependencyHealth();
+    const health = await getDependencyHealth(90_000);
     const ready = dependenciesAreReady(health.dependencies);
     res.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({
@@ -73,6 +74,8 @@ const server = http.createServer(async (req, res) => {
       service: "gloria-stream-worker",
       revision: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || "local",
       dependencies: health.dependencies,
+      issues: health.issues,
+      blocking: health.blocking,
       checkedAt: new Date(health.checkedAt).toISOString(),
       timestamp: new Date().toISOString(),
     }));
@@ -107,9 +110,27 @@ server.listen(PORT, () => {
   log.info("server.listening", { port: PORT });
 });
 
+const outboxTimer = setInterval(() => {
+  flushPendingReports().catch((error) => log.error("outbox.flush_failed", { error: String(error) }));
+}, 120_000);
+outboxTimer.unref();
+
+// Keeps provider status (credits, keys) fresh so the app's pre-call check gets an instant, current answer.
+const refreshHealth = () => {
+  getDependencyHealth(0).then((health) => {
+    if (health.issues.length) log.warn("health.issues", { issues: health.issues, blocking: health.blocking });
+  }).catch((error) => log.error("health.refresh_failed", { error: String(error) }));
+};
+setTimeout(refreshHealth, 5_000).unref();
+setInterval(refreshHealth, 60_000).unref();
+
 function shutdown(signal: string) {
   log.info("server.shutdown", { signal });
-  server.close(() => process.exit(0));
+  server.close(() => {
+    flushPendingReports()
+      .catch((error) => log.error("outbox.flush_failed", { error: String(error) }))
+      .finally(() => process.exit(0));
+  });
   setTimeout(() => {
     wss.clients.forEach((client) => client.close(1001, "shutdown"));
     setTimeout(() => process.exit(0), 25_000).unref();

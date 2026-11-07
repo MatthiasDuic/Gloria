@@ -1,6 +1,72 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, createContactRoutingState, isGatekeeperReasonQuestion, mentionsRetryTime } from "./contact-routing-controller.js";
+import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, classifyReceptionTransfer, createContactRoutingState, extractRetryTimePhrase, extractSuccessorName, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime } from "./contact-routing-controller.js";
+
+test("recognises the many real-world ways a receptionist says the person is unavailable", () => {
+  for (const text of [
+    "Herr Neumann ist gerade im Meeting.",
+    "Er ist heute im Homeoffice.",
+    "Herr Neumann sitzt in einer Besprechung.",
+    "Der ist auf Geschäftsreise.",
+    "Er ist in der Mittagspause.",
+    "Herr Neumann ist schon im Feierabend.",
+    "Er telefoniert gerade.",
+    "Der Chef ist auf der Baustelle.",
+    "Er ist beim Kunden.",
+    "Herr Neumann kommt erst morgen wieder.",
+  ]) {
+    assert.equal(isGatekeeperUnavailable(text), true, text);
+  }
+  assert.equal(isGatekeeperUnavailable("Ja, Herr Neumann ist da, einen Moment."), false);
+});
+
+test("detects a contact who has left the company and extracts a named successor", () => {
+  for (const text of [
+    "Herr Neumann ist nicht mehr bei uns.",
+    "Der arbeitet schon lange nicht mehr hier.",
+    "Herr Neumann hat das Unternehmen verlassen.",
+    "Herr Neumann ist in den Ruhestand gegangen.",
+    "Einen Herrn Neumann gibt es hier nicht.",
+    "Da sind Sie falsch verbunden.",
+  ]) {
+    assert.equal(isContactNoLongerAtCompany(text), true, text);
+  }
+  for (const text of ["Herr Neumann ist heute nicht mehr im Haus.", "Er ist gerade nicht da."]) {
+    assert.equal(isContactNoLongerAtCompany(text), false, text);
+  }
+  assert.equal(extractSuccessorName("Das macht jetzt Frau Meier."), "Frau Meier");
+  assert.equal(extractSuccessorName("Zuständig ist inzwischen Herr Schulz."), "Herr Schulz");
+  assert.equal(extractSuccessorName("Frau Krause hat das übernommen."), "Frau Krause");
+  assert.equal(extractSuccessorName("Ich verbinde Sie mit Herrn Peters."), "Herr Peters");
+  assert.equal(extractSuccessorName("Das weiß ich nicht."), undefined);
+});
+
+test("treats handing over the receiver as a transfer in progress, not as a new request", () => {
+  for (const text of [
+    "Ich reiche Sie mal weiter.",
+    "Ich übergebe an Herrn Neumann.",
+    "Ich gebe Ihnen mal Herrn Neumann.",
+    "Ich gebe den Hörer weiter.",
+    "Moment, er kommt gleich.",
+    "Bleiben Sie bitte dran.",
+    "Ich hol Herrn Neumann.",
+  ]) {
+    assert.equal(classifyReceptionTransfer(text), "in_progress", text);
+  }
+  for (const text of ["Ich gebe Ihnen mal Herrn Neumanns Durchwahl.", "Bleiben Sie dran, ich hole einen Stift.", "Ich übergebe ihm die Nachricht."]) {
+    assert.notEqual(classifyReceptionTransfer(text), "in_progress", text);
+  }
+});
+
+test("turns receptionist availability hints into natural retry phrases", () => {
+  assert.equal(extractRetryTimePhrase("Herr Neumann hat diese Woche noch Urlaub."), "nächste Woche");
+  assert.equal(extractRetryTimePhrase("Er ist bis zum 20. im Urlaub."), "nach dem zwanzigsten");
+  assert.equal(extractRetryTimePhrase("Er ist ab dem 3. wieder da."), "ab dem dritten");
+  assert.equal(extractRetryTimePhrase("Er ist bis Ende des Monats weg."), "Anfang nächsten Monats");
+  assert.equal(extractRetryTimePhrase("Versuchen Sie es Ende des Monats."), "Ende des Monats");
+  assert.equal(buildRetryFarewell("Herr Neumann hat diese Woche noch Urlaub, frühestens nächste Woche."),
+    "Vielen Dank. Dann versuche ich es nächste Woche erneut. Auf Wiederhören.");
+});
 
 test("recognizes initial recorded welcomes, hold music and advertising without starting a conversation", () => {
   let state = createContactRoutingState("Herr Neumann");

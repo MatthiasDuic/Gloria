@@ -26,7 +26,7 @@ keine gültige reale Rufnummer hinterlegt ist.
 ```
 Telnyx  ───►  Vercel /api/telnyx/call  (Call-Control + WebSocket-Stream)
    │
-   └── Audio (μ-law 8 kHz, 20 ms Frames)
+   └── Audio (G.711 A-law/PCMA 8 kHz, 20 ms Frames)
       └────►  Render-Worker  ws://…/telnyx-stream
                    └─ OpenAI Realtime Text (semantische VAD, Dialog, Tools)
                          └─ ElevenLabs Audio-Stream (A-law/μ-law 8 kHz)
@@ -59,94 +59,83 @@ ngrok http 8080
 2. Render erkennt `render.yaml` im Root und legt den Service `gloria-stream-worker` automatisch an.
 3. **Secrets eintragen** (Render → Service → Environment):
    - `OPENAI_API_KEY`
-      - `ELEVENLABS_API_KEY`
-      - `ELEVENLABS_VOICE_ID` (z. B. `Ywa4Py8gVz5ugeNVy6iC`)
-   - `STREAM_SHARED_SECRET` (z. B. `openssl rand -hex 32`)
+   - `ELEVENLABS_API_KEY`
    - `APP_INTERNAL_TOKEN` (gleicher Wert wie auf Vercel)
-4. **Deploy** klicken. Render baut mit `npm install && npm run build` und startet `npm run start`.
-5. Public-URL des Services kopieren (z. B. `https://gloria-stream-worker.onrender.com`).
+   - `TELNYX_API_KEY` (nur für den Telnyx-Check in `/readyz`)
+4. **Deploy** klicken. Render baut mit `npm install && npm run build` und startet `node dist/index.js`.
+5. Public-URL des Services: `https://gloria-tebr.onrender.com`.
 
-## Vercel-Seite aktivieren
+## Vercel-Seite
 
-Auf Vercel folgende Env-Var setzen (Production + Preview):
+Auf Vercel (Production + Preview):
 
 ```
-TELNYX_MEDIA_STREAM_URL=wss://gloria-stream-worker.onrender.com/telnyx-stream
+WORKER_HEALTHCHECK_URL=https://gloria-tebr.onrender.com/health
+TELNYX_MEDIA_STREAM_URL=wss://gloria-tebr.onrender.com/telnyx-stream
 ```
 
-## Status
+Der Stream-Pfad wird immer auf `/telnyx-stream` gesetzt; das ist der einzige
+WebSocket-Endpunkt des Workers.
 
-- [x] WebSocket-Server, Telnyx-Frame-Parser
-- [x] OpenAI Realtime Audio-to-Audio mit direktem G.711-Durchsatz
-- [x] Semantische VAD mit niedriger Unterbrechungsneigung und nativem Barge-in
-- [x] Topic Policies als flexible Leitplanken statt deterministischem Antwortskript
-- [x] Transkript und Reporting aus derselben Realtime-Session
-- [x] OpenAI Realtime ASR mit Server-VAD (PCM16 16 kHz)
-- [x] OpenAI Turn-Handler (JSON-Antwort, max. 25 Wörter)
-- [x] ElevenLabs Streaming-TTS direkt in μ-law 8 kHz (kein Resampling nötig)
-- [x] Barge-in (Aborts laufende TTS, sobald OpenAI-Partials beim sprechenden
-      Zustand eintreffen)
-- [x] Opener-Begrüßung beim `start`-Event
-- [x] Telnyx Stream-Switch in `src/app/api/telnyx/call/route.ts`
-      (`TELNYX_MEDIA_STREAM_URL` gesetzt)
+## Endpunkte
 
-## Audio-Realtime konfigurieren
+- `GET /health` – Liveness, antwortet sofort.
+- `GET /readyz` – Readiness inkl. Anbieterstatus. Antwort enthält `dependencies`,
+  `issues` (deutsche Klartextmeldungen) und `blocking`. `blocking: true` bedeutet,
+  dass ein bekannter Ausfall vorliegt (z. B. OpenAI-Guthaben aufgebraucht oder
+  ElevenLabs-Kontingent erschöpft). Die App startet dann keine Anrufe, pausiert
+  laufende Kampagnen und schickt eine Betriebsmail.
+- `POST /prepare-call` – wärmt den Gesprächskontext vor dem Wählen vor.
+- `WS /telnyx-stream` – Telnyx Media Stream (G.711, 8 kHz).
+
+## Ausfallschutz
+
+- **OpenAI-Guthaben**: Der Worker prüft das Guthaben alle 5 Minuten mit einem
+  minimalen Request (`OPENAI_CREDIT_PROBE_MS`, `OPENAI_CREDIT_PROBE_MODEL`), bei
+  bestehendem Ausfall jede Minute. Nach dem Aufladen ist Gloria nach etwa einer
+  Minute wieder startklar.
+- **Ausfall während eines Gesprächs**: Meldet OpenAI mitten im Gespräch Quota-,
+  Auth- oder Serverfehler, verabschiedet sich Gloria mit einem festen Satz
+  („Entschuldigung, wir haben gerade ein technisches Problem …“) und legt auf.
+  Ergebnis im Bericht: `Fehler`, kein stilles Hängenbleiben.
+- **Ersatzstimme**: Liefert ElevenLabs für eine Antwort kein Audio, spricht Gloria
+  diese Antwort mit der OpenAI-Sprachausgabe (`FALLBACK_TTS_ENABLED`,
+  `FALLBACK_TTS_MODEL`, `FALLBACK_TTS_VOICE`). Das ist nur für kurze Aussetzer
+  gedacht; ein erschöpftes ElevenLabs-Kontingent stoppt neue Anrufe.
+- **Report-Outbox**: Kann der Worker ein Gesprächsergebnis nicht an die App
+  senden, wird es mit Wiederholungen erneut zugestellt (nicht persistent über
+  einen Worker-Neustart hinweg).
+
+## Anrufbeantworter und Ansagen
+
+Telnyx-AMD ist bewusst nicht aktiv: Es kostet pro Anruf, verzögert die
+Begrüßung um mehrere Sekunden und würde mit der eigenen Erkennung konkurrieren.
+Gloria erkennt Mailboxen, Bandansagen („außerhalb unserer Geschäftszeiten“),
+Telefonmenüs und Warteschleifen am Transkript (`src/call-classification.ts`)
+und vergibt eindeutige Ergebnisse wie `Anrufbeantworter` oder `Telefonmenü`.
+
+## Wichtige Umgebungsvariablen
 
 ```env
-OPENAI_AUDIO_REALTIME=true
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_REALTIME_REASONING_EFFORT=low
-OPENAI_REALTIME_VOICE=marin
-OPENAI_REALTIME_VAD_EAGERNESS=low
+OPENAI_REALTIME_MAX_OUTPUT_TOKENS=220
+OPENAI_REALTIME_SILENCE_MS=650
+OPENAI_REALTIME_PREFIX_PADDING_MS=300
+OPENAI_RESPONSE_COOLDOWN_MS=40
+ELEVENLABS_MODEL=eleven_v4_turbo
+ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2
+ELEVENLABS_STREAMING_LATENCY=2
+FALLBACK_TTS_ENABLED=true
 ```
 
-Audio-Realtime ist der Standard. Nur `OPENAI_AUDIO_REALTIME=false` schaltet
-ohne Codeänderung auf die bisherige ASR/Chat/ElevenLabs-Pipeline zurück.
-ElevenLabs-Secrets werden nur für diesen Rückfallpfad benötigt.
+## Qualitätssicherung vor Deploy
 
-## Production Checklist (Realtime)
-
-1. Kern-Env-Variablen setzen:
-      - `OPENAI_REALTIME_MODEL=gpt-realtime-2.1`
-      - `OPENAI_REALTIME_REASONING_EFFORT=low`
-      - `OPENAI_REALTIME_MAX_OUTPUT_TOKENS=220`
-      - `OPENAI_REALTIME_SILENCE_MS=650`
-      - `OPENAI_REALTIME_PREFIX_PADDING_MS=300`
-      - `OPENAI_RESPONSE_COOLDOWN_MS=40`
-      - `TELNYX_SILENCE_OPENER_MS=4500`
-      - `ELEVENLABS_MODEL=eleven_v4_turbo`
-      - `ELEVENLABS_FALLBACK_MODEL=eleven_multilingual_v2`
-      - `ELEVENLABS_STREAMING_LATENCY=2` (nur für den HTTP-Fallback)
-
-2. Terminologie verifizieren:
-      - In PKV-Calls soll konsistent `Beitragsentwicklung in der Gesundheitsversorgung` verwendet werden.
-      - Keine Mischung aus `PKV`/`Krankenversicherung` in Kundensätzen, außer wenn der Kunde selbst so spricht.
-
-3. Strukturtreue prüfen:
-      - PKV-Reihenfolge: `ERLAUBNIS -> RELEVANZ -> VERTIEFUNG -> BEITRAG -> HOCHRECHNUNG -> KONZEPT -> TERMIN`.
-      - Genau eine Frage pro Turn.
-
-4. Messbare Latenz-Ziele in Logs überwachen:
-      - `realtime.turn_latency`
-      - `realtime.turn_latency_completed`
-      - Zielwerte: `asrFinalToResponseCreatedMs < 450`, `asrFinalToFirstTtsChunkMs < 1400`, `asrFinalToResponseDoneMs < 2200`.
-
-5. Operative Regression-Checks vor Deploy:
-      - `npm run typecheck`
-      - `npm test`
-      - Mindestens ein Testanruf mit aktivem Barge-in (Unterbrechung während laufender Antwort).
-
-### Offen (nächste Iteration)
-
-- [ ] Persistenz: am Stream-Ende Transcript & Outcome an Vercel posten
-      (`POST /api/reports` mit `APP_INTERNAL_TOKEN`).
-- [ ] Strukturiertes Outcome-Parsing (Termin / Absage / Wiedervorlage / Kein
-      Kontakt) — heute übernimmt das LLM nur `hangup`.
-- [ ] Telnyx Event-Signatur prüfen (HMAC mit
-      `STREAM_SHARED_SECRET` auf eingehenden Event-Requests).
-- [ ] Reconnect-/Retry-Logik bei OpenAI-Realtime-Drop.
-- [ ] Aufnahme/Recording (Telnyx Recording-Flow parallel zum Stream).
-- [ ] Healthcheck mit Provider-Pings (OpenAI/ElevenLabs).
+1. `npm test` im Repo-Root (enthält die Worker-Tests).
+2. Typecheck: `tsc -p worker/tsconfig.json --noEmit` und `tsc --noEmit -p .`.
+3. Mindestens ein Testanruf mit Unterbrechung (Barge-in) und einer mit Empfang/Weiterleitung.
+4. Latenz in den Logs prüfen: `realtime.turn_latency`, `realtime.response_usage`
+   (zeigt auch `cachedInputTokens` für den Prompt-Cache).
 
 ## Operatives
 

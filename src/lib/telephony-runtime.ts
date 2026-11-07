@@ -291,6 +291,36 @@ function getWorkerPreflightUrl(pathname: string): string | undefined {
   }
 }
 
+let workerReadinessCache: { at: number; issues: string[] | null } | null = null;
+
+export function resetWorkerReadinessCacheForTests(): void {
+  workerReadinessCache = null;
+}
+
+/**
+ * Returns the worker's blocking provider problems (exhausted credits, invalid keys) or null when calls can start.
+ * Timeouts and network errors never block a call; only an explicit `blocking: true` from the worker does.
+ */
+export async function getBlockingWorkerIssues(): Promise<string[] | null> {
+  if (workerReadinessCache && Date.now() - workerReadinessCache.at < 20_000) return workerReadinessCache.issues;
+  const url = getWorkerPreflightUrl("/readyz");
+  if (!url) return null;
+  let issues: string[] | null = null;
+  try {
+    const response = await fetch(url, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(4_000) });
+    const payload = await response.json().catch(() => null) as { blocking?: unknown; issues?: unknown } | null;
+    if (payload?.blocking === true) {
+      const reported = Array.isArray(payload.issues) ? payload.issues.filter((issue): issue is string => typeof issue === "string") : [];
+      issues = reported.length ? reported : ["Ein Sprachdienst ist derzeit nicht nutzbar"];
+    }
+  } catch (error) {
+    console.warn("[preflight] worker.readiness_unavailable", { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+  workerReadinessCache = { at: Date.now(), issues };
+  return issues;
+}
+
 async function preflightWorkerAndCalendar(baseUrl: string, userId: string | undefined, topic: Topic, preloadId?: string): Promise<void> {
   const headers = buildInternalHeaders();
   const preloadUrl = getWorkerPreflightUrl(preloadId ? "/prepare-call" : "/health");

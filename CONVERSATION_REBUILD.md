@@ -102,7 +102,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 3. Telnyx-Mark-Bestätigungen nutzen, um `audio_end_ms` nicht nur aus gesendeten Frames, sondern aus netzwerkseitig bestätigter Wiedergabe abzuleiten.
 4. ElevenLabs Flash/Turbo gegen das aktuelle Modell mit echten Telefonaufnahmen hinsichtlich First-Chunk-Latenz, Zahlen- und Namensaussprache testen.
 5. Freie OpenAI-Antworten erst nach einem kontrollierten Test satzweise an ElevenLabs weiterreichen; Tool-Calls, Unterbrechungen und Transkriptkonsistenz dürfen dadurch nicht überholt werden.
-6. Alte, nicht mehr aktive Twilio-Pfade nach Produktionsprüfung entfernen.
+
+Erledigt: Die alten Twilio-Pfade, das Twilio-Paket und Deepgram-Verweise sind vollständig entfernt.
 
 ## Qualitätskriterien
 
@@ -112,6 +113,8 @@ Fachliche Voraussetzungen dürfen nicht allein durch Prompttexte oder das Sprach
 - Kundenfragen und Einwände werden vor dem nächsten Pflichtschritt beantwortet.
 - Nur tatsächlich bereitgestellte freie Termine dürfen bestätigt werden.
 - Dialogszenarien, Typecheck und Build müssen vor jedem Rollout grün sein.
-- Gloria stellt sich als „digitale Vertriebsassistentin“ vor und beantwortet Rückfragen nach ihrer KI-Identität offen.
+- Gloria stellt sich als „KI-Assistentin“ des jeweiligen Benutzers vor (Firmenzusatz aus dem Benutzerprofil) und beantwortet Rückfragen nach ihrer KI-Identität offen.
+- Fragen nach der Datenherkunft beantwortet der Controller deterministisch mit der im Benutzerprofil hinterlegten Aussage. Widerspruch („nicht mehr anrufen“, „aus der Liste nehmen“, „Daten löschen“) beendet das Gespräch sofort, sperrt die Nummer und wird als „Gesperrt“ gemeldet.
+- Ist die gesuchte Person nicht mehr im Unternehmen, fragt Gloria einmal nach der zuständigen Person, übernimmt einen genannten Nachfolger als neues Ziel und meldet das Ergebnis „Ausgeschieden“.
 - Bei einem Gesundheitskostenauftrag mit Zehn-Jahres-Ausblick erzwingt der Controller vor der Terminierung die Frage nach dem heutigen Beitrag und die tatsächlich gesprochene Rechnung. Ein allgemeiner Hinweis auf steigende Kosten genügt nicht. Bei freiwillig übersprungener oder unbekannter Angabe bleibt eine ausdrücklich allgemeine Beispielrechnung möglich; andere Kampagnen erhalten diese Pflicht nicht.
 - Der Kundenterminbogen erkennt auch die Beitragsfrage aus dem Erstgespräch („Welchen monatlichen Beitrag zahlen Sie aktuell …?“). Er übernimmt ausschließlich die dazugehörige Kundenantwort, nicht den hochgerechneten Betrag oder spätere sachfremde Antworten. Dies gilt für separate Transkriptereignisse und das eingebettete Protokoll; eine frühere Angabe wird bei übersprungener Wiederholungsfrage nicht verloren.
