@@ -30,20 +30,20 @@ test("booking confirmation asks for the email without promising a delivery time"
 });
 
 test("announces the mailed confirmation for personal and digital appointments, with the Teams link only for digital", () => {
-  const owner = { ownerRealName: "Erika Mustermann" };
+  const owner = { ownerRealName: "Frau Erika Mustermann" };
   const state = createPreparationState({ topic: "Test" });
 
   const personal = advancePreparation(beginPreparation(state, "Montag um zehn Uhr", [], "Beim Kunden vor Ort").state, "kunde@example.org", [], owner);
   assert.equal(personal.state.stage, "completed");
   assert.equal(
     personal.speechText,
-    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Erika Mustermann per E-Mail. Auf Wiederhören.",
+    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Frau Mustermann per E-Mail. Auf Wiederhören.",
   );
 
   const digital = advancePreparation(beginPreparation(state, "Montag um zehn Uhr", [], "Microsoft Teams").state, "kunde@example.org", [], owner);
   assert.equal(
     digital.speechText,
-    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Erika Mustermann per E-Mail. Darin ist auch der Link zum Teams-Meeting enthalten. Auf Wiederhören.",
+    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Frau Mustermann per E-Mail. Darin ist auch der Link zum Teams-Meeting enthalten. Auf Wiederhören.",
   );
 
   for (const speech of [personal.speechText, digital.speechText]) {
@@ -57,8 +57,12 @@ test("announces the mailed confirmation for personal and digital appointments, w
   const questions = createPreparationState({ topic: "Test", preparationQuestions: "Welche Fragen sind Ihnen wichtig?" });
   const consent = beginPreparation(questions, "Montag um zehn Uhr", [], "Beim Kunden vor Ort");
   const declined = advancePreparation(consent.state, "Nein.", [], owner);
-  assert.match(declined.speechText || "", /Erika Mustermann klärt/);
-  assert.doesNotMatch(declined.speechText || "", /Herr Duic/);
+  assert.equal(declined.speechText?.startsWith("Frau Mustermann klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin."), true);
+  assert.doesNotMatch(declined.speechText || "", /Herr Duic|In Ordnung/);
+  assert.equal(
+    appointmentFarewellText({ ownerRealName: "Matthias Duic" }),
+    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Herrn Duic per E-Mail. Auf Wiederhören.",
+  );
 });
 
 test("does not accept an invalid email as the address for an appointment confirmation", () => {
@@ -281,10 +285,10 @@ test("completes all required PKV preparation questions before email", () => {
 
   transition = advancePreparation(transition.state, "kunde@example.de", [], { ownerRealName: "Matthias Duic" });
   assert.equal(transition.state.stage, "completed");
-  assert.match(transition.instruction, /Sie erhalten die Terminbestätigung von Matthias Duic per E-Mail/);
+  assert.match(transition.instruction, /Sie erhalten die Terminbestätigung von Herrn Duic per E-Mail/);
   assert.equal(
     transition.speechText,
-    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Matthias Duic per E-Mail. Auf Wiederhören.",
+    "Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung von Herrn Duic per E-Mail. Auf Wiederhören.",
   );
   assert.doesNotMatch(transition.instruction, /Haben Sie noch eine Frage zum Ablauf oder zum Termin/);
 });

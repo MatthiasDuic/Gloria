@@ -10,8 +10,18 @@ export type AppointmentConfirmationOwner = {
   appointmentMode?: AppointmentMode;
 };
 
+/** Spoken advisor reference like "Herr Duic" (nominative) / "Herrn Duic" (dative), consistent with Gloria's introduction. */
+function advisorReference(owner: AppointmentConfirmationOwner, dative = false): string | undefined {
+  const name = owner.ownerRealName?.replace(/\s+/g, " ").trim();
+  if (!name) return undefined;
+  const female = /^frau\s/i.test(name);
+  const surname = name.replace(/^(?:herrn?|frau)\s+/i, "").split(" ").pop();
+  if (!surname) return undefined;
+  return `${female ? "Frau" : dative ? "Herrn" : "Herr"} ${surname}`;
+}
+
 function appointmentAdvisor(owner: AppointmentConfirmationOwner): string {
-  return owner.ownerRealName?.trim() || "Ihre Ansprechperson";
+  return advisorReference(owner) || "Ihre Ansprechperson";
 }
 
 function appointmentEmailQuestion(complete = false): string {
@@ -20,7 +30,8 @@ function appointmentEmailQuestion(complete = false): string {
 
 // Gloria versendet selbst nichts; der Benutzer schickt die Bestätigung (bei Teams mit Meeting-Link) manuell.
 export function appointmentFarewellText(owner: AppointmentConfirmationOwner = {}): string {
-  const sender = owner.ownerRealName?.trim() ? ` von ${owner.ownerRealName.trim()}` : "";
+  const advisor = advisorReference(owner, true);
+  const sender = advisor ? ` von ${advisor}` : "";
   const linkHint = owner.appointmentMode === "Microsoft Teams" ? " Darin ist auch der Link zum Teams-Meeting enthalten." : "";
   return `Vielen Dank für das Gespräch. Der Termin ist eingetragen. Sie erhalten die Terminbestätigung${sender} per E-Mail.${linkHint} Auf Wiederhören.`;
 }
@@ -248,8 +259,8 @@ export function advancePreparation(
     if (consent === "declined") {
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: `Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage exakt: 'In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}'`,
-        speechText: `In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}`,
+        instruction: `Akzeptiere die Absage an die Vorbereitungsfragen ohne Nachfassen. Sage exakt: '${advisor} klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin. ${emailQuestion}'`,
+        speechText: `${advisor} klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin. ${emailQuestion}`,
       };
     }
     if (consent === "unknown") {
@@ -300,8 +311,8 @@ export function advancePreparation(
       }
       return {
         state: { ...state, stage: "awaiting_email", currentQuestionIndex: undefined },
-        instruction: `Akzeptiere das Nein ohne Nachfassen. Sage exakt: 'In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}'`,
-        speechText: `In Ordnung, ${advisor} klärt die offenen Punkte mit Ihnen im Termin. ${emailQuestion}`,
+        instruction: `Akzeptiere das Nein ohne Nachfassen. Sage exakt: '${advisor} klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin. ${emailQuestion}'`,
+        speechText: `${advisor} klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin. ${emailQuestion}`,
       };
     }
     const currentQuestion = state.questions[state.currentQuestionIndex ?? -1];

@@ -2943,7 +2943,7 @@ export default function HomePage() {
                   <li>Gloria handelt im Auftrag des jeweiligen Benutzers und nutzt ausschließlich die hinterlegten, freigegebenen Topic Policies für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
                   <li>Auf die Frage nach der Herkunft der Kontaktdaten nennt Gloria wörtlich die im Benutzerprofil hinterlegte Datenherkunft. Wer keine Anrufe mehr wünscht oder die Löschung verlangt, wird sofort gesperrt; Gloria beendet das Gespräch freundlich.</li>
                   <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
-                  <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung.</li>
+                  <li>Im Entscheidergespräch führt Gloria ein fachlich korrektes Orientierungsgespräch mit dem Ziel der Terminvereinbarung. Sie reagiert dabei durchgehend situativ auf das Gesagte; feste Inhalte wie Hochrechnung, Terminvorschläge und Vorbereitungsfragen folgen danach unverändert.</li>
                   <li>Gloria trifft keine rechtsverbindlichen Aussagen, gibt keine Tarifempfehlungen und keine individuelle Beratung.</li>
                 </ul>
 

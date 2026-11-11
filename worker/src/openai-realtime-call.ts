@@ -145,7 +145,21 @@ export function buildPkvCostIncreaseFollowup(previousAssistantText: string, user
   const askedAboutCostDevelopment = /(?:kosten|beitr[aä]ge).{0,80}(?:wahrgenommen|erlebt)|(?:wahrgenommen|erlebt).{0,80}(?:kosten|beitr[aä]ge)/i.test(previousAssistantText);
   const reportedAnnualIncrease = /\b(?:steigen|steigt|erh[öo]hen sich|erh[öo]ht sich)\b.{0,32}\b(?:jedes jahr|j[aä]hrlich)\b/i.test(userText);
   if (!askedAboutCostDevelopment || !reportedAnnualIncrease) return undefined;
-  return "Ja, das merken gerade viele. Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?";
+  return "Damit die Entwicklung für Sie greifbar wird: Welchen monatlichen Beitrag zahlen Sie aktuell ungefähr?";
+}
+
+/**
+ * Controller steps (projection, slots, preparation, ...) keep their exact wording, but Gloria first
+ * reacts naturally to what the person just said instead of jumping straight to the next script line.
+ * The model only produces this short reaction; the controller text follows verbatim afterwards.
+ */
+export function buildSituationalReactionInstruction(userText: string, followingText: string): string {
+  return [
+    `Der Gesprächspartner hat gerade gesagt: "${userText.replace(/\s+/g, " ").trim()}"`,
+    "Antworte jetzt nur mit einer kurzen, persönlichen Reaktion auf genau diese Aussage, passend zu deiner Persönlichkeit und zur Stimmung des Gesprächspartners: greife Inhalt oder Stimmung konkret auf, ohne sie wörtlich zu wiederholen und ohne Floskeln wie 'Verstehe', 'Alles klar' oder 'Super'. Bei einer knappen, eindeutigen Antwort genügen wenige natürliche Worte, sonst höchstens ein kurzer Satz.",
+    "Enthält die Aussage eine Frage, beantworte sie stattdessen in höchstens zwei kurzen Sätzen ehrlich und ohne etwas zu erfinden.",
+    `Direkt im Anschluss sagt Gloria automatisch: "${followingText}" Nimm davon nichts vorweg, nenne keine Zahlen, Termine oder Uhrzeiten daraus, stelle selbst keine Frage und rufe kein Tool auf.`,
+  ].join("\n");
 }
 
 export const NO_STRATEGY_ACKNOWLEDGEMENT = "Das höre ich sehr oft. Gerade wenn man nicht mal wirklich versteht, wie es überhaupt zu den Beitragsanpassungen kommt, ist dies leicht frustrierend.";
@@ -161,7 +175,8 @@ export function isNoStrategyAnswer(previousAssistantText: string, userText: stri
 export function buildNoStrategyAcknowledgementInstruction(userText: string): string {
   return [
     `Der Kunde hat für die steigenden Beiträge noch keine Strategie oder Planung: "${userText.trim()}".`,
-    `Beginne deine Antwort wörtlich mit: '${NO_STRATEGY_ACKNOWLEDGEMENT}'`,
+    "Stellt der Kunde in derselben Aussage eine Frage, beantworte sie zuerst kurz und ehrlich. Fragt er etwa, wie der Wert zustande kommt: Es ist eine beispielhafte Hochrechnung mit rund vier Prozent Steigerung pro Jahr auf seinen genannten Beitrag, keine Prognose für seinen Tarif.",
+    `Greife dann seine Situation empathisch auf, sinngemäß: '${NO_STRATEGY_ACKNOWLEDGEMENT}' Formuliere das passend zu seiner Aussage statt es abzulesen.`,
     "Erläutere direkt danach ohne weitere Einleitung in ein bis zwei kurzen Sätzen den konkreten Lösungsansatz aus dem Auftrag und frage dann, ob eine unverbindliche individuelle Prüfung in einem kurzen Orientierungsgespräch für ihn interessant wäre.",
     "Schlage in dieser Antwort noch keinen Termin und keine Uhrzeit vor.",
   ].join(" ");
@@ -681,6 +696,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
   let pendingOpeningTopic: string | undefined;
+  let pendingAnchoredSpeech: {
+    text: string;
+    hangupAfterPlayback?: boolean;
+    prefetchedSpeech?: PrefetchedSpeech;
+    prefetchController?: AbortController;
+  } | null = null;
+  let noStrategyAcknowledged = false;
   let identityAnnounced = false;
   let identityPrefetch: PrefetchedSpeech | null = null;
   let identityPrefetchController: AbortController | null = null;
@@ -1091,6 +1113,28 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
+  /** Speaks a controller step after a short, situational reaction of the model to the latest customer statement. */
+  const requestAnchoredSpeech = (text: string, options: { hangupAfterPlayback?: boolean } = {}) => {
+    const speechText = replaceDiscouragedWords(convertNumbersForSpeech(text.replace(/\s+/g, " ").trim()));
+    const latestUserText = ctx ? [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text.trim() : "";
+    if (!ctx || !speechText || !latestUserText || responses.isActive() || pendingAnchoredSpeech || pendingDeterministicSpeech
+      || process.env.GLORIA_SITUATIONAL_REACTIONS?.trim() === "false") {
+      return requestDeterministicSpeech(text, options);
+    }
+    const prefetchedSpeech = isElevenLabsConfigured() ? new PrefetchedSpeech(speechText) : undefined;
+    const prefetchController = prefetchedSpeech ? new AbortController() : undefined;
+    if (prefetchedSpeech && prefetchController) startSpeechPrefetch(prefetchedSpeech, prefetchController, "controller_step");
+    pendingAnchoredSpeech = { text: speechText, ...options, prefetchedSpeech, prefetchController };
+    requestEventResponse(buildSituationalReactionInstruction(latestUserText, speechText));
+    return true;
+  };
+
+  const discardAnchoredSpeech = () => {
+    pendingAnchoredSpeech?.prefetchedSpeech?.detach();
+    pendingAnchoredSpeech?.prefetchController?.abort();
+    pendingAnchoredSpeech = null;
+  };
+
   flushDeterministicSpeech = () => {
     if (!ctx || !pendingDeterministicSpeech || userTurns.isBlocked() || responses.isActive() || playback.isPending() || terminationInProgress) return;
     if (contactRouting?.stage === "waiting_for_transfer" && !pendingDeterministicSpeech.allowWhileWaiting) return;
@@ -1168,34 +1212,35 @@ export async function handleOpenAiRealtimeTelnyxStream(
     topicPrefetch = topicEntry;
     identityPrefetchController = identityController;
     topicPrefetchController = topicController;
-    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
-    const prefetch = (entry: PrefetchedSpeech, controller: AbortController, label: "identity" | "topic") => {
-      const startedAt = Date.now();
-      const onChunk = (chunk: Buffer) => entry.push(chunk);
-      void (async () => {
-        try {
-          if (isElevenLabsDialogueModel()) {
-            const dialogue = new ElevenLabsDialogueStream({ outputFormat, signal: controller.signal, onChunk, voiceProfile: ctx?.voiceProfile });
-            await dialogue.append(entry.text);
-            const result = await dialogue.finish();
-            logDialogueResult(result);
-            entry.complete(result.audioBytes > 0);
-          } else {
-            await streamElevenLabsAudio(entry.text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
-            entry.complete(true);
-          }
-          if (entry.isReady()) log.info(`realtime.${label}_prefetched`, { callSid: ctx?.callSid, prefetchMs: Date.now() - startedAt });
-        } catch (error) {
-          entry.complete(false);
-          if (!controller.signal.aborted) {
-            log.warn(`realtime.${label}_prefetch_failed`, { callSid: ctx?.callSid, error: error instanceof Error ? error.message : String(error) });
-          }
-        }
-      })();
-    };
-    prefetch(identityEntry, identityController, "identity");
-    prefetch(topicEntry, topicController, "topic");
+    startSpeechPrefetch(identityEntry, identityController, "identity");
+    startSpeechPrefetch(topicEntry, topicController, "topic");
   };
+
+  function startSpeechPrefetch(entry: PrefetchedSpeech, controller: AbortController, label: string) {
+    const outputFormat = outputAudioFormat === "audio/pcma" ? "alaw_8000" : "ulaw_8000";
+    const startedAt = Date.now();
+    const onChunk = (chunk: Buffer) => entry.push(chunk);
+    void (async () => {
+      try {
+        if (isElevenLabsDialogueModel()) {
+          const dialogue = new ElevenLabsDialogueStream({ outputFormat, signal: controller.signal, onChunk, voiceProfile: ctx?.voiceProfile });
+          await dialogue.append(entry.text);
+          const result = await dialogue.finish();
+          logDialogueResult(result);
+          entry.complete(result.audioBytes > 0);
+        } else {
+          await streamElevenLabsAudio(entry.text, outputFormat, controller.signal, onChunk, ctx?.voiceProfile, getElevenLabsModel());
+          entry.complete(true);
+        }
+        if (entry.isReady()) log.info(`realtime.${label}_prefetched`, { callSid: ctx?.callSid, prefetchMs: Date.now() - startedAt });
+      } catch (error) {
+        entry.complete(false);
+        if (!controller.signal.aborted) {
+          log.warn(`realtime.${label}_prefetch_failed`, { callSid: ctx?.callSid, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    })();
+  }
 
   const discardIdentityPrefetch = () => {
     identityPrefetch?.detach();
@@ -1757,7 +1802,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         ? buildPkvCostIncreaseFollowup(previousAssistantText, transcript)
         : undefined;
       if (pkvCostIncreaseFollowup) {
-        requestDeterministicSpeech(pkvCostIncreaseFollowup);
+        requestAnchoredSpeech(pkvCostIncreaseFollowup);
         return;
       }
       const requiredStep = getRequiredContributionStep(currentContext);
@@ -1766,13 +1811,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
         && (extractCurrentContributionPhrase(currentContext.transcript)
           || (!/passt es.*(?:kurz|minuten)|haben sie.*(?:moment|zeit)/i.test(lastAssistant)
             && /beitragserh[öo]hung|(?:wie|kosten).*(?:erleben|wahrnehmen)|(?:beitr[äa]ge|kosten).*(?:steigen|entwicklung)|monatlichen\s+beitrag|monatsbeitrag|durchgerechnet|hochgerechnet|strategie|planung/i.test(lastAssistant)))) {
-        requestDeterministicSpeech(requiredStep);
+        requestAnchoredSpeech(requiredStep);
         return;
       }
       if ((event.type === "answer" || event.type === "customer_question")
         && currentContext.topicKind === "pkv"
         && isNoStrategyAnswer(previousAssistantText, transcript)
-        && !currentContext.transcript.some((turn) => turn.role === "assistant" && turn.text.startsWith("Das höre ich sehr oft."))) {
+        && !noStrategyAcknowledged) {
+        noStrategyAcknowledged = true;
         requestEventResponse(buildNoStrategyAcknowledgementInstruction(transcript));
         return;
       }
@@ -1789,12 +1835,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (routing.speechText) {
-        requestDeterministicSpeech(convertNumbersForSpeech(routing.speechText));
+        requestAnchoredSpeech(convertNumbersForSpeech(routing.speechText));
         return;
       }
       const projection = event.type === "answer" ? buildRequiredContributionProjection(currentContext) : undefined;
       if (projection) {
-        requestDeterministicSpeech(projection);
+        requestAnchoredSpeech(projection);
         return;
       }
       requestEventResponse(instructionForConversationEvent(event));
@@ -1806,11 +1852,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     preparationState = transition.state;
 
     if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
-      requestDeterministicSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
+      requestAnchoredSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
       return;
     }
 
-    if (transition.speechText) requestDeterministicSpeech(transition.speechText);
+    if (transition.speechText) requestAnchoredSpeech(transition.speechText);
     else requestEventResponse(transition.instruction);
   };
 
@@ -1895,7 +1941,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
           updateSession();
           const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode);
           preparationState=transition.state;
-          if(transition.speechText) requestDeterministicSpeech(transition.speechText);
+          if(transition.speechText) {
+            if(tool.callId.startsWith("controller-booking-")) requestAnchoredSpeech(transition.speechText);
+            else requestDeterministicSpeech(transition.speechText);
+          }
           else requestResponse(transition.instruction);
           return;
         }
@@ -1990,6 +2039,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           bargeInAwaitingTranscript = false;
           clearBargeInRecovery();
           pendingDeterministicSpeech = null;
+          discardAnchoredSpeech();
           hangupAfterPlayback = false;
           reconnectNoticePending = interrupted && contactRouting?.stage === "decision_maker";
           log.warn("realtime.reconnected", { callSid: ctx?.callSid, interrupted, retainedTranscript: Boolean(retainedText) });
@@ -2261,6 +2311,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           playback.interrupt();
           responses.markCancelled();
           responseInterrupted = false;
+          discardAnchoredSpeech();
           responseCreatedAt = null;
           firstModelTokenAt = null;
           firstTtsChunkAt = null;
@@ -2277,6 +2328,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         }
         const rawTranscript = assistantTranscript.replace(/\s+/g, " ").trim();
         const transcript = rawTranscript;
+        const anchored = pendingAnchoredSpeech;
+        pendingAnchoredSpeech = null;
+        const discardAnchor = () => {
+          anchored?.prefetchedSpeech?.detach();
+          anchored?.prefetchController?.abort();
+        };
         if (ctx && transcript) {
           const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
           if (ctx.lastUserFinalAt) {
@@ -2311,7 +2368,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           playback.interrupt();
         }
         responses.markFinished();
-        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested) {
+        if (isLikelyIncompleteAssistantTurn(transcript) && !assistantContinuationRequested && !anchored) {
           const alreadyStarted = currentOpening?.hasStarted() ?? false;
           currentOpening?.stop();
           await currentOpening?.finish();
@@ -2343,13 +2400,27 @@ export async function handleOpenAiRealtimeTelnyxStream(
           if (currentOpening) {
             await currentOpening.finish();
             await finishResponseDialogueStream(transcript);
-            if (responseVersion !== currentVersion || responseInterrupted) return;
+            if (responseVersion !== currentVersion || responseInterrupted) {
+              discardAnchor();
+              return;
+            }
             playback.finishAudio(outputAudioFormat === "audio/pcma" ? 0xd5 : 0xff);
           } else {
             await speakWithElevenLabs(transcript);
           }
         }
-        if (responseVersion !== currentVersion) return;
+        if (responseVersion !== currentVersion) {
+          discardAnchor();
+          return;
+        }
+        if (anchored && !terminationInProgress) {
+          requestDeterministicSpeech(anchored.text, {
+            hangupAfterPlayback: anchored.hangupAfterPlayback,
+            prefetchedSpeech: anchored.prefetchedSpeech,
+          });
+        } else {
+          discardAnchor();
+        }
 
         assistantContinuationRequested = false;
         if (pendingMissingCallbackNumberNotice && !terminationInProgress) {
@@ -2391,6 +2462,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         playback.interrupt();
         responses.markCancelled();
         responseInterrupted = false;
+        discardAnchoredSpeech();
         responseCreatedAt = null;
         firstModelTokenAt = null;
         firstTtsChunkAt = null;
