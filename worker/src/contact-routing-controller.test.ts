@@ -380,6 +380,19 @@ test("treats a company greeting from another named person as a gatekeeper", () =
   assert.equal(state.stage, "gatekeeper");
 });
 
+test("recognizes the target from the surname alone, even in a company greeting", () => {
+  for (const text of [
+    "Die Musterbau GmbH, mein Name ist Neumann, guten Tag.",
+    "Musterbau GmbH, Neumann.",
+    "Hier Neumann.",
+    "Ja, Neumann.",
+    "Ich bin Herr Neumann.",
+  ]) {
+    assert.equal(advanceContactRouting(createContactRoutingState("Martin Neumann"), text).stage, "decision_maker", text);
+  }
+  assert.notEqual(advanceContactRouting(createContactRoutingState("Martin Neumann"), "Herr Neumann?").stage, "decision_maker");
+});
+
 test("routes name-first greetings to the receptionist or target without repeating the identity check", () => {
   for (const text of ["Mussabaog, guten Tag.", "Müller, guten Tag.", "Paula hier."]) {
     assert.equal(advanceContactRouting(createContactRoutingState("Herr Neumann"), text).stage, "gatekeeper", text);

@@ -230,16 +230,19 @@ function identifiesDecisionMaker(text: string, targetName?: string): boolean {
 
   const targetTokens = targetNameTokens(targetName);
   if (targetTokens.length === 0) return false;
-  const escapedName = targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
-  const escapedSurname = targetTokens.at(-1)!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = targetTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  // People usually answer with their surname only ("Neumann", "mein Name ist Neumann"); the given name is optional.
+  const givenNames = escaped.slice(0, -1).join("\\s+");
+  const name = givenNames ? `(?:${givenNames}\\s+)?${escaped.at(-1)}` : escaped[0];
   const nameRegex = new RegExp(
       `(?:` +
-        `\\bmein(?:e)?\\s+name\\s+ist\\s+${escapedName}\\b|` +
-        `\\bsie\\s+sprechen\\s+mit\\s+(?:herrn?|frau)?\\s*${escapedName}\\b|` +
-        `\\bhier\\s+(?:ist|spricht)\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
-        `\\b(?:herr|frau)?\\s*${escapedName}\\s+am\\s+apparat\\b|` +
-        `\\bich\\s+bin\\s+(?:herr|frau)?\\s*${escapedName}\\b|` +
-        `(?:^|[,.!?]\\s*|\\b(?:ja|hallo|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:herrn?\\s+|frau\\s+)?(?:${escapedName}|${escapedSurname})\\s*,?\\s*(?:guten\\s+(?:tag|morgen|abend)|hallo|hier|am\\s+apparat)\\b` +
+        `\\bmein(?:e)?\\s+name\\s+ist\\s+(?:herr|frau)?\\s*${name}\\b|` +
+        `\\bsie\\s+sprechen\\s+mit\\s+(?:herrn?|frau)?\\s*${name}\\b|` +
+        `\\bhier\\s+(?:ist\\s+|spricht\\s+)?(?:herr|frau)?\\s*${name}\\b|` +
+        `\\b(?:herr|frau)?\\s*${name}\\s+am\\s+apparat\\b|` +
+        `\\bich\\s+bin\\s+(?:herr|frau)?\\s*${name}\\b|` +
+        `(?:^|[,.!?]\\s*|\\b(?:ja|hallo|guten\\s+(?:tag|morgen|abend))\\s*,?\\s*)(?:herrn?\\s+|frau\\s+)?${name}\\s*,?\\s*(?:guten\\s+(?:tag|morgen|abend)|hallo|hier|am\\s+apparat)\\b|` +
+        `(?:^|[,.!]\\s*|\\b(?:ja|hallo)\\s+)(?:herr\\s+|frau\\s+)?${name}\\s*\\.?\\s*$` +
       `)`,
       "i",
   );

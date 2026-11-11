@@ -146,3 +146,11 @@ export function addressPersonDative(fullName: string, fallback?: Gender): string
   if (gender === "female") return `Frau ${name}`;
   return name;
 }
+
+/** "Herrn Neumann" instead of "Herrn Martin Neumann" when the salutation is certain; otherwise the full name. */
+export function addressPersonDativeBySurname(fullName: string): string {
+  const full = addressPersonDative(fullName);
+  const match = full.match(/^(Herrn|Frau)\s+((?:(?:Dr|Prof)\.?\s+)*)(.+)$/i);
+  if (!match) return full;
+  return `${match[1]} ${match[2]}${match[3].split(/\s+/).at(-1)}`;
+}

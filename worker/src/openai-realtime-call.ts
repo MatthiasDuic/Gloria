@@ -16,7 +16,7 @@ import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { RealtimeOutputGate } from "./realtime-output-gate.js";
 import { replaceDiscouragedWords, stripSpokenQuotes } from "./spoken-vocabulary.js";
 import { PrefetchedSpeech } from "./prefetched-speech.js";
-import { addressPersonDative } from "./name-salutation.js";
+import { addressPersonDative, addressPersonDativeBySurname } from "./name-salutation.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
 import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio, type DialogueStreamResult } from "./elevenlabs-tts.js";
 import { isFallbackTtsEnabled, streamFallbackSpeech } from "./fallback-tts.js";
@@ -90,6 +90,8 @@ type RealtimeToolCall = {
 
 // Shorter end-of-speech pause while waiting for the first contact; later turns keep OPENAI_REALTIME_SILENCE_MS.
 const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "600", 10);
+// Pause after the icebreaker before Gloria names the topic herself when the person does not react.
+const ICEBREAKER_PAUSE_MS = Number.parseInt(process.env.GLORIA_ICEBREAKER_PAUSE_MS?.trim() || "2000", 10);
 // "low" waited up to several seconds after each answer; "medium" responds faster without cutting people off.
 const SEMANTIC_VAD_EAGERNESS = ((value) => (["low", "medium", "high", "auto"].includes(value) ? value : "medium"))(
   process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim().toLowerCase() || "",
@@ -400,6 +402,15 @@ export function buildMissingOpeningTopicInstruction(missingTopic: string): strin
 const PKV_DECISION_MAKER_TOPIC = "Es geht um die Entwicklung der Kosten in der Gesundheitsversorgung und vor allem darum, wie man diese Kosten gerade mit Blick auf das Alter planbar gestalten kann.";
 
 export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext, followsEarlierIdentity = false): string {
+  const parts = buildDecisionMakerTopicParts(ctx, followsEarlierIdentity);
+  return [parts.icebreaker, parts.topic].filter(Boolean).join(" ");
+}
+
+/** The icebreaker and the actual topic ("Es geht um … Passt es kurz?") as separate speaking turns. */
+export function buildDecisionMakerTopicParts(
+  ctx: DecisionMakerTopicContext,
+  followsEarlierIdentity = false,
+): { icebreaker?: string; topic: string } {
   const icebreaker = buildAiIcebreaker(ctx, followsEarlierIdentity);
   const topicLabel = ctx.policyTopic || ctx.topic;
   const topic = buildGatekeeperTopic(topicLabel, ctx.callObjective, ctx.receptionTopicReason);
@@ -412,7 +423,28 @@ export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext, 
   } else {
     reason = topic.sentence || (topic.inline ? `Ich rufe ${topic.inline} an.` : "Ich rufe mit einem kurzen Anliegen an.");
   }
-  return [icebreaker, reason, DECISION_MAKER_TIME_QUESTION].filter(Boolean).join(" ");
+  return { icebreaker, topic: [reason, DECISION_MAKER_TIME_QUESTION].filter(Boolean).join(" ") };
+}
+
+/**
+ * First speaking turn towards the decision maker. With an icebreaker Gloria stops after the joke so the
+ * person can react; the topic and time question follow in the next turn (pendingTopic).
+ */
+export function buildDecisionMakerOpening(
+  ctx: OwnerIdentityContext & DecisionMakerTopicContext,
+  identityAlreadySpoken = false,
+): { speech: string; pendingTopic?: string } {
+  const parts = buildDecisionMakerTopicParts(ctx, identityAlreadySpoken);
+  const identity = identityAlreadySpoken ? "" : `${buildDecisionMakerIdentity(ctx)} `;
+  if (!parts.icebreaker) return { speech: `${identity}${parts.topic}` };
+  if (process.env.GLORIA_ICEBREAKER_PAUSE?.trim() === "false") {
+    return { speech: `${identity}${parts.icebreaker} ${parts.topic}` };
+  }
+  return { speech: `${identity}${parts.icebreaker}`, pendingTopic: parts.topic };
+}
+
+export function buildIcebreakerTopicInstruction(topic: string): string {
+  return `Der Gesprächspartner hat gerade auf deinen Einstieg mit dem KI-Augenzwinkern reagiert. Gehe zuerst kurz, natürlich und gern mit einem Lächeln auf genau diese Reaktion ein, ohne den Witz oder die Vorstellung zu wiederholen. Nenne danach wörtlich: "${topic}" Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
@@ -472,7 +504,7 @@ export function buildGatekeeperTopicInstruction(
 export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "contactName">): string {
   const targetName = ctx.contactName?.trim();
   if (!targetName) return "Spreche ich mit der zuständigen Ansprechperson?";
-  return `Spreche ich mit ${addressPersonDative(targetName)}?`;
+  return `Spreche ich mit ${addressPersonDativeBySurname(targetName)}?`;
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
@@ -700,6 +732,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
   let pendingOpeningTopic: string | undefined;
+  let icebreakerTopicPending: string | undefined;
+  let icebreakerPauseTimer: NodeJS.Timeout | null = null;
   let pendingAnchoredSpeech: {
     text: string;
     hangupAfterPlayback?: boolean;
@@ -756,6 +790,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       flushDeterministicSpeech();
       responses.flush();
+      scheduleIcebreakerTopic();
       if (hangupAfterPlayback && ctx && !responses.isActive() && !userTurns.isBlocked()) {
         hangupAfterPlayback = false;
         setTimeout(() => {
@@ -1072,11 +1107,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
     interruptedAssistantContext = "";
     const missingTopic = pendingOpeningTopic;
     pendingOpeningTopic = undefined;
+    const icebreakerTopic = missingTopic ? undefined : takeIcebreakerTopic();
     return [
       interruption
         ? `Du wurdest während dieses begonnenen Satzes unterbrochen: "${interruption}". Reagiere jetzt auf die neue Kundenaussage. Wiederhole den Satz nicht vollständig und stelle keine bereits beantwortete Frage erneut.`
         : "",
       missingTopic ? buildMissingOpeningTopicInstruction(missingTopic) : "",
+      icebreakerTopic ? buildIcebreakerTopicInstruction(icebreakerTopic) : "",
       instructions || "",
     ].filter(Boolean).join("\n") || undefined;
   };
@@ -1144,7 +1181,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (contactRouting?.stage === "waiting_for_transfer" && !pendingDeterministicSpeech.allowWhileWaiting) return;
     const pending = pendingDeterministicSpeech;
     pendingDeterministicSpeech = null;
-    if (pending.text.includes(DECISION_MAKER_TIME_QUESTION)) pendingOpeningTopic = undefined;
+    if (pending.text.includes(DECISION_MAKER_TIME_QUESTION)) {
+      pendingOpeningTopic = undefined;
+      takeIcebreakerTopic();
+    }
     playback.startResponse();
     const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
     ctx.transcript.push({
@@ -1187,6 +1227,29 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestDeterministicSpeech(text);
   };
 
+  function takeIcebreakerTopic(): string | undefined {
+    if (icebreakerPauseTimer) clearTimeout(icebreakerPauseTimer);
+    icebreakerPauseTimer = null;
+    const topic = icebreakerTopicPending;
+    icebreakerTopicPending = undefined;
+    return topic;
+  }
+
+  /** After the icebreaker Gloria leaves room for a reaction; if the person stays silent she names the topic herself. */
+  function scheduleIcebreakerTopic(delayMs = ICEBREAKER_PAUSE_MS) {
+    if (!icebreakerTopicPending || icebreakerPauseTimer || terminationInProgress) return;
+    icebreakerPauseTimer = setTimeout(() => {
+      icebreakerPauseTimer = null;
+      if (!icebreakerTopicPending || terminationInProgress) return;
+      if (userTurns.isBlocked() || responses.isActive() || playback.isPending() || pendingDeterministicSpeech || pendingAnchoredSpeech) {
+        scheduleIcebreakerTopic(700);
+        return;
+      }
+      const topic = takeIcebreakerTopic();
+      if (topic) requestDeterministicSpeech(topic);
+    }, delayMs);
+  }
+
   const speakDeterministicIntro = (
     text: string,
     route: "decision_maker" | "gatekeeper",
@@ -1209,7 +1272,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const identityEntry = new PrefetchedSpeech(
       `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerIdentityQuestion(ctx)}`,
     );
-    const topicEntry = new PrefetchedSpeech(buildDecisionMakerIntro(ctx));
+    const topicEntry = new PrefetchedSpeech(buildDecisionMakerOpening(ctx).speech);
     const identityController = new AbortController();
     const topicController = new AbortController();
     identityPrefetch = identityEntry;
@@ -1390,6 +1453,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     responses.clearLastHash();
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
+    // Any reaction after the icebreaker ends the pause; the topic follows situationally below.
+    const openingTopicAfterIcebreaker = takeIcebreakerTopic();
 
     const previousUserTexts = currentContext.transcript.slice(0, -1)
       .filter((turn) => turn.role === "user")
@@ -1439,7 +1504,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
           requestDeterministicSpeech(`${buildAiIdentityAnswer(currentContext)}${repeatRequest}`);
         }
       } else if (!callbackNumberStage) {
-        requestEventResponse(`Der Kunde fragt, ob er mit einer KI spricht. Sage wörtlich: "${buildAiIdentityAnswer(currentContext)}" Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf.`);
+        requestEventResponse(`Der Kunde fragt, ob er mit einer KI spricht. Sage wörtlich: "${buildAiIdentityAnswer(currentContext)}" ${openingTopicAfterIcebreaker
+          ? `Nenne danach wörtlich: "${openingTopicAfterIcebreaker}"`
+          : "Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf."}`);
       } else {
         requestDeterministicSpeech(buildAiIdentityAnswer(currentContext));
       }
@@ -1728,14 +1795,17 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (identityAnnounced && currentContext.callObjective?.trim() && !getSpeakableCampaignReason(currentContext.callObjective)) {
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, true));
         } else if (identityAnnounced) {
-          const topicText = convertNumbersForSpeech(buildDecisionMakerTopicQuestion(currentContext, true));
-          requestDeterministicSpeech(topicText);
+          const opening = buildDecisionMakerOpening(currentContext, true);
+          icebreakerTopicPending = opening.pendingTopic && convertNumbersForSpeech(opening.pendingTopic);
+          requestDeterministicSpeech(convertNumbersForSpeech(opening.speech));
         } else if (currentContext.callObjective?.trim()
           && !getSpeakableCampaignReason(currentContext.callObjective)) {
           identityAnnounced = true;
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, false));
         } else {
-          speakDeterministicIntro(buildDecisionMakerIntro(currentContext), "decision_maker", topicPrefetch || undefined);
+          const opening = buildDecisionMakerOpening(currentContext);
+          icebreakerTopicPending = opening.pendingTopic && convertNumbersForSpeech(opening.pendingTopic);
+          speakDeterministicIntro(opening.speech, "decision_maker", topicPrefetch || undefined);
         }
         return;
       }
@@ -1766,6 +1836,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (hasRequestedHumanTransfer(transcript)) {
       requestEventResponse("Der Kunde verlangt einen Menschen oder lehnt das Gespräch mit Gloria ausdrücklich ab. Keine weiteren Fach-, Termin- oder Vorbereitungsfragen. Kündige kurz die Weiterleitung an den Auftraggeber an und rufe transfer_to_human auf.");
+      return;
+    }
+    if (openingTopicAfterIcebreaker && event.type !== "clear_rejection" && contactRouting?.stage !== "waiting_for_transfer") {
+      log.info("realtime.icebreaker_reaction", { callSid: currentContext.callSid, eventType: event.type });
+      requestAnchoredSpeech(openingTopicAfterIcebreaker);
       return;
     }
     if (basicInfoEmailOfferPending) {
@@ -2622,6 +2697,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (closed) return;
     closed = true;
     openingSpeech?.stop();
+    takeIcebreakerTopic();
     discardIdentityPrefetch();
     if (callDeadline) clearTimeout(callDeadline);
     responses.stop();

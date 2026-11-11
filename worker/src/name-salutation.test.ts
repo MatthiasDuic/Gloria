@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addressPersonDative, detectGenderFromName } from "./name-salutation.js";
+import { addressPersonDative, addressPersonDativeBySurname, detectGenderFromName } from "./name-salutation.js";
+
+test("addresses a known person by surname only", () => {
+  assert.equal(addressPersonDativeBySurname("Martin Neumann"), "Herrn Neumann");
+  assert.equal(addressPersonDativeBySurname("Petra Schulz"), "Frau Schulz");
+  assert.equal(addressPersonDativeBySurname("Dr. Martin Müller"), "Herrn Dr. Müller");
+  assert.equal(addressPersonDativeBySurname("Herr Neumann"), "Herrn Neumann");
+  assert.equal(addressPersonDativeBySurname("Kim Wagner"), "Kim Wagner");
+});
 
 test("adds Herrn or Frau based on the first name", () => {
   for (const name of ["Martin Müller", "Alexander Schmidt", "Marc Weber", "Michael Fürst", "Hans-Peter Klein"]) {
