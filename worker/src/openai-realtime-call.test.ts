@@ -1298,8 +1298,11 @@ test("the no-strategy instruction answers a customer question first and paraphra
   assert.match(instruction, /rund vier Prozent Steigerung pro Jahr/);
   assert.match(instruction, /sinngemäß: 'Das höre ich sehr oft\./);
   assert.doesNotMatch(instruction, /wörtlich/);
-  assert.match(instruction, /Lösungsansatz aus dem Auftrag/);
-  assert.match(instruction, /Orientierungsgespräch/);
+  assert.match(instruction, /Ansatz aus dem Auftrag/);
+  assert.match(instruction, /unverbindliches Kennenlernen mit Herrn Duic/);
+  assert.match(instruction, /stellt seinen Ansatz vor/);
+  assert.match(instruction, /ohne Prüfpunkte aufzuzählen/);
+  assert.doesNotMatch(instruction, /individuelle Prüfung in einem kurzen Orientierungsgespräch/);
   assert.match(instruction, /noch keinen Termin/);
 });
 
@@ -1404,7 +1407,10 @@ test("calculates the reported 480 Euro contribution before moving to the concept
   ctx.transcript.push({ role: "user", text: "Nein, bisher keine Planung.", at: 4 });
   assert.equal(buildRequiredContributionProjection(ctx), undefined);
   assert.match(buildRealtimeInstructions(ctx), /KONZEPT VOR TERMIN/);
-  assert.match(buildRealtimeInstructions(ctx), /konkreten Lösungsansatz aus dem Auftrag/);
+  assert.match(buildRealtimeInstructions(ctx), /Ansatz aus dem Auftrag/);
+  assert.match(buildRealtimeInstructions(ctx), /unverbindliches Kennenlernen mit Herrn Duic/);
+  assert.match(buildRealtimeInstructions(ctx), /Zähle keine Prüfpunkte/);
+  assert.match(buildRealtimeInstructions(ctx), /zunächst ums Kennenlernen und die Vorstellung des Ansatzes/);
 });
 
 test("requires the contribution and exact projection before scheduling, not merely a generic outlook", () => {
