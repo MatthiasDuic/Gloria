@@ -41,7 +41,7 @@ import { isTrustedStreamState } from "./openai-realtime-call.js";
 import test from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { buildGatekeeperIntro, buildGatekeeperTopicInstruction, buildGatekeeperTransferRequest, hasDeterministicGatekeeperTopic } from "./openai-realtime-call.js";
-import { buildAiIdentityAnswer, buildDataSourceAnswer, buildDecisionMakerIdentity, buildOptOutFarewell, buildOwnerAffiliation, DATA_SOURCE_LIST_OFFER } from "./openai-realtime-call.js";
+import { buildAiIcebreaker, buildAiIdentityAnswer, planInterruptedOpening, buildDataSourceAnswer, buildDecisionMakerIdentity, buildOptOutFarewell, buildOwnerAffiliation, DATA_SOURCE_LIST_OFFER } from "./openai-realtime-call.js";
 import { buildDecisionMakerIntro, buildDecisionMakerIntroInstructions, buildDecisionMakerTopicQuestion, buildNoStrategyAcknowledgementInstruction, buildPkvCostIncreaseFollowup, buildRealtimeInstructions, buildRealtimeResponseInstructions, buildRequiredContributionProjection, getRequiredContributionStep, hasRequestedHumanTransfer, hasAffirmedAssistantEndQuestion, isLikelyIncompleteAssistantTurn, isLikelyNoiseTranscript, isNoStrategyAnswer, isSyntheticTranscriptionPrompt, notifyCallAction, openAiAudioFormat, OPENAI_REALTIME_INPUT_NOISE_REDUCTION, shouldOfferBasicInfoEmailAfterAppointmentRejection, shouldRecoverInterruptedBargeIn } from "./openai-realtime-call.js";
 import { shouldRetryElevenLabsStream } from "./elevenlabs-tts.js";
 import { isSuppliedAppointmentSlot } from "./appointment-controller.js";
@@ -566,7 +566,7 @@ test("a short first greeting waits for ASR then delivers a complete identity che
     assert.equal(ttsRequests.length, 0);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "hello", transcript: "Ja, Müller?" });
     await waitForTtsRequests(ttsRequests, 1);
-    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Testberater.*Spreche ich mit Herrn Neumann\?/);
+    assert.match(ttsRequests[0], /Hallo, ich bin Gloria, die KI-Assistentin von Herrn Testberater.*Spreche ich mit Herrn Neumann\?/);
     assert.doesNotMatch(ttsRequests[0], /Entschuldigung/);
     assert.equal(socket.sent.some((event) => event.type === "response.create"), false);
     assert.equal(hangups.length, 0);
@@ -598,11 +598,11 @@ test("accepts an offered transfer once, stays quiet and introduces herself only 
 
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ja." });
     await waitForTtsRequests(ttsRequests, 3);
-    assert.match(requestedSpeech(ttsRequests)[2], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
+    assert.match(requestedSpeech(ttsRequests)[2], /Hallo, ich bin Gloria.*Spreche ich mit Herrn Neumann\?/);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Ja." });
     await waitForTtsRequests(ttsRequests, 4);
     assert.match(requestedSpeech(ttsRequests)[3], /Zukunft des Versicherungsvertriebs/);
-    assert.doesNotMatch(requestedSpeech(ttsRequests)[3], /hier ist Gloria|Spreche ich mit/);
+    assert.doesNotMatch(requestedSpeech(ttsRequests)[3], /ich bin Gloria|Spreche ich mit/);
     assert.equal(hangups.length, 0);
   }, 0, 160, false,
   "Es geht um die Zukunft des Versicherungsvertriebs und die Zusammenarbeit mit der BarmeniaGothaer. Vereinbare ein Kennenlernen.",
@@ -623,7 +623,7 @@ test("a receptionist's yes after a transfer request produces no speech until the
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
     await settleStreamEvents();
     const response = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } };
-    assert.match(response.response.instructions, /Guten Tag, hier ist Gloria/);
+    assert.match(response.response.instructions, /Hallo, ich bin Gloria/);
     assert.equal(hangups.length, 0);
   });
 });
@@ -667,7 +667,7 @@ test("introduces herself before answering a new person's question after a transf
     assert.equal(ttsRequests.length, 1);
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Worum geht es?" });
     await waitForTtsRequests(ttsRequests, 2);
-    assert.match(requestedSpeech(ttsRequests)[1], /^Guten Tag, hier ist Gloria.*Es geht um ein Kennenlernen zur Zukunft des Versicherungsvertriebs\.$/);
+    assert.match(requestedSpeech(ttsRequests)[1], /^Hallo, ich bin Gloria.*Es geht um ein Kennenlernen zur Zukunft des Versicherungsvertriebs\.$/);
     assert.doesNotMatch(requestedSpeech(ttsRequests)[1], /verbinden|weiterleiten|\?/i);
     assert.equal(hangups.length, 0);
   }, 0, 160, false,
@@ -726,6 +726,26 @@ test("does not speak a late model response during an active transfer", { timeout
   });
 });
 
+test("an interruption during the icebreaker still delivers the topic in the next reply", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket, hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
+    await waitForTtsRequests(ttsRequests, 1);
+    assert.match(requestedSpeech(ttsRequests)[0], /eine echte KI.*Passt es kurz\?$/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    socket.message({ type: "input_audio_buffer.speech_started", item_id: "interruption" });
+    socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "interruption" });
+    socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "interruption", transcript: "Moment, was genau wollen Sie denn von mir?" });
+    await settleStreamEvents();
+    const response = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } } | undefined;
+    assert.ok(response);
+    assert.match(response.response.instructions, /Dein Einstieg wurde unterbrochen/);
+    assert.match(response.response.instructions, /Es geht um das Thema Energiekosten\. Passt es kurz\?/);
+    assert.doesNotMatch(response.response.instructions, /unterbrochen: "[^"]*Passt es kurz\?/);
+    assert.equal(hangups.length, 0);
+  }, 0, 160_000, false, "Es geht um ein Kennenlernen zur Zukunft des Versicherungsvertriebs. Vereinbare einen Termin.");
+});
+
 test("does not recover an interrupted acknowledgement with an apology during a transfer", { timeout: 10_000 }, async () => {
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
@@ -763,7 +783,7 @@ test("preserves a buffered transfer offer and the next person's greeting as sepa
     assert.equal(ttsRequests.length, 1);
     const response = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } };
     assert.ok(response);
-    assert.match(response.response.instructions, /Guten Tag, hier ist Gloria/);
+    assert.match(response.response.instructions, /Hallo, ich bin Gloria/);
     assert.equal(hangups.length, 0);
   });
 });
@@ -784,7 +804,7 @@ test("preserves a buffered yes to the transfer and the next person's greeting as
     assert.equal(ttsRequests.length, 1);
     const response = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } };
     assert.ok(response);
-    assert.match(response.response.instructions, /Guten Tag, hier ist Gloria/);
+    assert.match(response.response.instructions, /Hallo, ich bin Gloria/);
     assert.equal(hangups.length, 0);
   });
 });
@@ -816,7 +836,7 @@ test("prefetches complete alternative opening turns and uses the gatekeeper rout
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
     assert.ok(prefetchedTexts.some((text) => text.includes("Spreche ich mit Herrn Neumann?")));
-    assert.ok(prefetchedTexts.some((text) => text.includes("Ich rufe mit einem kurzen Anliegen an.")));
+    assert.ok(prefetchedTexts.some((text) => text.includes("Aber Spaß beiseite: Herr Testberater hat mich gebeten")));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Herzlich willkommen bei der Firma Muster, mein Name ist Schulz, wie kann ich Ihnen helfen?" });
     for (let attempt = 0; attempt < 50 && !socket.sent.some((event) => event.type === "response.create"); attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const request = socket.sent.find((event) => event.type === "response.create") as { response: { instructions: string } } | undefined;
@@ -858,12 +878,12 @@ test("a receptionist hears whom Gloria wants to reach and why when the campaign 
 });
 
 test("the first topic sentence is prefetched from a natural campaign objective and is not requested after identity playback", { timeout: 10_000 }, async () => {
-  const topicSentence = "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Passt es Ihnen gerade für ein kurzes Gespräch?";
+  const topicSentence = "Es geht um die langfristig steigenden Kosten in der Gesundheitsversorgung und die Auswirkungen auf die Unternehmensplanung. Passt es kurz?";
   await withRealtimeStream(async (socket, hangups, ttsRequests) => {
     socket.message({ type: "session.updated" });
     for (let attempt = 0; attempt < 50 && ttsRequests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 20));
     const prefetchedTexts = ttsRequests.map((request) => JSON.parse(request) as { text: string }).map((request) => request.text);
-    assert.ok(prefetchedTexts.some((text) => text.startsWith("Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Testberater")));
+    assert.ok(prefetchedTexts.some((text) => text.startsWith("Hallo, ich bin Gloria, die KI-Assistentin von Herrn Testberater")));
     assert.ok(prefetchedTexts.some((text) => text.endsWith(topicSentence)));
     socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript: "Neumann am Apparat, guten Tag." });
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -876,28 +896,74 @@ test("the first topic sentence is prefetched from a natural campaign objective a
 });
 
 test("uses a spoken campaign objective and never reads an internal campaign label as the topic", () => {
+  const callback = { isCallback: true };
   assert.equal(
     buildDecisionMakerTopicQuestion({
+      ...callback,
       topic: "private Krankenversicherung",
       callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
     }),
-    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es Ihnen gerade für ein kurzes Gespräch?",
+    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es kurz?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
+      ...callback,
       topic: "Recruiting",
       callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
     }),
-    "Ich rufe mit einem kurzen Anliegen an. Passt es Ihnen gerade für ein kurzes Gespräch?",
+    "Ich rufe mit einem kurzen Anliegen an. Passt es kurz?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
+      ...callback,
       topic: "Recruiting",
       callObjective: "Erfrage den Personalbedarf und vereinbare danach einen Beratungstermin.",
       receptionTopicReason: "Ich habe eine fachliche Frage zum Thema Personalbedarf.",
     }),
-    "Ich rufe zum Thema Personalbedarf an. Passt es Ihnen gerade für ein kurzes Gespräch?",
+    "Ich rufe zum Thema Personalbedarf an. Passt es kurz?",
   );
+});
+
+test("opens a first contact with the decision maker with a charming AI icebreaker and the topic", () => {
+  const pkv = buildDecisionMakerTopicQuestion({
+    ownerRealName: "Matthias Duic",
+    topic: "private Krankenversicherung",
+    callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
+  });
+  assert.equal(pkv,
+    "Ja, richtig gehört: eine echte KI. Und Sie denken jetzt vermutlich: Ach, schon wieder eine KI, die mich anruft! "
+    + "Keine Sorge, ich werde Ihnen weder die Weltherrschaft erklären noch versuchen, Ihnen einen Toaster zu verkaufen. "
+    + "Aber Spaß beiseite: Herr Duic hat mich gebeten, mit Ihnen über ein Thema zu sprechen, das gerade für Unternehmer durchaus interessant ist. "
+    + "Es geht um die Entwicklung der Kosten in der Gesundheitsversorgung und vor allem darum, wie man diese Kosten gerade mit Blick auf das Alter planbar gestalten kann. "
+    + "Passt es kurz?");
+  assert.match(buildDecisionMakerTopicQuestion({ ownerRealName: "Frau Anna Muster", topic: "Recruiting", receptionTopicReason: "Frage zum Thema Personalbedarf." }),
+    /Frau Muster hat mich gebeten.*Es geht um das Thema Personalbedarf\. Passt es kurz\?$/);
+  assert.match(buildDecisionMakerTopicQuestion({ ownerRealName: "Matthias Duic", topic: "Recruiting" }),
+    /durchaus interessant ist\. Passt es kurz\?$/);
+  assert.equal(buildAiIcebreaker({ topic: "Recruiting", isCallback: true }), undefined);
+  assert.match(buildDecisionMakerIntroInstructions(newContext({ callSid: "icebreaker", streamSid: "s", topic: "Recruiting" })),
+    /locker und mit einem Augenzwinkern wörtlich: "Ja, richtig gehört: eine echte KI/);
+});
+
+test("an interrupted opening reports only the heard part and keeps the topic pending", () => {
+  const opening = buildDecisionMakerIntro({
+    ownerRealName: "Matthias Duic",
+    topic: "private Krankenversicherung",
+    callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung.",
+  });
+  const topic = "Es geht um die Entwicklung der Kosten in der Gesundheitsversorgung und vor allem darum, wie man diese Kosten gerade mit Blick auf das Alter planbar gestalten kann. Passt es kurz?";
+
+  const duringJoke = planInterruptedOpening(opening, 9_000);
+  assert.ok(duringJoke);
+  assert.equal(duringJoke.missingTopic, topic);
+  assert.ok(opening.startsWith(duringJoke.spokenPrefix.replace(/ …$/, "")));
+  assert.doesNotMatch(duringJoke.spokenPrefix, /Gesundheitsversorgung|Passt es kurz/);
+
+  const beforeQuestion = planInterruptedOpening(opening, Math.floor(((opening.length - 10) / 13) * 1000));
+  assert.equal(beforeQuestion?.missingTopic, "Passt es kurz?");
+
+  assert.equal(planInterruptedOpening(opening, 600_000), undefined);
+  assert.equal(planInterruptedOpening("Welchen monatlichen Beitrag zahlen Sie aktuell?", 1_000), undefined);
 });
 
 test("does not speak speculatively before classifying a short greeting", { timeout: 10_000 }, async () => {
@@ -912,7 +978,7 @@ test("does not speak speculatively before classifying a short greeting", { timeo
     socket.message({ type: "input_audio_buffer.speech_stopped", item_id: "human" });
     socket.message({ type: "conversation.item.input_audio_transcription.completed", item_id: "human", transcript: "Hallo?" });
     await waitForTtsRequests(ttsRequests, 1);
-    assert.match(ttsRequests[0], /Guten Tag, hier ist Gloria.*Spreche ich mit Herrn Neumann\?/);
+    assert.match(ttsRequests[0], /Hallo, ich bin Gloria.*Spreche ich mit Herrn Neumann\?/);
     assert.equal(hangups.length, 0);
   });
 });
@@ -1510,8 +1576,8 @@ test("uses a transparent, campaign-specific introduction for the decision maker"
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.match(instructions, /stelle dich transparent und kurz vor/);
-  assert.match(buildDecisionMakerIntro(ctx), /Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic/);
-  assert.match(buildDecisionMakerIntro(ctx), /Ich rufe zum Thema Individuelle Gesundheitsvorsorge an/);
+  assert.match(buildDecisionMakerIntro(ctx), /Hallo, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic/);
+  assert.match(buildDecisionMakerIntro(ctx), /Es geht um das Thema Individuelle Gesundheitsvorsorge\./);
   assert.match(instructions, /gerne mit Herrn Neumann zum Thema des Anrufs verbunden werden möchtest/);
   assert.equal(buildGatekeeperIntro(ctx),
     "Guten Tag, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel, und möchte gerne mit Herrn Neumann zum Thema Individuelle Gesundheitsvorsorge verbunden werden.");
@@ -1658,9 +1724,9 @@ test("introduces Gloria as the user's AI assistant with the configured company p
   assert.equal(buildOwnerAffiliation({ ...owner, ownerIntroCompanyPhrase: "der Allianz Generalvertretung Muster" }), "von der Allianz Generalvertretung Muster");
   assert.equal(buildOwnerAffiliation(owner), "bei Agentur Duic Sprockhövel");
   assert.equal(buildDecisionMakerIdentity(configured),
-    "Guten Tag, hier ist Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel.");
+    "Hallo, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel.");
   assert.equal(buildDecisionMakerIdentity({ ...configured, ownerRealName: "Frau Anna Muster" }),
-    "Guten Tag, hier ist Gloria, die KI-Assistentin von Frau Anna Muster von der BarmeniaGothaer in Sprockhövel.");
+    "Hallo, ich bin Gloria, die KI-Assistentin von Frau Anna Muster von der BarmeniaGothaer in Sprockhövel.");
   const ctx = newContext({ callSid: "test-identity", streamSid: "test-stream", contactName: "Herr Neumann", topic: "Gesundheitskosten", ...configured });
   assert.match(buildGatekeeperIntro(ctx), /^Guten Tag, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel, und möchte gerne mit Herrn Neumann/);
   const instructions = buildRealtimeInstructions(ctx);

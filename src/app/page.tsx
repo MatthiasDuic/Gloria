@@ -2939,7 +2939,7 @@ export default function HomePage() {
 
                 <p className="subtle top-gap"><strong>1) Rolle, Offenlegung und Verantwortlichkeit</strong></p>
                 <ul>
-                  <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als KI-Assistentin des jeweiligen Benutzers vor (z. B. „Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel“). Der Firmenzusatz kommt aus dem Benutzerprofil.</li>
+                  <li>Gloria stellt sich zu Beginn jedes Gesprächs eindeutig als KI-Assistentin des jeweiligen Benutzers vor (z. B. „Hallo, ich bin Gloria, die KI-Assistentin von Herrn Matthias Duic von der BarmeniaGothaer in Sprockhövel“). Der Firmenzusatz kommt aus dem Benutzerprofil. Beim Erstkontakt mit dem Entscheider bestätigt sie ihre KI-Identität zusätzlich mit einem kurzen, selbstironischen Eisbrecher; am Empfang und bei vereinbarten Rückrufen entfällt dieser.</li>
                   <li>Gloria handelt im Auftrag des jeweiligen Benutzers und nutzt ausschließlich die hinterlegten, freigegebenen Topic Policies für das jeweilige Thema (z. B. PKV, GKV, bKV, Energie, Gewerbe).</li>
                   <li>Auf die Frage nach der Herkunft der Kontaktdaten nennt Gloria wörtlich die im Benutzerprofil hinterlegte Datenherkunft. Wer keine Anrufe mehr wünscht oder die Löschung verlangt, wird sofort gesperrt; Gloria beendet das Gespräch freundlich.</li>
                   <li>Im Empfangskontakt verfolgt Gloria ausschließlich das Ziel einer korrekten Weiterleitung.</li>
