@@ -16,6 +16,7 @@ import { OpeningSpeechStream } from "./opening-speech-stream.js";
 import { RealtimeOutputGate } from "./realtime-output-gate.js";
 import { replaceDiscouragedWords, stripSpokenQuotes } from "./spoken-vocabulary.js";
 import { PrefetchedSpeech } from "./prefetched-speech.js";
+import { addressPersonDative } from "./name-salutation.js";
 import { UserTurnBuffer } from "./user-turn-buffer.js";
 import { ElevenLabsDialogueStream, getElevenLabsModel, isElevenLabsConfigured, isElevenLabsDialogueModel, shouldRetryElevenLabsStream, streamElevenLabsAudio, type DialogueStreamResult } from "./elevenlabs-tts.js";
 import { isFallbackTtsEnabled, streamFallbackSpeech } from "./fallback-tts.js";
@@ -292,9 +293,7 @@ type OwnerIdentityContext = Pick<CallContext, "ownerRealName" | "ownerCompanyNam
   & Partial<Pick<CallContext, "ownerIntroCompanyPhrase">>;
 
 function buildAddressedOwner(ctx: Pick<CallContext, "ownerRealName">): string {
-  const ownerName = ctx.ownerRealName?.trim() || "Matthias Duic";
-  if (/^frau\s/i.test(ownerName)) return ownerName;
-  return /^herrn?\s/i.test(ownerName) ? ownerName.replace(/^herr\s/i, "Herrn ") : `Herrn ${ownerName}`;
+  return addressPersonDative(ctx.ownerRealName?.trim() || "Matthias Duic", "male");
 }
 
 function buildOwnerNominative(ctx: Pick<CallContext, "ownerRealName">): string {
@@ -426,10 +425,8 @@ type GatekeeperRequestContext = Pick<CallContext, "contactName" | "topic">
   & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>;
 
 function buildGatekeeperWish(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
-  const targetName = ctx.contactName?.trim() || "der zuständigen Person";
-  const addressedTarget = /^herr\s+/i.test(targetName)
-    ? targetName.replace(/^herr\s+/i, "Herrn ")
-    : targetName;
+  const targetName = ctx.contactName?.trim();
+  const addressedTarget = targetName ? addressPersonDative(targetName) : "der zuständigen Person";
   const topic = topicPlaceholder
     ? { inline: `zum Thema ${topicPlaceholder}`, sentence: undefined }
     : buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
@@ -465,16 +462,13 @@ export function buildGatekeeperTopicInstruction(
 export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "contactName">): string {
   const targetName = ctx.contactName?.trim();
   if (!targetName) return "Spreche ich mit der zuständigen Ansprechperson?";
-  const addressedTarget = /^herr\s+/i.test(targetName)
-    ? targetName.replace(/^herr\s+/i, "Herrn ")
-    : targetName;
-  return `Spreche ich mit ${addressedTarget}?`;
+  return `Spreche ich mit ${addressPersonDative(targetName)}?`;
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
   const addressedOwner = buildAddressedOwner(ctx);
   const target = ctx.contactName?.trim();
-  const addressedTarget = target?.replace(/^herr\s+/i, "Herrn ");
+  const addressedTarget = target ? addressPersonDative(target) : undefined;
   const today = new Date().toLocaleDateString("de-DE", {
     weekday: "long",
     year: "numeric",
@@ -1680,7 +1674,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           const suggestedTime = mentionsRetryTime(transcript);
           if (!contactRouting.availabilityFollowUpAsked && !suggestedTime) {
             const target = contactRouting.targetName?.trim() || "die zuständige Person";
-            const addressedTarget = /^herr\s+/i.test(target) ? target.replace(/^herr\s+/i, "Herrn ") : target;
+            const addressedTarget = addressPersonDative(target);
             contactRouting = { ...contactRouting, availabilityFollowUpAsked: true, awaitingAvailabilityAnswer: true };
             requestDeterministicSpeech(`Verstehe. Wann kann ich ${addressedTarget} am besten erreichen?`);
           } else {

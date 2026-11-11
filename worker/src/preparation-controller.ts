@@ -1,5 +1,6 @@
 import type { ConversationTurn } from "./pkv-conversation-controller.js";
 import type { AppointmentMode } from "./appointment-controller.js";
+import { detectGenderFromName } from "./name-salutation.js";
 
 
 export const FINAL_FAREWELL_TEXT = "Vielen Dank für das Gespräch. Auf Wiederhören.";
@@ -14,7 +15,7 @@ export type AppointmentConfirmationOwner = {
 function advisorReference(owner: AppointmentConfirmationOwner, dative = false): string | undefined {
   const name = owner.ownerRealName?.replace(/\s+/g, " ").trim();
   if (!name) return undefined;
-  const female = /^frau\s/i.test(name);
+  const female = /^frau\s/i.test(name) || (!/^herrn?\s/i.test(name) && detectGenderFromName(name) === "female");
   const surname = name.replace(/^(?:herrn?|frau)\s+/i, "").split(" ").pop();
   if (!surname) return undefined;
   return `${female ? "Frau" : dative ? "Herrn" : "Herr"} ${surname}`;
