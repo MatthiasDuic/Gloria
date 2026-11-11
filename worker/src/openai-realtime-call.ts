@@ -90,6 +90,10 @@ type RealtimeToolCall = {
 
 // Shorter end-of-speech pause while waiting for the first contact; later turns keep OPENAI_REALTIME_SILENCE_MS.
 const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "600", 10);
+// "low" waited up to several seconds after each answer; "medium" responds faster without cutting people off.
+const SEMANTIC_VAD_EAGERNESS = ((value) => (["low", "medium", "high", "auto"].includes(value) ? value : "medium"))(
+  process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim().toLowerCase() || "",
+);
 
 const REALTIME_TOOLS = [
   {
@@ -344,9 +348,13 @@ type DecisionMakerTopicContext = Pick<CallContext, "topic">
  * Self-ironic AI icebreaker for the first contact with the decision maker. It sets Gloria apart from
  * anonymous robocalls; skipped on agreed callbacks, where the person already knows her.
  */
-export function buildAiIcebreaker(ctx: DecisionMakerTopicContext): string | undefined {
+export function buildAiIcebreaker(ctx: DecisionMakerTopicContext, followsEarlierIdentity = false): string | undefined {
   if (ctx.isCallback) return undefined;
-  return "Ja, richtig gehört: eine echte KI. Und Sie denken jetzt vermutlich: Ach, schon wieder eine KI, die mich anruft! "
+  // After a transfer or "Spreche ich mit …?" the self-introduction lies one turn back, so "richtig gehört" would not fit.
+  const opener = followsEarlierIdentity
+    ? "Schön, dass ich Sie erreiche. Wie gesagt: Ich bin eine echte KI."
+    : "Ja, richtig gehört: eine echte KI.";
+  return `${opener} Und Sie denken jetzt vermutlich: Ach, schon wieder eine KI, die mich anruft! `
     + "Keine Sorge, ich werde Ihnen weder die Weltherrschaft erklären noch versuchen, Ihnen einen Toaster zu verkaufen. "
     + `Aber Spaß beiseite: ${buildOwnerShortName(ctx)} hat mich gebeten, mit Ihnen über ein Thema zu sprechen, das gerade für Unternehmer durchaus interessant ist.`;
 }
@@ -391,8 +399,8 @@ export function buildMissingOpeningTopicInstruction(missingTopic: string): strin
 
 const PKV_DECISION_MAKER_TOPIC = "Es geht um die Entwicklung der Kosten in der Gesundheitsversorgung und vor allem darum, wie man diese Kosten gerade mit Blick auf das Alter planbar gestalten kann.";
 
-export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext): string {
-  const icebreaker = buildAiIcebreaker(ctx);
+export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext, followsEarlierIdentity = false): string {
+  const icebreaker = buildAiIcebreaker(ctx, followsEarlierIdentity);
   const topicLabel = ctx.policyTopic || ctx.topic;
   const topic = buildGatekeeperTopic(topicLabel, ctx.callObjective, ctx.receptionTopicReason);
   let reason: string | undefined;
@@ -408,7 +416,7 @@ export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext):
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
-  const icebreaker = buildAiIcebreaker(ctx);
+  const icebreaker = buildAiIcebreaker(ctx, identityAlreadySpoken);
   const icebreakerRule = icebreaker
     ? `Sage direkt danach locker und mit einem Augenzwinkern wörtlich: "${icebreaker}" `
     : "";
@@ -424,13 +432,15 @@ ${topicRule}`;
 type GatekeeperRequestContext = Pick<CallContext, "contactName" | "topic">
   & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>;
 
+const GATEKEEPER_TRANSFER_QUESTION = "Wären Sie so nett, mich kurz zu verbinden?";
+
 function buildGatekeeperWish(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
   const targetName = ctx.contactName?.trim();
   const addressedTarget = targetName ? addressPersonDative(targetName) : "der zuständigen Person";
   const topic = topicPlaceholder
     ? { inline: `zum Thema ${topicPlaceholder}`, sentence: undefined }
     : buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
-  return `möchte gerne mit ${addressedTarget}${topic.inline ? ` ${topic.inline}` : ""} verbunden werden.${topic.sentence ? ` ${topic.sentence}` : ""}`;
+  return `würde gerne mit ${addressedTarget}${topic.inline ? ` ${topic.inline}` : ""} sprechen.${topic.sentence ? ` ${topic.sentence}` : ""} ${GATEKEEPER_TRANSFER_QUESTION}`;
 }
 
 export function hasDeterministicGatekeeperTopic(ctx: GatekeeperRequestContext): boolean {
@@ -442,7 +452,7 @@ export function buildGatekeeperIntro(
   ctx: OwnerIdentityContext & GatekeeperRequestContext,
   topicPlaceholder?: string,
 ): string {
-  return `Guten Tag, ich bin Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}, und ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+  return `Guten Tag, hier ist Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}. Ich ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
 }
 
 /** Used when Gloria's identity was already spoken; completes it with whom and why. */
@@ -456,7 +466,7 @@ export function buildGatekeeperTopicInstruction(
   withIdentity: boolean,
 ): string {
   const template = withIdentity ? buildGatekeeperIntro(ctx, "<THEMA>") : buildGatekeeperTransferRequest(ctx, "<THEMA>");
-  return `Du sprichst mit dem Empfang. Sage genau diesen einen Satz und ersetze nur <THEMA> durch eine kurze, natürliche Themenbezeichnung (höchstens sechs Wörter) aus dem AUFTRAG FÜR GLORIA, nicht durch den internen Kampagnennamen: "${template}" Sage danach nichts weiter: keine Frage, kein Pitch, keine erfundenen Angaben.`;
+  return `Du sprichst mit dem Empfang. Sage genau diesen Text und ersetze nur <THEMA> durch eine kurze, natürliche Themenbezeichnung (höchstens sechs Wörter) aus dem AUFTRAG FÜR GLORIA, nicht durch den internen Kampagnennamen: "${template}" Sage danach nichts weiter: keine weitere Frage, kein Pitch, keine erfundenen Angaben.`;
 }
 
 export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "contactName">): string {
@@ -807,7 +817,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
             },
             turn_detection: contactRouting?.stage === "decision_maker" ? {
               type: "semantic_vad",
-              eagerness: "low",
+              eagerness: SEMANTIC_VAD_EAGERNESS,
               create_response: false,
               interrupt_response: false,
             } : {
@@ -1718,7 +1728,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (identityAnnounced && currentContext.callObjective?.trim() && !getSpeakableCampaignReason(currentContext.callObjective)) {
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, true));
         } else if (identityAnnounced) {
-          const topicText = convertNumbersForSpeech(buildDecisionMakerTopicQuestion(currentContext));
+          const topicText = convertNumbersForSpeech(buildDecisionMakerTopicQuestion(currentContext, true));
           requestDeterministicSpeech(topicText);
         } else if (currentContext.callObjective?.trim()
           && !getSpeakableCampaignReason(currentContext.callObjective)) {
