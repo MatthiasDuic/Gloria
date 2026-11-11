@@ -5,7 +5,7 @@ import type { VoiceProfile } from "./topic-policy.js";
 export type ElevenLabsOutputFormat = "alaw_8000" | "ulaw_8000";
 
 const DEFAULT_VOICE_ID = "Ywa4Py8gVz5ugeNVy6iC";
-const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
+const DEFAULT_MODEL_ID = "eleven_v4_turbo";
 const DEFAULT_FALLBACK_MODEL_ID = "eleven_multilingual_v2";
 
 type DialogueStreamOptions = {
