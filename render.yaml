@@ -25,11 +25,13 @@ services:
       - key: OPENAI_API_KEY
         sync: true
       - key: OPENAI_MODEL
-        value: gpt-4.1-mini
+        value: gpt-4.1
       - key: OPENAI_REALTIME_MODEL
         value: gpt-realtime-2.1
       - key: OPENAI_REALTIME_REASONING_EFFORT
         value: low
+      - key: OPENAI_REALTIME_SILENCE_MS
+        value: "350"
       - key: ELEVENLABS_API_KEY
         sync: true
       - key: ELEVENLABS_VOICE_ID
