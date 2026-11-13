@@ -56,5 +56,3 @@ services:
         value: https://gloria.agentur-duic-sprockhoevel.de
       - key: APP_INTERNAL_TOKEN
         sync: false
-      - key: TRANSFER_PHONE
-        value: "+491715358989"
