@@ -182,7 +182,7 @@ test("fallback outcomes distinguish voicemail and queues from human conversation
   }
 });
 
-test("a reached contact who hangs up is reported as an aborted conversation, never as unreachable", async () => {
+test("a reached contact who hangs up is not reported as booked without a stored appointment", async () => {
   const dispatcher = getGlobalDispatcher();
   const agent = new MockAgent();
   agent.disableNetConnect();
@@ -200,7 +200,7 @@ test("a reached contact who hangs up is reported as an aborted conversation, nev
   openAi.intercept({ path: "/v1/chat/completions", method: "POST" }).reply((options) => {
     responseFormat = JSON.parse(String(options.body)).response_format;
     return { statusCode: 200, data: {
-      choices: [{ message: { content: JSON.stringify({ outcome: "Nicht erreicht / kein Kontakt", summary: "Kein Gespräch." }) } }],
+      choices: [{ message: { content: JSON.stringify({ outcome: "Termin", appointmentAt: "2099-12-03T10:00:00+01:00", summary: "Der Termin wurde bestätigt." }) } }],
     } };
   });
   agent.get("https://finalize.test").intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
@@ -223,6 +223,8 @@ test("a reached contact who hangs up is reported as an aborted conversation, nev
     assert.equal(posts.length, 2);
     assert.equal(posts[0].resultDetail, "Aufgelegt");
     assert.equal(posts[1].outcome, "Gespräch abgebrochen");
+    assert.equal(posts[1].appointmentAt, undefined);
+    assert.doesNotMatch(String(posts[1].summary), /Der Termin wurde bestätigt/);
     assert.equal(posts[1].resultDetail, "Aufgelegt");
     agent.assertNoPendingInterceptors();
   } finally {

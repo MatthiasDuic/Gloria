@@ -244,10 +244,28 @@ export function getAppointmentOfferSlots(freeSlotsPrompt: string | undefined, pr
 }
 
 export function matchOfferedAppointmentSelection(text: string, offeredSlots: string[]): string | undefined {
-  if (offeredSlots.length < 2) return undefined;
+  if (offeredSlots.length < 2 || text.includes("?") || rejectsBothOfferedSlots(text) || isNegatedChoice(text)) return undefined;
   const normalized = normalizeSlot(text);
-  if (/\b(?:der\s+)?(?:erste|ersten|erster|erstes|1\.?|erste[nr]?)\b/i.test(normalized)) return offeredSlots[0];
-  if (/\b(?:der\s+)?(?:zweite|zweiten|zweiter|zweites|2\.?|zweite[nr]?)\b/i.test(normalized)) return offeredSlots[1];
+  const datePattern = /\b(\d{1,2}|[a-zäöüß]+)\s+(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b/gi;
+  const dates = [...normalized.matchAll(datePattern)];
+  if (dates.length) {
+    if (dates.length !== 1) return undefined;
+    const [, dayText, month] = dates[0];
+    const ordinal = dayText.replace(/e[nrs]$/, "e");
+    const base = ["erste", "zweite", "dritte", "vierte", "fünfte", "sechste", "siebte", "achte", "neunte", "zehnte",
+      "elfte", "zwölfte", "dreizehnte", "vierzehnte", "fünfzehnte", "sechzehnte", "siebzehnte", "achtzehnte", "neunzehnte",
+      "zwanzigste", "einundzwanzigste", "zweiundzwanzigste", "dreiundzwanzigste", "vierundzwanzigste", "fünfundzwanzigste",
+      "sechsundzwanzigste", "siebenundzwanzigste", "achtundzwanzigste", "neunundzwanzigste", "dreißigste", "einunddreißigste"];
+    const day = /^\d+$/.test(dayText) ? Number(dayText)
+      : base.indexOf(ordinal) + 1;
+    const matches = offeredSlots.filter((slot) => ` ${normalizeSlot(slot)} `.includes(` ${day} ${month} `));
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+  const first = normalized === "1" || /\berste[nrs]?\b/i.test(normalized);
+  const second = normalized === "2" || /\bzweite[nrs]?\b/i.test(normalized);
+  if (first && second) return undefined;
+  if (first) return offeredSlots[0];
+  if (second) return offeredSlots[1];
 
   const exact = offeredSlots.find((slot) => normalized.includes(normalizeSlot(slot)));
   if (exact) return exact;
@@ -287,6 +305,11 @@ export function advanceAppointmentRouting(
   const modeSignal = analyzeAppointmentMode(latestUser);
   const mode = modeSignal.mode;
   if (state.selectedAppointmentSlot) {
+    const revised = matchOfferedAppointmentSelection(latestUser, state.appointmentOfferedSlots || []);
+    if (revised) {
+      const nextState = { ...state, selectedAppointmentSlot: revised, appointmentMode: mode };
+      return mode ? { state: nextState, readyToBook: true } : { state: nextState, speechText: appointmentModeFollowUp("") };
+    }
     if (mode) return { state: { ...state, appointmentMode: mode }, readyToBook: true };
     if (modeSignal.mentioned) {
       return {
@@ -294,7 +317,7 @@ export function advanceAppointmentRouting(
         speechText: appointmentModeFollowUp(latestUser),
       };
     }
-    return { state: { ...state, appointmentMode: undefined } };
+    return { state: { ...state, appointmentMode: undefined }, speechText: isUnclearSlotSelection(latestUser) ? appointmentModeFollowUp("") : undefined };
   }
   if (state.appointmentOfferedSlots?.length) {
     const selected = matchOfferedAppointmentSelection(latestUser, state.appointmentOfferedSlots);
@@ -313,7 +336,8 @@ export function advanceAppointmentRouting(
       speechText: modeSignal.mentioned ? appointmentModeFollowUp(latestUser) : appointmentModeFollowUp(""),
     };
   }
-  if (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant)) return { state };
+  if (!/\b(?:vormittags?|nachmittags?)\s+oder\s+(?:eher\s+)?(?:vormittags?|nachmittags?)\b/i.test(lastAssistant)
+    && (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant))) return { state };
   const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);
   const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
   if (preference === "unknown") return { state };
@@ -332,6 +356,7 @@ export function decideAppointment(params: {
   topicKind: "pkv" | "other";
   freeSlotsPrompt?: string;
   slotPhrase?: string;
+  selectedOfferedSlot?: string;
 }): AppointmentDecision {
   const slotPhrase = params.slotPhrase?.trim() || "";
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
@@ -341,6 +366,10 @@ export function decideAppointment(params: {
   const userNamedConcreteSlot = mentionsConcreteSlot(latestUserText);
   const recentUserNamedConcreteSlot = recentUserTurns.some((turn) => mentionsConcreteSlot(turn.text));
   const userRejectedBothSlots = rejectsBothOfferedSlots(latestUserText);
+  if (params.selectedOfferedSlot && isSuppliedAppointmentSlot(params.freeSlotsPrompt, params.selectedOfferedSlot)
+    && analyzeAppointmentMode(latestUserText).mode && !userRejectedBothSlots) {
+    return { ok: true, preference: detectAppointmentPreference(params.turns), slotPhrase: params.selectedOfferedSlot };
+  }
   const confirmationWasAsked = /(?:meinen\s+sie|passt\s+der|ist\s+das\s+so|richtig\s+verstanden)[^.?!]*(?:uhr|termin|donnerstag|freitag|montag|dienstag|mittwoch)/i.test(assistantText);
   const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText)
     || /\b(?:montag|dienstag|mittwoch|donnerstag|freitag)\b[^.!?]{0,20}\b(?:passt|passt\s+gut|gut\s+so|stimmt|klingt\s+gut|besser)\b/i.test(latestUserText);

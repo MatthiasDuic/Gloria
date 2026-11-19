@@ -7,6 +7,28 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const freeSlots = "FREIE TERMIN-VORSCHLÄGE:\n- Mittwoch, 26. August um 11:00 Uhr\n- Donnerstag, 27. August um 15:30 Uhr";
 
+test("keeps a date chosen in words through a separate appointment-mode answer", () => {
+  const offers = ["Montag, 30. November um 08:30 Uhr", "Donnerstag, 3. Dezember um 10:00 Uhr"];
+  const calendar = offers.map((offer) => `- ${offer}`).join("\n");
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: "Passt es Ihnen grundsätzlich eher vormittags oder eher nachmittags?" },
+    { role: "user", text: "Am Vormittag." },
+  ];
+  const offered = advanceAppointmentRouting({}, turns, calendar);
+  assert.deepEqual(offered.state.appointmentOfferedSlots, offers);
+  turns.push({ role: "assistant", text: offered.speechText! }, { role: "user", text: "Der dritte Dezember passt besser." });
+  const selected = advanceAppointmentRouting(offered.state, turns, calendar);
+  assert.equal(selected.state.selectedAppointmentSlot, offers[1]);
+  assert.equal(selected.speechText, "Soll der Termin persönlich oder digital stattfinden?");
+  turns.push({ role: "assistant", text: selected.speechText! }, { role: "user", text: "Gerne vor Ort, also gerne persönlich." });
+  const booking = advanceAppointmentRouting(selected.state, turns, calendar);
+  assert.equal(booking.readyToBook, true);
+  assert.deepEqual(decideAppointment({ turns, topicKind: "other", freeSlotsPrompt: calendar, slotPhrase: offers[1], selectedOfferedSlot: booking.state.selectedAppointmentSlot }),
+    { ok: true, preference: "morning", slotPhrase: offers[1] });
+  assert.equal(matchOfferedAppointmentSelection("Der zweite Dezember passt", offers), undefined);
+  assert.equal(matchOfferedAppointmentSelection("Der dritte Dezember passt nicht", offers), undefined);
+});
+
 test("locks the selected Tuesday, retains the location and proceeds to booking without model slot rewriting", () => {
   const slots = "FREIE TERMIN-VORSCHLÄGE:\n- Freitag, 6. November um 08:30 Uhr\n- Dienstag, 10. November um 10:00 Uhr";
   const turns: ConversationTurn[] = [

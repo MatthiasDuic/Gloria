@@ -161,13 +161,19 @@ FALLBACK_TTS_ENABLED=true
 
 ## Kalender und Verbindungen
 
+- Beim Erstkontakt nennt Gloria ihre KI-Rolle und den tatsächlichen Anlass.
+  Sie stellt beim Empfang eine kurze Weiterleitungsfrage und beim Entscheider
+  eine Zeitfrage. Nach der Frage wartet sie auf eine Antwort.
 - `find_free_slots` sucht bei abweichenden Kundenwünschen lokal in bereits
   geladenen Kalenderdaten. Es gibt keinen Kalenderabruf im Toolpfad, aber eine
   weitere Realtime-Modellantwort nach dem Tool-Ergebnis.
 - Der Kalender-Cache dient der Vorschau; während Terminangebote aktiv sind,
   kann er im Hintergrund aktualisiert werden. `confirm_appointment` liest vor
   dem Speichern frisch. Eine verbindliche Bestätigung wird erst nach dem
-  Speichern gesprochen. Die frische Abfrage ersetzt keinen atomaren
+  Speichern gesprochen. Gloria fragt die Terminart zunächst nur mit
+  „Soll der Termin persönlich oder digital stattfinden?“ ab. Offene
+  Vorbereitungsfragen folgen nach der Buchung und nur nach Zustimmung.
+  Die frische Abfrage ersetzt keinen atomaren
   Konfliktschutz im Backend.
 - Der Worker verwendet HTTP-Keep-Alive und stößt das Vorwärmen im Hintergrund
   an. Wiederverwendung ist möglich, wenn der jeweilige Server die Verbindung

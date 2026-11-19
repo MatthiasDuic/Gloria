@@ -93,7 +93,6 @@ type RealtimeToolCall = {
 // Shorter end-of-speech pause while waiting for the first contact; later turns keep OPENAI_REALTIME_SILENCE_MS.
 const OPENING_SILENCE_MS = Number.parseInt(process.env.OPENING_SILENCE_MS?.trim() || "600", 10);
 // Pause after the icebreaker before Gloria names the topic herself when the person does not react.
-const ICEBREAKER_PAUSE_MS = Number.parseInt(process.env.GLORIA_ICEBREAKER_PAUSE_MS?.trim() || "2000", 10);
 // "low" waited up to several seconds after each answer; "medium" responds faster without cutting people off.
 const SEMANTIC_VAD_EAGERNESS = ((value) => (["low", "medium", "high", "auto"].includes(value) ? value : "medium"))(
   process.env.OPENAI_REALTIME_VAD_EAGERNESS?.trim().toLowerCase() || "",
@@ -354,29 +353,8 @@ export function buildDecisionMakerIdentity(ctx: OwnerIdentityContext): string {
   return `Hallo, ich bin Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}.`;
 }
 
-/** Short spoken owner reference, e.g. "Herr Duic" or "Frau Muster". */
-function buildOwnerShortName(ctx: Pick<CallContext, "ownerRealName">): string {
-  const [salutation, ...names] = buildOwnerNominative(ctx).split(/\s+/);
-  return names.length ? `${salutation} ${names[names.length - 1]}` : salutation;
-}
-
 type DecisionMakerTopicContext = Pick<CallContext, "topic">
   & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason" | "ownerRealName" | "isCallback">>;
-
-/**
- * Self-ironic AI icebreaker for the first contact with the decision maker. It sets Gloria apart from
- * anonymous robocalls; skipped on agreed callbacks, where the person already knows her.
- */
-export function buildAiIcebreaker(ctx: DecisionMakerTopicContext, followsEarlierIdentity = false): string | undefined {
-  if (ctx.isCallback) return undefined;
-  // After a transfer or "Spreche ich mit …?" the self-introduction lies one turn back, so "richtig gehört" would not fit.
-  const opener = followsEarlierIdentity
-    ? "Schön, dass ich Sie erreiche. Wie gesagt: Ich bin eine echte KI."
-    : "Ja, richtig gehört: eine echte KI.";
-  return `${opener} Und Sie denken jetzt vermutlich: Ach, schon wieder eine KI, die mich anruft! `
-    + "Keine Sorge, ich werde Ihnen weder die Weltherrschaft erklären noch versuchen, Ihnen einen Toaster zu verkaufen. "
-    + `Aber Spaß beiseite: ${buildOwnerShortName(ctx)} hat mich gebeten, mit Ihnen über ein Thema zu sprechen, das gerade für Unternehmer durchaus interessant ist.`;
-}
 
 export function buildDecisionMakerIntro(ctx: OwnerIdentityContext & DecisionMakerTopicContext): string {
   return `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerTopicQuestion(ctx)}`;
@@ -413,63 +391,27 @@ export function planInterruptedOpening(
 }
 
 export function buildMissingOpeningTopicInstruction(missingTopic: string): string {
-  return `Dein Einstieg wurde unterbrochen, bevor der Gesprächsanlass vollständig angekommen ist. Reagiere zuerst kurz und natürlich auf die Kundenaussage, ohne den Witz oder die Vorstellung zu wiederholen. Nenne danach mit diesen Worten, was noch fehlt: "${missingTopic}" Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
+  return `Dein Einstieg wurde unterbrochen, bevor der Gesprächsanlass oder die Zeitfrage vollständig angekommen ist. Behandle die Zwischenreaktion nicht als Zustimmung. Nenne, wenn passend, nur den fehlenden Teil: "${missingTopic}" Warte danach auf die Antwort. Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
 }
 
-const PKV_DECISION_MAKER_TOPIC = "Es geht um die Entwicklung der Kosten in der Gesundheitsversorgung und vor allem darum, wie man diese Kosten gerade mit Blick auf das Alter planbar gestalten kann.";
-
-export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext, followsEarlierIdentity = false): string {
-  const parts = buildDecisionMakerTopicParts(ctx, followsEarlierIdentity);
-  return [parts.icebreaker, parts.topic].filter(Boolean).join(" ");
-}
-
-/** The icebreaker and the actual topic ("Es geht um … Passt es kurz?") as separate speaking turns. */
-export function buildDecisionMakerTopicParts(
-  ctx: DecisionMakerTopicContext,
-  followsEarlierIdentity = false,
-): { icebreaker?: string; topic: string } {
-  const icebreaker = buildAiIcebreaker(ctx, followsEarlierIdentity);
+export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext): string {
   const topicLabel = ctx.policyTopic || ctx.topic;
   const topic = buildGatekeeperTopic(topicLabel, ctx.callObjective, ctx.receptionTopicReason);
-  let reason: string | undefined;
-  if (icebreaker) {
-    const isPkv = /privat.*krankenversicherung|\bpkv\b/i.test(topicLabel || "");
-    reason = isPkv
-      ? PKV_DECISION_MAKER_TOPIC
-      : topic.sentence || (topic.inline ? `Es geht um das Thema ${topic.inline.replace(/^zum\s+Thema\s+/i, "")}.` : undefined);
-  } else {
-    reason = topic.sentence || (topic.inline ? `Ich rufe ${topic.inline} an.` : "Ich rufe mit einem kurzen Anliegen an.");
-  }
-  return { icebreaker, topic: [reason, DECISION_MAKER_TIME_QUESTION].filter(Boolean).join(" ") };
+  const reason = !ctx.isCallback && /privat.*krankenversicherung|\bpkv\b/i.test(topicLabel || "")
+    ? "Es geht um steigende Gesundheitskosten und darum, wie sie im Alter planbar bleiben."
+    : topic.sentence || (topic.inline ? `Ich rufe ${topic.inline} an.` : "Ich rufe mit einem kurzen Anliegen an.");
+  return `${reason} ${DECISION_MAKER_TIME_QUESTION}`;
 }
 
-/**
- * First speaking turn towards the decision maker. With an icebreaker Gloria stops after the joke so the
- * person can react; the topic and time question follow in the next turn (pendingTopic).
- */
 export function buildDecisionMakerOpening(
   ctx: OwnerIdentityContext & DecisionMakerTopicContext,
   identityAlreadySpoken = false,
-): { speech: string; pendingTopic?: string } {
-  const parts = buildDecisionMakerTopicParts(ctx, identityAlreadySpoken);
-  const identity = identityAlreadySpoken ? "" : `${buildDecisionMakerIdentity(ctx)} `;
-  if (!parts.icebreaker) return { speech: `${identity}${parts.topic}` };
-  if (process.env.GLORIA_ICEBREAKER_PAUSE?.trim() === "false") {
-    return { speech: `${identity}${parts.icebreaker} ${parts.topic}` };
-  }
-  return { speech: `${identity}${parts.icebreaker}`, pendingTopic: parts.topic };
-}
-
-export function buildIcebreakerTopicInstruction(topic: string): string {
-  return `Der Gesprächspartner hat gerade auf deinen Einstieg mit dem KI-Augenzwinkern reagiert. Gehe zuerst kurz, natürlich und gern mit einem Lächeln auf genau diese Reaktion ein, ohne den Witz oder die Vorstellung zu wiederholen. Nenne danach wörtlich: "${topic}" Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
+): string {
+  return identityAlreadySpoken ? buildDecisionMakerTopicQuestion(ctx) : buildDecisionMakerIntro(ctx);
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
-  const icebreaker = buildAiIcebreaker(ctx, identityAlreadySpoken);
-  const icebreakerRule = icebreaker
-    ? `Sage direkt danach locker und mit einem Augenzwinkern wörtlich: "${icebreaker}" `
-    : "";
-  const topicRule = `${icebreakerRule}Nenne ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen. Schließe mit genau dieser Frage: '${DECISION_MAKER_TIME_QUESTION}' Verwende das Wort 'kurz' nicht zusätzlich im Anlass-Satz. Noch keinen Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand, ohne erledigte Auftragsschritte neu zu beginnen.`;
+  const topicRule = `Nenne ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen. Schließe mit genau dieser Frage: '${DECISION_MAKER_TIME_QUESTION}' Warte auf die Antwort. Kein Witz, kein Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand.`;
   if (identityAlreadySpoken) {
     return `Du hast dich soeben bereits mit diesem Satz vorgestellt: "${buildDecisionMakerIdentity(ctx)}"
 Wiederhole die Begrüßung und die Vorstellung nicht. ${topicRule}`;
@@ -481,15 +423,13 @@ ${topicRule}`;
 type GatekeeperRequestContext = Pick<CallContext, "contactName" | "topic">
   & Partial<Pick<CallContext, "policyTopic" | "callObjective" | "receptionTopicReason">>;
 
-const GATEKEEPER_TRANSFER_QUESTION = "Wären Sie so nett, mich kurz zu verbinden?";
-
 function buildGatekeeperWish(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
   const targetName = ctx.contactName?.trim();
   const addressedTarget = targetName ? addressPersonDative(targetName) : "der zuständigen Person";
   const topic = topicPlaceholder
     ? { inline: `zum Thema ${topicPlaceholder}`, sentence: undefined }
     : buildGatekeeperTopic(ctx.policyTopic || ctx.topic, ctx.callObjective, ctx.receptionTopicReason);
-  return `würde gerne mit ${addressedTarget}${topic.inline ? ` ${topic.inline}` : ""} sprechen.${topic.sentence ? ` ${topic.sentence}` : ""} ${GATEKEEPER_TRANSFER_QUESTION}`;
+  return `${topic.sentence ? `${topic.sentence} ` : ""}Können Sie mich bitte mit ${addressedTarget}${topic.inline ? ` ${topic.inline}` : ""} verbinden?`;
 }
 
 export function hasDeterministicGatekeeperTopic(ctx: GatekeeperRequestContext): boolean {
@@ -501,12 +441,12 @@ export function buildGatekeeperIntro(
   ctx: OwnerIdentityContext & GatekeeperRequestContext,
   topicPlaceholder?: string,
 ): string {
-  return `Guten Tag, hier ist Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}. Ich ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+  return `Guten Tag, hier ist Gloria, die ${GLORIA_ROLE_LABEL} von ${buildAddressedOwner(ctx)} ${buildOwnerAffiliation(ctx)}. ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
 }
 
 /** Used when Gloria's identity was already spoken; completes it with whom and why. */
 export function buildGatekeeperTransferRequest(ctx: GatekeeperRequestContext, topicPlaceholder?: string): string {
-  return `Ich ${buildGatekeeperWish(ctx, topicPlaceholder)}`;
+  return buildGatekeeperWish(ctx, topicPlaceholder);
 }
 
 /** Model fallback when the campaign has no speakable topic: only the topic phrase is generated. */
@@ -562,7 +502,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "TERMINBESTÄTIGUNG: Ein Termin ist erst nach erfolgreichem confirm_appointment eingetragen. Gloria versendet selbst keine E-Mails; sie nimmt nur die E-Mail-Adresse auf, damit der Berater die Terminbestätigung versenden kann. Kündige an, dass der Kunde die Terminbestätigung per E-Mail erhält, bei einem digitalen Termin einschließlich des Links zum Teams-Meeting. Sage nie, dass die E-Mail bereits versendet oder zugestellt wurde, und nenne keinen Versandzeitpunkt.",
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach nur, ob der Termin persönlich oder digital stattfinden soll. Frage niemals nach einem Ort oder einer Adresse: 'persönlich' bedeutet immer beim Kunden vor Ort, die Adresse kommt aus den Kundendaten. Eine Frage zu einer Terminart, eine Verneinung oder ein unklarer Laut ist keine Auswahl und darf keine Buchung auslösen. Erkläre 'digital' bei Nachfrage als Beratung per Microsoft Teams; der Link zum Meeting kommt mit der Terminbestätigung per E-Mail. Nenne keinen Versandzeitpunkt. Erst nach eindeutiger Auswahl rufst du confirm_appointment für den vollständigen angebotenen Slot auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
-    "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
+    "Sage vor einem erfolgreichen confirm_appointment nie, dass die Buchung läuft, vorbereitet, reserviert oder bestätigt ist. Frage vorher weder nach einer E-Mail-Adresse zur Terminbestätigung noch nach Vorbereitungsdaten. Frage zur Terminart ausschließlich: 'Soll der Termin persönlich oder digital stattfinden?' Erkläre die Optionen nur auf Nachfrage.",
     "ANDERER ZEITRAUM: Wünscht der Kunde einen anderen Tag, eine andere Woche oder Tageszeit, als in den freien Terminvorschlägen steht, rufe find_free_slots mit passendem Zeitraum auf (Daten im Format JJJJ-MM-TT). Die Tool-Ergebnisse zählen als bereitgestellte Slots; beachte die Regeln zur Terminauswahl. Rufe es nicht auf, solange die vorhandenen Vorschläge genügen.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
@@ -752,8 +692,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let hangupAfterPlayback = false;
   let interruptedAssistantContext = "";
   let pendingOpeningTopic: string | undefined;
-  let icebreakerTopicPending: string | undefined;
-  let icebreakerPauseTimer: NodeJS.Timeout | null = null;
   let pendingAnchoredSpeech: {
     text: string;
     hangupAfterPlayback?: boolean;
@@ -810,7 +748,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       flushDeterministicSpeech();
       responses.flush();
-      scheduleIcebreakerTopic();
       if (hangupAfterPlayback && ctx && !responses.isActive() && !userTurns.isBlocked()) {
         hangupAfterPlayback = false;
         setTimeout(() => {
@@ -1127,13 +1064,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     interruptedAssistantContext = "";
     const missingTopic = pendingOpeningTopic;
     pendingOpeningTopic = undefined;
-    const icebreakerTopic = missingTopic ? undefined : takeIcebreakerTopic();
     return [
       interruption
         ? `Du wurdest während dieses begonnenen Satzes unterbrochen: "${interruption}". Reagiere jetzt auf die neue Kundenaussage. Wiederhole den Satz nicht vollständig und stelle keine bereits beantwortete Frage erneut.`
         : "",
       missingTopic ? buildMissingOpeningTopicInstruction(missingTopic) : "",
-      icebreakerTopic ? buildIcebreakerTopicInstruction(icebreakerTopic) : "",
       instructions || "",
     ].filter(Boolean).join("\n") || undefined;
   };
@@ -1203,7 +1138,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     pendingDeterministicSpeech = null;
     if (pending.text.includes(DECISION_MAKER_TIME_QUESTION)) {
       pendingOpeningTopic = undefined;
-      takeIcebreakerTopic();
     }
     playback.startResponse();
     const latencyMs = ctx.lastUserFinalAt ? Date.now() - ctx.lastUserFinalAt : undefined;
@@ -1247,29 +1181,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     requestDeterministicSpeech(text);
   };
 
-  function takeIcebreakerTopic(): string | undefined {
-    if (icebreakerPauseTimer) clearTimeout(icebreakerPauseTimer);
-    icebreakerPauseTimer = null;
-    const topic = icebreakerTopicPending;
-    icebreakerTopicPending = undefined;
-    return topic;
-  }
-
-  /** After the icebreaker Gloria leaves room for a reaction; if the person stays silent she names the topic herself. */
-  function scheduleIcebreakerTopic(delayMs = ICEBREAKER_PAUSE_MS) {
-    if (!icebreakerTopicPending || icebreakerPauseTimer || terminationInProgress) return;
-    icebreakerPauseTimer = setTimeout(() => {
-      icebreakerPauseTimer = null;
-      if (!icebreakerTopicPending || terminationInProgress) return;
-      if (userTurns.isBlocked() || responses.isActive() || playback.isPending() || pendingDeterministicSpeech || pendingAnchoredSpeech) {
-        scheduleIcebreakerTopic(700);
-        return;
-      }
-      const topic = takeIcebreakerTopic();
-      if (topic) requestDeterministicSpeech(topic);
-    }, delayMs);
-  }
-
   const speakDeterministicIntro = (
     text: string,
     route: "decision_maker" | "gatekeeper",
@@ -1292,7 +1203,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const identityEntry = new PrefetchedSpeech(
       `${buildDecisionMakerIdentity(ctx)} ${buildDecisionMakerIdentityQuestion(ctx)}`,
     );
-    const topicEntry = new PrefetchedSpeech(buildDecisionMakerOpening(ctx).speech);
+    const topicEntry = new PrefetchedSpeech(buildDecisionMakerOpening(ctx));
     const identityController = new AbortController();
     const topicController = new AbortController();
     identityPrefetch = identityEntry;
@@ -1476,7 +1387,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
     // Any reaction after the icebreaker ends the pause; the topic follows situationally below.
-    const openingTopicAfterIcebreaker = takeIcebreakerTopic();
 
     const previousUserTexts = currentContext.transcript.slice(0, -1)
       .filter((turn) => turn.role === "user")
@@ -1526,9 +1436,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           requestDeterministicSpeech(`${buildAiIdentityAnswer(currentContext)}${repeatRequest}`);
         }
       } else if (!callbackNumberStage) {
-        requestEventResponse(`Der Kunde fragt, ob er mit einer KI spricht. Sage wörtlich: "${buildAiIdentityAnswer(currentContext)}" ${openingTopicAfterIcebreaker
-          ? `Nenne danach wörtlich: "${openingTopicAfterIcebreaker}"`
-          : "Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife dafür die zuletzt offene Frage oder den nächsten Auftragsschritt natürlich wieder auf."}`);
+        requestEventResponse(`Der Kunde fragt, ob er mit einer KI spricht. Sage wörtlich: "${buildAiIdentityAnswer(currentContext)}" Kehre danach ohne Rechtfertigung mit genau einer kurzen Frage zum Gespräch zurück; greife die zuletzt offene Frage auf.`);
       } else {
         requestDeterministicSpeech(buildAiIdentityAnswer(currentContext));
       }
@@ -1817,17 +1725,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         if (identityAnnounced && currentContext.callObjective?.trim() && !getSpeakableCampaignReason(currentContext.callObjective)) {
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, true));
         } else if (identityAnnounced) {
-          const opening = buildDecisionMakerOpening(currentContext, true);
-          icebreakerTopicPending = opening.pendingTopic && convertNumbersForSpeech(opening.pendingTopic);
-          requestDeterministicSpeech(convertNumbersForSpeech(opening.speech));
+          requestDeterministicSpeech(buildDecisionMakerOpening(currentContext, true));
         } else if (currentContext.callObjective?.trim()
           && !getSpeakableCampaignReason(currentContext.callObjective)) {
           identityAnnounced = true;
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, false));
         } else {
-          const opening = buildDecisionMakerOpening(currentContext);
-          icebreakerTopicPending = opening.pendingTopic && convertNumbersForSpeech(opening.pendingTopic);
-          speakDeterministicIntro(opening.speech, "decision_maker", topicPrefetch || undefined);
+          speakDeterministicIntro(buildDecisionMakerOpening(currentContext), "decision_maker", topicPrefetch || undefined);
         }
         return;
       }
@@ -1860,9 +1764,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
       requestEventResponse("Der Kunde verlangt einen Menschen oder lehnt das Gespräch mit Gloria ausdrücklich ab. Keine weiteren Fach-, Termin- oder Vorbereitungsfragen. Kündige kurz die Weiterleitung an den Auftraggeber an und rufe transfer_to_human auf.");
       return;
     }
-    if (openingTopicAfterIcebreaker && event.type !== "clear_rejection" && contactRouting?.stage !== "waiting_for_transfer") {
-      log.info("realtime.icebreaker_reaction", { callSid: currentContext.callSid, eventType: event.type });
-      requestAnchoredSpeech(openingTopicAfterIcebreaker);
+    if (pendingOpeningTopic && /^(?:ja|okay|ok|mhm|aha|gerne|gern|bitte)[.!]*$/i.test(transcript.trim())) {
+      requestDeterministicSpeech(pendingOpeningTopic);
       return;
     }
     if (basicInfoEmailOfferPending) {
@@ -1899,6 +1802,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (preparationState.stage === "inactive") {
+      if (bookingInProgress) return;
       const pkvCostIncreaseFollowup = currentContext.topicKind === "pkv"
         ? buildPkvCostIncreaseFollowup(previousAssistantText, transcript)
         : undefined;
@@ -1923,7 +1827,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestEventResponse(buildNoStrategyAcknowledgementInstruction(transcript));
         return;
       }
-      const routing = event.type === "answer"
+      const routing = event.type === "answer" || currentContext.selectedAppointmentSlot
         ? advanceAppointmentRouting(currentContext, currentContext.transcript, currentContext.freeSlotsPrompt)
         : { state: currentContext, speechText: undefined, readyToBook: false };
       Object.assign(currentContext, routing.state);
@@ -1936,7 +1840,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (routing.speechText) {
-        requestAnchoredSpeech(convertNumbersForSpeech(routing.speechText));
+        requestDeterministicSpeech(routing.speechText);
         return;
       }
       const projection = event.type === "answer" ? buildRequiredContributionProjection(currentContext) : undefined;
@@ -1953,11 +1857,11 @@ export async function handleOpenAiRealtimeTelnyxStream(
     preparationState = transition.state;
 
     if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
-      requestAnchoredSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
+      requestDeterministicSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
       return;
     }
 
-    if (transition.speechText) requestAnchoredSpeech(transition.speechText);
+    if (transition.speechText) requestDeterministicSpeech(transition.speechText);
     else requestEventResponse(transition.instruction);
   };
 
@@ -2006,7 +1910,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
           topicKind: ctx.topicKind==="pkv"? "pkv":"other",
           freeSlotsPrompt: ctx.freeSlotsPrompt,
           slotPhrase: phrase,
+          selectedOfferedSlot: ctx.selectedAppointmentSlot,
         });
+        if (!decision.ok) log.info("realtime.booking_rejected", { callSid: ctx.callSid, reason: decision.error });
         if(!decision.ok&&decision.error==="slot_not_offered") {
           sendToolResult(tool.callId,{ ok: false,error: decision.error,instruction: decision.instruction });
           requestResponse(decision.instruction);
@@ -2025,7 +1931,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             if(busySlots) ctx.freeSlotsPrompt=freeSlotsToPrompt(computeFreeSlots(busySlots,{ daysAhead: 60,maxCount: 40,minLeadDays: 7 }));
             sendToolResult(tool.callId,{ ok: false,error: busySlots? "slot_unavailable":"calendar_unavailable",instruction });
             updateSession();
-            requestResponse(instruction);
+            requestDeterministicSpeech(busySlots
+              ? "Der gewählte Termin ist leider nicht mehr verfügbar. Welcher andere Zeitraum würde Ihnen passen?"
+              : "Ich kann den Kalender gerade nicht prüfen. Deshalb ist noch kein Termin bestätigt.");
             return;
           }
           const speechSlotPhrase=convertSlotPhraseForSpeech(decision.slotPhrase);
@@ -2034,7 +1942,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           if(!persisted) {
             const instruction="Der Termin konnte nicht gespeichert werden. Er ist noch nicht bestätigt. Erkläre den technischen Speicherfehler kurz, ohne einen belegten Termin zu behaupten oder eine neue Auswahl zu verlangen.";
             sendToolResult(tool.callId,{ ok: false,error: "booking_storage_failed",instruction });
-            requestResponse(instruction);
+            requestDeterministicSpeech("Ich konnte den Termin gerade nicht speichern. Er ist deshalb noch nicht bestätigt.");
             return;
           }
           ctx.confirmedSlotPhrase=decision.slotPhrase;
@@ -2044,10 +1952,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           updateSession();
           const transition=beginPreparation(preparationState,speechSlotPhrase,ctx.transcript,appointmentMode);
           preparationState=transition.state;
-          if(transition.speechText) {
-            if(tool.callId.startsWith("controller-booking-")) requestAnchoredSpeech(transition.speechText);
-            else requestDeterministicSpeech(transition.speechText);
-          }
+          if(transition.speechText) requestDeterministicSpeech(transition.speechText);
           else requestResponse(transition.instruction);
           return;
         }
@@ -2754,7 +2659,6 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (closed) return;
     closed = true;
     openingSpeech?.stop();
-    takeIcebreakerTopic();
     discardIdentityPrefetch();
     if (callDeadline) clearTimeout(callDeadline);
     responses.stop();

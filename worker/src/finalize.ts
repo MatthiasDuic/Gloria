@@ -362,13 +362,16 @@ export async function postReport(ctx: CallContext): Promise<void> {
     log.warn("finalize.reached_contact_misclassified", { callSid: ctx.callSid });
     outcome = "Gespräch abgebrochen";
   }
-  let appointmentAt: string | undefined = resolvedExtraction.appointmentAt;
+  const appointmentAt = ctx.confirmedSlotPhrase ? parseSlotPhraseToIso(ctx.confirmedSlotPhrase) : undefined;
   let summary = resolvedExtraction.summary;
 
-  if (ctx.confirmedSlotPhrase) {
+  if (appointmentAt) {
     outcome = "Termin";
-    const parsed = parseSlotPhraseToIso(ctx.confirmedSlotPhrase);
-    if (parsed) appointmentAt = parsed;
+  } else if (outcome === "Termin") {
+    log.warn("finalize.unpersisted_appointment_ignored", { callSid: ctx.callSid });
+    const fallback = buildFallbackExtraction(ctx);
+    outcome = fallback.outcome;
+    summary = fallback.summary;
   }
   if (ctx.optOut && outcome !== "Termin") {
     outcome = "Absage";
@@ -538,7 +541,7 @@ function buildFallbackExtraction(ctx: CallContext): ExtractedReport {
     summaryParts.push(`${hadConversation ? "Letzte relevante Kundenaussagen" : "Erkannte Ansage"}: ${lastUserSignals}.`);
   }
 
-  summaryParts.push("Automatisch erzeugte Fallback-Zusammenfassung, da die LLM-Auswertung nicht rechtzeitig verfügbar war.");
+  summaryParts.push("Automatisch erzeugte Zusammenfassung anhand des Gesprächsverlaufs.");
 
   return {
     outcome,
