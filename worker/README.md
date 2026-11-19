@@ -129,7 +129,7 @@ und vergibt eindeutige Ergebnisse wie `Anrufbeantworter` oder `Telefonmenü`.
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_REALTIME_REASONING_EFFORT=low
 OPENAI_REALTIME_MAX_OUTPUT_TOKENS=220
-OPENAI_REALTIME_SILENCE_MS=650
+OPENAI_REALTIME_SILENCE_MS=350
 OPENAI_REALTIME_PREFIX_PADDING_MS=300
 OPENAI_RESPONSE_COOLDOWN_MS=40
 ELEVENLABS_MODEL=eleven_v4_turbo
@@ -143,8 +143,35 @@ FALLBACK_TTS_ENABLED=true
 1. `npm test` im Repo-Root (enthält die Worker-Tests).
 2. Typecheck: `tsc -p worker/tsconfig.json --noEmit` und `tsc --noEmit -p .`.
 3. Mindestens ein Testanruf mit Unterbrechung (Barge-in) und einer mit Empfang/Weiterleitung.
-4. Latenz in den Logs prüfen: `realtime.turn_latency`, `realtime.response_usage`
-   (zeigt auch `cachedInputTokens` für den Prompt-Cache).
+4. Latenz mit mehreren vergleichbaren Testanrufen prüfen (Median und p95,
+   getrennt nach Einstieg, normaler Antwort und Terminablauf):
+   - `realtime.start_latency`: Streamstart bis zum ersten TTS-Audioblock.
+   - `realtime.asr_latency`: vom empfangenen VAD-Endsignal bis zum finalen
+     Transkript desselben Audiosegments. Enthält nicht die Stille vor dem VAD-Endsignal.
+   - `realtime.turn_latency`: finales Transkript bis Modelltext bzw. erster
+     TTS-Audioblock im Worker. Das ist noch nicht der beim Kunden hörbare Ton.
+   - `realtime.response_usage`: `cachedInputTokens` im Verhältnis zu `inputTokens`
+     vergleichen, um den Prompt-Cache zu beurteilen.
+5. Einstellungen einzeln vergleichen. `low` bleibt die Baseline für Reasoning;
+   `minimal` erst nach einem erfolgreichen API-Test mit dem verwendeten Modell
+   und einem Dialogvergleich übernehmen. Die 350 ms Stille nicht pauschal weiter
+   senken: kurze Pausen, Unterbrechungen und gesprochene Telefonnummern mitprüfen.
+   Bei ElevenLabs v4 Turbo und G.711 als Baseline verwenden; keine
+   Latenzoptimierung wählen, die die Normalisierung von Zahlen und Daten abschaltet.
+
+## Kalender und Verbindungen
+
+- `find_free_slots` sucht bei abweichenden Kundenwünschen lokal in bereits
+  geladenen Kalenderdaten. Es gibt keinen Kalenderabruf im Toolpfad, aber eine
+  weitere Realtime-Modellantwort nach dem Tool-Ergebnis.
+- Der Kalender-Cache dient der Vorschau; während Terminangebote aktiv sind,
+  kann er im Hintergrund aktualisiert werden. `confirm_appointment` liest vor
+  dem Speichern frisch. Eine verbindliche Bestätigung wird erst nach dem
+  Speichern gesprochen. Die frische Abfrage ersetzt keinen atomaren
+  Konfliktschutz im Backend.
+- Der Worker verwendet HTTP-Keep-Alive und stößt das Vorwärmen im Hintergrund
+  an. Wiederverwendung ist möglich, wenn der jeweilige Server die Verbindung
+  offen hält; der OpenAI-Realtime-WebSocket ist davon unabhängig.
 
 ## Operatives
 

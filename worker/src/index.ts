@@ -7,6 +7,9 @@ import { log } from "./log.js";
 import { flushPendingReports } from "./finalize.js";
 import { checkReportStorage } from "./report-outbox.js";
 import { preloadTopicPolicy } from "./topic-policy-prompt.js";
+import { configureHttpClient, warmConnections } from "./http-client.js";
+
+configureHttpClient();
 
 const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
@@ -50,6 +53,8 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "invalid_request" }));
       return;
     }
+    // The call follows within seconds; park TLS connections to the providers now.
+    warmConnections();
     const ready = await preloadTopicPolicy(body.preloadId, body.userId, body.topic);
     res.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: ready }));

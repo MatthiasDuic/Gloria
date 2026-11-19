@@ -85,6 +85,35 @@ function requestedSpeech(requests: string[]): string[] {
   return requests.map((request) => (JSON.parse(request) as { text: string }).text);
 }
 
+test("find_free_slots sends local availability and resumes without rewriting the session", { timeout: 10_000 }, async () => {
+  await withRealtimeStream(async (socket) => {
+    const calendarReady = () => socket.sent.some((event) =>
+      event.type === "session.update" && JSON.stringify(event).includes("AKTUELLER KALENDERSTATUS"));
+    for (let attempt = 0; attempt < 100 && !calendarReady(); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(calendarReady());
+    socket.message({ type: "session.updated" });
+    const start = socket.sent.length;
+    const tool = { name: "find_free_slots", call_id: "fixture-slots", arguments: '{"part_of_day":"afternoon","max_results":3}' };
+    socket.message({ type: "response.created" });
+    socket.message({ type: "response.function_call_arguments.done", ...tool });
+    socket.message({ type: "response.done", response: { status: "completed", output: [{ type: "function_call", ...tool }] } });
+    await settleStreamEvents();
+    const events = socket.sent.slice(start);
+    const results = events.filter((event) => event.type === "conversation.item.create")
+      .map((event) => event.item as { type: string; call_id: string; output: string })
+      .filter((item) => item.type === "function_call_output");
+    assert.equal(results.length, 1);
+    assert.equal(results[0].call_id, tool.call_id);
+    const result = JSON.parse(results[0].output);
+    assert.equal(result.ok, true);
+    assert.equal(result.slots.length, 3);
+    assert.equal(events.filter((event) => event.type === "response.create").length, 1);
+    assert.equal(events.some((event) => event.type === "session.update"), false);
+  });
+});
+
 async function withRealtimeStream(
   run: (socket: StreamTestSocket, hangups: object[], ttsRequests: string[]) => Promise<void>,
   policyDelayMs = 0,

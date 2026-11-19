@@ -1,4 +1,5 @@
 import { fetch } from "undici";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { CallContext } from "./state.js";
 import { log } from "./log.js";
 import { classifyInboundSpeech, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
@@ -58,7 +59,7 @@ export async function persistAppointmentBooking(ctx: CallContext, appointmentAt:
 }
 
 function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return sleep(ms);
 }
 
 type Outcome = "Termin" | "Absage" | "Wiedervorlage" | "Nicht erreicht / kein Kontakt" | "Gespräch abgebrochen";
@@ -108,6 +109,47 @@ Regeln:
 - nextCallAt: bei outcome="Wiedervorlage" den konkret vereinbarten Zeitpunkt für einen ausgehenden Rückruf aus dem Transkript als ISO-8601 mit Europe/Berlin-Zeitzone angeben. Relative Angaben anhand des aktuellen Zeitpunkts berechnen; insbesondere "in zehn Minuten" bedeutet zehn Minuten nach der Äußerung. Nicht schätzen. Ausnahme: Wenn der Empfang die Zielperson erst für einen Zeitraum ankündigt (z. B. "nächste Woche", "nach dem Urlaub ab Montag") und Gloria zusagt, es dann erneut zu versuchen, ist das eine Wiedervorlage; setze nextCallAt auf den ersten Werktag dieses Zeitraums um 10:00 Uhr Europe/Berlin. directDial nur füllen, wenn der Interessent ausdrücklich eine alternative Nummer genannt hat.
 - contactEmail nur, wenn explizit vom Anrufenden buchstabiert/genannt UND bestätigt.`;
 
+const EXTRACT_SCHEMA = {
+  name: "call_report",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["outcome", "appointmentAt", "contactEmail", "nextCallAt", "directDial", "summary"],
+    properties: {
+      outcome: { type: "string", enum: ["Termin", "Absage", "Wiedervorlage", "Nicht erreicht / kein Kontakt", "Gespräch abgebrochen"] },
+      appointmentAt: { type: ["string", "null"] },
+      contactEmail: { type: ["string", "null"] },
+      nextCallAt: { type: ["string", "null"] },
+      directDial: { type: ["string", "null"] },
+      summary: { type: "string" },
+    },
+  },
+} as const;
+
+async function requestExtraction(apiKey: string, system: string, user: string): Promise<string | null> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4.1",
+      temperature: 0.1,
+      response_format: { type: "json_schema", json_schema: EXTRACT_SCHEMA },
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    log.error("finalize.openai_error", { status: res.status, body: body.slice(0, 200) });
+    // Client errors will not heal on retry.
+    if (res.status < 500 && res.status !== 429) return null;
+    throw new Error(`openai_${res.status}`);
+  }
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return json.choices?.[0]?.message?.content || "{}";
+}
+
 export async function extractReport(ctx: CallContext): Promise<ExtractedReport | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -133,36 +175,22 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
     timeZone: "Europe/Berlin",
   });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4.1",
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: `${EXTRACT_PROMPT}\n\nHeute ist ${todayStr}.` },
-          { role: "user", content: `Firma: ${ctx.company || "?"}\nThema: ${ctx.topic || "?"}\n\nTranskript:\n${transcriptText}` },
-        ],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      log.error("finalize.openai_error", { status: res.status, body: body.slice(0, 200) });
-      return null;
+    const system = `${EXTRACT_PROMPT}\n\nHeute ist ${todayStr}.`;
+    const user = `Firma: ${ctx.company || "?"}\nThema: ${ctx.topic || "?"}\n\nTranskript:\n${transcriptText}`;
+    // Post-call work is not latency critical: one retry on timeouts and transient provider errors.
+    let raw: string | null = null;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        raw = await requestExtraction(apiKey, system, user);
+        break;
+      } catch (error) {
+        log.warn("finalize.extract_attempt_failed", { callSid: ctx.callSid, attempt, error: String(error) });
+        if (attempt === 2) throw error;
+        await wait(process.env.NODE_TEST_CONTEXT ? 0 : 1_500);
+      }
     }
-
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const raw = json.choices?.[0]?.message?.content || "{}";
+    if (raw === null) return null;
     const parsed = JSON.parse(raw) as Partial<ExtractedReport> & {
       appointmentAt?: string | null;
       contactEmail?: string | null;
@@ -227,8 +255,6 @@ export async function extractReport(ctx: CallContext): Promise<ExtractedReport |
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

@@ -194,8 +194,14 @@ test("a reached contact who hangs up is reported as an aborted conversation, nev
   process.env.OPENAI_API_KEY = "test-key";
   setGlobalDispatcher(agent);
   const posts: Array<Record<string, unknown>> = [];
-  agent.get("https://api.openai.com").intercept({ path: "/v1/chat/completions", method: "POST" }).reply(200, {
-    choices: [{ message: { content: JSON.stringify({ outcome: "Nicht erreicht / kein Kontakt", summary: "Kein Gespräch." }) } }],
+  const openAi = agent.get("https://api.openai.com");
+  openAi.intercept({ path: "/v1/chat/completions", method: "POST" }).reply(503, { error: "unavailable" });
+  let responseFormat: { type: string; json_schema: { strict: boolean; schema: { required: string[] } } } | undefined;
+  openAi.intercept({ path: "/v1/chat/completions", method: "POST" }).reply((options) => {
+    responseFormat = JSON.parse(String(options.body)).response_format;
+    return { statusCode: 200, data: {
+      choices: [{ message: { content: JSON.stringify({ outcome: "Nicht erreicht / kein Kontakt", summary: "Kein Gespräch." }) } }],
+    } };
   });
   agent.get("https://finalize.test").intercept({ path: "/api/calls/webhook", method: "POST" }).reply((options) => {
     posts.push(JSON.parse(String(options.body)) as Record<string, unknown>);
@@ -211,6 +217,9 @@ test("a reached contact who hangs up is reported as an aborted conversation, nev
       { role: "user", text: "Nee.", at: 3_000 },
     );
     await postReport(ctx);
+    assert.equal(responseFormat?.type, "json_schema");
+    assert.equal(responseFormat?.json_schema.strict, true);
+    assert.deepEqual(responseFormat?.json_schema.schema.required, ["outcome", "appointmentAt", "contactEmail", "nextCallAt", "directDial", "summary"]);
     assert.equal(posts.length, 2);
     assert.equal(posts[0].resultDetail, "Aufgelegt");
     assert.equal(posts[1].outcome, "Gespräch abgebrochen");

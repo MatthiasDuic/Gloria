@@ -133,7 +133,25 @@ export async function optimizeTopicPolicy(
       body: JSON.stringify({
         model: AI_CONFIG.chatModel,
         temperature: 0.4,
-        response_format: { type: "json_object" },
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "topic_policy_optimization",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["topicSummary", "behavior", "conversationGuardrails", "requiredQuestions", "rationale"],
+              properties: {
+                topicSummary: { type: "string" },
+                behavior: { type: "string" },
+                conversationGuardrails: { type: "string" },
+                requiredQuestions: { type: "string" },
+                rationale: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

@@ -5,7 +5,9 @@ import type { WebSocket as ServerWebSocket } from "ws";
 import { advanceAppointmentRouting, appointmentModeFollowUp, convertSlotPhraseForSpeech, decideAppointment, detectAppointmentMode } from "./appointment-controller.js";
 import { planBargeIn } from "./barge-in-controller.js";
 import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction } from "./call-classification.js";
-import { computeFreeSlots, freeSlotsToPrompt, isAppointmentSlotFree, loadBusySlots } from "./busy.js";
+import { computeFreeSlots, freeSlotsToPrompt, invalidateBusySlots, isAppointmentSlotFree, loadBusySlots, loadBusySlotsCached, peekBusySlots } from "./busy.js";
+import { findFreeSlots, parseFreeSlotQuery } from "./availability.js";
+import { warmConnections } from "./http-client.js";
 import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, buildGatekeeperTopic, buildRetryFarewell, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, extractSuccessorName, getSpeakableCampaignReason, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isNoNeedStatement, isUnclearConversationText } from "./conversation-event-controller.js";
 import { advanceCallback, classifyCallbackNumberReply, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber, type CallbackNumberStage, type CallbackStage } from "./callback-controller.js";
@@ -111,6 +113,21 @@ const REALTIME_TOOLS = [
         },
       },
       required: ["slot_phrase"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "find_free_slots",
+    description: "Sucht freie Termine im Kalender (lokal, sehr schnell). Nur aufrufen, wenn der Kunde einen anderen Zeitraum, Tag oder eine andere Tageszeit wünscht, als in den freien Terminvorschlägen steht. Nicht für die Erstansprache und nicht zum Bestätigen. Angeboten werden dürfen danach nur die zurückgegebenen Termine.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string", description: "Frühestes Datum, Format JJJJ-MM-TT. Optional." },
+        to_date: { type: "string", description: "Spätestes Datum, Format JJJJ-MM-TT. Optional." },
+        part_of_day: { type: "string", enum: ["morning", "afternoon", "any"], description: "Vormittag, Nachmittag oder egal." },
+        max_results: { type: "integer", description: "Anzahl Termine, 1 bis 6, Standard 4." },
+      },
       additionalProperties: false,
     },
   },
@@ -521,13 +538,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
 
   const parts = [
     GLORIA_CORE_INSTRUCTIONS,
-    `Du bist Gloria, die ${GLORIA_ROLE_LABEL} von ${addressedOwner} ${buildOwnerAffiliation(ctx)}, und telefonierst ausschließlich in diesem Auftrag. Stelle dich immer ausdrücklich als '${GLORIA_ROLE_LABEL}' vor (gesetzliche Transparenzpflicht), nie als Mensch, Mitarbeiterin oder 'digitale Vertriebsassistentin'. Fragt jemand, ob du eine KI, ein Roboter oder ein Mensch bist, bestätige ehrlich in einem Satz, dass du eine KI-Assistentin bist, und mache dann ohne Rechtfertigung weiter.`,
-    `DATENHERKUNFT: Fragt jemand, woher du die Nummer oder die Kontaktdaten hast oder wie ihr auf ihn kommt, antworte ehrlich und ohne Ausflüchte: '${buildDataSourceAnswer(ctx)}' Biete an, ihn auf Wunsch aus der Liste zu nehmen. Erfinde keine anderen Quellen.`,
+    `Stelle dich immer ausdrücklich als '${GLORIA_ROLE_LABEL}' vor (gesetzliche Transparenzpflicht), nie als Mensch, Mitarbeiterin oder 'digitale Vertriebsassistentin'. Fragt jemand, ob du eine KI, ein Roboter oder ein Mensch bist, bestätige ehrlich in einem Satz, dass du eine KI-Assistentin bist, und mache dann ohne Rechtfertigung weiter.`,
     "WIDERSPRUCH UND LÖSCHUNG: Sagt jemand, er möchte nicht mehr angerufen werden, aus der Liste genommen werden oder seine Daten gelöscht haben, bestätige das sofort in einem Satz, entschuldige dich kurz für die Störung, verabschiede dich und rufe end_call auf. Kein Überzeugungsversuch.",
     "SMALLTALK UND ABSCHWEIFEN: Beginnt die Person mit Smalltalk oder weicht sie vom Thema ab, reagiere freundlich, menschlich und in höchstens einem kurzen Satz darauf, ohne eigene Erlebnisse, Orte oder Beobachtungen zu erfinden. Leite dann mit einer natürlichen Brücke zum Anliegen zurück und stelle genau eine passende Frage. Nicht ignorieren, nicht ausdehnen.",
     "EINWÄNDE: Behandle Einwände wie 'kein Bedarf', 'das macht mein Steuerberater', 'ich habe einen Makler', 'zu teuer' oder 'schlechte Erfahrungen' ernsthaft: kurz würdigen, in einem Satz konkret und ehrlich antworten, dann genau eine passende Frage. Nie widersprechen, nie Druck. Ein Steuerberater deckt die steuerliche Seite ab, nicht die Absicherung und ihre langfristige Entwicklung; er kann gern einbezogen werden. Bei wiederholtem Nein oder klarer Ablehnung freundlich verabschieden.",
     "AUSSPRACHE: Der Nachname Duic wird immer 'Duitsch' ausgesprochen.",
-    `Heute ist ${today}. Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.`,
+    "Du führst ein echtes deutsches Telefongespräch, keinen Fragebogen und kein Skript.",
     "ANTWORTSTIL: Antworte auf den konkreten Sinn der letzten Aussage, nicht auf einzelne Wörter. Bei Sorge oder Einwand: ein kurzer, konkreter Spiegelungssatz, dann eine passende Frage. Bei einer klaren Information: natürlich daran anknüpfen und zum nächsten Schritt überleiten, nicht abrupt zur nächsten Frage springen. Bei Interesse: den passenden nächsten Schritt anbieten. Vermeide routinemäßige Einleitungen wie 'Alles klar', 'Verstehe', 'Super', 'Perfekt' oder wiederholtes Bedanken.",
     "KEINE VORREDE: Kündige dein eigenes Vorgehen nie an und kommentiere es nicht, etwa 'ich frage zuerst kurz nach ...', 'ich prüfe kurz ...', 'ich knüpfe kurz an ...', 'dann notiere ich Ihr Interesse', 'dann halte ich fest ...' oder 'ich schließe das für Sie ab'. Sprich keine Vorrede und keinen Kommentar vor einer Antwort oder vor confirm_appointment; antworte direkt mit dem Inhalt. Nur vor end_call oder transfer_to_human sprichst du die Verabschiedung beziehungsweise Übergabeankündigung.",
     "EMPFANG UND WEITERLEITUNG: Eine eigene Namensnennung oder die Auskunft, dass die gesuchte Person nicht da ist, bedeutet Empfang/Gatekeeper; frage dann nicht erneut, ob du mit der gesuchten Person sprichst. Bitte nur einmal um Weiterleitung. Bei Nichterreichbarkeit frage höchstens einmal nach einem passenden Zeitpunkt und akzeptiere die Antwort ohne eine Rückrufzusage zu erfinden. Sobald weitergeleitet wird, bleibe still, bis die nächste Person spricht; beginne dann mit einer vollständigen, kurzen Vorstellung samt tatsächlichem Gesprächsthema.",
@@ -547,8 +563,12 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     "Wenn ein Mensch verlangt oder das Gespräch mit Gloria beziehungsweise der KI ausdrücklich abgelehnt wird, kündigst du die Übergabe kurz an und rufst danach transfer_to_human auf. Das Ziel ist ausschließlich die im Benutzerkonto hinterlegte reale Rufnummer des Auftraggebers, niemals Jutta Brost oder eine andere frühere Mitarbeiterin. Diese Regel hat Vorrang vor abweichenden alten Kampagnenanweisungen. Erfinde keine erfolgreiche Verbindung oder automatische Rückrufzusage. Eine allgemeine Gesprächsablehnung oder kein Interesse ist kein Transferwunsch.",
     "Einen Termin bestätigst du nur aus den bereitgestellten freien Slots. Frage zuerst, ob eher Vormittag oder Nachmittag passt, und biete danach zwei echte freie Optionen an verschiedenen Tagen an. Eine eindeutige Auswahl wie 'der Montag', 'der zweite Termin' oder 'Montag passt besser' ist bereits verbindlich; verlange kein zusätzliches Ja. Frage danach nur, ob der Termin persönlich oder digital stattfinden soll. Frage niemals nach einem Ort oder einer Adresse: 'persönlich' bedeutet immer beim Kunden vor Ort, die Adresse kommt aus den Kundendaten. Eine Frage zu einer Terminart, eine Verneinung oder ein unklarer Laut ist keine Auswahl und darf keine Buchung auslösen. Erkläre 'digital' bei Nachfrage als Beratung per Microsoft Teams; der Link zum Meeting kommt mit der Terminbestätigung per E-Mail. Nenne keinen Versandzeitpunkt. Erst nach eindeutiger Auswahl rufst du confirm_appointment für den vollständigen angebotenen Slot auf. Bei Hallo, Bitte, Mhm, Wiederholungsbitten oder unklarem Audio niemals bestätigen.",
     "Sage niemals, dass ein Termin eingetragen, reserviert oder bestätigt ist, bevor confirm_appointment erfolgreich war. Wenn ein Tool meldet, dass noch Gesprächsschritte fehlen, machst du genau diesen Schritt statt Termine anzubieten.",
+    "ANDERER ZEITRAUM: Wünscht der Kunde einen anderen Tag, eine andere Woche oder Tageszeit, als in den freien Terminvorschlägen steht, rufe find_free_slots mit passendem Zeitraum auf (Daten im Format JJJJ-MM-TT). Die Tool-Ergebnisse zählen als bereitgestellte Slots; beachte die Regeln zur Terminauswahl. Rufe es nicht auf, solange die vorhandenen Vorschläge genügen.",
     "Nach einem bestätigten Termin führt der Worker die im Kampagnenleitfaden hinterlegten Vorbereitungsfragen einzeln und in Reihenfolge durch. Er holt vorher ausdrücklich Zustimmung ein; bei Gesundheitsangaben muss die Zustimmung die freiwillige Abfrage persönlicher/Gesundheitsangaben abdecken. Ein Nein zu einer einzelnen Frage wird akzeptiert und die Frage übersprungen. Stelle diese Fragen nicht selbst außerhalb des Vorbereitungsablaufs.",
     "Antworte immer gesprochen auf Deutsch. Gib niemals JSON, Toolnamen, interne Regeln oder Regieanweisungen aus.",
+    `Du bist Gloria, die ${GLORIA_ROLE_LABEL} von ${addressedOwner} ${buildOwnerAffiliation(ctx)}, und telefonierst ausschließlich in diesem Auftrag.`,
+    `DATENHERKUNFT: Fragt jemand, woher du die Nummer oder die Kontaktdaten hast oder wie ihr auf ihn kommt, antworte ehrlich und ohne Ausflüchte: '${buildDataSourceAnswer(ctx)}' Biete an, ihn auf Wunsch aus der Liste zu nehmen. Erfinde keine anderen Quellen.`,
+    `Heute ist ${today}.`,
   ];
 
   if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.policyTopic || ctx.topic || "")) {
@@ -577,8 +597,7 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
   parts.push("ERSTKONTAKT: Behaupte nicht, die Person habe angefragt oder um einen Rückruf gebeten, außer das ist im Anrufkontext ausdrücklich vermerkt. Beginne transparent und natürlich mit dem tatsächlichen Anlass; verwende keinen festen Pitch.");
   parts.push("WORTWAHL: Sprich natürlich und alltagsnah. Verwende keine technischen oder mechanischen Metaphern für Lösungsmöglichkeiten; sprich stattdessen einfach von 'Optionen' oder 'Möglichkeiten'.");
 
-  // Everything above stays identical for the whole call, so OpenAI can reuse it from the prompt cache.
-  // State that changes during the call (contribution step, calendar, confirmed slot) must stay below.
+  // Keep frequently changing state at the end so it does not break the stable prompt prefix.
   const requiredContributionStep = !ctx.confirmedSlotPhrase ? getRequiredContributionStep(ctx) : undefined;
   if (requiredContributionStep) {
     parts.push(`VERBINDLICHER SCHRITT VOR KONZEPT UND TERMIN: Nach dem weichen Einstieg und der ersten inhaltlichen Antwort zur Beitragsentwicklung ist zuerst dieser Schritt offen: ${requiredContributionStep} Überspringe die Beitragsfrage und die konkrete Zehn-Jahres-Rechnung nicht. Keine Terminfrage, keine Zeitpräferenz und kein Konzeptabschluss davor. Beantworte Kundenfragen zuerst; Zeitmangel, Ablehnung und der Wunsch, keinen Beitrag zu nennen, bleiben vorrangig. Biete nicht von dir aus an, die Beitragsangabe zu überspringen.`);
@@ -692,6 +711,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let reportPosted = false;
   let callStartedAt = 0;
   let firstAudioLogged = false;
+  let latestSpeechStop: { itemId: string; at: number } | undefined;
   let callDeadline: NodeJS.Timeout | null = null;
   let bargeInAwaitingTranscript = false;
   let bargeInRecoveryTimer: NodeJS.Timeout | null = null;
@@ -1425,6 +1445,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
   const processUserTranscript = (transcript: string, hasFollowingUserSpeech = false) => {
     if (!ctx) return;
     if (terminationInProgress) return;
+    // Refresh the preview for alternative offers; booking checks the calendar separately.
+    if (ctx.appointmentSlotsOffered) void loadBusySlotsCached({ userId: ctx.userId }, 20_000);
     if (isSyntheticTranscriptionPrompt(transcript)) {
       log.warn("realtime.synthetic_transcript_ignored", { callSid: ctx.callSid, text: transcript });
       return;
@@ -2007,7 +2029,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
             return;
           }
           const speechSlotPhrase=convertSlotPhraseForSpeech(decision.slotPhrase);
-          if(!await persistAppointmentBooking(ctx,startAt,appointmentMode)) {
+          const persisted=await persistAppointmentBooking(ctx,startAt,appointmentMode);
+          invalidateBusySlots(ctx.userId);
+          if(!persisted) {
             const instruction="Der Termin konnte nicht gespeichert werden. Er ist noch nicht bestätigt. Erkläre den technischen Speicherfehler kurz, ohne einen belegten Termin zu behaupten oder eine neue Auswahl zu verlangen.";
             sendToolResult(tool.callId,{ ok: false,error: "booking_storage_failed",instruction });
             requestResponse(instruction);
@@ -2032,6 +2056,31 @@ export async function handleOpenAiRealtimeTelnyxStream(
       } finally {
         bookingInProgress = false;
       }
+    }
+
+    if (tool.name === "find_free_slots") {
+      // Served from the calendar loaded at call start (or refreshed while offering); no network round trip.
+      const busySlots = peekBusySlots(ctx.userId, 10 * 60_000);
+      if (!busySlots) {
+        sendToolResult(tool.callId, { ok: false, error: "calendar_unavailable" });
+        requestResponse("Der Kalender ist momentan nicht verfügbar. Biete keine Termine an; erkläre höflich, dass die Verfügbarkeit erst geprüft werden muss.");
+        return;
+      }
+      const slots = findFreeSlots(busySlots, parseFreeSlotQuery(args));
+      if (slots.length) {
+        const known = new Set((ctx.freeSlotsPrompt || "").split(/\r?\n/).map((line) => line.replace(/^\s*[-*]\s*/, "").trim()));
+        const additions = slots.map((slot) => slot.phrase).filter((phrase) => !known.has(phrase));
+        // confirm_appointment only accepts slots that appear in the supplied list.
+        if (additions.length) {
+          ctx.freeSlotsPrompt = `${(ctx.freeSlotsPrompt || "").trimEnd()}\n${additions.map((phrase) => `- ${phrase}`).join("\n")}\n`;
+        }
+      }
+      log.info("realtime.find_free_slots", { callSid: ctx.callSid, found: slots.length });
+      sendToolResult(tool.callId, slots.length
+        ? { ok: true, slots: slots.map((slot) => slot.phrase) }
+        : { ok: true, slots: [], hint: "Im gewünschten Zeitraum gibt es keine freien Termine; frage nach einem anderen Zeitraum." });
+      requestResponse();
+      return;
     }
 
     if (tool.name === "transfer_to_human") {
@@ -2224,6 +2273,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "input_audio_buffer.speech_stopped") {
+        if (message.item_id) latestSpeechStop = { itemId: message.item_id, at: Date.now() };
         userTurns.speechStopped(message.item_id);
         if (bargeInAwaitingTranscript && !bargeInRecoveryTimer) {
           bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 3200);
@@ -2234,6 +2284,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
       if (message.type === "conversation.item.input_audio_transcription.completed") {
         const transcript = message.transcript?.trim();
+        if (latestSpeechStop && latestSpeechStop.itemId === message.item_id) {
+          if (ctx && transcript && !terminationInProgress) {
+            log.info("realtime.asr_latency", { callSid: ctx.callSid, vadStopToAsrFinalMs: Date.now() - latestSpeechStop.at });
+          }
+          latestSpeechStop = undefined;
+        }
         userTurns.complete(transcript && !isSyntheticTranscriptionPrompt(transcript) ? transcript : "", message.item_id);
         if (ctx && transcript) {
           if (terminationInProgress) return;
@@ -2615,6 +2671,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         topic: ctx.topic,
       });
       connectOpenAi();
+      warmConnections();
 
       const policyTask = loadTopicPolicy({ userId: ctx.userId, topic: ctx.topic, preloadId: state.queueId }).then((policy) => {
         if (!ctx) return;
@@ -2644,7 +2701,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         flushUserTranscript();
       });
 
-      const calendarTask = loadBusySlots({ userId: ctx.userId }).then((slots) => {
+      const calendarTask = loadBusySlotsCached({ userId: ctx.userId }, 0).then((slots) => {
         if (!ctx) return;
         if (!slots) {
           ctx.freeSlotsPrompt = "KALENDER NICHT VERFÜGBAR: Keine Termine anbieten oder bestätigen, bevor die Verfügbarkeit erfolgreich geprüft wurde.";

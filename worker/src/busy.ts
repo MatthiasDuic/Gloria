@@ -6,6 +6,48 @@ export type BusySlot = {
   end: string;   // ISO 8601 UTC
 };
 
+const busyCache = new Map<string, { slots: BusySlot[]; at: number }>();
+const busyInFlight = new Map<string, Promise<BusySlot[] | null>>();
+
+export function peekBusySlots(userId: string | undefined, maxAgeMs: number, now = Date.now()): BusySlot[] | null {
+  const entry = userId ? busyCache.get(userId) : undefined;
+  return entry && now - entry.at <= maxAgeMs ? entry.slots : null;
+}
+
+export function invalidateBusySlots(userId: string | undefined): void {
+  if (!userId) return;
+  busyCache.delete(userId);
+  busyInFlight.delete(userId);
+}
+
+/**
+ * Liefert die Kalenderdaten aus dem Kurzzeit-Cache, sonst per (dedupliziertem) Abruf.
+ * Hält den Kalender-Roundtrip aus dem Live-Gespräch heraus, solange die Daten frisch genug sind.
+ */
+export async function loadBusySlotsCached(opts: { userId?: string }, maxAgeMs: number): Promise<BusySlot[] | null> {
+  const cached = maxAgeMs > 0 ? peekBusySlots(opts.userId, maxAgeMs) : null;
+  if (cached) return cached;
+  const userId = opts.userId;
+  if (!userId) return loadBusySlots(opts);
+  const running = busyInFlight.get(userId);
+  if (running) return running;
+  const request = loadBusySlots(opts).then((slots) => {
+    if (slots && busyInFlight.get(userId) === request) {
+      busyCache.set(userId, { slots, at: Date.now() });
+    }
+    return slots;
+  }).finally(() => {
+    if (busyInFlight.get(userId) === request) busyInFlight.delete(userId);
+  });
+  busyInFlight.set(userId, request);
+  return request;
+}
+
+export function resetBusyCacheForTests(): void {
+  busyCache.clear();
+  busyInFlight.clear();
+}
+
 /**
  * Lädt alle künftigen Termine (outcome=Termin, appointmentAt in Zukunft) des
  * Users vom Vercel-Backend. Wird in den System-Prompt als "BEREITS BELEGT"
