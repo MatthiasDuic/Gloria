@@ -126,8 +126,9 @@ async function withRealtimeStream(
   contactName = "Herr Neumann",
   receptionTopicReason: string | null = "Ich habe eine Frage zum Thema Energiekosten.",
   requiredQuestions?: string,
+  topic = "Energie",
 ) {
-  const policyFields = { topic: "Energie", callObjective, requiredQuestions, ...(receptionTopicReason ? { receptionTopicReason } : {}) };
+  const policyFields = { topic, callObjective, requiredQuestions, ...(receptionTopicReason ? { receptionTopicReason } : {}) };
   const previous = {
     APP_BASE_URL: process.env.APP_BASE_URL, APP_INTERNAL_TOKEN: process.env.APP_INTERNAL_TOKEN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
@@ -196,7 +197,7 @@ async function withRealtimeStream(
     if (!policyDelayMs) cachePreloadedTopicPolicy("fixture-queue", "owner", policyFields);
     const unsigned = {
       queueId: "fixture-queue", userId: "owner", ownerRole: "user", ownerRealName: "Testberater",
-      company: "Testfirma", topic: "Energie", contactName, calledPhone: "+492339555100", ownerRealPhone,
+      company: "Testfirma", topic, contactName, calledPhone: "+492339555100", ownerRealPhone,
       streamExpiresAt: Date.now() + 60_000,
     };
     const state = { ...unsigned, streamSignature: createHmac("sha256", "fixture-token").update(JSON.stringify(unsigned)).digest("hex") };
@@ -954,7 +955,7 @@ test("uses a spoken campaign objective and never reads an internal campaign labe
       topic: "private Krankenversicherung",
       callObjective: "Es geht um die Beitragsentwicklung in der Gesundheitsversorgung. Den heutigen Beitrag erfragen.",
     }),
-    "Ich rufe zum Thema Beitragsentwicklung in der Gesundheitsversorgung an. Passt es kurz?",
+    "Ich rufe zum Thema Gesundheitskosten im Ruhestand an. Passt es kurz?",
   );
   assert.equal(
     buildDecisionMakerTopicQuestion({
@@ -1179,6 +1180,36 @@ test("books the chosen appointment and asks for preparation consent without extr
   assert.ok(posts.some((post) => post.outcome === "Termin" && post.appointmentMode === "Beim Kunden vor Ort" && post.appointmentAt));
 });
 
+test("PKV kurz goes from a concrete invitation to voluntary health questions after booking", { timeout: 10_000 }, async () => {
+  const posts = await withRealtimeStream(async (socket, _hangups, ttsRequests) => {
+    socket.message({ type: "session.updated" });
+    const say = async (transcript: string, count: number) => {
+      socket.message({ type: "conversation.item.input_audio_transcription.completed", transcript });
+      await waitForTtsRequests(ttsRequests, count);
+      return requestedSpeech(ttsRequests)[count - 1];
+    };
+    const opening = await say("Neumann am Apparat, guten Tag.", 1);
+    assert.match(opening, /Gesprächstermin anzubieten.*Gesundheitskosten bis zum Ruhestand.*unverbindliches Kennenlernen/);
+    assert.doesNotMatch(opening, /Passt es kurz|Monatsbeitrag|private Krankenversicherung|\bPKV\b/i);
+    assert.match(await say("Okay.", 2), /Kennenlernen dazu für Sie interessant/);
+    assert.equal(await say("Ja, gerne.", 3), "Passt es Ihnen eher vormittags oder nachmittags?");
+    assert.match(await say("Am Vormittag.", 4), /Welcher Termin passt Ihnen besser/);
+    assert.equal(await say("Den zweiten bitte.", 5), "Soll der Termin persönlich oder digital stattfinden?");
+    const consent = await say("Persönlich.", 6);
+    assert.match(consent, /ist bestätigt.*Gesundheitsangaben.*überspringen/);
+    assert.doesNotMatch(consent, /Bestehen bekannte Diagnosen/);
+    assert.equal(await say("Ja, gerne.", 7), "Sind Sie aktuell privat oder gesetzlich krankenversichert?");
+    assert.equal(socket.sent.filter((event) => event.type === "response.create").length, 0);
+  }, 0, 160, false, "Unverbindliches Kennenlernen; keine Zehn-Jahres-Rechnung im Anruf.", undefined, undefined, null, undefined, "PKV kurz");
+  assert.ok(posts.some((post) => post.outcome === "Termin" && post.appointmentMode === "Beim Kunden vor Ort" && post.appointmentAt));
+});
+
+test("PKV kurz names only the general appointment topic at reception", () => {
+  const intro = buildGatekeeperIntro(newContext({ callSid: "test", streamSid: "test", topic: "PKV kurz", contactName: "Herr Neumann" }));
+  assert.match(intro, /Gesprächstermin zum Thema Gesundheitskosten im Ruhestand.*mit Herrn Neumann verbinden/);
+  assert.doesNotMatch(intro, /private Krankenversicherung|Diagnos/);
+});
+
 test("the situational reaction instruction keeps controller facts out of the model's reaction", () => {
   const instruction = buildSituationalReactionInstruction(
     "Jedes Jahr ein bisschen mehr.",
@@ -1222,19 +1253,19 @@ test("worker refuses unsigned, tampered and expired stream contexts", () => {
   assert.equal(isTrustedStreamState(unsigned, "fixture"), false);
 });
 
-test("the healthcare reason takes precedence over private-insurance wording at reception", () => {
+test("the neutral healthcare wording takes precedence at reception and with the decision maker", () => {
   const instructions = buildRealtimeInstructions(buildPkvContext());
   assert.match(instructions, /ANLASS AM EMPFANG/);
-  assert.match(instructions, /Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung/);
-  assert.match(instructions, /Sage dort nicht 'private Krankenversicherung'/);
-  assert.match(instructions, /Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden/);
+  assert.match(instructions, /Es geht um die Entwicklung der Gesundheitskosten bis zum Ruhestand/);
+  assert.match(instructions, /am Empfang, beim Entscheider und bei Rückfragen ausschließlich „Gesundheitskosten“/);
+  assert.match(instructions, /auch bei abweichenden Angaben, Beispielen oder Formulierungen im Auftrag, Leitfaden und Rückrufkontext/);
 });
 
 test("renamed personal campaign copies retain their source's healthcare rules", () => {
   const context = newContext({ callSid: "copy", streamSid: "copy-stream", topic: "Meine persönliche Kampagne", policyTopic: "private Krankenversicherung" });
   assert.equal(context.topicKind, "pkv");
   assert.match(buildRealtimeInstructions(context), /ANLASS AM EMPFANG/);
-  assert.match(buildRealtimeInstructions(context), /langfristige Beitragsentwicklung in der Gesundheitsversorgung/);
+  assert.match(buildRealtimeInstructions(context), /Entwicklung der Gesundheitskosten bis zum Ruhestand/);
 });
 
 test("keeps a warm contextual bridge after the introduction without skipping the assignment or consent", () => {
@@ -1729,7 +1760,7 @@ for (const mode of ["normal", "test", "callback"] as const) {
     });
 
     const instructions = buildRealtimeInstructions(ctx);
-    assert.match(instructions, /Interne Kampagnenzuordnung \(nicht als Gesprächsanlass vorlesen\)/);
+    assert.match(instructions, /Gesprächsthema: Gesundheitskosten bis zum Ruhestand/);
     assert.doesNotMatch(instructions, /Gesprächsthema: private Krankenversicherung/);
     assert.ok(instructions.includes(policy.callObjective));
     assert.match(instructions, /AUFTRAGSTREUE/);
@@ -1737,12 +1768,13 @@ for (const mode of ["normal", "test", "callback"] as const) {
 
     const intro = buildDecisionMakerIntroInstructions(ctx);
     assert.match(intro, /Gloria, die KI-Assistentin von Herrn Matthias Duic bei Agentur Duic Sprockhövel/);
-    assert.match(intro, /Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen/);
+    assert.match(intro, /Gesundheitskosten.*Passt es kurz\?/);
     assert.doesNotMatch(intro, /Ich rufe zum Thema private Krankenversicherung/);
-    assert.match(intro, /kein Pitch, keine Fachfragen und keine Terminfrage/);
+    assert.match(intro, /Warte auf die Antwort/);
 
     const nextTurn = buildRealtimeResponseInstructions(ctx, "Beantworte zuerst die Kundenfrage.");
     assert.match(nextTurn, /Beantworte zuerst die Kundenfrage/);
+    assert.match(nextTurn, /Nenne als Gesprächsanlass nur Gesundheitskosten/);
     assert.ok(nextTurn.includes(buildRealtimeInstructions(ctx)));
     assert.ok(nextTurn.includes(policy.callObjective));
     assert.match(nextTurn, /noch offenen Auftragsschritte/);
@@ -1790,7 +1822,7 @@ test("retains the complete session assignment in each response override througho
   }
   const intro = buildRealtimeResponseInstructions(ctx, buildDecisionMakerIntroInstructions(ctx));
   assert.ok(intro.includes(policy.callObjective));
-  assert.match(intro, /Nenne ausschließlich den tatsächlichen Gesprächsanlass/);
+  assert.match(intro, /Nenne genau diesen Gesprächsanlass.*Gesundheitskosten/);
   assert.match(intro, /Interne Begriffe.*dürfen nicht gesprochen werden/);
 });
 
@@ -1879,7 +1911,7 @@ test("does not inject an unrelated fixed PKV pitch into campaign instructions", 
 
   const instructions = buildRealtimeInstructions(ctx);
   assert.doesNotMatch(instructions, /PKV-GESPRÄCHSZIEL|ZWINGENDER NÄCHSTER SCHRITT|Laut PKV Verband|drei bis fünf Prozent/i);
-  assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
+  assert.match(instructions, /Gesprächsthema: Gesundheitskosten bis zum Ruhestand/);
   assert.match(instructions, /persönlich oder digital/);
   assert.match(instructions, /der Link zum Meeting kommt mit der Terminbestätigung per E-Mail\. Nenne keinen Versandzeitpunkt/);
   assert.doesNotMatch(instructions, /in unserer Agentur oder per Microsoft Teams/);
@@ -1908,7 +1940,7 @@ test("uses only the campaign objective, not a fixed sequence, before preparation
   const instructions = buildRealtimeInstructions(ctx);
 
   assert.doesNotMatch(instructions, /EINSTIEGSBEITRAG|HEUTIGER BEITRAG|HOCHRECHNUNG|PKV-GESPRÄCHSZIEL/);
-  assert.match(instructions, /Gesprächsthema: private Krankenversicherung/);
+  assert.match(instructions, /Gesprächsthema: Gesundheitskosten bis zum Ruhestand/);
   assert.match(instructions, /KAMPAGNEN UND FACHINFORMATIONEN/);
   assert.match(instructions, /Nach einem bestätigten Termin führt der Worker/);
   assert.match(instructions, /persönlich oder digital/i);

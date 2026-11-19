@@ -1,5 +1,6 @@
 import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction, isHumanContactAfterQueue } from "./call-classification.js";
 import { endsWithSentenceAbbreviation } from "./german-sentence.js";
+import { isShortPkvTopic, usesNeutralHealthCostsWording } from "./topic-policy.js";
 
 export const CONTACT_WAIT_TIMEOUT_MS = 3 * 60_000;
 
@@ -36,7 +37,11 @@ export function getSpeakableCampaignReason(callObjective?: string): string | und
   return `${firstSentence.replace(/[.!?]+$/, "").replace(/\s+/g, " ")}.`;
 }
 
+export const SHORT_PKV_RECEPTION_REASON = "Es geht um einen Gesprächstermin zum Thema Gesundheitskosten im Ruhestand.";
+
 export function buildGatekeeperReason(topic?: string, callObjective?: string, receptionTopicReason?: string): string | null {
+  if (isShortPkvTopic(topic)) return SHORT_PKV_RECEPTION_REASON;
+  if (usesNeutralHealthCostsWording(topic)) return "Es geht um die Entwicklung der Gesundheitskosten bis zum Ruhestand.";
   if (/privat.*krankenversicherung|\bpkv\b/i.test(topic || "")) {
     return "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.";
   }
@@ -55,6 +60,8 @@ export function buildGatekeeperTopic(
   callObjective?: string,
   receptionTopicReason?: string,
 ): { inline?: string; sentence?: string } {
+  if (isShortPkvTopic(topic)) return { sentence: SHORT_PKV_RECEPTION_REASON };
+  if (usesNeutralHealthCostsWording(topic)) return { inline: "zum Thema Gesundheitskosten im Ruhestand" };
   if (/privat.*krankenversicherung|\bpkv\b/i.test(topic || "")) {
     return { inline: "zum Thema Beitragsentwicklung in der Gesundheitsversorgung" };
   }

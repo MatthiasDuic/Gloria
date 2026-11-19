@@ -26,7 +26,7 @@ import { classifyProviderFailure, markServiceOutage, type ProviderFailure } from
 import { advancePreparation, appointmentFarewellText, beginPreparation, createPreparationStateForCall, formatAmountForSpeech, FINAL_FAREWELL_TEXT, type PreparationState } from "./preparation-controller.js";
 import { RealtimeResponseController } from "./realtime-response-controller.js";
 import { newContext, type CallContext } from "./state.js";
-import { createVoiceProfile, detectTopicKind } from "./topic-policy.js";
+import { createVoiceProfile, detectTopicKind, isShortPkvTopic, usesNeutralHealthCostsWording } from "./topic-policy.js";
 import { TelnyxPlayback } from "./telnyx-playback.js";
 import { hasUsableCallAssignment, loadTopicPolicy, topicPolicyToSystemPrompt } from "./topic-policy-prompt.js";
 import { GLORIA_CORE_INSTRUCTIONS } from "./gloria-core-instructions.js";
@@ -221,7 +221,7 @@ export function isSyntheticTranscriptionPrompt(text: string): boolean {
 }
 
 export function buildRequiredContributionProjection(ctx: CallContext): string | undefined {
-  if (ctx.topicKind !== "pkv" || !/(?:zehn[- ]jahres|zehn\s+jahre|10[- ]jahre)/i.test(ctx.callObjective || "")) return undefined;
+  if (ctx.topicKind !== "pkv" || isShortPkvTopic(ctx.policyTopic || ctx.topic) || !/(?:zehn[- ]jahres|zehn\s+jahre|10[- ]jahre)/i.test(ctx.callObjective || "")) return undefined;
   const latest = ctx.transcript.at(-1);
   if (latest?.role !== "user" || !extractContributionPhrase(latest.text)) return undefined;
   const currentContribution = extractCurrentContributionPhrase(ctx.transcript);
@@ -230,7 +230,7 @@ export function buildRequiredContributionProjection(ctx: CallContext): string | 
 }
 
 export function getRequiredContributionStep(ctx: CallContext): string | undefined {
-  if (ctx.topicKind !== "pkv" || !/(?:zehn[- ]jahres|zehn\s+jahre|10[- ]jahre)/i.test(ctx.callObjective || "")) return undefined;
+  if (ctx.topicKind !== "pkv" || isShortPkvTopic(ctx.policyTopic || ctx.topic) || !/(?:zehn[- ]jahres|zehn\s+jahre|10[- ]jahre)/i.test(ctx.callObjective || "")) return undefined;
   const contribution = extractCurrentContributionPhrase(ctx.transcript);
   const projection = convertNumbersForSpeech(buildTenYearProjectionSentence(contribution));
   if (ctx.transcript.some((turn) => turn.role === "assistant" && turn.text.includes(projection))) return undefined;
@@ -287,8 +287,11 @@ export function buildRealtimeResponseInstructions(
   instructions?: string,
   _includeSequence = true,
 ): string {
+  const topicReminder = usesNeutralHealthCostsWording(ctx.policyTopic || ctx.topic)
+    ? "Nenne als Gesprächsanlass nur Gesundheitskosten, unabhängig von der Wortwahl im Auftrag."
+    : "Verwende dessen Gesprächsanlass statt des internen Kampagnennamens.";
   const taskReminder = ctx.callObjective?.trim()
-    ? "Bleibe beim vollständigen AUFTRAG FÜR GLORIA im Kampagnenkontext: Verwende dessen Gesprächsanlass statt des internen Kampagnennamens und führe die noch offenen Auftragsschritte situationsgerecht weiter. Kundenfragen, Freiwilligkeit, Rückrufwünsche und klare Ablehnung haben Vorrang."
+    ? `Bleibe beim vollständigen AUFTRAG FÜR GLORIA im Kampagnenkontext und führe die noch offenen Auftragsschritte situationsgerecht weiter. ${topicReminder} Kundenfragen, Freiwilligkeit, Rückrufwünsche und klare Ablehnung haben Vorrang.`
     : "";
   // response.instructions replaces the session instructions, so retain the full context.
   return [
@@ -361,6 +364,12 @@ export function buildDecisionMakerIntro(ctx: OwnerIdentityContext & DecisionMake
 }
 
 export const DECISION_MAKER_TIME_QUESTION = "Passt es kurz?";
+const SHORT_PKV_INTEREST_QUESTION = "Wäre ein unverbindliches Kennenlernen dazu für Sie interessant?";
+const SHORT_PKV_REASON = "Es geht darum, wie sich Gesundheitskosten bis zum Ruhestand entwickeln können und welche Möglichkeiten es gibt, dafür vorzusorgen.";
+
+function acceptsShortPkvInvitation(text: string): boolean {
+  return /^(?:ja(?:[, ]+(?:gerne?|klar|das klingt interessant|das können wir gerne? machen))?|(?:sehr )?gerne?|das klingt interessant|das können wir gerne? machen)[.!]*$/i.test(text.trim());
+}
 
 /** Conservative German TTS speaking rate; underestimating only means the topic is offered again. */
 const OPENING_CHARS_PER_SECOND = 13;
@@ -374,7 +383,8 @@ export function planInterruptedOpening(
   audioEndMs: number,
 ): { spokenPrefix: string; missingTopic?: string } | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized.endsWith(DECISION_MAKER_TIME_QUESTION)) return undefined;
+  const question = [DECISION_MAKER_TIME_QUESTION, SHORT_PKV_INTEREST_QUESTION].find((candidate) => normalized.endsWith(candidate));
+  if (!question) return undefined;
   const sentences = normalized.match(/[^.!?]+[.!?]+/g)?.map((sentence) => sentence.trim()) || [];
   if (sentences.length < 2) return undefined;
   const spokenChars = Math.floor((Math.max(0, audioEndMs) / 1000) * OPENING_CHARS_PER_SECOND);
@@ -382,20 +392,23 @@ export function planInterruptedOpening(
   const cut = normalized.lastIndexOf(" ", spokenChars);
   const spokenPrefix = `${normalized.slice(0, Math.max(0, cut)).trim()} …`;
   const reason = sentences[sentences.length - 2];
-  const topicStart = normalized.length - DECISION_MAKER_TIME_QUESTION.length - reason.length - 1;
+  const topicStart = normalized.length - question.length - reason.length - 1;
   const reasonHeard = spokenChars >= topicStart + reason.length * 0.8;
   return {
     spokenPrefix,
-    missingTopic: reasonHeard ? DECISION_MAKER_TIME_QUESTION : `${reason} ${DECISION_MAKER_TIME_QUESTION}`,
+    missingTopic: reasonHeard ? question : `${reason} ${question}`,
   };
 }
 
 export function buildMissingOpeningTopicInstruction(missingTopic: string): string {
-  return `Dein Einstieg wurde unterbrochen, bevor der Gesprächsanlass oder die Zeitfrage vollständig angekommen ist. Behandle die Zwischenreaktion nicht als Zustimmung. Nenne, wenn passend, nur den fehlenden Teil: "${missingTopic}" Warte danach auf die Antwort. Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
+  return `Dein Einstieg wurde unterbrochen, bevor der Gesprächsanlass oder die Einstiegsfrage vollständig angekommen ist. Behandle die Zwischenreaktion nicht als Zustimmung. Nenne, wenn passend, nur den fehlenden Teil: "${missingTopic}" Warte danach auf die Antwort. Lehnt die Person ab, hat sie keine Zeit oder fragt sie etwas anderes, hat das Vorrang.`;
 }
 
 export function buildDecisionMakerTopicQuestion(ctx: DecisionMakerTopicContext): string {
   const topicLabel = ctx.policyTopic || ctx.topic;
+  if (isShortPkvTopic(topicLabel)) {
+    return `${buildOwnerNominative(ctx)} hat mich gebeten, Ihnen einen kurzen Gesprächstermin anzubieten. ${SHORT_PKV_REASON} ${SHORT_PKV_INTEREST_QUESTION}`;
+  }
   const topic = buildGatekeeperTopic(topicLabel, ctx.callObjective, ctx.receptionTopicReason);
   const reason = !ctx.isCallback && /privat.*krankenversicherung|\bpkv\b/i.test(topicLabel || "")
     ? "Es geht um steigende Gesundheitskosten und darum, wie sie im Alter planbar bleiben."
@@ -411,7 +424,9 @@ export function buildDecisionMakerOpening(
 }
 
 export function buildDecisionMakerIntroInstructions(ctx: CallContext, identityAlreadySpoken = false): string {
-  const topicRule = `Nenne ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen. Schließe mit genau dieser Frage: '${DECISION_MAKER_TIME_QUESTION}' Warte auf die Antwort. Kein Witz, kein Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand.`;
+  const topicRule = usesNeutralHealthCostsWording(ctx.policyTopic || ctx.topic)
+    ? `Nenne genau diesen Gesprächsanlass und diese Einstiegsfrage: "${buildDecisionMakerTopicQuestion(ctx)}" Warte auf die Antwort.`
+    : `Nenne ausschließlich den tatsächlichen Gesprächsanlass mit der Themenbezeichnung aus dem AUFTRAG FÜR GLORIA in einem kurzen Satz, nicht den internen Kampagnennamen. Schließe mit genau dieser Frage: '${DECISION_MAKER_TIME_QUESTION}' Warte auf die Antwort. Kein Witz, kein Pitch, keine Fachfragen und keine Terminfrage. Bei einem vereinbarten Rückruf berücksichtige den bisherigen Gesprächsstand.`;
   if (identityAlreadySpoken) {
     return `Du hast dich soeben bereits mit diesem Satz vorgestellt: "${buildDecisionMakerIdentity(ctx)}"
 Wiederhole die Begrüßung und die Vorstellung nicht. ${topicRule}`;
@@ -465,6 +480,8 @@ export function buildDecisionMakerIdentityQuestion(ctx: Pick<CallContext, "conta
 }
 
 export function buildRealtimeInstructions(ctx: CallContext): string {
+  const shortPkv = isShortPkvTopic(ctx.policyTopic || ctx.topic);
+  const neutralHealthCosts = usesNeutralHealthCostsWording(ctx.policyTopic || ctx.topic);
   const addressedOwner = buildAddressedOwner(ctx);
   const target = ctx.contactName?.trim();
   const addressedTarget = target ? addressPersonDative(target) : undefined;
@@ -509,10 +526,16 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     `Du bist Gloria, die ${GLORIA_ROLE_LABEL} von ${addressedOwner} ${buildOwnerAffiliation(ctx)}, und telefonierst ausschließlich in diesem Auftrag.`,
     `DATENHERKUNFT: Fragt jemand, woher du die Nummer oder die Kontaktdaten hast oder wie ihr auf ihn kommt, antworte ehrlich und ohne Ausflüchte: '${buildDataSourceAnswer(ctx)}' Biete an, ihn auf Wunsch aus der Liste zu nehmen. Erfinde keine anderen Quellen.`,
     `Heute ist ${today}.`,
-  ];
+  ].filter((line) => !shortPkv || !/^(?:WEICHER GESPRÄCHSÜBERGANG|THEMA VOR TERMIN|KONZEPT VOR TERMIN):/.test(line));
 
-  if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.policyTopic || ctx.topic || "")) {
-    parts.push("ANLASS AM EMPFANG: Bei Empfang, Gatekeeper oder digitaler Rezeption lautet die kurze thematische Einordnung ausschließlich: 'Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.' Sage dort nicht 'private Krankenversicherung' oder 'seine private Krankenversicherung' und behaupte keinen privaten Versicherungsstatus des Ansprechpartners. Diese Vorgabe hat am Empfang Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden. Noch kein Fachgespräch am Empfang.");
+  if (shortPkv) {
+    parts.push(`PKV-KURZABLAUF: Nenne direkt das Terminziel und den konkreten Anlass: "${SHORT_PKV_REASON}" Frage dann: "${SHORT_PKV_INTEREST_QUESTION}" Warte auf klares Interesse, bevor du nach Terminzeiten fragst. Ein bloßes Okay, eine Rückfrage oder eine Begrüßung ist keine Zustimmung. Keine Versicherungsannahme, Beitragsabfrage, Hochrechnung oder Beratung im Erstkontakt. Beantworte Rückfragen knapp und kehre nur bei Interesse zur Terminwahl zurück. Nach erfolgreicher Buchung führt ausschließlich der Worker die freiwilligen Vorbereitungsfragen nach ausdrücklicher Zustimmung durch.`);
+  }
+  if (neutralHealthCosts) {
+    parts.push(`ANLASS AM EMPFANG: '${buildGatekeeperReason(ctx.policyTopic || ctx.topic)}' Kein Fachgespräch am Empfang.`);
+  } else if (/privat.*krankenversicherung|\bpkv\b/i.test(ctx.policyTopic || ctx.topic || "")) {
+    const receptionReason = "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.";
+    parts.push(`ANLASS AM EMPFANG: Bei Empfang, Gatekeeper oder digitaler Rezeption lautet die kurze thematische Einordnung ausschließlich: '${receptionReason}' Sage dort nicht 'private Krankenversicherung' oder 'seine private Krankenversicherung' und behaupte keinen privaten Versicherungsstatus des Ansprechpartners. Diese Vorgabe hat am Empfang Vorrang vor abweichenden Formulierungen im Kampagnenleitfaden. Noch kein Fachgespräch am Empfang.`);
   }
   if (target) {
     parts.push(
@@ -520,7 +543,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     );
   }
   if (ctx.company) parts.push(`Du rufst bei ${ctx.company} an.`);
-  if (ctx.topic) {
+  if (neutralHealthCosts) {
+    parts.push("Gesprächsthema: Gesundheitskosten bis zum Ruhestand.");
+  } else if (ctx.topic) {
     parts.push(ctx.callObjective?.trim()
       ? `Interne Kampagnenzuordnung (nicht als Gesprächsanlass vorlesen): ${ctx.topic}. Der tatsächliche Anlass und die Themenbezeichnung stehen im AUFTRAG FÜR GLORIA.`
       : `Gesprächsthema: ${ctx.topic}.`);
@@ -534,6 +559,9 @@ export function buildRealtimeInstructions(ctx: CallContext): string {
     parts.push(`Dies ist ein vereinbarter Rückruf. Letzter Stand: ${ctx.previousSummary.trim()}`);
   }
   if (ctx.topicPolicyPrompt) parts.push(ctx.topicPolicyPrompt);
+  if (neutralHealthCosts) {
+    parts.push("VERBINDLICHE WORTWAHL: Nenne den Gesprächsanlass am Empfang, beim Entscheider und bei Rückfragen ausschließlich „Gesundheitskosten“ bzw. „Gesundheitskosten im Ruhestand“. Sage weder „private Krankenversicherung“ noch „PKV“ und unterstelle keinen Versicherungsstatus. Das gilt auch bei abweichenden Angaben, Beispielen oder Formulierungen im Auftrag, Leitfaden und Rückrufkontext. Die neutrale Frage „Sind Sie aktuell privat oder gesetzlich krankenversichert?“ bleibt als freiwillige Terminvorbereitung nach Buchung und Zustimmung zulässig.");
+  }
   parts.push("ERSTKONTAKT: Behaupte nicht, die Person habe angefragt oder um einen Rückruf gebeten, außer das ist im Anrufkontext ausdrücklich vermerkt. Beginne transparent und natürlich mit dem tatsächlichen Anlass; verwende keinen festen Pitch.");
   parts.push("WORTWAHL: Sprich natürlich und alltagsnah. Verwende keine technischen oder mechanischen Metaphern für Lösungsmöglichkeiten; sprich stattdessen einfach von 'Optionen' oder 'Möglichkeiten'.");
 
@@ -1136,7 +1164,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (contactRouting?.stage === "waiting_for_transfer" && !pendingDeterministicSpeech.allowWhileWaiting) return;
     const pending = pendingDeterministicSpeech;
     pendingDeterministicSpeech = null;
-    if (pending.text.includes(DECISION_MAKER_TIME_QUESTION)) {
+    if (pending.text.includes(DECISION_MAKER_TIME_QUESTION) || pending.text.includes(SHORT_PKV_INTEREST_QUESTION)) {
       pendingOpeningTopic = undefined;
     }
     playback.startResponse();
@@ -1722,12 +1750,13 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if (previousStage !== "decision_maker") {
-        if (identityAnnounced && currentContext.callObjective?.trim() && !getSpeakableCampaignReason(currentContext.callObjective)) {
+        const needsModelOpening = !usesNeutralHealthCostsWording(currentContext.policyTopic || currentContext.topic)
+          && currentContext.callObjective?.trim() && !getSpeakableCampaignReason(currentContext.callObjective);
+        if (identityAnnounced && needsModelOpening) {
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, true));
         } else if (identityAnnounced) {
           requestDeterministicSpeech(buildDecisionMakerOpening(currentContext, true));
-        } else if (currentContext.callObjective?.trim()
-          && !getSpeakableCampaignReason(currentContext.callObjective)) {
+        } else if (needsModelOpening) {
           identityAnnounced = true;
           requestEventResponse(buildDecisionMakerIntroInstructions(currentContext, false));
         } else {
@@ -1790,7 +1819,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
     unclearClarificationPending = false;
 
     const previousAssistantText = [...currentContext.transcript.slice(0, -1)].reverse().find((turn) => turn.role === "assistant")?.text || "";
-    if (shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText, transcript)) {
+    const shortPkv = isShortPkvTopic(currentContext.policyTopic || currentContext.topic);
+    if (shortPkv && !currentContext.confirmedSlotPhrase && previousAssistantText.endsWith(SHORT_PKV_INTEREST_QUESTION)) {
+      if (acceptsShortPkvInvitation(transcript)) {
+        requestDeterministicSpeech("Passt es Ihnen eher vormittags oder nachmittags?");
+        return;
+      }
+      if (/^(?:okay|ok|mhm|aha|genau)[.!]*$/i.test(transcript.trim())) {
+        requestDeterministicSpeech(SHORT_PKV_INTEREST_QUESTION);
+        return;
+      }
+    }
+    if (!shortPkv && shouldOfferBasicInfoEmailAfterAppointmentRejection(previousAssistantText, transcript)) {
       basicInfoEmailOfferPending = true;
       requestDeterministicSpeech("Verstehe, dann kein Termin. Wäre stattdessen eine kurze E-Mail mit ein paar Basisinformationen für Sie interessant, falls das Thema später einmal relevant wird?");
       return;
@@ -1803,7 +1843,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     if (preparationState.stage === "inactive") {
       if (bookingInProgress) return;
-      const pkvCostIncreaseFollowup = currentContext.topicKind === "pkv"
+      const pkvCostIncreaseFollowup = currentContext.topicKind === "pkv" && !shortPkv
         ? buildPkvCostIncreaseFollowup(previousAssistantText, transcript)
         : undefined;
       if (pkvCostIncreaseFollowup) {
@@ -1820,7 +1860,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
         return;
       }
       if ((event.type === "answer" || event.type === "customer_question")
-        && currentContext.topicKind === "pkv"
+        && currentContext.topicKind === "pkv" && !shortPkv
         && isNoStrategyAnswer(previousAssistantText, transcript)
         && !noStrategyAcknowledged) {
         noStrategyAcknowledged = true;

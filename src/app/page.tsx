@@ -435,6 +435,24 @@ function normalizeLineCount(value?: string) {
 
 function getRecommendedTopicPolicyPreset(topic: Topic): Partial<TopicPolicyConfig> {
   const normalized = topic.trim().toLowerCase();
+  if (/^pkv\s+kurz$/.test(normalized)) {
+    return {
+      callObjective: "Biete ein unverbindliches Kennenlernen mit dem Auftraggeber an. Es geht darum, wie sich Gesundheitskosten bis zum Ruhestand entwickeln können und welche Möglichkeiten es gibt, dafür vorzusorgen.",
+      topicSummary: "Direkte Terminvereinbarung zum Thema Gesundheitskosten im Ruhestand. Die Beratung findet erst im Termin statt.",
+      receptionTopicReason: "Es geht um einen Gesprächstermin zum Thema Gesundheitskosten im Ruhestand.",
+      behavior: "Kurz und transparent. Nenne beim Entscheider den Anlass und das Terminziel, frage einmal nach Interesse und warte auf die Antwort. Bei klarem Ja frage direkt nach Vormittag oder Nachmittag.",
+      conversationGuardrails: "Am Empfang und beim Entscheider nur von Gesundheitskosten sprechen. Keinen Versicherungsstatus unterstellen. Vor der Buchung keine Beitragsabfrage, Hochrechnung oder Gesundheitsfragen. Nach erfolgreicher Buchung und ausdrücklicher Zustimmung die freiwilligen Vorbereitungsfragen einzeln stellen; danach die E-Mail-Adresse zur Terminbestätigung erfragen. Eine Ablehnung respektieren.",
+      preparationQuestions: [
+        "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+        "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+        "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
+        "Wie groß sind Sie?",
+        "Wie viel wiegen Sie derzeit?",
+        "Sind Sie derzeit in Behandlung?",
+        "Bestehen bekannte Diagnosen?",
+      ].join("\n"),
+    };
+  }
   const completeDefault = topicPolicyDefaults.find(
     (policy) => policy.topic.trim().toLowerCase() === normalized,
   );
@@ -747,6 +765,7 @@ function buildNewCampaignDraft(topic: Topic): TopicPolicyConfig {
     preparationQuestions: "",
     knowledge: "",
     knowledgeSources: [],
+    ...(/^pkv\s+kurz$/i.test(topic.trim()) ? getRecommendedTopicPolicyPreset(topic) : {}),
   };
 }
 
@@ -2037,7 +2056,7 @@ export default function HomePage() {
       setDetailTopic(topic);
       setNewTopicInput("");
       setShowNewTopicForm(false);
-      const message = `Kampagne "${topic}" dauerhaft angelegt (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}). Bitte ergänzen Sie den Gesprächsauftrag und speichern Sie den Leitfaden.`;
+      const message = `Kampagne "${topic}" dauerhaft angelegt (${payload.storageMode === "postgres" ? "PostgreSQL" : "Datei-Fallback"}). ${draft.callObjective ? "Der Leitfaden ist vorausgefüllt." : "Bitte ergänzen Sie den Gesprächsauftrag und speichern Sie den Leitfaden."}`;
       setNotice(message);
       setSaveStatus({ type: "success", message });
     } catch (error) {

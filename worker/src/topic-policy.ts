@@ -1,5 +1,13 @@
 export type TopicKind = "pkv" | "commercial" | "energy" | "retirement" | "generic";
 
+export function isShortPkvTopic(topic?: string): boolean {
+  return /^pkv\s+kurz$/i.test(topic?.trim() || "");
+}
+
+export function usesNeutralHealthCostsWording(topic?: string): boolean {
+  return /^(?:pkv(?:\s+kurz)?|private\s+krankenversicherung)$/i.test(topic?.trim() || "");
+}
+
 export type VoiceProfile = {
   profileName: string;
   stability: number;

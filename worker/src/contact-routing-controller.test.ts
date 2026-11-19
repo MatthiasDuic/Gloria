@@ -104,9 +104,9 @@ test("a new receptionist after a transfer is not dismissed for the previous rece
 
 test("uses the healthcare contribution reason at reception without disclosing a private insurance status", () => {
   const reason = buildGatekeeperReason("private Krankenversicherung");
-  assert.equal(reason, "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
+  assert.equal(reason, "Es geht um die Entwicklung der Gesundheitskosten bis zum Ruhestand.");
   assert.doesNotMatch(reason, /privat|krankenversicherung/i);
-  assert.equal(buildGatekeeperReason("PKV"), "Es geht um die langfristige Beitragsentwicklung in der Gesundheitsversorgung.");
+  assert.equal(buildGatekeeperReason("PKV"), "Es geht um die Entwicklung der Gesundheitskosten bis zum Ruhestand.");
   assert.equal(buildGatekeeperReason("Kampagne Energie"), "Es geht um ein kurzes Anliegen für die zuständige Person.");
   assert.equal(
     buildGatekeeperReason("Kampagne Energie", undefined, "Ich habe eine Frage zum Thema betriebliche Altersvorsorge."),

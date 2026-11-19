@@ -161,6 +161,14 @@ FALLBACK_TTS_ENABLED=true
 
 ## Kalender und Verbindungen
 
+- In **Einstellungen → Kampagnenthemen & Gesprächsleitfäden → Neues Thema**
+  füllt der Name **PKV kurz** den Auftrag und die Vorbereitungsfragen aus.
+  Diese Kampagne bietet beim Entscheider direkt ein unverbindliches Kennenlernen
+  zu Gesundheitskosten bis zum Ruhestand an, ohne Beitragsabfrage oder Hochrechnung.
+  Auch bei **private Krankenversicherung** spricht Gloria am Empfang und
+  beim Entscheider von Gesundheitskosten und unterstellt keinen Versicherungsstatus.
+  Die Gesundheitsfragen bleiben freiwillige Vorbereitung nach erfolgreicher
+  Buchung und ausdrücklicher Zustimmung. Der längere Gesprächsablauf bleibt verfügbar.
 - Beim Erstkontakt nennt Gloria ihre KI-Rolle und den tatsächlichen Anlass.
   Sie stellt beim Empfang eine kurze Weiterleitungsfrage und beim Entscheider
   eine Zeitfrage. Nach der Frage wartet sie auf eine Antwort.
