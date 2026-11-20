@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceContactRouting, buildGatekeeperReason, buildRetryFarewell, classifyReceptionTransfer, createContactRoutingState, extractRetryTimePhrase, extractSuccessorName, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime } from "./contact-routing-controller.js";
+import { advanceContactRouting, assessDecisionMakerConfidence, buildGatekeeperReason, buildRetryFarewell, classifyReceptionTransfer, createContactRoutingState, DECISION_MAKER_CONFIDENCE_THRESHOLD, extractRetryTimePhrase, extractSuccessorName, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime } from "./contact-routing-controller.js";
 
 test("recognises the many real-world ways a receptionist says the person is unavailable", () => {
   for (const text of [
@@ -169,6 +169,24 @@ test("does not mistake an explicit identity denial for the decision maker", () =
   }
 });
 
+test("does not promote an assistant's affirmative answer to the decision maker", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "confirming_decision_maker" as const,
+  };
+  assert.equal(advanceContactRouting(state, "Ja, ich bin nur sein Assistent.").stage, "gatekeeper");
+});
+
+test("a person identifying as reception can correct a previously inferred decision-maker role", () => {
+  const state = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "decision_maker" as const,
+  };
+  assert.equal(advanceContactRouting(state, "Guten Tag, Schmidt hier vom Empfang.").stage, "gatekeeper");
+  assert.equal(advanceContactRouting(state, "Ich bin nicht zuständig.").stage, "gatekeeper");
+  assert.equal(advanceContactRouting(state, "Herr Neumann ist gerade im Termin.").stage, "gatekeeper");
+});
+
 test("answers a reason question even when a short pause or a transfer offer is mentioned", () => {
   const state = {
     ...createContactRoutingState("Herr Neumann"),
@@ -228,6 +246,33 @@ test("a yes to a transfer request starts waiting, not a second identity check", 
   };
   assert.equal(advanceContactRouting(state, "Ja.").stage, "waiting_for_transfer");
   assert.equal(advanceContactRouting(state, "Ja, aber Herr Neumann ist nicht da.").stage, "gatekeeper");
+});
+
+test("a bare yes after a transfer does not identify a decision maker without an identity question", () => {
+  const waiting = {
+    ...createContactRoutingState("Herr Neumann"),
+    stage: "waiting_for_transfer" as const,
+    gatekeeperRequestMade: true,
+  };
+  const weakAnswer = assessDecisionMakerConfidence(waiting, "Ja.");
+  assert.equal(weakAnswer.accepted, false);
+  assert.equal(weakAnswer.score, 1);
+  assert.equal(weakAnswer.threshold, DECISION_MAKER_CONFIDENCE_THRESHOLD);
+  assert.equal(advanceContactRouting(waiting, "Ja.").stage, "waiting_for_transfer");
+
+  assert.equal(advanceContactRouting(waiting, "Guten Tag.").stage, "confirming_decision_maker");
+  assert.equal(advanceContactRouting(waiting, "Neumann am Apparat, guten Tag.").stage, "decision_maker");
+  const identityQuestionAsked = advanceContactRouting(waiting, "Guten Tag.");
+  assert.equal(assessDecisionMakerConfidence(identityQuestionAsked, "Ja.").accepted, true);
+  assert.equal(advanceContactRouting(identityQuestionAsked, "Ja.").stage, "decision_maker");
+});
+
+test("retries an unclear identity check once and then returns to reception instead of looping", () => {
+  const initial = advanceContactRouting(createContactRoutingState("Herr Neumann"), "Guten Tag.");
+  const retry = advanceContactRouting(initial, "Wie bitte?");
+  assert.equal(retry.stage, "confirming_decision_maker");
+  assert.equal(retry.identityCheckCount, 2);
+  assert.equal(advanceContactRouting(retry, "Bitte?").stage, "gatekeeper");
 });
 
 test("a confirmed contact can also hand the call on to someone else", () => {

@@ -2,6 +2,7 @@ export class UserTurnBuffer {
   private speaking = false;
   private readonly items = new Map<string, string | undefined>();
   private anonymousItem = 0;
+  private readonly expiredItemIds = new Set<string>();
 
   speechStarted(itemId?: string): void {
     this.speaking = true;
@@ -14,7 +15,18 @@ export class UserTurnBuffer {
   }
 
   complete(text: string, itemId?: string): void {
-    this.items.set(itemId || `anonymous-${++this.anonymousItem}`, text.trim());
+    const id = itemId || `anonymous-${++this.anonymousItem}`;
+    if (this.expiredItemIds.has(id)) return;
+    this.items.set(id, text.trim());
+  }
+
+  fail(itemId: string): void {
+    this.expiredItemIds.add(itemId);
+    if (this.expiredItemIds.size > 128) {
+      const oldest = this.expiredItemIds.values().next().value;
+      if (oldest) this.expiredItemIds.delete(oldest);
+    }
+    this.items.set(itemId, "");
   }
 
   isBlocked(): boolean {
@@ -34,6 +46,7 @@ export class UserTurnBuffer {
 
   clear(): void {
     this.items.clear();
+    this.expiredItemIds.clear();
     this.speaking = false;
   }
 

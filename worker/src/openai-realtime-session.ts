@@ -84,15 +84,18 @@ export class OpenAiRealtimeSession {
     const factory = this.options.socketFactory ?? ((socketUrl, headers) => new WebSocket(socketUrl, { headers }) as RealtimeSocket);
     this.socket = factory(url, { Authorization: `Bearer ${this.options.apiKey}` });
     const openedSocket = this.socket;
-    this.socket.on("open", () => {
+    const isCurrentSocket = () => this.socket === openedSocket;
+    openedSocket.on("open", () => {
+      if (!isCurrentSocket()) return;
       this.ready = false;
       void Promise.resolve(this.options.onOpen?.()).then(() => {
-        if (this.socket !== openedSocket) return;
+        if (!isCurrentSocket()) return;
       }).catch((error) => {
-        this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        if (isCurrentSocket()) this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
       });
     });
-    this.socket.on("message", (data) => {
+    openedSocket.on("message", (data) => {
+      if (!isCurrentSocket()) return;
       try {
         const event = JSON.parse(data.toString()) as RealtimeServerEvent;
         if (event.type === "session.updated" && !this.ready) {
@@ -108,7 +111,8 @@ export class OpenAiRealtimeSession {
         // Ignore malformed server frames; the socket remains usable.
       }
     });
-    this.socket.on("close", (code, reason) => {
+    openedSocket.on("close", (code, reason) => {
+      if (!isCurrentSocket()) return;
       this.ready = false;
       this.socket = null;
       if (this.deliberatelyClosed) {
@@ -128,7 +132,9 @@ export class OpenAiRealtimeSession {
         this.options.onClose?.(code, reason.toString());
       }
     });
-    this.socket.on("error", (error) => this.options.onError?.(error));
+    openedSocket.on("error", (error) => {
+      if (isCurrentSocket()) this.options.onError?.(error);
+    });
   }
 
   isReady(): boolean {
@@ -158,6 +164,19 @@ export class OpenAiRealtimeSession {
     this.queuedAudio.push(audio);
     const limit = this.options.maxQueuedAudio ?? 500;
     if (this.queuedAudio.length > limit) this.queuedAudio.shift();
+  }
+
+  reconnect(reason = "session_reconnect"): void {
+    if (this.deliberatelyClosed) return;
+    if (!this.socket) {
+      this.connect();
+      return;
+    }
+    try {
+      this.socket.close(1011, reason.slice(0, 100));
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   close(code = 1000, reason = "session_closed"): void {

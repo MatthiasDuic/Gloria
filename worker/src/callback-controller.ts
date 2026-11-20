@@ -53,6 +53,11 @@ export function needsTimeToWriteCallbackNumber(text: string): boolean {
   return /\b(?:einen\s+(?:moment|augenblick)|warten\s+sie|ich\s+(?:(?:muss|möchte|will)\s+)?(?:erst\s+)?(?:einen\s+)?(?:stift|zettel)\s+(?:holen|suchen)|(?:noch\s+)?nicht\s+bereit)\b/i.test(text);
 }
 
+export function confirmsCallbackHandoff(text: string): boolean {
+  return /\b(?:ich|wir|er|sie)\s+(?:gebe|geben|reiche|reichen|leite|leiten|melde|melden|sage|sagen)\s+(?:es|das|ihm|ihr|ihnen|weiter)\b/i.test(text)
+    || /\b(?:ich|wir)\s+(?:werde|werden)\s+(?:es|das|ihm|ihr|ihnen)\s+weitergeben\b/i.test(text);
+}
+
 export function classifyCallbackNumberReply(text: string, stage: CallbackNumberStage): CallbackNumberReply {
   const normalized = text.trim();
   if (needsTimeToWriteCallbackNumber(normalized)) return "wait";
@@ -87,7 +92,10 @@ const NO_TIME_PATTERNS: RegExp[] = [
 const SLOT_CONTEXT = /\b(?:vormittag|nachmittag|uhr|montag|dienstag|mittwoch|donnerstag|freitag|samstag|termin|persönlich\s+oder\s+digital)\b/i;
 
 export function isNoTimeRequest(text: string, previousAssistantText = ""): boolean {
-  if (SLOT_CONTEXT.test(previousAssistantText) && !/\bpasst\s+es\s+(?:gerade|jetzt)\b/i.test(previousAssistantText)) return false;
+  const urgentExit = /\b(?:muss\s+(?:jetzt|gleich|sofort)\s+(?:weg|los)|muss\s+jetzt\s+auflegen|habe\s+(?:gerade|jetzt|im\s+moment)\s+keine\s+zeit|rufen\s+sie\s+mich\s+(?:bitte\s+)?(?:morgen|später|spaeter|übermorgen|nächste\s+woche|naechste\s+woche)\s+(?:an|zurück|zurueck))\b/i.test(text);
+  if (SLOT_CONTEXT.test(previousAssistantText)
+    && !urgentExit
+    && !/\bpasst\s+es\s+(?:gerade|jetzt)\b/i.test(previousAssistantText)) return false;
   return NO_TIME_PATTERNS.some((pattern) => pattern.test(text));
 }
 

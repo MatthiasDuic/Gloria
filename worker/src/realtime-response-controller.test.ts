@@ -4,16 +4,22 @@ import { RealtimeResponseController, type ResponseTimer } from "./realtime-respo
 
 function manualClock() {
   let currentTime = 1000;
-  const callbacks: Array<{ callback: () => void; delayMs: number }> = [];
+  const callbacks: Array<{ id: number; callback: () => void; delayMs: number; cancelled: boolean }> = [];
+  let nextId = 0;
   return {
     now: () => currentTime,
     schedule(callback: () => void, delayMs: number): ResponseTimer {
-      callbacks.push({ callback, delayMs });
-      return callbacks.length as unknown as ResponseTimer;
+      const id = ++nextId;
+      callbacks.push({ id, callback, delayMs, cancelled: false });
+      return id as unknown as ResponseTimer;
     },
-    cancelSchedule(): void {},
+    cancelSchedule(timer: ResponseTimer): void {
+      const scheduled = callbacks.find((entry) => entry.id === (timer as unknown as number));
+      if (scheduled) scheduled.cancelled = true;
+    },
     runNext(): void {
-      const next = callbacks.shift();
+      let next = callbacks.shift();
+      while (next?.cancelled) next = callbacks.shift();
       if (!next) return;
       currentTime += next.delayMs;
       next.callback();
@@ -111,4 +117,78 @@ test("reserves the response slot before response.created arrives", () => {
   assert.equal(controller.request("first"), true);
   assert.equal(controller.request("second"), false);
   assert.deepEqual(sent, ["first"]);
+});
+
+test("does not deduplicate distinct instructions that share a long prefix", () => {
+  const clock = manualClock();
+  const sent: string[] = [];
+  const sharedPrefix = "A".repeat(110);
+  const controller = new RealtimeResponseController({
+    sendResponse: (instructions) => { sent.push(instructions); return true; },
+    isPlaybackPending: () => false,
+    now: clock.now,
+    schedule: clock.schedule,
+    cancelSchedule: clock.cancelSchedule,
+  });
+
+  controller.request(`${sharedPrefix} first`);
+  controller.markCreated();
+  controller.request(`${sharedPrefix} second`);
+  controller.markFinished();
+  clock.runNext();
+
+  assert.deepEqual(sent, [`${sharedPrefix} first`, `${sharedPrefix} second`]);
+});
+
+test("reconnects when a response is never acknowledged by the realtime server", () => {
+  const clock = manualClock();
+  const timeouts: string[] = [];
+  const controller = new RealtimeResponseController({
+    sendResponse: () => true,
+    isPlaybackPending: () => false,
+    now: clock.now,
+    schedule: clock.schedule,
+    cancelSchedule: clock.cancelSchedule,
+    creationTimeoutMs: 100,
+    onTimeout: (phase) => timeouts.push(phase),
+  });
+
+  controller.request("hello");
+  clock.runNext();
+
+  assert.deepEqual(timeouts, ["creation"]);
+  assert.equal(controller.isActive(), true);
+});
+
+test("clears the response watchdog after response completion", () => {
+  const clock = manualClock();
+  const timeouts: string[] = [];
+  const controller = new RealtimeResponseController({
+    sendResponse: () => true,
+    isPlaybackPending: () => false,
+    now: clock.now,
+    schedule: clock.schedule,
+    cancelSchedule: clock.cancelSchedule,
+    generationTimeoutMs: 100,
+    onTimeout: (phase) => timeouts.push(phase),
+  });
+
+  controller.request("hello");
+  controller.markCreated();
+  controller.markFinished();
+  clock.runNext();
+
+  assert.deepEqual(timeouts, []);
+});
+
+test("allows an empty instruction on the first request", () => {
+  const sent: string[] = [];
+  const controller = new RealtimeResponseController({
+    sendResponse: (instructions) => { sent.push(instructions); return true; },
+    isPlaybackPending: () => false,
+  });
+
+  assert.equal(controller.request(""), true);
+  assert.deepEqual(sent, [""]);
+  controller.stop();
 });

@@ -257,7 +257,16 @@ export function getAppointmentOfferSlots(freeSlotsPrompt: string | undefined, pr
 }
 
 export function matchOfferedAppointmentSelection(text: string, offeredSlots: string[]): string | undefined {
-  if (offeredSlots.length < 2 || text.includes("?") || rejectsBothOfferedSlots(text) || isNegatedChoice(text)) return undefined;
+  if (offeredSlots.length < 2 || text.includes("?") || rejectsBothOfferedSlots(text)) return undefined;
+  const matches = splitChoiceClauses(text)
+    .filter((clause) => !isNegatedChoice(clause.text))
+    .map((clause) => matchOfferedSelectionClause(clause.text, offeredSlots))
+    .filter((slot): slot is string => Boolean(slot));
+  const uniqueMatches = [...new Set(matches)];
+  return uniqueMatches.length === 1 ? uniqueMatches[0] : undefined;
+}
+
+function matchOfferedSelectionClause(text: string, offeredSlots: string[]): string | undefined {
   const normalized = normalizeSlot(text);
   const datePattern = /\b(\d{1,2}|[a-zäöüß]+)\s+(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b/gi;
   const dates = [...normalized.matchAll(datePattern)];
@@ -287,6 +296,16 @@ export function matchOfferedAppointmentSelection(text: string, offeredSlots: str
       return slotTime?.[1] === time[1] && slotTime[2] === time[2];
     });
   }
+
+  return undefined;
+}
+
+function rejectsOfferedAppointmentSelection(text: string, offeredSlots: string[]): string | undefined {
+  for (const clause of splitChoiceClauses(text)) {
+    if (!isNegatedChoice(clause.text)) continue;
+    const rejected = matchOfferedSelectionClause(clause.text, offeredSlots);
+    if (rejected) return rejected;
+  }
   return undefined;
 }
 
@@ -314,6 +333,16 @@ export function advanceAppointmentRouting(
   const modeSignal = analyzeAppointmentMode(latestUser);
   const mode = modeSignal.mode;
   if (state.selectedAppointmentSlot) {
+    const rejected = rejectsOfferedAppointmentSelection(
+      latestUser,
+      state.appointmentOfferedSlots || [state.selectedAppointmentSlot],
+    );
+    if (rejected) {
+      return {
+        state: { ...state, selectedAppointmentSlot: undefined, appointmentMode: undefined },
+        speechText: `Verstanden, ${rejected} passt nicht. Welcher der vorgeschlagenen Termine passt Ihnen stattdessen?`,
+      };
+    }
     const revised = matchOfferedAppointmentSelection(latestUser, state.appointmentOfferedSlots || []);
     if (revised) {
       const nextState = { ...state, selectedAppointmentSlot: revised, appointmentMode: mode };
@@ -349,7 +378,9 @@ export function advanceAppointmentRouting(
     && (!/\b(?:vormittags?|nachmittags?)\b/i.test(lastAssistant) || !/termin/i.test(lastAssistant))) return { state };
   const preference = detectAppointmentPreference([{ role: "user", text: latestUser }]);
   const choices = getAppointmentOfferSlots(freeSlotsPrompt, preference);
-  if (preference === "unknown") return { state };
+  if (preference === "unknown") {
+    return { state, speechText: "Passt Ihnen eher ein Termin am Vormittag oder am Nachmittag?" };
+  }
   if (choices.length < 2) return {
     state,
     speechText: "Für diesen Zeitraum finde ich gerade keine zwei freien Termine mit ausreichend Abstand und unterschiedlichen Uhrzeiten. Käme für Sie auch ein anderer Zeitraum infrage?",
@@ -366,6 +397,7 @@ export function decideAppointment(params: {
   freeSlotsPrompt?: string;
   slotPhrase?: string;
   selectedOfferedSlot?: string;
+  offeredSlots?: string[];
 }): AppointmentDecision {
   const slotPhrase = params.slotPhrase?.trim() || "";
   const latestUserText = [...params.turns].reverse().find((turn) => turn.role === "user")?.text.trim() || "";
@@ -375,9 +407,45 @@ export function decideAppointment(params: {
   const userNamedConcreteSlot = mentionsConcreteSlot(latestUserText);
   const recentUserNamedConcreteSlot = recentUserTurns.some((turn) => mentionsConcreteSlot(turn.text));
   const userRejectedBothSlots = rejectsBothOfferedSlots(latestUserText);
-  if (params.selectedOfferedSlot && isSuppliedAppointmentSlot(params.freeSlotsPrompt, params.selectedOfferedSlot)
-    && analyzeAppointmentMode(latestUserText).mode && !userRejectedBothSlots) {
-    return { ok: true, preference: detectAppointmentPreference(params.turns), slotPhrase: params.selectedOfferedSlot };
+  const assistantTurns = params.turns.map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "assistant");
+  const lastOffer = assistantTurns.reverse().find(({ turn }) =>
+    /welche[nr]?\s+termin|welcher\s+termin|ich\s+kann\s+ihnen/i.test(turn.text)
+      && /\b(?:montag|dienstag|mittwoch|donnerstag|freitag)\b/i.test(turn.text));
+  const offersFromContext = params.offeredSlots?.length
+    ? params.offeredSlots
+    : lastOffer
+      ? (params.freeSlotsPrompt || "").split(/\r?\n/)
+        .map((line) => line.replace(/^\s*[-*]\s*/, "").trim())
+        .filter((line) => line && normalizeSlot(lastOffer.turn.text).includes(normalizeSlot(line)))
+      : [];
+  const selectedInConversation = lastOffer && offersFromContext.length >= 2
+    ? params.turns.slice(lastOffer.index + 1)
+      .filter((turn) => turn.role === "user")
+      .map((turn) => matchOfferedAppointmentSelection(turn.text, offersFromContext))
+      .filter((slot): slot is string => Boolean(slot))
+      .at(-1)
+    : undefined;
+  if (rejectsOfferedAppointmentSelection(latestUserText, offersFromContext)) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Der zuletzt genannte Termin wurde abgelehnt. Frage nach einem anderen freien Termin und bestätige erst nach einer eindeutigen Auswahl.",
+    };
+  }
+  const authorizedSelection = params.selectedOfferedSlot || selectedInConversation;
+  const canonicalRequestedSlot = findSuppliedAppointmentSlot(params.freeSlotsPrompt, slotPhrase);
+  if (selectedInConversation && canonicalRequestedSlot && canonicalRequestedSlot !== selectedInConversation) {
+    return {
+      ok: false,
+      error: "conversation_not_ready",
+      instruction: "Das Tool hat nicht den vom Kunden gewählten Termin übermittelt. Verwende ausschließlich den eindeutig ausgewählten freien Termin.",
+    };
+  }
+  if (authorizedSelection && isSuppliedAppointmentSlot(params.freeSlotsPrompt, authorizedSelection)
+    && analyzeAppointmentMode(latestUserText).mode && !userRejectedBothSlots
+    && selectedInConversation === authorizedSelection) {
+    return { ok: true, preference: detectAppointmentPreference(params.turns), slotPhrase: authorizedSelection };
   }
   const confirmationWasAsked = /(?:meinen\s+sie|passt\s+der|ist\s+das\s+so|richtig\s+verstanden)[^.?!]*(?:uhr|termin|donnerstag|freitag|montag|dienstag|mittwoch)/i.test(assistantText);
   const explicitConfirmation = /^(?:ja\b|ja[, ]+das passt|das passt|passt|genau|richtig|genau richtig|bestätigt|einverstanden|nehme ich|der passt|diesen nehme ich)\b/i.test(latestUserText)

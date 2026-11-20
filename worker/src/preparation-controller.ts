@@ -89,6 +89,8 @@ export type PreparationState = {
   currentQuestionIndex?: number;
   consentRetryCount?: number;
   questionRetryCount?: number;
+  emailRetryCount?: number;
+  emailSkipOffered?: boolean;
   appointmentMode?: AppointmentMode;
 };
 
@@ -98,20 +100,9 @@ export type PreparationTransition = {
   speechText?: string;
 };
 
-const PKV_FALLBACK_QUESTIONS = [
-  "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
-  "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-  "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-  "Wie groß sind Sie?",
-  "Wie viel wiegen Sie derzeit?",
-  "Sind Sie derzeit in Behandlung?",
-  "Bestehen bekannte Diagnosen?",
-].join("\n");
-
 export function buildPreparationQuestions(policy: PreparationPolicy | null): string[] {
-  const isPkv = /private\s+krankenversicherung|pkv/i.test(policy?.topic || "");
   const source = policy?.preparationQuestions || policy?.pkvHealthQuestions
-    || (isPkv ? PKV_FALLBACK_QUESTIONS : policy?.requiredQuestions || policy?.requiredData || "");
+    || policy?.requiredQuestions || policy?.requiredData || "";
   const questions = source
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
@@ -133,12 +124,9 @@ export function createPreparationStateForCall(
   topic?: string,
   policy?: PreparationPolicy | null,
 ): PreparationState {
-  const hasConfiguredQuestions = Boolean(policy?.preparationQuestions?.trim() || policy?.pkvHealthQuestions?.trim());
   return createPreparationState({
     ...policy,
-    topic: topicKind === "pkv" && !hasConfiguredQuestions
-      ? "private Krankenversicherung"
-      : topic || (topicKind === "pkv" ? "private Krankenversicherung" : undefined),
+    topic: topic || (topicKind === "pkv" ? "private Krankenversicherung" : undefined),
   });
 }
 
@@ -154,10 +142,23 @@ function preparationConsentQuestion(state: PreparationState): string {
 
 function preparationConsent(text: string): "granted" | "declined" | "unknown" {
   const normalized = text.trim().toLowerCase();
+  if (/^(?:nein|nö|lieber nicht|keine zeit|nicht jetzt|später|möchte ich nicht|das möchte ich nicht|will ich nicht)\b/i.test(normalized)
+    || /\b(?:lieber nicht|keine zeit|nicht jetzt|möchte ich nicht|will ich nicht|das möchte ich nicht)\b/i.test(normalized)
+    || /\b(?:aber|jedoch|außer)\b[^.!?]{0,100}\b(?:keine?|nicht|lieber nicht|möchte ich nicht)\b/i.test(normalized)
+    || /\b(?:keine?\s+(?:gesundheits|persönlichen?|vorbereitungs?)fragen|keine?\s+(?:gesundheits|persönlichen?)angaben)\b/i.test(normalized)) {
+    return "declined";
+  }
   if (/^(?:ja\b|gerne\b|klar\b|okay\b|ok\b|passt\b|in ordnung\b|machen wir\b)/i.test(normalized)) return "granted";
   if (/\bpasst\b/i.test(normalized) && !/\b(?:passt\s+nicht|nicht\s+passt)\b/i.test(normalized)) return "granted";
-  if (/^(?:nein\b|nö\b|lieber nicht|keine zeit|nicht jetzt|später|möchte ich nicht|das möchte ich nicht|will ich nicht)/i.test(normalized)) return "declined";
   return "unknown";
+}
+
+function isPreparationExitRequest(text: string): boolean {
+  return /\b(?:keine\s+zeit|muss\s+(?:jetzt|gleich|sofort)\s+(?:weg|los)|ich\s+muss\s+jetzt\s+auflegen|rufen\s+sie\s+mich\s+(?:bitte\s+)?(?:morgen|später|spaeter|übermorgen|naechste\s+woche|nächste\s+woche)\s+(?:an|zurück|zurueck))\b/i.test(text);
+}
+
+function noEmailFarewell(): string {
+  return "In Ordnung. Der Termin ist eingetragen. Vielen Dank für das Gespräch. Auf Wiederhören.";
 }
 
 function isQuestionAlreadyAnswered(question: string, turns: ConversationTurn[]): boolean {
@@ -255,6 +256,15 @@ export function advancePreparation(
 ): PreparationTransition {
   const emailQuestion = appointmentEmailQuestion();
   const advisor = appointmentAdvisor(owner);
+  if (state.stage !== "inactive" && state.stage !== "completed" && state.stage !== "declined"
+    && isPreparationExitRequest(userText)) {
+    const farewell = "In Ordnung. Die Vorbereitung beenden wir hier. Der bereits bestätigte Termin bleibt bestehen. Vielen Dank für das Gespräch. Auf Wiederhören.";
+    return {
+      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+      instruction: `Beende die freiwillige Vorbereitung sofort. Der bereits bestätigte Termin bleibt bestehen. Sage exakt: '${farewell}'`,
+      speechText: farewell,
+    };
+  }
   if (state.stage === "awaiting_consent") {
     const consent = preparationConsent(userText);
     if (consent === "declined") {
@@ -267,10 +277,11 @@ export function advancePreparation(
     if (consent === "unknown") {
       const retries = (state.consentRetryCount || 0) + 1;
       if (retries >= 2) {
+        const skip = `${advisor} klärt die offenen Punkte dann gern persönlich mit Ihnen im Termin. ${emailQuestion}`;
         return {
-          state: { ...state, consentRetryCount: retries },
-          instruction: "Die Antwort blieb unklar. Frage exakt: 'Ist es für Sie in Ordnung: ja oder nein?' Stelle keine weitere Frage.",
-          speechText: "Ist es für Sie in Ordnung: ja oder nein?",
+          state: { ...state, consentRetryCount: retries, stage: "awaiting_email", currentQuestionIndex: undefined },
+          instruction: `Die Zustimmung blieb unklar. Beginne keine Vorbereitungsfragen. Sage exakt: '${skip}'`,
+          speechText: skip,
         };
       }
       return {
@@ -365,16 +376,30 @@ export function advancePreparation(
 
   if (state.stage === "awaiting_email") {
     if (!APPOINTMENT_EMAIL_PATTERN.test(userText)) {
-      const completeEmailQuestion = appointmentEmailQuestion(true);
+      if (/^(?:nein|ne|nö|no|lieber nicht|möchte ich nicht|will ich nicht|keine e-?mail|überspringen|ueberspringen|ohne e-?mail)\b/i.test(userText.trim())
+        || /\b(?:möchte|moechte|will)\s+ich\s+keine?\s+e-?mail\b/i.test(userText)
+        || /\bkeine\s+e-?mail-adresse\b/i.test(userText)
+        || state.emailSkipOffered) {
+        const farewell = noEmailFarewell();
+        return {
+          state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+          instruction: `Akzeptiere, dass keine E-Mail-Adresse genannt wird. Sage exakt: '${farewell}' Behaupte nicht, eine E-Mail zu senden.`,
+          speechText: farewell,
+        };
+      }
+      const retries = (state.emailRetryCount || 0) + 1;
+      const completeEmailQuestion = retries >= 2
+        ? "Die E-Mail-Adresse ist freiwillig. Möchten Sie sie nennen oder die Angabe überspringen?"
+        : appointmentEmailQuestion(true);
       return {
-        state,
+        state: { ...state, emailRetryCount: retries, emailSkipOffered: retries >= 2 },
         instruction: `Sage ausschließlich: '${completeEmailQuestion}'`,
         speechText: completeEmailQuestion,
       };
     }
     const farewell = appointmentFarewellText({ ...owner, appointmentMode: state.appointmentMode ?? owner.appointmentMode });
     return {
-      state: { ...state, stage: "completed", currentQuestionIndex: undefined },
+      state: { ...state, stage: "completed", currentQuestionIndex: undefined, emailRetryCount: 0 },
       instruction: `Nimm die E-Mail-Adresse an. Sage exakt: '${farewell}' Danach rufe end_call auf. Stelle keine weitere Frage.`,
       speechText: farewell,
     };

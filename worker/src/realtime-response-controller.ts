@@ -1,11 +1,8 @@
 export type ResponseTimer = ReturnType<typeof setTimeout>;
+export type ResponseTimeoutPhase = "creation" | "generation";
 
-function hashInstruction(instr: string): string {
-  // Simple hash based on first 50 chars + word count + key phrases
-  // Prevents duplicate questions from being queued multiple times
-  const trimmed = instr.slice(0, 100).toLowerCase();
-  const wordCount = instr.split(/\s+/).length;
-  return `${trimmed}|${wordCount}`;
+function normalizeInstruction(instr: string): string {
+  return instr.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 export type RealtimeResponseControllerOptions = {
@@ -16,6 +13,9 @@ export type RealtimeResponseControllerOptions = {
   now?: () => number;
   schedule?: (callback: () => void, delayMs: number) => ResponseTimer;
   cancelSchedule?: (timer: ResponseTimer) => void;
+  onTimeout?: (phase: ResponseTimeoutPhase) => void;
+  creationTimeoutMs?: number;
+  generationTimeoutMs?: number;
 };
 
 export class RealtimeResponseController {
@@ -26,11 +26,15 @@ export class RealtimeResponseController {
   private readonly now: () => number;
   private readonly schedule: (callback: () => void, delayMs: number) => ResponseTimer;
   private readonly cancelSchedule: (timer: ResponseTimer) => void;
+  private readonly onTimeout?: (phase: ResponseTimeoutPhase) => void;
+  private readonly creationTimeoutMs: number;
+  private readonly generationTimeoutMs: number;
   private active = false;
   private queuedInstructions: string | null = null;
-  private lastSentInstructionHash: string = "";
+  private lastSentInstruction: string | null = null;
   private createNotBefore = 0;
   private flushTimer: ResponseTimer | null = null;
+  private responseTimer: ResponseTimer | null = null;
   private stopped = false;
 
   constructor(options: RealtimeResponseControllerOptions) {
@@ -41,6 +45,9 @@ export class RealtimeResponseController {
     this.now = options.now ?? Date.now;
     this.schedule = options.schedule ?? setTimeout;
     this.cancelSchedule = options.cancelSchedule ?? clearTimeout;
+    this.onTimeout = options.onTimeout;
+    this.creationTimeoutMs = options.creationTimeoutMs ?? 12_000;
+    this.generationTimeoutMs = options.generationTimeoutMs ?? 60_000;
   }
 
   isActive(): boolean {
@@ -51,9 +58,9 @@ export class RealtimeResponseController {
     if (this.stopped) return false;
 
     // Deduplication: skip if same instruction is already queued or just sent
-    const instrHash = hashInstruction(instructions);
-    const queuedHash = this.queuedInstructions ? hashInstruction(this.queuedInstructions) : "";
-    if (instrHash === this.lastSentInstructionHash || instrHash === queuedHash) {
+    const normalizedInstruction = normalizeInstruction(instructions);
+    const queuedInstruction = this.queuedInstructions === null ? null : normalizeInstruction(this.queuedInstructions);
+    if (normalizedInstruction === this.lastSentInstruction || normalizedInstruction === queuedInstruction) {
       return false; // Skip duplicate
     }
 
@@ -67,20 +74,24 @@ export class RealtimeResponseController {
     }
     const sent = this.sendResponse(instructions);
     if (sent) {
-      this.lastSentInstructionHash = instrHash;
+      this.lastSentInstruction = normalizedInstruction;
       // response.created arrives asynchronously; reserve the response slot now.
       this.active = true;
+      this.scheduleResponseTimeout("creation", this.creationTimeoutMs);
     }
     return sent;
   }
 
   markCreated(): void {
-    if (!this.stopped) this.active = true;
+    if (this.stopped) return;
+    this.active = true;
+    this.scheduleResponseTimeout("generation", this.generationTimeoutMs);
   }
 
   markFinished(): void {
     if (this.stopped) return;
     this.active = false;
+    this.clearResponseTimeout();
     this.createNotBefore = this.now() + this.cooldownMs;
     this.flush();
   }
@@ -88,6 +99,7 @@ export class RealtimeResponseController {
   markCancelled(): void {
     if (this.stopped) return;
     this.active = false;
+    this.clearResponseTimeout();
     this.flush();
   }
 
@@ -115,11 +127,12 @@ export class RealtimeResponseController {
     this.queuedInstructions = null;
     if (this.flushTimer) this.cancelSchedule(this.flushTimer);
     this.flushTimer = null;
+    this.clearResponseTimeout();
   }
 
   /** Reset after user speaks so same instruction can be re-sent for next turn. */
-  clearLastHash(): void {
-    this.lastSentInstructionHash = "";
+  clearLastInstruction(): void {
+    this.lastSentInstruction = null;
   }
 
   private scheduleFlush(delayMs: number): void {
@@ -128,5 +141,18 @@ export class RealtimeResponseController {
       this.flushTimer = null;
       this.flush();
     }, delayMs);
+  }
+
+  private scheduleResponseTimeout(phase: ResponseTimeoutPhase, delayMs: number): void {
+    this.clearResponseTimeout();
+    this.responseTimer = this.schedule(() => {
+      this.responseTimer = null;
+      if (!this.stopped && this.active) this.onTimeout?.(phase);
+    }, delayMs);
+  }
+
+  private clearResponseTimeout(): void {
+    if (this.responseTimer) this.cancelSchedule(this.responseTimer);
+    this.responseTimer = null;
   }
 }

@@ -83,6 +83,23 @@ test("serializes client events and closes cleanly", () => {
   assert.deepEqual(socket.closed, { code: 1000, reason: "done" });
 });
 
+test("reconnect requests an unintentional socket close for recovery", () => {
+  const socket = new FakeSocket();
+  const session = new OpenAiRealtimeSession({
+    apiKey: "test-key",
+    model: "test-model",
+    onEvent: () => undefined,
+    socketFactory: () => socket,
+  });
+
+  session.connect();
+  socket.open();
+  session.reconnect("response_timeout");
+
+  assert.deepEqual(socket.closed, { code: 1011, reason: "response_timeout" });
+  session.close();
+});
+
 test("does not reconnect after a deliberate close", () => {
   const sockets: FakeSocket[] = [];
   const session = new OpenAiRealtimeSession({
@@ -107,6 +124,32 @@ test("does not reconnect after a deliberate close", () => {
       resolve();
     }, 650);
   });
+});
+
+test("ignores stale socket events after a replacement socket is connected", () => {
+  const sockets: FakeSocket[] = [];
+  const events: RealtimeServerEvent[] = [];
+  const session = new OpenAiRealtimeSession({
+    apiKey: "test-key",
+    model: "test-model",
+    onEvent: (event) => events.push(event),
+    socketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+
+  session.connect();
+  sockets[0].emit("close", 1011, { toString: () => "dropped" });
+  session.connect();
+  sockets[1].open();
+  sockets[0].emit("close", 1011, { toString: () => "stale close" });
+  sockets[0].message({ type: "response.created" });
+
+  assert.equal(session.isConnected(), true);
+  assert.deepEqual(events, []);
+  session.close();
 });
 
 test("returns false when the socket throws while sending", () => {

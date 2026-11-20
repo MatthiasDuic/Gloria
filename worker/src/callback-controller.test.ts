@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceCallback, classifyCallbackDirection, classifyCallbackNumberReply, extractCallbackTimePhrase, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber } from "./callback-controller.js";
+import { advanceCallback, classifyCallbackDirection, classifyCallbackNumberReply, confirmsCallbackHandoff, extractCallbackTimePhrase, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber } from "./callback-controller.js";
 
 test("recognizes requests to leave the caller's number without confusing them with the recipient's number", () => {
   for (const text of [
@@ -49,6 +49,8 @@ test("waits for the listener to be ready and distinguishes repetition from confi
   assert.equal(classifyCallbackNumberReply("Ja, danke, ich gebe es weiter.", "waiting_for_confirmation"), "finish");
   assert.equal(classifyCallbackNumberReply("Ja.", "waiting_for_repeat_confirmation"), "repeat");
   assert.equal(classifyCallbackNumberReply("Nein.", "waiting_for_repeat_confirmation"), "finish");
+  assert.equal(confirmsCallbackHandoff("Vielen Dank, ich gebe das weiter."), true);
+  assert.equal(confirmsCallbackHandoff("Ja, danke."), false);
 });
 
 test("speaks a validated callback number digit by digit", () => {
@@ -66,6 +68,7 @@ test("recognizes typical 'no time right now' answers", () => {
     assert.equal(isNoTimeRequest(text, "Wie erleben Sie das?"), false, text);
   }
   assert.equal(isNoTimeRequest("Am Montag habe ich keine Zeit.", "Passt Ihnen Montag um 10 Uhr oder Mittwoch um 14 Uhr?"), false);
+  assert.equal(isNoTimeRequest("Ich muss jetzt weg, rufen Sie mich morgen an.", "Welcher Termin passt Ihnen besser: Montag oder Mittwoch?"), true);
 });
 
 test("extracts the agreed callback time in speakable form", () => {

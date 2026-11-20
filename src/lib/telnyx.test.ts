@@ -84,6 +84,65 @@ test("signed Telnyx events start only the live stream, never an audio recording"
   }
 });
 
+test("transfer-leg events report bridge outcomes without starting a second Gloria media stream", async () => {
+  const previousKey = process.env.TELNYX_PUBLIC_KEY;
+  const previousApiKey = process.env.TELNYX_API_KEY;
+  const previousWorkerUrl = process.env.WORKER_HEALTHCHECK_URL;
+  const previousInternalToken = process.env.APP_INTERNAL_TOKEN;
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  process.env.TELNYX_PUBLIC_KEY = publicKey.export({ format: "pem", type: "spki" }).toString();
+  process.env.TELNYX_API_KEY = "fixture";
+  process.env.WORKER_HEALTHCHECK_URL = "https://worker.example.test/health";
+  process.env.APP_INTERNAL_TOKEN = "internal-test-token";
+  const commands: string[] = [];
+  const requests: RequestInit[] = [];
+  mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    commands.push(String(url));
+    if (init) requests.push(init);
+    return new Response(JSON.stringify({ accepted: true }), { status: 200 });
+  });
+  try {
+    const clientState = Buffer.from(JSON.stringify({
+      transferLeg: true,
+      originalCallControlId: "original-call",
+    })).toString("base64");
+    for (const eventType of ["call.initiated", "call.answered", "call.bridged"]) {
+      const body = JSON.stringify({
+        data: {
+          event_type: eventType,
+          payload: { call_control_id: "transfer-leg", client_state: clientState },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const headers = new Headers({
+        "telnyx-timestamp": timestamp,
+        "telnyx-signature-ed25519": sign(null, Buffer.from(`${timestamp}|${body}`), privateKey).toString("base64"),
+      });
+      assert.equal((await receiveTelnyxEvent(new Request("https://example.test/api/telnyx/events", {
+        method: "POST",
+        headers,
+        body,
+      }))).status, 200);
+    }
+    assert.deepEqual(commands, ["https://worker.example.test/internal/telnyx-transfer-event"]);
+    assert.equal(new Headers(requests[0]?.headers).get("x-gloria-internal-token"), "internal-test-token");
+    assert.deepEqual(JSON.parse(String(requests[0]?.body)), {
+      callControlId: "original-call",
+      outcome: "bridged",
+    });
+  } finally {
+    mock.restoreAll();
+    if (previousKey === undefined) delete process.env.TELNYX_PUBLIC_KEY;
+    else process.env.TELNYX_PUBLIC_KEY = previousKey;
+    if (previousApiKey === undefined) delete process.env.TELNYX_API_KEY;
+    else process.env.TELNYX_API_KEY = previousApiKey;
+    if (previousWorkerUrl === undefined) delete process.env.WORKER_HEALTHCHECK_URL;
+    else process.env.WORKER_HEALTHCHECK_URL = previousWorkerUrl;
+    if (previousInternalToken === undefined) delete process.env.APP_INTERNAL_TOKEN;
+    else process.env.APP_INTERNAL_TOKEN = previousInternalToken;
+  }
+});
+
 test("answers inbound call.initiated events and handles missing direction compatibly", async () => {
   const previousKey = process.env.TELNYX_PUBLIC_KEY;
   const previousApiKey = process.env.TELNYX_API_KEY;

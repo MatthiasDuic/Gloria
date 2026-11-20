@@ -5,6 +5,15 @@ import type { ConversationTurn } from "./pkv-conversation-controller.js";
 
 const policy = {
   topic: "private Krankenversicherung",
+  preparationQuestions: [
+    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
+    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
+    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
+    "Wie groß sind Sie?",
+    "Wie viel wiegen Sie derzeit?",
+    "Sind Sie derzeit in Behandlung?",
+    "Bestehen bekannte Diagnosen?",
+  ].join("\n"),
 };
 const knownStatusTurns: ConversationTurn[] = [{ role: "user", text: "Ich bin privat versichert." }];
 
@@ -71,6 +80,49 @@ test("does not accept an invalid email as the address for an appointment confirm
   const transition = advancePreparation(started.state, "kunde@beispiel.c", []);
   assert.equal(transition.state.stage, "awaiting_email");
   assert.match(transition.speechText || "", /vollständige E-Mail-Adresse/);
+});
+
+test("does not infer sensitive preparation questions from a PKV campaign name alone", () => {
+  assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), []);
+  assert.deepEqual(buildPreparationQuestions({ topic: "Betriebliche Krankenversicherung" }), []);
+  assert.deepEqual(buildPreparationQuestions({
+    topic: "private Krankenversicherung",
+    preparationQuestions: "Bestehen bekannte Diagnosen?",
+  }), ["Bestehen bekannte Diagnosen?"]);
+});
+
+test("treats a qualified or reluctant yes as declined preparation consent", () => {
+  for (const answer of ["Ja, aber keine Gesundheitsfragen.", "Ja, lieber nicht."]) {
+    const started = beginPreparation(createPreparationState(policy), "Montag um zehn Uhr", []);
+    const transition = advancePreparation(started.state, answer, []);
+    assert.equal(transition.state.stage, "awaiting_email", answer);
+    assert.doesNotMatch(transition.speechText || "", /Diagnosen|Gesundheitsfrage/i);
+  }
+});
+
+test("caps unclear consent retries and exits the preparation questions", () => {
+  let transition = beginPreparation(createPreparationState(policy), "Montag um zehn Uhr", []);
+  transition = advancePreparation(transition.state, "Vielleicht.", []);
+  assert.equal(transition.state.stage, "awaiting_consent");
+  transition = advancePreparation(transition.state, "Weiß ich nicht.", []);
+  assert.equal(transition.state.stage, "awaiting_email");
+  assert.doesNotMatch(transition.speechText || "", /ja oder nein/i);
+});
+
+test("accepts an email opt-out without claiming a confirmation email will be sent", () => {
+  const started = beginPreparation(createPreparationState({ topic: "Test" }), "Montag um zehn Uhr", []);
+  const transition = advancePreparation(started.state, "Ich möchte keine E-Mail-Adresse nennen.", []);
+  assert.equal(transition.state.stage, "completed");
+  assert.doesNotMatch(transition.speechText || "", /E-Mail|gesendet|erhalten/i);
+  assert.match(transition.speechText || "", /Termin ist eingetragen/);
+});
+
+test("stops optional preparation immediately when the customer has to leave", () => {
+  const started = beginPreparation(createPreparationState(policy), "Montag um zehn Uhr", []);
+  const transition = advancePreparation(started.state, "Ich muss jetzt weg, rufen Sie mich morgen an.", []);
+  assert.equal(transition.state.stage, "completed");
+  assert.match(transition.speechText || "", /Termin bleibt bestehen/);
+  assert.doesNotMatch(transition.speechText || "", /Gesundheits|E-Mail-Adresse/);
 });
 
 test("completes configured closing questions after booking without reasking the known 480 Euro contribution", () => {
@@ -151,28 +203,8 @@ test("does not mistake appointment location for a known health insurer", () => {
   assert.match(transition.instruction, /Krankenversicherer/);
 });
 
-test("asks for insurance status, insurer, and all required health details", () => {
-  assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
-    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
-    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-    "Wie groß sind Sie?",
-    "Wie viel wiegen Sie derzeit?",
-    "Sind Sie derzeit in Behandlung?",
-    "Bestehen bekannte Diagnosen?",
-  ]);
-});
-
-test("uses the same compact health precheck regardless of insurance status", () => {
-  assert.deepEqual(buildPreparationQuestions({ topic: "private Krankenversicherung" }), [
-    "Sind Sie aktuell privat oder gesetzlich krankenversichert?",
-    "Bei welchem Krankenversicherer sind Sie derzeit versichert?",
-    "Darf ich bitte Ihr Geburtsdatum aufnehmen?",
-    "Wie groß sind Sie?",
-    "Wie viel wiegen Sie derzeit?",
-    "Sind Sie derzeit in Behandlung?",
-    "Bestehen bekannte Diagnosen?",
-  ]);
+test("uses only explicitly configured sensitive preparation questions", () => {
+  assert.deepEqual(buildPreparationQuestions(policy), policy.preparationQuestions.split("\n"));
 });
 
 test("repeats only the consent request when the answer is unclear", () => {
@@ -296,7 +328,5 @@ test("completes all required PKV preparation questions before email", () => {
 test("initializes PKV completion questions synchronously from the call topic", () => {
   const state = createPreparationStateForCall("pkv", "Beitragsentwicklung in der Gesundheitsversorgung");
   assert.equal(state.stage, "inactive");
-  assert.equal(state.questions.length, 7);
-  assert.match(state.questions[0], /privat oder gesetzlich/);
-  assert.match(state.questions[6], /Diagnosen/);
+  assert.equal(state.questions.length, 0);
 });

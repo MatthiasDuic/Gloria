@@ -2,7 +2,7 @@ import http from "node:http";
 import { WebSocketServer } from "ws";
 import { dependenciesAreReady, getDependencyHealth } from "./health.js";
 import { getElevenLabsModel } from "./elevenlabs-tts.js";
-import { handleOpenAiRealtimeTelnyxStream } from "./openai-realtime-call.js";
+import { handleOpenAiRealtimeTelnyxStream, handleTelnyxTransferEvent } from "./openai-realtime-call.js";
 import { log } from "./log.js";
 import { flushPendingReports } from "./finalize.js";
 import { checkReportStorage } from "./report-outbox.js";
@@ -15,6 +15,49 @@ const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 
 const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url || "/", "http://localhost");
+  if (requestUrl.pathname === "/internal/telnyx-transfer-event") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "method_not_allowed" }));
+      return;
+    }
+    const token = process.env.APP_INTERNAL_TOKEN?.trim();
+    const providedToken = req.headers["x-gloria-internal-token"];
+    if (!token || typeof providedToken !== "string" || providedToken !== token) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+
+    let bodyText = "";
+    for await (const chunk of req) {
+      bodyText += chunk.toString();
+      if (bodyText.length > 4096) {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "payload_too_large" }));
+        return;
+      }
+    }
+    let body: { callControlId?: unknown; outcome?: unknown };
+    try {
+      body = JSON.parse(bodyText) as typeof body;
+    } catch {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid_json" }));
+      return;
+    }
+    if (typeof body.callControlId !== "string" || !body.callControlId.trim() || body.callControlId.length > 200
+      || (body.outcome !== "bridged" && body.outcome !== "failed")) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid_request" }));
+      return;
+    }
+
+    const accepted = handleTelnyxTransferEvent(body.callControlId.trim(), body.outcome);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ accepted }));
+    return;
+  }
   if (requestUrl.pathname === "/prepare-call") {
     if (req.method !== "POST") {
       res.writeHead(405, { "content-type": "application/json" });

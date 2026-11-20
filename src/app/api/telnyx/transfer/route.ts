@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { log } from "@/lib/log";
 import { findUserById } from "@/lib/report-db";
 import { normalizePhoneForDial } from "@/lib/phone-utils";
+import { telnyxCommandId } from "@/lib/telnyx-webhook-auth";
 
 export const runtime = "nodejs";
 
@@ -67,8 +68,14 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         to: transferPhone,
         ...(from ? { from } : {}),
+        command_id: telnyxCommandId(callControlId, "transfer"),
+        target_leg_client_state: Buffer.from(JSON.stringify({
+          transferLeg: true,
+          originalCallControlId: callControlId,
+        })).toString("base64"),
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!response.ok) {
@@ -77,13 +84,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Telnyx API error", details }, { status: 502 });
     }
 
-    log.info("telnyx.transfer.success", { callControlId, to: transferPhone });
-    return NextResponse.json({ ok: true });
+    log.info("telnyx.transfer.command_accepted", { callControlId, to: transferPhone });
+    return NextResponse.json({ commandAccepted: true });
   } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
     log.error("telnyx.transfer.fetch_failed", {
       callControlId,
+      timedOut,
       error: error instanceof Error ? error.message : String(error),
     });
-    return NextResponse.json({ error: "Network error" }, { status: 500 });
+    return NextResponse.json(
+      { error: timedOut ? "Telnyx command outcome is unknown" : "Network error" },
+      { status: timedOut ? 504 : 500 },
+    );
   }
 }

@@ -8,9 +8,9 @@ import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveRecep
 import { computeFreeSlots, freeSlotsToPrompt, invalidateBusySlots, isAppointmentSlotFree, loadBusySlots, loadBusySlotsCached, peekBusySlots } from "./busy.js";
 import { findFreeSlots, parseFreeSlotQuery } from "./availability.js";
 import { warmConnections } from "./http-client.js";
-import { acceptsTransferRequest, advanceContactRouting, buildGatekeeperReason, buildGatekeeperTopic, buildRetryFarewell, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, extractSuccessorName, getSpeakableCampaignReason, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime, type ContactRoutingState } from "./contact-routing-controller.js";
+import { acceptsTransferRequest, advanceContactRouting, assessDecisionMakerConfidence, buildGatekeeperReason, buildGatekeeperTopic, buildRetryFarewell, classifyReceptionTransfer, CONTACT_WAIT_TIMEOUT_MS, createContactRoutingState, extractSuccessorName, getSpeakableCampaignReason, isContactNoLongerAtCompany, isGatekeeperReasonQuestion, isGatekeeperUnavailable, mentionsRetryTime, type ContactRoutingState } from "./contact-routing-controller.js";
 import { classifyConversationEvent, instructionForConversationEvent, isConversationEndingText, isNoNeedStatement, isUnclearConversationText } from "./conversation-event-controller.js";
-import { advanceCallback, classifyCallbackNumberReply, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber, type CallbackNumberStage, type CallbackStage } from "./callback-controller.js";
+import { advanceCallback, classifyCallbackNumberReply, confirmsCallbackHandoff, formatCallbackPhoneForSpeech, isCallbackNumberRequest, isNoTimeRequest, needsTimeToWriteCallbackNumber, type CallbackNumberStage, type CallbackStage } from "./callback-controller.js";
 import { parseSlotPhraseToIso, persistAppointmentBooking, persistTranscriptDelta, postReport } from "./finalize.js";
 import { log } from "./log.js";
 import { OpenAiRealtimeSession, type OpenAiRealtimeSessionOptions, type RealtimeServerEvent } from "./openai-realtime-session.js";
@@ -52,6 +52,19 @@ type TelnyxFrame =
     }
   | { event: "stop" }
   | { event: "error"; payload?: { code?: number; title?: string; detail?: string } };
+
+type ReconnectableCallRuntime = {
+  suspended: boolean;
+  attach: (socket: ServerWebSocket, frame: Extract<TelnyxFrame, { event: "start" }>) => boolean;
+  transferEvent: (outcome: "bridged" | "failed") => boolean;
+};
+
+const reconnectableCallRuntimes = new Map<string, ReconnectableCallRuntime>();
+const TELNYX_STREAM_RESUME_GRACE_MS = 5_000;
+
+export function handleTelnyxTransferEvent(callControlId: string, outcome: "bridged" | "failed"): boolean {
+  return reconnectableCallRuntimes.get(callControlId)?.transferEvent(outcome) ?? false;
+}
 
 type ClientState = {
   streamExpiresAt?: number;
@@ -635,7 +648,7 @@ export async function notifyCallAction(ctx: CallContext, action: "transfer" | "h
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ callControlId: ctx.callSid, userId: ctx.userId }),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(action === "transfer" ? 8000 : 5000),
     });
     if (!response.ok) {
       log.error(`realtime.${action}_failed`, { callSid: ctx.callSid, status: response.status });
@@ -667,7 +680,39 @@ export async function handleOpenAiRealtimeTelnyxStream(
   _req: IncomingMessage,
   socketFactory?: OpenAiRealtimeSessionOptions["socketFactory"],
 ): Promise<void> {
+  let adoptedExistingRuntime = false;
+  telnyx.on("message", (raw) => {
+    if (adoptedExistingRuntime) return;
+    let frame: TelnyxFrame;
+    try {
+      frame = JSON.parse(raw.toString()) as TelnyxFrame;
+    } catch {
+      return;
+    }
+    if (frame.event !== "start") return;
+    const state = decodeClientState(frame.start.client_state);
+    if (!isTrustedStreamState(state, process.env.APP_INTERNAL_TOKEN?.trim() || "")) return;
+    const runtime = reconnectableCallRuntimes.get(frame.start.call_control_id);
+    if (!runtime) return;
+    adoptedExistingRuntime = true;
+    if (runtime.suspended && runtime.attach(telnyx, frame)) return;
+    log.warn("realtime.duplicate_telnyx_stream", {
+      callSid: frame.start.call_control_id,
+      suspended: runtime.suspended,
+    });
+    telnyx.close(1013, runtime.suspended ? "stream_resume_rejected" : "duplicate_stream");
+  });
+
   let ctx: CallContext | null = null;
+  let activeTelnyxSocket: ServerWebSocket | null = telnyx;
+  let transportSuspended = false;
+  let terminalStreamClose = false;
+  let streamResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  let transferOutcomeTimer: ReturnType<typeof setTimeout> | null = null;
+  let transferHangupTimer: ReturnType<typeof setTimeout> | null = null;
+  let runtimeRegistration: ReconnectableCallRuntime | null = null;
+  let finalizeTelnyxCall: (code: number, reason: string) => Promise<void> = async () => undefined;
+  let bindTelnyxSocket: (socket: ServerWebSocket) => void = () => undefined;
   let topicPolicyReady = false;
   let connectedOnce = false;
   let reconnectNoticePending = false;
@@ -733,19 +778,49 @@ export async function handleOpenAiRealtimeTelnyxStream(
   let topicPrefetch: PrefetchedSpeech | null = null;
   let topicPrefetchController: AbortController | null = null;
   const userTurns = new UserTurnBuffer();
+  const asrTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   const handledToolCalls = new Set<string>();
   let bookingInProgress = false;
+  let userActivityVersion = 0;
+  let transferCommandPending = false;
+  let transferFailed = false;
+  let transferBridged = false;
   let pendingDeterministicSpeech: { text: string; hangupAfterPlayback?: boolean; prefetchedSpeech?: PrefetchedSpeech; allowWhileWaiting?: boolean; sensitive?: boolean } | null = null;
   let flushDeterministicSpeech = () => undefined;
   let flushUserTranscript = () => undefined;
+  const clearAsrTimeout = (itemId?: string) => {
+    if (!itemId) return;
+    const timer = asrTimeouts.get(itemId);
+    if (timer) clearTimeout(timer);
+    asrTimeouts.delete(itemId);
+  };
+  const clearAsrTimeouts = () => {
+    for (const timer of asrTimeouts.values()) clearTimeout(timer);
+    asrTimeouts.clear();
+  };
+  const scheduleAsrTimeout = (itemId: string | undefined, delayMs: number) => {
+    if (!itemId) return;
+    clearAsrTimeout(itemId);
+    const timer = setTimeout(() => {
+      asrTimeouts.delete(itemId);
+      if (closed || terminationInProgress) return;
+      userTurns.fail(itemId);
+      log.warn("realtime.transcription_timeout", { callSid: ctx?.callSid, itemId, delayMs });
+      flushUserTranscript();
+      if (bargeInAwaitingTranscript && !userTurns.isBlocked()) recoverInterruptedBargeIn("transcript_timeout");
+    }, delayMs);
+    timer.unref?.();
+    asrTimeouts.set(itemId, timer);
+  };
 
   const sendOpenAi = (event: Record<string, unknown>): boolean => {
     return openaiSession?.send(event) ?? false;
   };
 
   const sendTelnyx = (event: Record<string, unknown>): boolean => {
-    if (telnyx.readyState !== telnyx.OPEN) return false;
-    telnyx.send(JSON.stringify(event));
+    const socket = activeTelnyxSocket;
+    if (!socket || socket.readyState !== socket.OPEN) return false;
+    socket.send(JSON.stringify(event));
     return true;
   };
 
@@ -800,6 +875,12 @@ export async function handleOpenAiRealtimeTelnyxStream(
         instructionsPreview: instructions.slice(0, 80) || "none",
         playbackPending,
       });
+    },
+    onTimeout: (phase) => {
+      if (!ctx || closed || terminationInProgress) return;
+      log.error("realtime.response_timeout", { callSid: ctx.callSid, phase });
+      responses.markInterruptRequested();
+      openaiSession?.reconnect(`response_${phase}_timeout`);
     },
     cooldownMs: Number.parseInt(process.env.OPENAI_RESPONSE_COOLDOWN_MS?.trim() || "40", 10),
   });
@@ -1102,14 +1183,20 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   const requestResponse = (instructions?: string) => {
-    if (contactRouting?.stage === "waiting_for_transfer") return false;
+    if (transportSuspended || contactRouting?.stage === "waiting_for_transfer") {
+      if (transportSuspended) reconnectNoticePending = true;
+      return false;
+    }
     const withInterruption = withInterruptionContext(instructions);
     const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, withInterruption) : withInterruption || "";
     return responses.request(responseInstructions);
   };
 
   const requestEventResponse = (instructions: string) => {
-    if (contactRouting?.stage === "waiting_for_transfer") return false;
+    if (transportSuspended || contactRouting?.stage === "waiting_for_transfer") {
+      if (transportSuspended) reconnectNoticePending = true;
+      return false;
+    }
     const withInterruption = withInterruptionContext(instructions) || instructions;
     const responseInstructions = ctx ? buildRealtimeResponseInstructions(ctx, withInterruption, false) : withInterruption;
     const sent = responses.request(responseInstructions);
@@ -1137,11 +1224,26 @@ export async function handleOpenAiRealtimeTelnyxStream(
     return true;
   };
 
+  const finishTransferFailure = (reason: string): boolean => {
+    if (!ctx || closed || !transferCommandPending || transferBridged) return false;
+    transferCommandPending = false;
+    transferFailed = true;
+    if (transferOutcomeTimer) clearTimeout(transferOutcomeTimer);
+    transferOutcomeTimer = null;
+    if (transferHangupTimer) clearTimeout(transferHangupTimer);
+    transferHangupTimer = null;
+    log.warn("realtime.transfer_failed", { callSid: ctx.callSid, reason });
+    requestDeterministicSpeech("Die Weiterleitung ist gerade leider nicht möglich. Möchten Sie stattdessen einen Rückruf vereinbaren?", {
+      allowWhileWaiting: true,
+    });
+    return true;
+  };
+
   /** Speaks a controller step after a short, situational reaction of the model to the latest customer statement. */
   const requestAnchoredSpeech = (text: string, options: { hangupAfterPlayback?: boolean } = {}) => {
     const speechText = replaceDiscouragedWords(convertNumbersForSpeech(text.replace(/\s+/g, " ").trim()));
     const latestUserText = ctx ? [...ctx.transcript].reverse().find((turn) => turn.role === "user")?.text.trim() : "";
-    if (!ctx || !speechText || !latestUserText || responses.isActive() || pendingAnchoredSpeech || pendingDeterministicSpeech
+    if (!ctx || transportSuspended || !speechText || !latestUserText || responses.isActive() || pendingAnchoredSpeech || pendingDeterministicSpeech
       || process.env.GLORIA_SITUATIONAL_REACTIONS?.trim() === "false") {
       return requestDeterministicSpeech(text, options);
     }
@@ -1160,7 +1262,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   flushDeterministicSpeech = () => {
-    if (!ctx || !pendingDeterministicSpeech || userTurns.isBlocked() || responses.isActive() || playback.isPending() || terminationInProgress) return;
+    if (!ctx || transportSuspended || !pendingDeterministicSpeech || userTurns.isBlocked() || responses.isActive() || playback.isPending() || terminationInProgress) return;
     if (contactRouting?.stage === "waiting_for_transfer" && !pendingDeterministicSpeech.allowWhileWaiting) return;
     const pending = pendingDeterministicSpeech;
     pendingDeterministicSpeech = null;
@@ -1327,6 +1429,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
     transferTimeoutTimer = null;
     pendingDeterministicSpeech = null;
+    clearAsrTimeouts();
     userTurns.clear();
     responses.stop();
     playback.stop();
@@ -1352,6 +1455,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     ttsAbortController?.abort();
     playback.interrupt();
     responses.stop();
+    clearAsrTimeouts();
     userTurns.clear();
     pendingDeterministicSpeech = null;
     requestDeterministicSpeech(TECHNICAL_ISSUE_FAREWELL, { hangupAfterPlayback: true, allowWhileWaiting: true });
@@ -1411,7 +1515,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
 
     updateDialogPhase(currentContext);
     // Reset deduplication so same instruction can fire again after user speaks
-    responses.clearLastHash();
+    responses.clearLastInstruction();
 
     log.info("realtime.user_said", { callSid: currentContext.callSid, text: transcript });
     // Any reaction after the icebreaker ends the pause; the topic follows situationally below.
@@ -1567,7 +1671,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestDeterministicSpeech("Natürlich, ich warte, bis Sie bereit sind.");
       } else if (reply === "repeat") {
         speakNumber();
-      } else if (reply === "finish" && interruptedCallbackNumber && !callbackNumberVerificationRequested) {
+      } else if (reply === "finish" && interruptedCallbackNumber && !callbackNumberVerificationRequested
+        && !confirmsCallbackHandoff(transcript)) {
         callbackNumberVerificationRequested = true;
         requestDeterministicSpeech("Haben Sie die vollständige Rückrufnummer notiert?");
       } else if (reply === "finish") {
@@ -1581,6 +1686,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
     if (contactRouting) {
       const previousStage = contactRouting.stage;
+      const identityConfidence = assessDecisionMakerConfidence(contactRouting, transcript);
       contactRouting = advanceContactRouting(contactRouting, transcript);
       const contactLeft = previousStage !== "decision_maker" && isContactNoLongerAtCompany(transcript);
       const successor = contactLeft || contactRouting.awaitingSuccessorAnswer ? extractSuccessorName(transcript) : undefined;
@@ -1616,7 +1722,18 @@ export async function handleOpenAiRealtimeTelnyxStream(
         callSid: currentContext.callSid,
         stage: contactRouting.stage,
       });
-      if (contactRouting.stage !== previousStage) updateSession();
+      if (contactRouting.stage !== previousStage) {
+        log.info("realtime.contact_routing_transition", {
+          callSid: currentContext.callSid,
+          from: previousStage,
+          to: contactRouting.stage,
+          confidence: identityConfidence.score,
+          threshold: identityConfidence.threshold,
+          confidenceAccepted: identityConfidence.accepted,
+          signals: identityConfidence.signals,
+        });
+        updateSession();
+      }
       if (contactRouting.stage === "waiting_for_transfer") {
         identityAnnounced = false;
         contactRouting = { ...contactRouting, awaitingAvailabilityAnswer: false, awaitingSuccessorAnswer: false };
@@ -1867,7 +1984,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestEventResponse(buildNoStrategyAcknowledgementInstruction(transcript));
         return;
       }
-      const routing = event.type === "answer" || currentContext.selectedAppointmentSlot
+      const appointmentPreferencePending = /\b(?:vormittags?|nachmittags?)\s+oder\s+(?:eher\s+)?(?:vormittags?|nachmittags?)\b/i.test(previousAssistantText)
+        || /\b(?:eher\s+vormittags?|eher\s+nachmittags?)\b/i.test(previousAssistantText);
+      const routing = event.type === "answer" || currentContext.selectedAppointmentSlot || appointmentPreferencePending
         ? advanceAppointmentRouting(currentContext, currentContext.transcript, currentContext.freeSlotsPrompt)
         : { state: currentContext, speechText: undefined, readyToBook: false };
       Object.assign(currentContext, routing.state);
@@ -1896,7 +2015,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
     const transition = advancePreparation(preparationState, transcript, currentContext.transcript, currentContext);
     preparationState = transition.state;
 
-    if (previousPreparationStage === "awaiting_email" && transition.state.stage === "completed") {
+    if (transition.state.stage === "completed") {
       requestDeterministicSpeech(transition.speechText || appointmentFarewellText(currentContext), { hangupAfterPlayback: true });
       return;
     }
@@ -1951,6 +2070,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           freeSlotsPrompt: ctx.freeSlotsPrompt,
           slotPhrase: phrase,
           selectedOfferedSlot: ctx.selectedAppointmentSlot,
+          offeredSlots: ctx.appointmentOfferedSlots,
         });
         if (!decision.ok) log.info("realtime.booking_rejected", { callSid: ctx.callSid, reason: decision.error });
         if(!decision.ok&&decision.error==="slot_not_offered") {
@@ -1960,7 +2080,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
           sendToolResult(tool.callId,{ ok: false,error: decision.error,instruction: decision.instruction });
         } else {
           const startAt=parseSlotPhraseToIso(decision.slotPhrase);
+          const bookingIntentVersion = userActivityVersion;
           const busySlots=await loadBusySlots({ userId: ctx.userId });
+          if (userActivityVersion !== bookingIntentVersion) {
+            const instruction = "Die Person hat während der Kalenderprüfung erneut gesprochen. Bestätige den Termin nicht; bearbeite zuerst die neue Aussage und frage bei Bedarf erneut nach.";
+            sendToolResult(tool.callId, { ok: false, error: "booking_superseded", instruction });
+            requestResponse(instruction);
+            return;
+          }
           if(!startAt||Date.parse(startAt)<=Date.now()||!busySlots||!isAppointmentSlotFree(startAt,busySlots)) {
             ctx.selectedAppointmentSlot=undefined;
             ctx.appointmentSlotsOffered=false;
@@ -2037,13 +2164,27 @@ export async function handleOpenAiRealtimeTelnyxStream(
         requestResponse(instruction);
         return;
       }
+      transferCommandPending = true;
+      transferFailed = false;
+      if (transferOutcomeTimer) clearTimeout(transferOutcomeTimer);
+      transferOutcomeTimer = setTimeout(() => finishTransferFailure("outcome_timeout"), 35_000);
+      transferOutcomeTimer.unref?.();
       const transferred = await notifyCallAction(ctx, "transfer");
-      sendToolResult(tool.callId, { ok: transferred, ...(transferred ? {} : { error: "transfer_failed" }) });
-      if (transferred) {
-        ctx.endReason = "transferred";
-        log.info("realtime.transfer", { callSid: ctx.callSid });
-      } else {
-        requestDeterministicSpeech("Die Weiterleitung ist gerade leider nicht möglich. Möchten Sie stattdessen einen Rückruf vereinbaren?");
+      if (transferBridged) {
+        sendToolResult(tool.callId, { ok: true, status: "bridged" });
+        return;
+      }
+      if (transferFailed) {
+        sendToolResult(tool.callId, { ok: false, error: "transfer_failed" });
+        return;
+      }
+      if (!transferred) finishTransferFailure("command_rejected");
+      sendToolResult(tool.callId, {
+        ok: transferred && !transferFailed,
+        ...(transferred && !transferFailed ? { status: "accepted" } : { error: "transfer_failed" }),
+      });
+      if (transferred && !transferFailed) {
+        log.info("realtime.transfer_command_accepted", { callSid: ctx.callSid });
       }
       return;
     }
@@ -2062,7 +2203,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
   };
 
   flushUserTranscript = () => {
-    if (!ctx || !topicPolicyReady || terminationInProgress || responses.isActive()) return;
+    if (!ctx || !topicPolicyReady || transportSuspended || terminationInProgress || responses.isActive()) return;
     const parts = userTurns.takeParts();
     if (!parts?.length) return;
     let start = 0;
@@ -2095,6 +2236,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       socketFactory,
       onOpen: () => {
         if (connectedOnce) {
+          clearAsrTimeouts();
           const interrupted = userTurns.isBlocked() || responses.isActive() || playback.isPending();
           const retainedText = userTurns.resetAfterReconnect();
           if (ctx && retainedText) {
@@ -2147,7 +2289,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           terminationInProgress = true;
           ctx.endReason = "error";
           void notifyCallAction(ctx, "hangup");
-          telnyx.close(1011, "upstream_unavailable");
+          activeTelnyxSocket?.close(1011, "upstream_unavailable");
         }
       },
       onError: (error) => {
@@ -2176,7 +2318,9 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "input_audio_buffer.speech_started") {
+        userActivityVersion += 1;
         userTurns.speechStarted(message.item_id);
+        scheduleAsrTimeout(message.item_id, 15_000);
         hangupAfterPlayback = false;
         responses.markInterruptRequested();
         const ttsAge = ttsPlaybackStartedAt ? Date.now() - ttsPlaybackStartedAt : Infinity;
@@ -2220,6 +2364,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       if (message.type === "input_audio_buffer.speech_stopped") {
         if (message.item_id) latestSpeechStop = { itemId: message.item_id, at: Date.now() };
         userTurns.speechStopped(message.item_id);
+        scheduleAsrTimeout(message.item_id, 5_000);
         if (bargeInAwaitingTranscript && !bargeInRecoveryTimer) {
           bargeInRecoveryTimer = setTimeout(() => recoverInterruptedBargeIn("transcript_timeout"), 3200);
         }
@@ -2228,6 +2373,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "conversation.item.input_audio_transcription.completed") {
+        clearAsrTimeout(message.item_id);
         const transcript = message.transcript?.trim();
         if (latestSpeechStop && latestSpeechStop.itemId === message.item_id) {
           if (ctx && transcript && !terminationInProgress) {
@@ -2259,8 +2405,10 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
 
       if (message.type === "conversation.item.input_audio_transcription.failed") {
+        clearAsrTimeout(message.item_id);
         log.error("realtime.transcription_failed", { callSid: ctx?.callSid, itemId: message.item_id, error: message.error?.message });
-        userTurns.complete("", message.item_id);
+        if (message.item_id) userTurns.fail(message.item_id);
+        else userTurns.complete("");
         flushUserTranscript();
         if (bargeInAwaitingTranscript && !userTurns.isBlocked()) recoverInterruptedBargeIn("transcript_timeout");
         return;
@@ -2556,7 +2704,8 @@ export async function handleOpenAiRealtimeTelnyxStream(
     openaiSession.connect();
   };
 
-  telnyx.on("message", (raw) => {
+  const handleTelnyxMessage = (raw: { toString(): string }) => {
+    if (adoptedExistingRuntime || closed) return;
     let frame: TelnyxFrame;
     try {
       frame = JSON.parse(raw.toString()) as TelnyxFrame;
@@ -2568,7 +2717,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
       callStartedAt = Date.now();
       const state = decodeClientState(frame.start.client_state);
       if (!isTrustedStreamState(state, process.env.APP_INTERNAL_TOKEN?.trim() || "")) {
-        telnyx.close(1008, "invalid_call_signature");
+        activeTelnyxSocket?.close(1008, "invalid_call_signature");
         return;
       }
       streamId = frame.stream_id;
@@ -2601,12 +2750,105 @@ export async function handleOpenAiRealtimeTelnyxStream(
       }
       preparationState = createPreparationStateForCall(ctx.topicKind === "pkv" ? "pkv" : "other", ctx.topic);
       contactRouting = createContactRoutingState(state.contactName);
+      runtimeRegistration = {
+        suspended: false,
+        transferEvent: (outcome) => {
+          if (closed || !ctx) return false;
+          if (outcome === "failed") {
+            if (!transferCommandPending) return false;
+            if (!transferHangupTimer) {
+              transferHangupTimer = setTimeout(() => finishTransferFailure("transfer_leg_hangup"), 1_000);
+              transferHangupTimer.unref?.();
+            }
+            return true;
+          }
+          if (transferBridged) return true;
+          transferBridged = true;
+          transferCommandPending = false;
+          transferFailed = false;
+          if (transferOutcomeTimer) clearTimeout(transferOutcomeTimer);
+          transferOutcomeTimer = null;
+          if (transferHangupTimer) clearTimeout(transferHangupTimer);
+          transferHangupTimer = null;
+          ctx.endReason = "transferred";
+          terminationInProgress = true;
+          openingSpeech?.stop();
+          discardIdentityPrefetch();
+          responseDialogueStream?.cancel();
+          responseDialogueStream = null;
+          responseDialogueController?.abort();
+          responseDialogueController = null;
+          responseDialogueIsCurrent = null;
+          ttsAbortController?.abort();
+          playback.stop();
+          responses.stop();
+          clearAsrTimeouts();
+          userTurns.clear();
+          log.info("realtime.transfer_bridged", { callSid: ctx.callSid });
+          if (activeTelnyxSocket) {
+            activeTelnyxSocket.close(1000, "transfer_bridged");
+          } else {
+            void finalizeTelnyxCall(1000, "transfer_bridged");
+          }
+          return true;
+        },
+        attach: (socket, resumeFrame) => {
+          if (closed || !transportSuspended || !ctx || ctx.callSid !== resumeFrame.start.call_control_id) return false;
+          const resumeState = decodeClientState(resumeFrame.start.client_state);
+          if (!isTrustedStreamState(resumeState, process.env.APP_INTERNAL_TOKEN?.trim() || "")) return false;
+          if (streamResumeTimer) clearTimeout(streamResumeTimer);
+          streamResumeTimer = null;
+          if (transferOutcomeTimer) clearTimeout(transferOutcomeTimer);
+          transferOutcomeTimer = null;
+          if (transferHangupTimer) clearTimeout(transferHangupTimer);
+          transferHangupTimer = null;
+          transportSuspended = false;
+          if (runtimeRegistration) runtimeRegistration.suspended = false;
+          activeTelnyxSocket = socket;
+          streamId = resumeFrame.stream_id;
+          ctx.streamSid = streamId;
+          inputAudioFormat = openAiAudioFormat(resumeFrame.start.media_format?.encoding);
+          outputAudioFormat = openAiAudioFormat(process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA");
+          const interrupted = responses.isActive() || playback.isPending() || userTurns.isBlocked();
+          openingSpeech?.stop();
+          responseDialogueStream?.cancel();
+          responseDialogueStream = null;
+          responseDialogueController?.abort();
+          responseDialogueController = null;
+          responseDialogueIsCurrent = null;
+          ttsTurn += 1;
+          ttsAbortController?.abort();
+          playback.interrupt();
+          if (responses.isActive()) {
+            responseInterrupted = true;
+            responses.markInterruptRequested();
+            sendOpenAi({ type: "response.cancel" });
+          }
+          reconnectNoticePending = interrupted && contactRouting?.stage === "decision_maker";
+          bindTelnyxSocket(socket);
+          sendTelnyx({ event: "clear" });
+          log.info("realtime.telnyx_stream_resumed", {
+            callSid: ctx.callSid,
+            streamSid: streamId,
+            interrupted,
+          });
+          if (openaiSession?.isReady()) {
+            if (reconnectNoticePending) {
+              reconnectNoticePending = false;
+              requestDeterministicSpeech("Entschuldigung, die Verbindung war kurz gestört. Können Sie Ihren letzten Satz bitte wiederholen?");
+            }
+            flushUserTranscript();
+          }
+          return true;
+        },
+      };
+      reconnectableCallRuntimes.set(ctx.callSid, runtimeRegistration);
       callDeadline = setTimeout(() => {
         if (!ctx || closed) return;
         terminationInProgress = true;
         ctx.endReason = "time_limit";
         void notifyCallAction(ctx, "hangup");
-        telnyx.close(1000, "call_time_limit");
+        activeTelnyxSocket?.close(1000, "call_time_limit");
       }, 30 * 60_000);
       log.info("realtime.call_started", {
         callSid: ctx.callSid,
@@ -2625,7 +2867,7 @@ export async function handleOpenAiRealtimeTelnyxStream(
           log.error("realtime.missing_campaign_assignment", { callSid: ctx.callSid, topic: ctx.topic });
           ctx.endReason = "error";
           void notifyCallAction(ctx, "hangup");
-          telnyx.close(1011, "missing_campaign_assignment");
+          activeTelnyxSocket?.close(1011, "missing_campaign_assignment");
           return;
         }
         if (!policy) return;
@@ -2682,22 +2924,31 @@ export async function handleOpenAiRealtimeTelnyxStream(
     }
 
     if (frame.event === "stop") {
+      terminalStreamClose = true;
+      terminationInProgress = true;
       try {
         openaiSession?.close(1000, "call_finished");
       } catch {
         /* ignore */
       }
       try {
-        telnyx.close(1000, "stop");
+        activeTelnyxSocket?.close(1000, "stop");
       } catch {
         /* ignore */
       }
     }
-  });
+  };
 
-  telnyx.on("close", async (code, reason) => {
+  finalizeTelnyxCall = async (code, reason) => {
     if (closed) return;
     closed = true;
+    transportSuspended = false;
+    activeTelnyxSocket = null;
+    if (streamResumeTimer) clearTimeout(streamResumeTimer);
+    streamResumeTimer = null;
+    if (ctx && runtimeRegistration && reconnectableCallRuntimes.get(ctx.callSid) === runtimeRegistration) {
+      reconnectableCallRuntimes.delete(ctx.callSid);
+    }
     openingSpeech?.stop();
     discardIdentityPrefetch();
     if (callDeadline) clearTimeout(callDeadline);
@@ -2705,13 +2956,14 @@ export async function handleOpenAiRealtimeTelnyxStream(
     playback.stop();
     clearBargeInRecovery();
     if (transferTimeoutTimer) clearTimeout(transferTimeoutTimer);
+    clearAsrTimeouts();
     userTurns.clear();
     try {
       openaiSession?.close(1000, "telnyx_closed");
     } catch {
       /* ignore */
     }
-    log.info("realtime.telnyx_closed", { callSid: ctx?.callSid, code, reason: reason.toString() });
+    log.info("realtime.telnyx_closed", { callSid: ctx?.callSid, code, reason });
     if (ctx && !reportPosted) {
       reportPosted = true;
       await persistTranscriptDelta(ctx);
@@ -2722,11 +2974,76 @@ export async function handleOpenAiRealtimeTelnyxStream(
         });
       });
     }
-  });
+  };
 
-  telnyx.on("error", (error) => {
-    log.error("realtime.telnyx_error", { callSid: ctx?.callSid, error: error.message });
-  });
+  bindTelnyxSocket = (socket) => {
+    activeTelnyxSocket = socket;
+    socket.on("message", (raw) => {
+      if (activeTelnyxSocket === socket) handleTelnyxMessage(raw);
+    });
+    socket.on("close", (code, reason) => {
+      if (adoptedExistingRuntime || activeTelnyxSocket !== socket || closed) return;
+      activeTelnyxSocket = null;
+      const closeReason = reason.toString();
+      if (!ctx || terminationInProgress || terminalStreamClose) {
+        void finalizeTelnyxCall(code, closeReason);
+        return;
+      }
+
+      transportSuspended = true;
+      if (runtimeRegistration) runtimeRegistration.suspended = true;
+      const interrupted = responses.isActive() || playback.isPending();
+      openingSpeech?.stop();
+      responseDialogueStream?.cancel();
+      responseDialogueStream = null;
+      responseDialogueController?.abort();
+      responseDialogueController = null;
+      responseDialogueIsCurrent = null;
+      ttsTurn += 1;
+      ttsAbortController?.abort();
+      playback.interrupt();
+      responses.markInterruptRequested();
+      if (responses.isActive()) {
+        responseInterrupted = true;
+        sendOpenAi({ type: "response.cancel" });
+      }
+      clearBargeInRecovery();
+      bargeInAwaitingTranscript = false;
+      discardAnchoredSpeech();
+      reconnectNoticePending = interrupted && contactRouting?.stage === "decision_maker";
+      log.warn("realtime.telnyx_stream_suspended", {
+        callSid: ctx.callSid,
+        streamSid: ctx.streamSid,
+        code,
+        reason: closeReason,
+        resumeGraceMs: TELNYX_STREAM_RESUME_GRACE_MS,
+      });
+
+      streamResumeTimer = setTimeout(() => {
+        streamResumeTimer = null;
+        if (closed || !transportSuspended || !ctx) return;
+        const transferPending = contactRouting?.stage === "waiting_for_transfer";
+        log.error("realtime.telnyx_stream_resume_expired", {
+          callSid: ctx.callSid,
+          transferPending,
+        });
+        if (!transferPending) {
+          terminationInProgress = true;
+          ctx.endReason = "error";
+          void notifyCallAction(ctx, "hangup");
+        }
+        void finalizeTelnyxCall(code, "stream_resume_timeout");
+      }, TELNYX_STREAM_RESUME_GRACE_MS);
+      streamResumeTimer.unref?.();
+    });
+    socket.on("error", (error) => {
+      if (!adoptedExistingRuntime && activeTelnyxSocket === socket) {
+        log.error("realtime.telnyx_error", { callSid: ctx?.callSid, error: error.message });
+      }
+    });
+  };
+
+  if (!adoptedExistingRuntime) bindTelnyxSocket(telnyx);
 }
 
 

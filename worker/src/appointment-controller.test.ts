@@ -243,6 +243,57 @@ test("keeps a spoken ordinal date as a concrete choice when the appointment mode
   });
 });
 
+test("does not keep a rejected date when the customer names another appointment mode", () => {
+  const slots = ["Montag, 30. November um 08:30 Uhr", "Donnerstag, 3. Dezember um 10:00 Uhr"];
+  const transition = advanceAppointmentRouting({
+    appointmentOfferedSlots: slots,
+    selectedAppointmentSlot: slots[1],
+  }, [
+    { role: "assistant", text: "Soll der Termin persönlich oder digital stattfinden?" },
+    { role: "user", text: "Der dritte Dezember passt nicht. Lieber digital." },
+  ], slots.map((slot) => `- ${slot}`).join("\n"));
+
+  assert.equal(transition.state.selectedAppointmentSlot, undefined);
+  assert.equal(transition.state.appointmentMode, undefined);
+  assert.equal(transition.readyToBook, undefined);
+  assert.match(transition.speechText || "", /passt nicht/);
+});
+
+test("rejects a tool-selected slot that differs from the customer's offered-slot choice", () => {
+  const slots = ["Montag, 30. November um 08:30 Uhr", "Donnerstag, 3. Dezember um 10:00 Uhr"];
+  const calendar = slots.map((slot) => `- ${slot}`).join("\n");
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: `Welcher Termin passt Ihnen besser: ${slots[0]} oder ${slots[1]}?` },
+    { role: "user", text: "Der erste bitte." },
+    { role: "assistant", text: "Soll der Termin persönlich oder digital stattfinden?" },
+    { role: "user", text: "Persönlich, bitte." },
+  ];
+
+  const rejected = decideAppointment({
+    turns, topicKind: "other", freeSlotsPrompt: calendar, slotPhrase: slots[1],
+    selectedOfferedSlot: slots[1], offeredSlots: slots,
+  });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.instruction, /vom Kunden gewählten Termin/);
+
+  const accepted = decideAppointment({
+    turns, topicKind: "other", freeSlotsPrompt: calendar, slotPhrase: slots[0],
+    selectedOfferedSlot: slots[0], offeredSlots: slots,
+  });
+  assert.deepEqual(accepted, { ok: true, preference: "unknown", slotPhrase: slots[0] });
+});
+
+test("repeats the time-of-day question instead of allowing an unclear greeting to progress", () => {
+  const transition = advanceAppointmentRouting({}, [
+    { role: "assistant", text: "Passt Ihnen eher vormittags oder nachmittags?" },
+    { role: "user", text: "Guten Tag." },
+  ], freeSlots);
+
+  assert.equal(transition.readyToBook, undefined);
+  assert.equal(transition.state.appointmentOfferedSlots, undefined);
+  assert.match(transition.speechText || "", /Vormittag oder am Nachmittag/);
+});
+
 test("requires asking for customer-proposed slot when both offered slots are rejected", () => {
   const turns: ConversationTurn[] = [
     ...readyPkvTurns(),

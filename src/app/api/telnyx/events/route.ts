@@ -86,6 +86,8 @@ function parseEvent(body: unknown): TelnyxEvent {
 
 type DecodedClientState = {
   queueId?: string;
+  transferLeg?: boolean;
+  originalCallControlId?: string;
   company?: string;
   contactName?: string;
   topic?: string;
@@ -107,6 +109,31 @@ function decodeClientState(raw?: string): DecodedClientState {
     }
   };
   return tryDecode("base64") || tryDecode("base64url") || {};
+}
+
+async function forwardWorkerTransferOutcome(callControlId: string, outcome: "bridged" | "failed"): Promise<void> {
+  const healthUrl = process.env.WORKER_HEALTHCHECK_URL?.trim();
+  const token = process.env.APP_INTERNAL_TOKEN?.trim();
+  if (!healthUrl || !token) throw new Error("Worker transfer callback is not configured");
+  const endpoint = new URL("/internal/telnyx-transfer-event", healthUrl);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-gloria-internal-token": token,
+    },
+    body: JSON.stringify({ callControlId, outcome }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(2500),
+  });
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(`Worker transfer callback failed: ${response.status} ${details}`);
+  }
+  const result = await response.json() as { accepted?: unknown };
+  if (result.accepted !== true) {
+    log.warn("telnyx.events.worker_transfer_outcome_unmatched", { callControlId, outcome });
+  }
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -134,7 +161,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    if (eventType === "call.initiated") {
+    if (eventType === "call.initiated" && clientState.transferLeg) {
+      log.info("telnyx.events.transfer_leg_initiated", {
+        callControlId,
+        originalCallControlId: clientState.originalCallControlId,
+      });
+    } else if (eventType === "call.initiated") {
       if (clientState.queueId) {
         await markOutboundCallActive(clientState.queueId, callControlId);
       }
@@ -147,6 +179,11 @@ export async function POST(request: Request): Promise<NextResponse> {
           ...(event.payload?.client_state ? { client_state: event.payload.client_state } : {}),
         });
       }
+    } else if (eventType === "call.answered" && clientState.transferLeg) {
+      log.info("telnyx.events.transfer_leg_answered", {
+        callControlId,
+        originalCallControlId: clientState.originalCallControlId,
+      });
     } else if (eventType === "call.answered") {
       const streamBidirectionalCodec = (process.env.TELNYX_STREAM_BIDIRECTIONAL_CODEC || "PCMA").trim();
       await sendTelnyxCommand(callControlId, "streaming_start", {
@@ -161,6 +198,17 @@ export async function POST(request: Request): Promise<NextResponse> {
         bidirectionalMode: "rtp",
         bidirectionalCodec: streamBidirectionalCodec,
       });
+    } else if (eventType === "call.bridged") {
+      if (clientState.transferLeg && clientState.originalCallControlId) {
+        await forwardWorkerTransferOutcome(clientState.originalCallControlId, "bridged");
+      }
+      log.info("telnyx.events.call_bridged", {
+        callControlId,
+        callLegId: event.payload?.call_leg_id,
+        callSessionId: event.payload?.call_session_id,
+        transferLeg: clientState.transferLeg === true,
+        originalCallControlId: clientState.originalCallControlId,
+      });
     } else if (eventType === "call.streaming.failed") {
       await sendTelnyxCommand(callControlId, "hangup", {});
       log.warn("telnyx.events.streaming_failed", {
@@ -169,6 +217,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         callSessionId: event.payload?.call_session_id,
       });
     } else if (eventType === "call.hangup") {
+      if (clientState.transferLeg && clientState.originalCallControlId) {
+        await forwardWorkerTransferOutcome(clientState.originalCallControlId, "failed");
+      }
       const unansweredResult = resultDetailForUnansweredHangup(event.payload?.hangup_cause);
       if (unansweredResult) {
         await setReportResultDetailIfMissing(callControlId, unansweredResult).catch((error) => {
@@ -192,6 +243,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         callSessionId: event.payload?.call_session_id,
         hangupCause: event.payload?.hangup_cause,
         hangupSource: event.payload?.hangup_source,
+        transferLeg: clientState.transferLeg === true,
+        originalCallControlId: clientState.originalCallControlId,
       });
     }
   } catch (error) {

@@ -1,4 +1,4 @@
-import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction, isHumanContactAfterQueue } from "./call-classification.js";
+import { classifyInboundSpeech, hasExplicitQueueInstruction, hasInteractiveReceptionQuestion, hasTransferWaitInstruction, isHumanContactAfterQueue, looksLikeMeaningfulHumanTurn } from "./call-classification.js";
 import { endsWithSentenceAbbreviation } from "./german-sentence.js";
 import { isShortPkvTopic, usesNeutralHealthCostsWording } from "./topic-policy.js";
 
@@ -15,6 +15,7 @@ export type ContactRoutingStage =
 export type ContactRoutingState = {
   stage: ContactRoutingStage;
   targetName?: string;
+  identityCheckCount?: number;
   gatekeeperRequestMade?: boolean;
   gatekeeperReasonGiven?: boolean;
   awaitingAvailabilityAnswer?: boolean;
@@ -23,6 +24,105 @@ export type ContactRoutingState = {
   awaitingSuccessorAnswer?: boolean;
   successorQuestionAsked?: boolean;
 };
+
+export const DECISION_MAKER_CONFIDENCE_THRESHOLD = 5;
+
+export type DecisionMakerConfidence = {
+  score: number;
+  threshold: number;
+  accepted: boolean;
+  signals: string[];
+};
+
+const WEAK_TRANSFER_ACKNOWLEDGEMENT = /^(?:ja|jaa|nein|ne|mhm+|hm+|okay|ok|klar|bitte)[.!?,\s]*$/i;
+
+function isMessageTransfer(text: string): boolean {
+  return /\b(?:nachricht|e-?mail|unterlagen|informationen)\b/i.test(text)
+    && /\b(?:weiter|weiterleiten|weitergeben|weiterreichen|durchstellen|verbinden)\b/i.test(text);
+}
+
+export function assessDecisionMakerConfidence(state: ContactRoutingState, userText: string): DecisionMakerConfidence {
+  const classification = classifyInboundSpeech(userText);
+  if (classification === "voicemail") {
+    return { score: 0, threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD, accepted: false, signals: ["voicemail_veto"] };
+  }
+  if (classification === "queue" || hasExplicitQueueInstruction(userText)) {
+    return { score: 0, threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD, accepted: false, signals: ["queue_veto"] };
+  }
+  if (classifyReceptionTransfer(userText)) {
+    return { score: 0, threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD, accepted: false, signals: ["transfer_announcement_veto"] };
+  }
+  if (isMessageTransfer(userText)) {
+    return { score: 0, threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD, accepted: false, signals: ["message_veto"] };
+  }
+  if (deniesDecisionMakerIdentity(userText) || isExplicitGatekeeperIdentity(userText)
+    || isGatekeeperUnavailable(userText) || introducesOtherPerson(userText, state.targetName)) {
+    return { score: 0, threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD, accepted: false, signals: ["gatekeeper_veto"] };
+  }
+
+  let score = 0;
+  const signals: string[] = [];
+  const normalized = userText.trim().toLowerCase();
+  const explicitSelfIdentification = /\b(?:das\s+bin\s+ich|ich\s+bin\s+(?:es|selbst|zuständig|verantwortlich|der\s+verantwortliche|die\s+verantwortliche|der\s+entscheidungsträger|die\s+entscheidungsträgerin)|selbst\s+am\s+apparat|sprechen\s+sie\s+mit\s+mir)\b/i.test(normalized);
+  const targetTokens = targetNameTokens(state.targetName);
+  const targetNameMatch = targetTokens.some((token) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(normalized));
+  const phoneIdentityCue = /\b(?:am\s+apparat|hier\s+(?:ist|spricht)|sie\s+sprechen\s+mit|mein(?:e)?\s+name\s+ist)\b/i.test(normalized);
+
+  if (state.stage === "waiting_for_transfer") {
+    score += 1;
+    signals.push("transfer_wait_context");
+  }
+  if (explicitSelfIdentification) {
+    score += 4;
+    signals.push("explicit_self_identification");
+  }
+  if (identifiesDecisionMaker(userText, state.targetName)) {
+    score += 3;
+    signals.push("decision_maker_identity_match");
+  }
+  if (targetNameMatch) {
+    score += 2;
+    signals.push("target_name_mentioned");
+  }
+  if (phoneIdentityCue) {
+    score += 2;
+    signals.push("phone_identity_phrase");
+  }
+  if (state.stage === "confirming_decision_maker") {
+    score += 2;
+    signals.push("identity_question_pending");
+    if (confirmsDecisionMaker(userText)) {
+      score += 3;
+      signals.push("affirmative_identity_answer");
+    }
+  }
+  if (classification === "human" && looksLikeMeaningfulHumanTurn(userText)) {
+    score += 1;
+    signals.push("substantive_human_speech");
+  }
+
+  return {
+    score,
+    threshold: DECISION_MAKER_CONFIDENCE_THRESHOLD,
+    accepted: score >= DECISION_MAKER_CONFIDENCE_THRESHOLD,
+    signals,
+  };
+}
+
+function moveContactRouting(
+  state: ContactRoutingState,
+  stage: ContactRoutingStage,
+  patch: Partial<ContactRoutingState> = {},
+): ContactRoutingState {
+  return {
+    ...state,
+    ...patch,
+    stage,
+    identityCheckCount: stage === "confirming_decision_maker"
+      ? state.stage === stage ? state.identityCheckCount ?? 1 : 1
+      : undefined,
+  };
+}
 
 export function isGatekeeperReasonQuestion(text: string): boolean {
   return /\b(?:worum\s+(?:es\s+)?geht|um\s+was\s+geht|(?:worum|um\s+was)\s+handelt\s+es\s+sich|was\s+(?:genau\s+)?ist\s+(?:denn\s+)?(?:der\s+)?(?:grund|anlass)|was\s+(?:ist|wäre)\s+(?:denn\s+)?(?:ihr\s+)?anliegen|weshalb\s+rufen|warum\s+rufen|in\s+welcher\s+angelegenheit|was\s+(?:wollen|möchten)\s+sie\s+(?:denn\s+)?(?:genau\s+)?(?:von\s+(?:ihm|ihr|herrn?\s+[a-zäöüß]+|frau\s+[a-zäöüß]+)|mit\s+(?:ihm|ihr))|weswegen\s+(?:rufen|möchten|wollen))\b/i.test(text);
@@ -220,7 +320,8 @@ function targetNameTokens(targetName?: string): string[] {
 }
 
 function deniesDecisionMakerIdentity(text: string): boolean {
-  return /\b(?:das\s+bin\s+ich|ich\s+bin\s+(?:es|selbst|zuständig))\s+(?:(?:leider|definitiv|doch)\s+)?nicht\b/i.test(text);
+  return /\b(?:das\s+bin\s+ich|ich\s+bin\s+(?:es|selbst|zuständig))\s+(?:(?:leider|definitiv|doch)\s+)?nicht\b/i.test(text)
+    || /\bich\s+bin\s+nicht\s+(?:zuständig|verantwortlich|der\s+verantwortliche|die\s+verantwortliche|der\s+entscheidungsträger|die\s+entscheidungsträgerin)\b/i.test(text);
 }
 
 function identifiesDecisionMaker(text: string, targetName?: string): boolean {
@@ -318,6 +419,7 @@ function isClearlyGatekeeper(text: string, targetName?: string): boolean {
     ).test(normalized);
 
   return mentionsUnavailableTarget
+    || isMessageTransfer(text)
     || /\b(?:stelle\s+sie\s+zu|stellen\s+sie\s+zu|verbinde\s+sie|ich\s+verbinde|durchstellen|weiterleiten|weiterleite|schalte\s+weiter)\b/i.test(normalized)
     || /\b(?:zentrale|empfang|assistenz|telefonassistenz|sekretariat|rezeption|telefonzentrale)\b/i.test(normalized)
     || /\b(?:digitale|virtuelle|ki-?)\s*(?:telefon)?assistent(?:in)?\b|\bwie\s+lautet\s+ihr\s+name\b|\bmit\s+dem\s+richtigen\s+ansprechpartner\b/i.test(normalized)
@@ -328,11 +430,16 @@ function isClearlyGatekeeper(text: string, targetName?: string): boolean {
 function confirmsDecisionMaker(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (deniesDecisionMakerIdentity(normalized)
+    || isExplicitGatekeeperIdentity(normalized)
     || /\b(?:nein|falsch|nicht\s+(?:der|die|das|zuständig|ich|selbst|herr|frau)|ich\s+verbinde|ich\s+stelle|weiterleiten|durchstellen)\b/i.test(normalized)) {
     return false;
   }
   return /^(?:ja|genau|richtig|am\s+apparat|hier|das\s+bin\s+ich|ich\s+bin\s+(?:es|das)|spreche[n]?\s+sie\s+mit\s+mir|korrekt)[.!?,\s]*$/i.test(normalized)
     || /\b(?:ja|genau|richtig|das\s+bin\s+ich|ich\s+bin\s+(?:es|das)|am\s+apparat)\b/i.test(normalized);
+}
+
+function isExplicitGatekeeperIdentity(text: string): boolean {
+  return /\b(?:ich\s+bin\s+(?:(?:nur|lediglich)\s+)?(?:(?:der|die|sein(?:e|en)?|ihr(?:e|en)?|unser(?:e|en)?)\s+)?(?:assistent(?:in)?|sekretär(?:in)?|empfang|rezeption|mitarbeiter(?:in)?|kollege|kollegin)|vom\s+empfang|aus\s+(?:der\s+assistenz|dem\s+empfang|dem\s+sekretariat|der\s+rezeption)|hier\s+(?:vom|am)\s+empfang)\b/i.test(text);
 }
 
 export function createContactRoutingState(targetName?: string): ContactRoutingState {
@@ -346,39 +453,45 @@ export function advanceContactRouting(
   if (state.stage === "voicemail") return state;
 
   const classification = classifyInboundSpeech(userText);
-  if (classification === "voicemail") return { ...state, stage: "voicemail" };
+  if (classification === "voicemail") return moveContactRouting(state, "voicemail");
   const transfer = classifyReceptionTransfer(userText);
   const asksBeforeTransfer = isGatekeeperReasonQuestion(userText)
     || Boolean(transfer && hasInteractiveReceptionQuestion(userText));
   if (state.stage === "decision_maker") {
+    if (deniesDecisionMakerIdentity(userText) || isExplicitGatekeeperIdentity(userText)
+      || isGatekeeperUnavailable(userText) || introducesOtherPerson(userText, state.targetName)) {
+      return moveContactRouting(state, "gatekeeper", {
+        gatekeeperRequestMade: false,
+        gatekeeperReasonGiven: false,
+      });
+    }
     if (asksBeforeTransfer && !hasExplicitQueueInstruction(userText)) return state;
     return classification === "queue" || transfer
-      ? { ...state, stage: "waiting_for_transfer", gatekeeperRequestMade: true }
+      ? moveContactRouting(state, "waiting_for_transfer", { gatekeeperRequestMade: true })
       : state;
   }
-  if (identifiesDecisionMaker(userText, state.targetName) && !hasExplicitQueueInstruction(userText)) {
-    return { ...state, stage: "decision_maker" };
+  if (assessDecisionMakerConfidence(state, userText).accepted) {
+    return moveContactRouting(state, "decision_maker");
   }
   if (asksBeforeTransfer && !hasExplicitQueueInstruction(userText)) {
-    return {
-      ...state,
-      stage: "gatekeeper",
+    return moveContactRouting(state, "gatekeeper", {
       gatekeeperRequestMade: state.stage === "waiting_for_transfer" ? false : state.gatekeeperRequestMade || Boolean(transfer),
       gatekeeperReasonGiven: state.stage === "waiting_for_transfer" ? false : state.gatekeeperReasonGiven,
       awaitingAvailabilityAnswer: state.stage === "waiting_for_transfer" ? false : state.awaitingAvailabilityAnswer,
       availabilityFollowUpAsked: state.stage === "waiting_for_transfer" ? false : state.availabilityFollowUpAsked,
-    };
+    });
   }
   if (transfer === "in_progress" || (transfer === "offered" && !hasTransferWaitInstruction(userText))) {
-    return { ...state, stage: "waiting_for_transfer", gatekeeperRequestMade: true };
+    return moveContactRouting(state, "waiting_for_transfer", { gatekeeperRequestMade: true });
   }
   if (isGatekeeperUnavailable(userText)) {
-    return { ...state, stage: "gatekeeper", gatekeeperRequestMade: true };
+    return moveContactRouting(state, "gatekeeper", { gatekeeperRequestMade: true });
   }
-  if (classification === "queue") return { ...state, stage: "waiting_for_transfer" };
+  if (classification === "queue") return moveContactRouting(state, "waiting_for_transfer");
   if (state.stage === "gatekeeper" && state.gatekeeperRequestMade && acceptsTransferRequest(userText)) {
-    return { ...state, stage: "waiting_for_transfer" };
+    return moveContactRouting(state, "waiting_for_transfer");
   }
+  if (state.stage === "waiting_for_transfer" && WEAK_TRANSFER_ACKNOWLEDGEMENT.test(userText.trim())) return state;
   if (state.stage === "waiting_for_transfer" && !identifiesDecisionMaker(userText, state.targetName) && !isHumanContactAfterQueue(userText)) {
     return state;
   }
@@ -388,20 +501,25 @@ export function advanceContactRouting(
     return state;
   }
   if (state.stage === "confirming_decision_maker") {
-    return confirmsDecisionMaker(userText)
-      ? { ...state, stage: "decision_maker" }
-      : { ...state, stage: "gatekeeper" };
+    const explicitDenial = deniesDecisionMakerIdentity(userText)
+      || isExplicitGatekeeperIdentity(userText)
+      || isMessageTransfer(userText)
+      || /^(?:nein|nicht\s+ich)[.!?,\s]*$/i.test(userText.trim());
+    if (explicitDenial) return moveContactRouting(state, "gatekeeper");
+    const checksAsked = state.identityCheckCount ?? 1;
+    return checksAsked < 2
+      ? { ...state, identityCheckCount: checksAsked + 1 }
+      : moveContactRouting(state, "gatekeeper");
   }
   if (state.stage === "gatekeeper") return state;
   if (classification === "human") {
-    return {
-      ...state,
+    const nextStage = isClearlyGatekeeper(userText, state.targetName) ? "gatekeeper" : "confirming_decision_maker";
+    return moveContactRouting(state, nextStage, {
       gatekeeperRequestMade: state.stage === "waiting_for_transfer" ? false : state.gatekeeperRequestMade,
       gatekeeperReasonGiven: state.stage === "waiting_for_transfer" ? false : state.gatekeeperReasonGiven,
       awaitingAvailabilityAnswer: state.stage === "waiting_for_transfer" ? false : state.awaitingAvailabilityAnswer,
       availabilityFollowUpAsked: state.stage === "waiting_for_transfer" ? false : state.availabilityFollowUpAsked,
-      stage: isClearlyGatekeeper(userText, state.targetName) ? "gatekeeper" : "confirming_decision_maker",
-    };
+    });
   }
   return state;
 }
