@@ -2,6 +2,18 @@ import { parseSlotPhraseToIso } from "./finalize.js";
 
 type ConversationTurn = { role: "user" | "assistant"; text: string };
 
+const SPOKEN_ORDINAL_DAYS = [
+  "erste", "zweite", "dritte", "vierte", "fünfte", "sechste", "siebte", "achte", "neunte", "zehnte",
+  "elfte", "zwölfte", "dreizehnte", "vierzehnte", "fünfzehnte", "sechzehnte", "siebzehnte", "achtzehnte", "neunzehnte",
+  "zwanzigste", "einundzwanzigste", "zweiundzwanzigste", "dreiundzwanzigste", "vierundzwanzigste", "fünfundzwanzigste",
+  "sechsundzwanzigste", "siebenundzwanzigste", "achtundzwanzigste", "neunundzwanzigste", "dreißigste", "einunddreißigste",
+];
+const MONTH_NAMES = "januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember";
+const SPOKEN_DATE_PATTERN = new RegExp(
+  `\\b(?:${SPOKEN_ORDINAL_DAYS.join("|")})(?:n|r|s)?\\s+(?:${MONTH_NAMES})\\b`,
+  "i",
+);
+
 export function convertSlotPhraseForSpeech(slotPhrase: string): string {
   const hourWords = ["null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig"];
   const minuteWords = ["", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn", "zwanzig", "einundzwanzig", "zweiundzwanzig", "dreiundzwanzig", "vierundzwanzig", "fünfundzwanzig", "sechsundzwanzig", "siebenundzwanzig", "achtundzwanzig", "neunundzwanzig", "dreißig", "einunddreißig", "zweiunddreißig", "dreiunddreißig", "vierunddreißig", "fünfunddreißig", "sechsunddreißig", "siebenunddreißig", "achtunddreißig", "neununddreißig", "vierzig", "einundvierzig", "zweiundvierzig", "dreiundvierzig", "vierundvierzig", "fünfundvierzig", "sechsundvierzig", "siebenundvierzig", "achtundvierzig", "neunundvierzig", "fünfzig", "einundfünfzig", "zweiundfünfzig", "dreiundfünfzig", "vierundfünfzig", "fünfundfünfzig", "sechsundfünfzig", "siebenundfünfzig", "achtundfünfzig", "neunundfünfzig"];
@@ -30,6 +42,7 @@ function mentionsConcreteSlot(text: string): boolean {
   return /\b(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b/i.test(text)
     || /\b\d{1,2}:\d{2}\b/.test(text)
     || /\b\d{1,2}\.\s*(?:januar|februar|m[äa]rz|april|mai|juni|juli|august|september|oktober|november|dezember)\b/i.test(text)
+    || SPOKEN_DATE_PATTERN.test(text)
     || /\berste[rn]?\b|\bzweite[rn]?\b/.test(text);
 }
 
@@ -252,12 +265,8 @@ export function matchOfferedAppointmentSelection(text: string, offeredSlots: str
     if (dates.length !== 1) return undefined;
     const [, dayText, month] = dates[0];
     const ordinal = dayText.replace(/e[nrs]$/, "e");
-    const base = ["erste", "zweite", "dritte", "vierte", "fünfte", "sechste", "siebte", "achte", "neunte", "zehnte",
-      "elfte", "zwölfte", "dreizehnte", "vierzehnte", "fünfzehnte", "sechzehnte", "siebzehnte", "achtzehnte", "neunzehnte",
-      "zwanzigste", "einundzwanzigste", "zweiundzwanzigste", "dreiundzwanzigste", "vierundzwanzigste", "fünfundzwanzigste",
-      "sechsundzwanzigste", "siebenundzwanzigste", "achtundzwanzigste", "neunundzwanzigste", "dreißigste", "einunddreißigste"];
     const day = /^\d+$/.test(dayText) ? Number(dayText)
-      : base.indexOf(ordinal) + 1;
+      : SPOKEN_ORDINAL_DAYS.indexOf(ordinal) + 1;
     const matches = offeredSlots.filter((slot) => ` ${normalizeSlot(slot)} `.includes(` ${day} ${month} `));
     return matches.length === 1 ? matches[0] : undefined;
   }

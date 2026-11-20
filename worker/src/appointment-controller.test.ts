@@ -220,6 +220,29 @@ test("accepts selected offered slot without re-asking when latest turn is appoin
   assert.equal(decision.ok, true);
 });
 
+test("keeps a spoken ordinal date as a concrete choice when the appointment mode follows", () => {
+  const slots = [
+    "Montag, 30. November um 08:30 Uhr",
+    "Donnerstag, 3. Dezember um 10:00 Uhr",
+  ];
+  const turns: ConversationTurn[] = [
+    { role: "assistant", text: `Welcher Termin passt Ihnen besser: ${slots[0]} oder ${slots[1]}?` },
+    { role: "user", text: "Der dritte Dezember." },
+    { role: "assistant", text: "Soll der Termin persönlich oder digital stattfinden?" },
+    { role: "user", text: "Persönlich, bitte." },
+  ];
+  assert.deepEqual(decideAppointment({
+    turns,
+    topicKind: "other",
+    freeSlotsPrompt: slots.map((slot) => `- ${slot}`).join("\n"),
+    slotPhrase: slots[1],
+  }), {
+    ok: true,
+    preference: "unknown",
+    slotPhrase: slots[1],
+  });
+});
+
 test("requires asking for customer-proposed slot when both offered slots are rejected", () => {
   const turns: ConversationTurn[] = [
     ...readyPkvTurns(),
